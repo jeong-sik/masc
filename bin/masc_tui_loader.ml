@@ -1516,23 +1516,23 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
 let load_tools ~(host : string) ~(port : int) ?keeper () :
-    (Tui_decode.tool_snapshot, string) result =
+    (Masc.Tui_decode_tools.tool_snapshot, string) result =
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_tool_snapshot json
+  | Ok json -> Masc.Tui_decode_tools.decode_tool_snapshot json
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
-    (Tui_decode.skills_catalog, string) result =
-  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
+    (Masc.Tui_decode_tools.skills_catalog, string) result =
+  Result.bind (fetch_skills_catalog ~host ~port) Masc.Tui_decode_tools.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
-    (Tui_decode.connector_snapshot, string) result =
+    (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Tui_decode.decode_connector_snapshot json with
+      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
@@ -1540,13 +1540,13 @@ let load_connectors ~(host : string) ~(port : int) :
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
                | Error detail ->
                  List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
-                 (match Tui_decode.decode_connector_name_page json with
+                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
@@ -1596,7 +1596,7 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Tui_decode.connector_with_name_pages connector ~pages
+                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
                     ~error:
                       (match read_problems with
                        | [] -> None
@@ -1657,10 +1657,10 @@ let load_repository_changes ~(host : string) ~(port : int)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
 
 let load_memory_health ~(host : string) ~(port : int) :
-    (Tui_decode.memory_health_snapshot, string) result =
+    (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_health_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :

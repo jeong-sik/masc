@@ -23,7 +23,7 @@ let make_keeper ?(paused = false) name : Decode.keeper =
   }
 ;;
 
-let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
+let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
   ; mkh_updated_at = Some 1700000000.
@@ -40,7 +40,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some Decode.Pass_drained
+      { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -63,7 +63,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   }
 ;;
 
-let make_memory_health ~total_facts ~source_facts ~keepers : Decode.memory_health_snapshot =
+let make_memory_health ~total_facts ~source_facts ~keepers : Masc.Tui_decode_memory_health.memory_health_snapshot =
   { mhs_generated_at = 1000.0
   ; mhs_keepers = keepers
   ; mhs_refused_keepers = []

@@ -1498,556 +1498,19 @@ let approval_decision_unverified = function
   | Confirm -> "Confirmation outcome unverified"
   | Deny -> "Denial outcome unverified"
 
-type approval_observation = {
-  ao_ticket: Approval.Listing_order.ticket;
-  ao_result: (approval_snapshot, string) result;
-}
+open Masc_tui_async_protocol
 
-type http_scoped_surface_results = {
-  http_transport: (Tui_decode.transport_health, string) result option;
-  http_approvals: approval_observation option;
-  (* [None] on surfaces that do not draw them. Each is read by one surface, and
-     leaving it out keeps whatever that surface last observed rather than
-     dropping it. *)
-  http_asks: (Masc.Tui_decode_asks.asks_snapshot, string) result option;
-  http_board: (board_post list, string) result option;
-  (* The board's hearth census rides with its listing: the two are read for
-     one surface and a cycle keyed on a census the listing has outgrown walks
-     names that are no longer there. *)
-  http_board_hearths: ((string * int) list, string) result option;
-  http_planning: (planning_snapshot, string) result option;
-  http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
-  (* [None] on surfaces that do not read the roster or its Candle summary;
-     leaving it out keeps the observation until a relevant refresh. *)
-  http_keeper_roster:
-    (Keeper_control.roster * (Candle_observation.t, string) result, Keeper_control.roster_failure) result option;
-  (* [None] off Dashboard and Usage. One fetch, two readings: the runtime
-     rows and the provider usage windows. *)
-  http_runtime_quota:
-    ((Tui_decode.runtime_option list, string) result
-    * (Masc.Tui_decode_usage.provider_usage_windows, string) result)
-    option;
-  http_keeper_usage: (Masc.Tui_decode_usage.keeper_usage_window, string) result option;
-  http_provider_history:
-    (int * (Masc.Tui_decode_usage.provider_usage_history, string) result) option;
-  (* [None] off the Overview, the one surface that draws the GOALS section. *)
-  http_overview_goals: (Tui_decode.overview_goal list, string) result option;
-  (* [None] off Usage, the surface that draws account emails. *)
-  http_account_emails: ((string * string) list * int, string) result option;
-}
-
-type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
-  http_approvals: approval_observation option;
-  http_scoped: http_scoped_surface_results;
-  (* Mandatory on every refresh: the same endpoint may name a different
-     server after a restart, without a failed request reaching this process. *)
-  http_server_identity: (Tui_decode.server_identity, string) result;
-}
-
-(* What one full refresh came back with. A booting server answers the probe
-   and nothing else, so there are no surfaces to carry. *)
-type http_refresh_outcome =
-  | Refresh_surfaces of http_surface_results
-  | Refresh_server_booting of
-      { identity : (Tui_decode.server_identity, string) result
-      ; (* The ticket [start_http_refresh] took before the probe went
-           out. Carried so the approvals panel learns why its rows are stale,
-           the same way a failed refresh tells it. *)
-        approval_ticket : Approval.Listing_order.ticket option
-      }
-
-type preset_sink =
-  | Preset_to_chat of string option
-  | Preset_to_pane
-
-type identity_login_result =
-  | Login_started of { provider_id : string; label : string; url : string }
-  | Login_attached of string
-  | Login_failed of string
-
-(* The UI domain owns these refs. A posted tick is a mutation: closing its
-   view invalidates presentation, never cancels or retries the request. Keep
-   the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int }
 let msx_poll_view = ref (ref ())
 type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
-
-(* A DOS read changes nothing on the server. The current view owns one read;
-   reopening may start another without waiting for an old view's HTTP timeout.
-   Only the owning request may clear its state slot or draw its answer. *)
-
-type lane_addons_failure = [ `Inventory of string | `Detail of string | `Request of string ]
-
-type lane_addons_reply = {
-  lar_snapshot : Masc_tui_lane_addons.snapshot option;
-  lar_receipt : Yojson.Safe.t option;
-  lar_action : Masc.Lane_addon_action.receipt option;
-  lar_diagnostic : Masc_tui_lane_addons.diagnostic option;
-  lar_inventory_read : [ `Unchanged | `Read | `Failed of string ];
-}
-
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
-
-type 'a play_mutation =
-  | Play_answered of ('a, string) result
-  | Play_refused of string
-  | Play_unanswered of string
-
-type play_revoke =
-  | Play_revoke_absent
-  | Play_revoke_result of Tui_decode.play_invite_revoked play_mutation
-
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
   | Masc_tui_http.Post_refused detail -> Play_refused detail
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
-type currency_authority_request = {
-  car_generation : int;
-  car_identity : Tui_decode.server_identity option;
-}
 
-type async_msg =
-  | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
-  | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
-  | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
-  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
-      * (Masc_tui_lane_declaration.response, string) result
-  | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
-  | Msx_frame_loaded of msx_poll_request
-      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
-  | Dos_live_loaded of machine_live_request
-      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
-  (* A microphone capture, from the fiber that runs it. The keeper is carried
-     on every one of these rather than read from the state at delivery: the
-     roster cursor moves under a refresh, and a transcript that took several
-     seconds would otherwise land on whoever happens to be selected when it
-     arrives. *)
-  (* The wizard's replies carry the save they answer, and
-     [Masc_tui_voice_wizard_session.voice_wizard_after_save] and its two siblings drop one the
-     open session is not waiting on. *)
-  | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
-  (* The keeper-voice screen: the voices its endpoint answers to, and what
-     the setup route said about the one line it writes. *)
-  | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
-  | Voice_agent_voice_saved of (Yojson.Safe.t, string) result
-  | Voice_wizard_probed of int * (Yojson.Safe.t, string) result
-  | Voice_wizard_reread of int * (string, string) result
-  | Voice_config_loaded of
-      (Yojson.Safe.t, string) result
-      * (Yojson.Safe.t, string) result
-      * string option
-  | Voice_level of { keeper : string; db : float }
-  | Voice_transcribed of { keeper : string; text : string }
-  | Voice_silent of { keeper : string; reason : string }
-  (* The operator abandoned a recording that had speech in it. Its own row
-     rather than a silence: the microphone worked. *)
-  | Voice_discarded of { keeper : string; reason : string }
-  | Voice_failed of { keeper : string; error : string }
-  | Http_refresh_done of http_refresh_outcome
-  | Http_refresh_failed of string * Approval.Listing_order.ticket option
-  | Http_scoped_refresh_done of currency_authority_request * http_scoped_surface_results
-  | Http_scoped_refresh_failed of
-      string * Approval.Listing_order.ticket option
-  | Board_post_refresh_done of
-      Board_detail.request * (board_post * board_comment list, string) result
-  | Approval_decision_done of
-      approval_item
-      * approval_decision
-      * (Approval.confirm_outcome, string) result
-      * Approval.Flow.generation
-      * (approval_snapshot, string) result
-  (* The answer that came back, and the list re-read behind it. The store
-     settles on first write, so the response says what was actually recorded
-     -- which may be someone else's answer. The first field is the human
-     confirmation label (the Keeper and what was chosen), built at submit time
-     from the labels the operator saw rather than the ask's opaque id. *)
-  | Ask_answer_done of
-      string
-      * (Yojson.Safe.t, string) result
-      * (Masc.Tui_decode_asks.asks_snapshot, string) result
-  | Keeper_chat_dispatch_started of
-      Keeper_chat.request * bool * bool Eio.Promise.u
-  | Keeper_chat_done of
-      Keeper_chat.request
-      * bool
-      * (Keeper_chat.response, Keeper_chat.error) result
-      * unit Eio.Promise.u
-  | Keeper_chat_stream_deltas of
-      Keeper_chat.request * (int option * Keeper_chat_live.delta) list
-  | Keeper_chat_stream_unavailable of Keeper_chat.request * string
-  | Keeper_run_next_done of Keeper_chat.request * (string, string) result
-  | Keeper_observed_interrupt_done of
-      string * string * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
-  | Keeper_chat_interrupt_done of
-      Keeper_chat.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
-  | Keeper_chat_history_loaded of
-      int
-      * string
-      * (Keeper_chat_history.decoded, string) result
-      * (Keeper_chat_history.decoded, string) result
-  | Keeper_chat_copy_loaded of
-      int * string * (Keeper_chat_history.decoded, string) result
-  | Keeper_chat_journal_loaded of
-      { keeper_name : string
-      ; operation_id : string
-      ; started_at : float
-      ; journal :
-          ( Masc.Keeper_chat_event_log.journaled_event list
-          , Keeper_chat_log.events_error )
-          result
-      }
-  | Context_inspector_loaded of
-      int * string * Masc_tui_context_inspector.reading
-  | Keeper_chat_older_loaded of
-      int * string * float * (Keeper_chat_history.page, string) result
-  | Lanes_loaded of
-      ( Masc.Tui_decode.keeper_lanes_snapshot
-        * Masc.Tui_decode.keeper_secret_projection list,
-        string )
-      result
-  | Standalone_lanes_loaded of
-      int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
-  | Clients_loaded of
-      int * (Masc.Tui_decode.clients_snapshot, string) result
-  (* Keyed by the lane / run they answer for: an answer that lands after the
-     operator left the list or the run is not this view's answer. *)
-  | Lane_runs_loaded of
-      Standalone_lane.t * int * (float * string) option *
-      (Masc.Tui_decode.lane_run_page, string) result
-  | Lane_run_detail_loaded of
-      string * int * (Masc.Tui_decode.lane_run_detail, string) result
-  | Measurement_artifact_loaded of
-      string * int * (Measurement.t, string) result
-  | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
-  | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
-  | Fusion_runs_loaded of
-      unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
-  | Fusion_detail_loaded of
-      int * string * (Masc.Tui_decode_fusion.fusion_detail, string) result
-  | Fusion_historical_detail_loaded of
-      int * Masc.Tui_decode_fusion.fusion_historical_evidence
-      * (Masc.Tui_decode_fusion.fusion_historical_detail, string) result
-  (* Both carry the launch generation: the answer to a read or a submit the
-     operator already left must not open or close a form they are not in. *)
-  | Fusion_launch_options_loaded of
-      int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
-  | Fusion_launched of int * (string, string) result
-  | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
-  | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
-  | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
-  (* Carries the request it answers: the browser can be closed or pointed at
-     another keeper while a load is in flight, and a late answer for somebody
-     else must be dropped, not filed under whoever is open. The answer is the
-     facts and, for the "all keepers" merge, the keepers it could not read. *)
-  | Memory_facts_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
-  | Repository_changes_loaded of
-      Masc.Tui_decode.repository_change_scope
-      * (Masc.Tui_decode.repository_change_snapshot, string) result
-  | Repository_changes_diff_loaded of
-      repository_diff_request * (Masc.Tui_decode.git_diff, string) result
-  (* Carries the keeper it was asked about. The surface can be pointed at a
-     different keeper while a load is in flight, and an answer that did not
-     say whose it was would be filed under whoever is selected when it
-     lands. *)
-  | File_changes_loaded of
-      string * (Masc.Tui_decode.file_change_snapshot, string) result
-  | Keeper_chat_file_changes_loaded of
-      int * string * (Masc.Tui_decode.file_change_snapshot, string) result
-      (** Generation and keeper-stamped answer for the chat-only cache. The
-          Changes surface owns [File_changes_loaded] and is never populated by
-          this response. *)
-  (* Keyed by the path it answers for, for the same reason the file-change
-     message carries a keeper: an answer for a file the operator has since
-     left is not this view's answer. *)
-  | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
-  | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
-  | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
-  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
-  | Browser_lane_loaded of
-      int * (Browser_lane_view.reading, string) result
-  | Browser_lane_action_done of int * (unit, string) result
-  | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
-  | Browser_lane_follow_loaded of int *
-      ((Masc_tui_http.browser_follow_receipt *
-        (Browser_lane_view.scene, string) result), string) result
-  | Browser_lane_screenshot_ready of {
-      generation : int; image_generation : int;
-      result : (Browser_lane_view.screenshot * string, string) result;
-    }
-  | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
-  | Connector_unbind_all_done of {
-      keeper_name : string;
-      results :
-        (Masc_tui_connector_unbind.target * Masc_tui_connector_unbind.outcome)
-        list;
-    }
-  | Runtime_surface_loaded of
-      int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
-  | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
-  | Runtime_lane_slots_written of
-      Masc_tui_types.runtime_lane_list * (unit, string) result
-  | Runtime_catalog_loaded of
-      ( Masc.Tui_decode.runtime_option list
-        * Masc.Tui_decode.runtime_resolved_lane list
-        * Masc.Tui_decode.runtime_assignment list,
-        string )
-      result
-  | Runtime_assignment_set of
-      string
-      * string option
-      * (Masc_tui_http.runtime_assignment_write_result, string) result
-      (** keeper, the runtime it was pointed at ([None] = back to default),
-          and whether the server took it. *)
-  | Keeper_chat_approval_answered of
-      Keeper_chat.request
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-  | Keeper_tool_approvals_loaded of
-      Snapshot_read.request * (Tui_decode.keeper_tool_approval list, string) result
-  | Sent_image_ready of {
-      generation : int;
-      view : surface;
-      keeper_name : string option;
-      name : string;
-      result : (string, string) result;
-    }
-  | Image_render_ready of {
-      title : string;
-      caption : string list;
-      page_url : string;
-      image_url : string;
-      result : (string, string) result;
-    }
-      (** A [v]-requested web image, downloaded and converted to PNG off the
-          render loop. [result] is the PNG bytes ready to draw, or why they
-          could not be produced. [title] is indented for the screen and is
-          never a location. [image_url] is what was fetched; [page_url] is the
-          link the operator chose, and the one a browser gets when drawing
-          fails (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * (Tui_decode.keeper_turn_row list, string) result
-  | Keeper_chat_control_received of string * int * string
-      (** Which keepers are mid-turn right now, for the "answering now"
-          badge drawn from every surface. *)
-  | Gate_snapshot_loaded of Snapshot_read.request * (Tui_decode.gate_snapshot, string) result
-      (** The durable Gate beside the held calls: pending approvals that
-          survive nobody watching, and both lane modes. *)
-  | Gate_approval_resolved of
-      string * bool * (unit, string) result * Approval.Flow.generation
-      (** approval id, approve, the resolve result, and the in-flight
-          generation this decision holds. Completion releases that slot, so
-          the header stops drawing [submitting] and a second press is admitted
-          again. *)
-  | Gate_auto_judge_retried of
-      string * (unit, string) result * Approval.Flow.generation
-      (** approval id, rearm outcome, and the action slot this explicit retry
-          owns. The server accepts it only if every observed identity field
-          still matches the blocked row. *)
-  | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
-      (** The external-services lane the operator asked for, and whether the
-          server took it. *)
-  | Surface_tool_approval_answered of
-      string
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-      * Approval.Flow.generation
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
-  | Keeper_tool_modes_loaded of
-      ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
-      * Approval.Listing_order.ticket
-      (** The stance listing replaces the whole yolo set, so a fetch that
-          started before an operator armed a gate would put the pre-press
-          answer back. This no longer rides a generation that every reader
-          advances for itself: that made two unrelated listings invalidate
-          each other, so a tool-modes fetch racing any unrelated background
-          poll (not only a press) was dropped even with no press ever armed
-          (#37461). The generation carried here is only ever advanced by
-          [Approval.Flow.begin_action] (a press), and is observed -- not
-          reserved -- at dispatch time, so [Approval.Flow.is_current] at
-          arrival answers exactly "did a press open since this fetch went
-          out", including one that opened and closed in between (#37609
-          review: a dispatch-time-only [action_inflight] check cannot see
-          that). The ticket also numbers the fetch: a full and a scoped
-          refresh each launch one, so two can be out at once and the older
-          answer may land last (task-1672). *)
-  | Keeper_tool_mode_set of
-      string
-      * Masc.Keeper_tool_approval_mode.mode
-      * (unit, string) result
-      * Approval.Flow.generation
-      (** keeper, tool call id, allow, and whether a wait was released — the
-          Approvals-surface twin of [Keeper_chat_approval_answered], which
-          needs the chat request this path does not have. *)
-  | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
-  | Keeper_action_done of
-      string
-      * Keeper_control.action
-      * (Keeper_control.outcome, string) result
-  | Board_new_post_done of {
-      reply_to : string option;
-      sent_draft : string;
-      result : (string, string) result;
-    }
-  | Board_vote_done of (string, string) result
-  | Goal_transition_done of (string, string) result
-  | Goal_confirmation_submitted of (string, string) result
-  | Goal_confirmation_loaded of
-      string Goal_confirmation_read.request * (Goal_confirmation.confirmation, string) result
-  | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
-  (* Carries the schedule it was asked about: the reader can step to the next
-     row or close the detail while a load is in flight, and an answer that did
-     not say whose it was would be filed under whoever is open when it lands. *)
-  | Schedule_wake_history_loaded of
-      string * (schedule_wake_history, string) result
-  (* Carries the keeper it was asked about: the roster cursor can move while a
-     load is in flight, and an answer that did not say whose it was would be
-     filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
-  | System_logs_loaded of (system_log_snapshot, string) result
-  | Schedule_cancel_done of string * (string, string) result
-  (* (message, noop): [noop = true] says the verdict already stood. *)
-  | Verification_verdict_done of (string * bool, string) result
-  | Harness_label_done of (string, string) result
-  | Keeper_calls_loaded of
-      int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
-  | Goal_timeline_loaded of
-      string * (Masc.Tui_decode.goal_timeline, string) result
-  | Task_history_loaded of
-      string * (Masc.Tui_decode.task_history_event list, string) result
-  | Task_cancel_done of string * (string, string) result
-  | Verification_evidence_loaded of
-      string * (Masc.Tui_decode.verification_evidence,
-                Masc_tui_types.Verification_evidence_read.failure) result
-  | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
-  | Keeper_items_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
-  | Keeper_sandbox_view_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
-  | Keeper_sandbox_logs_loaded of
-      string * int * (Masc_tui_keeper_sandbox.logs, string) result
-  | Runtime_config_view_loaded of
-      (string * string list * Masc_tui_runtime_config_view.metadata, string) result
-  | Runtime_params_loaded of
-      (Tui_decode.runtime_param_row list, string) result
-  | Prompts_loaded of
-      unit Masc_tui_fetched.request * (Tui_decode.prompts_snapshot, string) result
-  | Keeper_board_quarantines_loaded of
-      string Masc_tui_fetched.request
-      * (Masc_tui_board_quarantine.t, string) result
-  (* Keeper, partition, and what is known about the requeue's effect. *)
-  | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
-  | Board_quarantines_bulk_progress of
-      string * int * int * int * int * int
-  | Board_quarantines_bulk_requeued of
-      string * (string * Masc_tui_http.post_outcome) list
-  (* Where a preset answer goes: the chat pane that typed the command, or
-     the Config pane that pressed the key. *)
-  | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
-  | Preset_detail_loaded of
-      string Masc_tui_fetched.request * (Tui_decode.preset_detail, string) result
-  (* The chat answer to [/preset show]. The pane's own detail rides on
-     [Preset_detail_loaded] with a cursor key; this one has a sink because a
-     typed command answers where it was typed. *)
-  | Preset_contents_shown of preset_sink * (Tui_decode.preset_detail, string) result
-  | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
-  | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
-  | Play_invites_listed of string option * (Tui_decode.play_invite_row list, string) result
-  | Play_invite_issued of string option * Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of string option * string * play_revoke
-  | Librarian_input_loaded of string * (string list, string) result
-  | Resources_listed of (Masc_tui_mcp.resource list, string) result
-  (* The scope travels with the directory. Without it a reply names a
-     relative path, which two scopes can both have, and the handler had no
-     way to tell a late answer for the scope just left from an answer for the
-     scope now open (#33946). *)
-  | Code_entries_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
-  | Code_history_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc_tui_types.code_history_listing, string) result
-  | Code_diff_loaded of
-      string Masc_tui_fetched.request * (Masc.Tui_decode.git_diff, string) result
-  (* The Activity pane's Changes tab: the selected keeper's recorded file
-     changes, stamped with the request so an answer for a keeper the
-     cursor has left is dropped. *)
-  | Acting_pane_changes_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode.file_change_snapshot, string) result
-  (* The path the margin describes; stamped so a late answer cannot caption
-     another file. *)
-  | Code_blame_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode.blame_block list, string) result
-  (* The path the note anchored to; success re-reads the listing. *)
-  (* (question, symbol, answer) — the note the pane shows names both. *)
-  | Code_lsp_answered of
-      string * string * (Masc.Tui_decode.lsp_answer, string) result
-  | Resource_read of
-      string * (Masc_tui_mcp.resource_content list, string) result
-  | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
-  | Identity_providers_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_types.identity_provider list, string) result
-  | Identity_switch_set of
-      string * string * bool * (unit, string) result
-      (** keeper, provider, the state the operator asked for, and whether
-          the server took it. *)
-  | Identity_login_started of string * identity_login_result
-  | Identity_refreshed of string * (unit, string) result
-  | Identity_app_saved of string * (int, string) result
-      (** provider id, then how many scopes were recorded *)
-  | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
-  | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
-  (* A removal's answer keeps what is known about its effect: removed, declined
-     by the server in its own words, or unknown. *)
-  | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
-      * Masc_tui_http.post_outcome
-  | Github_login_lines of string * string list
-  | Github_login_finished of string * (unit, string) result
-  | Github_token_saved of string * (Yojson.Safe.t, string) result
-  | Observer_opened of {
-      session_id : string;
-      handshake : (Sse_wire.observer_handshake option, string) result;
-    }
-  | Observer_received of string option * Masc_tui_observer.delivery list
-  | Observer_closed of (unit, Masc_tui_http.observer_error) result
-  | Task_dispatched of {
-      keeper : string;
-      task_id : string;
-      title : string;
-      body : string;
-    }
-  | Task_dispatch_failed of {
-      keeper : string;
-      detail : string;
-      original : string;
-    }
-
-(* Every async result carries the instant it was ready, so the loop can say
-   how long it sat in the mailbox. A result that arrived in a second and was
-   applied ten seconds later names the loop, not the request (RFC-0429
-   §3.0). The instant is read off [Mtime_clock.elapsed_ns] so that a clock
-   correction landing between the two reads cannot fabricate the wait or
-   erase it. *)
-type 'a mailed = {
-  ready_at_ns : int64;
-  message : 'a;
-}
 
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
@@ -5105,13 +4568,13 @@ let launch_all_memory_facts_load state ~mailbox =
     | Some health ->
       let loads =
         List.map
-          (fun (k : Tui_decode.memory_keeper_health) ->
-            let keeper_name = k.Tui_decode.mkh_keeper_id in
+          (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
+            let keeper_name = k.Masc.Tui_decode_memory_health.mkh_keeper_id in
             ( keeper_name,
               try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Printexc.to_string exn) ))
-          health.Tui_decode.mhs_keepers
+          health.Masc.Tui_decode_memory_health.mhs_keepers
       in
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
@@ -6046,7 +5509,7 @@ let row_list (state : state) : row_list option =
      page keys reach them through here, which is what makes these arms live
      rather than a landing nobody calls. *)
   | Approvals ->
-      windowed ~count:(List.length (approval_items state))
+      windowed ~count:(List.length (Masc_tui_approvals_model.approval_items state))
         ~cursor:state.approval_cursor (fun index ->
           state.approval_cursor <- index)
   | Schedules ->
@@ -6504,12 +5967,12 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.visible_surface_ring state in
+  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
   let count = List.length ring in
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.visible_surface_ring_index state state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -8483,9 +7946,9 @@ let follow_target (kind : Link.kind) (id : string) =
 ;;
 
 let approval_row_reference = function
-  | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
-  | Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
-  | Operator_row item ->
+  | Masc_tui_approvals_model.Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Masc_tui_approvals_model.Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
+  | Masc_tui_approvals_model.Operator_row item ->
       Option.bind item.ap_target_id (fun target_id ->
           match
             Masc.Operator_action_constants.target_type_of_string
@@ -8580,7 +8043,7 @@ let selected_surface_reference state =
          Workspace target, or one this build does not know, points at no
          surface and gets no reference. *)
       Option.bind
-        (List.nth_opt (approval_items state) state.approval_cursor)
+        (List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor)
         approval_row_reference
   | Acting | Metrics
   | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
@@ -10101,7 +9564,7 @@ let apply_approvals_load state = function
         else
           keeper_prefix
           + Approval.reconcile_cursor
-              ~current_items:(operator_approval_items state)
+              ~current_items:(Masc_tui_approvals_model.operator_approval_items state)
               ~cursor:operator_cursor ~next_items:snapshot.aps_items
       in
       state.approval_snapshot <- Some snapshot;
@@ -10168,7 +9631,7 @@ let apply_asks_load state = function
            (match List.find_index
                     (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
-            | None -> clear_ask_answering state));
+            | None -> Masc_tui_home.clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -11627,7 +11090,7 @@ let selected_ask_question state =
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
    is still waiting either way, and the row says so. *)
-let leave_ask_answering state = clear_ask_answering state
+let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
@@ -15068,7 +14531,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
            state.keeper_tool_approvals_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
@@ -15253,7 +14716,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
            state.gate_snapshot_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.gate_error <- Some detail)
@@ -15279,7 +14742,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (fun (pending : Tui_decode.gate_pending) ->
                  not (String.equal pending.Tui_decode.gp_id approval_id))
                state.gate_pending;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -15393,7 +14856,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (fun (held : Tui_decode.keeper_tool_approval) ->
             not (String.equal held.kta_tool_call_id tool_call_id))
           state.keeper_tool_approvals;
-      let count = List.length (approval_items state) in
+      let count = List.length (Masc_tui_approvals_model.approval_items state) in
       if state.approval_cursor >= count then
         state.approval_cursor <- max 0 (count - 1);
       report_action state
@@ -15972,7 +15435,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let previous_id =
             Option.bind state.connectors (fun previous ->
                 Option.map
-                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                  (fun (connector : Masc.Tui_decode_connectors.connector) -> connector.cn_id)
                   (List.nth_opt previous.cs_connectors state.connectors_cursor))
           in
           state.connectors <- Some snapshot;
@@ -15983,7 +15446,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Some id ->
                  let rec find index = function
                    | [] -> 0
-                   | (connector : Tui_decode.connector) :: rest ->
+                   | (connector : Masc.Tui_decode_connectors.connector) :: rest ->
                        if String.equal connector.cn_id id then index
                        else find (index + 1) rest
                  in
@@ -16559,7 +16022,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None ->
-        reconcile_home_request_detail state;
+        Masc_tui_home.reconcile_home_request_detail state;
         changed
     | Some { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
@@ -17136,20 +16599,20 @@ let main
   let answer_presented_approval decision =
     match
       Approval_authority.resolve ~presented:!presented_approval
-        ~current:(approval_items state) decision
+        ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
-    | Some { Approval_authority.row = Operator_row approval; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
         handle_approval_decision state approval decision
           ~mailbox:async_messages
-    | Some { Approval_authority.row = Keeper_tool_row held; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
         launch_surface_tool_approval state ~mailbox:async_messages
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
-    | Some { Approval_authority.row = Gate_row pending; decision = Confirm } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
           ~approval_id:pending.Tui_decode.gp_id ~approve:true ~reason:None
-    | Some { Approval_authority.row = Gate_row pending; decision = Deny } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Deny } ->
         reject_gate_approval pending
     | None ->
         report_action state "system"
@@ -17370,7 +16833,7 @@ let main
     Option.bind state.connectors (fun snapshot ->
         List.nth_opt snapshot.cs_connectors state.connectors_cursor)
   in
-  let selected_connector_binding (connector : Tui_decode.connector) =
+  let selected_connector_binding (connector : Masc.Tui_decode_connectors.connector) =
     List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =
@@ -18194,7 +17657,7 @@ and is loaded on demand through keeper_skill.
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let name = profile.Masc.Tui_decode.esp_name in
+      let name = profile.Masc.Tui_decode_tools.esp_name in
       let host = server_peer_host in
       let port = state.port in
       (match
@@ -20392,11 +19855,11 @@ and is loaded on demand through keeper_skill.
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
                 let delta = match k with
-                  | "pageup" -> -(Masc_tui_render.ask_question_page_size state)
-                  | "pagedown" -> Masc_tui_render.ask_question_page_size state
+                  | "pageup" -> -(Masc_tui_render_approvals.ask_question_page_size state)
+                  | "pagedown" -> Masc_tui_render_approvals.ask_question_page_size state
                   | "wheel-up" -> -1 | _ -> 1 in
                 state.ask_question_scroll <- max 0
-                  (min (Masc_tui_render.ask_question_scroll_limit state)
+                  (min (Masc_tui_render_approvals.ask_question_scroll_limit state)
                      (state.ask_question_scroll + delta))
             (* This arm takes every key while a question is open, so the
                surface Home and End below never reach it -- and reaching it
@@ -20406,7 +19869,7 @@ and is loaded on demand through keeper_skill.
             | "home" -> state.ask_question_scroll <- 0
             | "end" ->
                 state.ask_question_scroll <-
-                  Masc_tui_render.ask_question_scroll_limit state
+                  Masc_tui_render_approvals.ask_question_scroll_limit state
             | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
             | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
@@ -22262,7 +21725,7 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
            state.home_opened_request <- None;
-           step_detail_cursor ~count:(List.length (approval_items state))
+           step_detail_cursor ~count:(List.length (Masc_tui_approvals_model.approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.approval_cursor <- n)
@@ -22466,11 +21929,11 @@ and is loaded on demand through keeper_skill.
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval
-                ~current:(approval_items state) Confirm
+                ~current:(Masc_tui_approvals_model.approval_items state) Confirm
             with
-            | Some { Approval_authority.row = Gate_row pending; _ } ->
+            | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
                 launch_gate_auto_judge_retry state ~mailbox:async_messages pending
-            | Some { Approval_authority.row = (Operator_row _ | Keeper_tool_row _); _ }
+            | Some { Approval_authority.row = (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _); _ }
             | None ->
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
@@ -22643,11 +22106,11 @@ and is loaded on demand through keeper_skill.
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
-           home_step state ~backwards:(key = "k" || key = "up")
+           Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
        | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
-           (match home_selected_action state with
+           (match Masc_tui_home.home_selected_action state with
             | None -> report_action state "system" "Selection changed; choose again"
             | Some action ->
               state.home_selected <- Some action;
@@ -22663,8 +22126,8 @@ and is loaded on demand through keeper_skill.
                 (match request with
                  | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
                      (match List.find_index
-                              (fun row -> home_request_of_approval row = request)
-                              (approval_items state) with
+                              (fun row -> Masc_tui_home.home_request_of_approval row = request)
+                              (Masc_tui_approvals_model.approval_items state) with
                       | None -> report_action state "system" "Request changed; choose again"
                       | Some cursor ->
                           navigate Approvals;
@@ -24501,7 +23964,7 @@ and is loaded on demand through keeper_skill.
                 state.approval_detail_scroll <-
                   Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
             | Approvals ->
-                let count = List.length (approval_items state) in
+                let count = List.length (Masc_tui_approvals_model.approval_items state) in
                 if state.approval_cursor < count - 1 then begin
                   state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor + 1
@@ -25264,7 +24727,7 @@ and is loaded on demand through keeper_skill.
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
-                if List.length (approval_items state) > 0 then begin
+                if List.length (Masc_tui_approvals_model.approval_items state) > 0 then begin
                   state.approval_detail_open <- true;
                   state.approval_detail_scroll <- 0
                 end
@@ -25371,7 +24834,7 @@ and is loaded on demand through keeper_skill.
                         | None -> ()
                         | Some keeper ->
                             let keeper_name =
-                              keeper.Masc.Tui_decode.mkh_keeper_id
+                              keeper.Masc.Tui_decode_memory_health.mkh_keeper_id
                             in
                             state.memory_facts_keeper <- Some keeper_name;
                             state.memory_facts <-
@@ -26821,14 +26284,14 @@ and is loaded on demand through keeper_skill.
                   | Some projection -> state.acting_chunk_projection <- Some projection);
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
-                      let selected = home_selected_action state in
+                      let selected = Masc_tui_home.home_selected_action state in
                       if Option.is_none state.home_selected
-                         && home_initial_reading_ready state selected then
+                         && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
                       (* The persistent requests link owns the first body row. *)
                       let budget = max 0
                           (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
-                      let first, _ = home_decision_window state ~budget in
+                      let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());
                  render state)

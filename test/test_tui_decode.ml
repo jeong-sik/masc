@@ -2933,19 +2933,19 @@ let tool_snapshot_json ?effective ?activations tools =
     ]
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
-      Alcotest.(check int) "count" 1 snapshot.Tui_decode.ts_count;
-      (match snapshot.Tui_decode.ts_tools with
+      Alcotest.(check int) "count" 1 snapshot.Masc.Tui_decode_tools.ts_count;
+      (match snapshot.Masc.Tui_decode_tools.ts_tools with
        | [ t ] ->
            Alcotest.(check string) "name" "masc_board_post"
-             t.Tui_decode.tl_name;
+             t.Masc.Tui_decode_tools.tl_name;
            Alcotest.(check (list string)) "where it is visible"
-             [ "public_mcp" ] t.Tui_decode.tl_surfaces;
+             [ "public_mcp" ] t.Masc.Tui_decode_tools.tl_surfaces;
            Alcotest.(check bool) "callable directly" true
-             t.Tui_decode.tl_direct_call
+             t.Masc.Tui_decode_tools.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
 let skill_snapshot_json ?(rejections = []) ?(shadows = []) () =
@@ -3039,7 +3039,7 @@ let test_decode_skills_catalog_keeps_usage_scope () =
     | `Assoc fields -> `Assoc (("usage_coverage", coverage) :: List.remove_assoc "usage_coverage" fields)
     | _ -> Alcotest.fail "invalid catalog fixture" in
   let read ?(usage = true) coverage =
-    match Tui_decode.decode_skills_catalog (payload ~usage coverage) with
+    match Masc.Tui_decode_tools.decode_skills_catalog (payload ~usage coverage) with
     | Ok catalog -> catalog
     | Error error -> Alcotest.fail error in
   let partial = read (skill_usage_coverage_json ~loaded:19
@@ -3062,14 +3062,14 @@ let test_decode_skills_catalog_keeps_usage_scope () =
    | Some coverage -> Alcotest.(check int) "zero loaded is explicit" 0 coverage.suc_ledgers_loaded
    | None -> Alcotest.fail "unavailable ledger inventory disappeared");
   List.iter (fun bad ->
-      match Tui_decode.decode_skills_catalog (payload bad) with
+      match Masc.Tui_decode_tools.decode_skills_catalog (payload bad) with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "malformed coverage must not become an observed zero")
     [ `Null; skill_usage_coverage_json ~loaded:(-1) ();
       `Assoc ["ledgers_loaded", `Int 1; "unavailable", `List [`Int 1]] ];
   match skills_catalog_json () with
   | `Assoc fields ->
-      (match Tui_decode.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
+      (match Masc.Tui_decode_tools.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "missing coverage was accepted")
   | _ -> Alcotest.fail "invalid catalog fixture"
@@ -3078,7 +3078,7 @@ let test_decode_skills_catalog_keeps_usage_scope () =
    gives only the cause, so the source is named once on screen. *)
 let test_decode_skills_catalog_errors_carry_only_the_cause () =
   let error json =
-    match Tui_decode.decode_skills_catalog json with
+    match Masc.Tui_decode_tools.decode_skills_catalog json with
     | Error detail -> detail
     | Ok _ -> Alcotest.fail "a malformed catalog decoded"
   in
@@ -3141,64 +3141,64 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
       ; "surfaces", `List []
       ]
   in
-  match Tui_decode.decode_skills_catalog payload with
+  match Masc.Tui_decode_tools.decode_skills_catalog payload with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok catalog ->
-    (match catalog.Tui_decode.sc_config with
+    (match catalog.Masc.Tui_decode_tools.sc_config with
      | Some
-         (Tui_decode.Skill_config_configured
+         (Masc.Tui_decode_tools.Skill_config_configured
             { revision; resource_read_max_bytes }) ->
        Alcotest.(check string) "config revision" "4e96407eeb70ddd0" revision;
        Alcotest.(check (option int))
          "resource read cap" (Some 65536) resource_read_max_bytes
      | _ -> Alcotest.fail "a configured Skill section was read as something else");
-    (match catalog.Tui_decode.sc_sources with
+    (match catalog.Masc.Tui_decode_tools.sc_sources with
      | [ first; second ] ->
-       Alcotest.(check string) "first root" "project-masc" first.Tui_decode.scso_id;
+       Alcotest.(check string) "first root" "project-masc" first.Masc.Tui_decode_tools.scso_id;
        Alcotest.(check (option string))
-         "first path" (Some ".masc/skills") first.Tui_decode.scso_path;
+         "first path" (Some ".masc/skills") first.Masc.Tui_decode_tools.scso_path;
        Alcotest.(check string)
-         "first access" "read-write" first.Tui_decode.scso_access;
+         "first access" "read-write" first.Masc.Tui_decode_tools.scso_access;
        Alcotest.(check bool) "first is ready with its candidate count" true
-         (first.Tui_decode.scso_observation = Tui_decode.Skill_source_ready 13);
+         (first.Masc.Tui_decode_tools.scso_observation = Masc.Tui_decode_tools.Skill_source_ready 13);
        (* A root that is not there is the answer to "why is my Skill not
           loaded", so it has to survive the projection too. *)
        Alcotest.(check bool) "second is missing" true
-         (second.Tui_decode.scso_observation = Tui_decode.Skill_source_missing)
+         (second.Masc.Tui_decode_tools.scso_observation = Masc.Tui_decode_tools.Skill_source_missing)
      | sources ->
        Alcotest.failf "expected both roots, got %d" (List.length sources))
 
 let test_decode_skills_catalog_reads_usage_and_flow () =
-  match Tui_decode.decode_skills_catalog (skills_catalog_json ()) with
+  match Masc.Tui_decode_tools.decode_skills_catalog (skills_catalog_json ()) with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok catalog ->
       Alcotest.(check bool) "state" true
-        (catalog.Tui_decode.sc_state = Tui_decode.Skills_ready);
-      (match catalog.Tui_decode.sc_surfaces with
+        (catalog.Masc.Tui_decode_tools.sc_state = Masc.Tui_decode_tools.Skills_ready);
+      (match catalog.Masc.Tui_decode_tools.sc_surfaces with
        | [ surface ] ->
            Alcotest.(check string) "skill name" "work-intake"
-             surface.Tui_decode.scs_name;
+             surface.Masc.Tui_decode_tools.scs_name;
            Alcotest.(check string) "kind" "composition"
-             surface.Tui_decode.scs_kind;
-           (match surface.Tui_decode.scs_usage with
+             surface.Masc.Tui_decode_tools.scs_kind;
+           (match surface.Masc.Tui_decode_tools.scs_usage with
             | [ row ] ->
                 Alcotest.(check string) "usage keeper" "bravo"
-                  row.Tui_decode.su_keeper;
+                  row.Masc.Tui_decode_tools.su_keeper;
                 Alcotest.(check int) "invocations" 12
-                  row.Tui_decode.su_invocations;
-                Alcotest.(check int) "actions" 9 row.Tui_decode.su_actions
+                  row.Masc.Tui_decode_tools.su_invocations;
+                Alcotest.(check int) "actions" 9 row.Masc.Tui_decode_tools.su_actions
             | rows ->
                 Alcotest.failf "expected one usage row, got %d"
                   (List.length rows));
-           (match surface.Tui_decode.scs_flow with
-            | Some { Tui_decode.sf_batches = [ batch ]; _ } ->
+           (match surface.Masc.Tui_decode_tools.scs_flow with
+            | Some { Masc.Tui_decode_tools.sf_batches = [ batch ]; _ } ->
                 Alcotest.(check string) "batch mode" "serial"
-                  batch.Tui_decode.sfb_execution_mode
+                  batch.Masc.Tui_decode_tools.sfb_execution_mode
             | other ->
                 Alcotest.failf "expected one serial batch in the flow (got %d)"
                   (match other with
                    | None -> 0
-                   | Some { Tui_decode.sf_batches; _ } ->
+                   | Some { Masc.Tui_decode_tools.sf_batches; _ } ->
                        List.length sf_batches))
        | surfaces ->
            Alcotest.failf "expected one surface, got %d" (List.length surfaces))
@@ -3207,17 +3207,17 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
    the exact surface profile remains the capability authority. *)
 let test_decode_skills_catalog_tolerates_empty_usage_and_flow () =
   match
-    Tui_decode.decode_skills_catalog
+    Masc.Tui_decode_tools.decode_skills_catalog
       (skills_catalog_json ~usage:false ~flow:false ())
   with
   | Error err -> Alcotest.failf "decode failed on empty usage/flow: %s" err
   | Ok catalog ->
-      (match catalog.Tui_decode.sc_surfaces with
+      (match catalog.Masc.Tui_decode_tools.sc_surfaces with
        | [ surface ] ->
            Alcotest.(check bool) "usage reads empty" true
-             (surface.Tui_decode.scs_usage = []);
+             (surface.Masc.Tui_decode_tools.scs_usage = []);
            Alcotest.(check bool) "flow reads None" true
-             (surface.Tui_decode.scs_flow = None)
+             (surface.Masc.Tui_decode_tools.scs_flow = None)
        | surfaces ->
            Alcotest.failf "expected one surface, got %d"
              (List.length surfaces))
@@ -3239,7 +3239,7 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       ]
   in
   match
-    Tui_decode.decode_skills_catalog
+    Masc.Tui_decode_tools.decode_skills_catalog
       (`Assoc
          [ ("schema", `String "masc.skill-snapshot/v1")
          ; ("state", `String "ready")
@@ -3286,15 +3286,15 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
             () )
       ]
   in
-  match Tui_decode.decode_skills_catalog payload with
+  match Masc.Tui_decode_tools.decode_skills_catalog payload with
   | Error error -> Alcotest.failf "invalid-only catalog rejected: %s" error
-  | Ok { Tui_decode.sc_surfaces = []; sc_rejections = [ rejection ]; _ } ->
+  | Ok { Masc.Tui_decode_tools.sc_surfaces = []; sc_rejections = [ rejection ]; _ } ->
     Alcotest.(check int) "source index" 3 rejection.scr_source_index;
     Alcotest.(check string) "source" "workspace" rejection.scr_source_id;
     Alcotest.(check (option string)) "package" (Some "broken")
       rejection.scr_package_id;
     (match rejection.scr_reason with
-     | Tui_decode.Skill_document_rejected
+     | Masc.Tui_decode_tools.Skill_document_rejected
          [ { srd_diagnostic = Agent_core.Skill_document.Name_mismatch
                  { declared; directory }
              ; srd_message
@@ -3328,11 +3328,11 @@ let test_decode_skills_catalog_keeps_shadows () =
       ]
   in
   (match
-     Tui_decode.decode_skills_catalog
+     Masc.Tui_decode_tools.decode_skills_catalog
        (payload [ `Assoc [ "winner", winner; "shadowed", shadowed ] ])
    with
    | Error error -> Alcotest.failf "a catalog with a shadow was refused: %s" error
-   | Ok { Tui_decode.sc_shadows = [ shadow ]; _ } ->
+   | Ok { Masc.Tui_decode_tools.sc_shadows = [ shadow ]; _ } ->
      Alcotest.(check string) "winner source" "project-masc"
        (Skill_reference.identity_source_id_to_string shadow.scsh_winner);
      Alcotest.(check string) "shadowed source" "project-agents"
@@ -3345,7 +3345,7 @@ let test_decode_skills_catalog_keeps_shadows () =
      list: dropping it would hide the one fact the list exists to show. *)
   List.iter
     (fun (label, shadow) ->
-       match Tui_decode.decode_skills_catalog (payload [ shadow ]) with
+       match Masc.Tui_decode_tools.decode_skills_catalog (payload [ shadow ]) with
        | Error _ -> ()
        | Ok _ -> Alcotest.failf "%s must be refused" label)
     [ ( "a winner without its package"
@@ -3396,11 +3396,11 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
       ; "surfaces", `List []
       ]
   in
-  match Tui_decode.decode_skills_catalog payload with
+  match Masc.Tui_decode_tools.decode_skills_catalog payload with
   | Error error -> Alcotest.failf "empty invalid identifier was lost: %s" error
   | Ok { sc_rejections = [ rejection ]; _ } ->
     (match rejection.scr_reason with
-     | Tui_decode.Skill_document_rejected
+     | Masc.Tui_decode_tools.Skill_document_rejected
          [ { srd_diagnostic =
                  Agent_core.Skill_document.Unexpected_frontmatter_field ""
              ; _
@@ -3410,7 +3410,7 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
 
 let test_decode_skills_catalog_closes_schema_and_state () =
   let expect_error label payload =
-    match Tui_decode.decode_skills_catalog payload with
+    match Masc.Tui_decode_tools.decode_skills_catalog payload with
     | Error _ -> ()
     | Ok _ -> Alcotest.failf "%s must be rejected" label
   in
@@ -3465,7 +3465,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
 
 let test_decode_skills_catalog_reads_each_unready_state () =
   let decode expected payload =
-    match Tui_decode.decode_skills_catalog payload with
+    match Masc.Tui_decode_tools.decode_skills_catalog payload with
     | Error error -> Alcotest.failf "unready catalog rejected: %s" error
     | Ok catalog ->
       Alcotest.(check bool) "typed state" true (catalog.sc_state = expected);
@@ -3478,10 +3478,10 @@ let test_decode_skills_catalog_reads_each_unready_state () =
       ; "state", `String state
       ]
   in
-  decode Tui_decode.Skills_not_registered (simple "not_registered");
-  decode Tui_decode.Skills_uninitialized (simple "uninitialized");
+  decode Masc.Tui_decode_tools.Skills_not_registered (simple "not_registered");
+  decode Masc.Tui_decode_tools.Skills_uninitialized (simple "uninitialized");
   decode
-    Tui_decode.Skills_invalid_workspace
+    Masc.Tui_decode_tools.Skills_invalid_workspace
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "invalid_workspace"
@@ -3498,39 +3498,39 @@ let test_decode_tool_snapshot_keeps_the_warming_flag () =
     | `Assoc fields -> `Assoc (("is_warming", `Bool true) :: fields)
     | other -> other
   in
-  (match Tui_decode.decode_tool_snapshot warming with
+  (match Masc.Tui_decode_tools.decode_tool_snapshot warming with
    | Error err -> Alcotest.failf "decode failed: %s" err
    | Ok snapshot ->
        Alcotest.(check bool) "an empty warming inventory is not an answer" true
-         (snapshot.Tui_decode.ts_freshness = Tui_decode.Warming));
+         (snapshot.Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Warming));
   (* A built inventory does not mention the flag at all. *)
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json []) with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check bool) "an empty built inventory does mean none" true
-        (snapshot.Tui_decode.ts_freshness = Tui_decode.Settled)
+        (snapshot.Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Settled)
 
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
      reading. *)
   match
-    Tui_decode.decode_tool_snapshot
+    Masc.Tui_decode_tools.decode_tool_snapshot
       (tool_snapshot_json [ tool_entry_json ~surfaces:[] () ])
   with
-  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
-      Alcotest.(check (list string)) "nowhere" [] t.Tui_decode.tl_surfaces
+  | Ok { Masc.Tui_decode_tools.ts_tools = [ t ]; _ } ->
+      Alcotest.(check (list string)) "nowhere" [] t.Masc.Tui_decode_tools.tl_surfaces
   | Ok _ -> Alcotest.fail "expected one tool"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_tool_absent_direct_call_is_off () =
   match
-    Tui_decode.decode_tool_snapshot
+    Masc.Tui_decode_tools.decode_tool_snapshot
       (tool_snapshot_json [ tool_entry_json ~direct:`Null () ])
   with
-  | Ok { Tui_decode.ts_tools = [ t ]; _ } ->
+  | Ok { Masc.Tui_decode_tools.ts_tools = [ t ]; _ } ->
       Alcotest.(check bool) "absent means not callable" false
-        t.Tui_decode.tl_direct_call
+        t.Masc.Tui_decode_tools.tl_direct_call
   | Ok _ -> Alcotest.fail "expected one tool"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -3539,7 +3539,7 @@ let test_decode_tool_snapshot_without_inventory_is_an_error () =
      as one would draw a server that answered wrong as a server with no
      tools. *)
   match
-    Tui_decode.decode_tool_snapshot (`Assoc [ ("generated_at", `String "x") ])
+    Masc.Tui_decode_tools.decode_tool_snapshot (`Assoc [ ("generated_at", `String "x") ])
   with
   | Ok _ -> Alcotest.fail "an envelope with no inventory should not decode"
   | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
@@ -3625,7 +3625,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
            the values are the ones test_keeper_effective_tool_surface pins on
            the producer side. The second tool is the other branch: a
            descriptor origin carries no skill_provenance at all and decodes
-           as Descriptor_origin, which has no source to name. *)
+           as Masc.Tui_decode_tools.Descriptor_origin, which has no source to name. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -3657,12 +3657,12 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "tool_surface_sha256", `String (String.make 64 'a')
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
-      { Tui_decode.ts_effective =
+      { Masc.Tui_decode_tools.ts_effective =
           Some
-            (Tui_decode.Effective_surface_available
+            (Masc.Tui_decode_tools.Effective_surface_available
                { ets_keeper_name;
                  ets_native_posture = Some native;
                  ets_skill_resource_read_max_bytes = Some resource_bound;
@@ -3691,11 +3691,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check bool)
         "composition tool names its configured skill source" true
         (tool.et_origin
-         = Tui_decode.Composition_skill_origin
+         = Masc.Tui_decode_tools.Composition_skill_origin
              { skill_source_id = Some "shared-catalog" });
       Alcotest.(check bool)
         "a tool with no skill behind it is a descriptor" true
-        (bare_tool.et_origin = Tui_decode.Descriptor_origin);
+        (bare_tool.et_origin = Masc.Tui_decode_tools.Descriptor_origin);
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -3708,7 +3708,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         "profile load reasons"
         true
         (match profile.esp_load_reasons with
-         | [ Tui_decode.Skill_task "task-001"; Skill_keeper_profile ] -> true
+         | [ Masc.Tui_decode_tools.Skill_task "task-001"; Masc.Tui_decode_tools.Skill_keeper_profile ] -> true
          | _ -> false);
       (match profile.esp_flow with
        | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
@@ -3748,7 +3748,7 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "tool_surface_sha256", `Null
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "legacy Skill name list was accepted"
 
@@ -3778,10 +3778,10 @@ let minimal_available_surface ?(unavailable_skill_names = Some (`List [])) tools
      | None -> [])
 
 let decode_surface_tools surface =
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective:surface []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective:surface []) with
   | Ok
-      { Tui_decode.ts_effective =
-          Some (Tui_decode.Effective_surface_available { ets_tools; _ });
+      { Masc.Tui_decode_tools.ts_effective =
+          Some (Masc.Tui_decode_tools.Effective_surface_available { ets_tools; _ });
         _ } -> Ok ets_tools
   | Ok _ -> Error "expected an available effective Keeper surface"
   | Error err -> Error err
@@ -3802,7 +3802,7 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
   in
   let origins tools =
     match decode_surface_tools (minimal_available_surface tools) with
-    | Ok decoded -> List.map (fun (t : Tui_decode.effective_tool) -> t.et_origin) decoded
+    | Ok decoded -> List.map (fun (t : Masc.Tui_decode_tools.effective_tool) -> t.et_origin) decoded
     | Error err -> Alcotest.failf "decode failed: %s" err
   in
   let refused what tools =
@@ -3812,16 +3812,16 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
   in
   Alcotest.(check bool) "an unresolved provenance is null, and reads as no source" true
     (origins [ composition (Some `Null) ]
-     = [ Tui_decode.Composition_skill_origin { skill_source_id = None } ]);
+     = [ Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None } ]);
   Alcotest.(check bool) "the other kinds carry no provenance" true
     (origins
        [ tool [ "kind", `String "descriptor" ]
        ; tool [ "kind", `String "instruction_skill" ]
        ; tool [ "kind", `String "composition_control" ]
        ]
-     = [ Tui_decode.Descriptor_origin
-       ; Tui_decode.Instruction_skill_origin
-       ; Tui_decode.Composition_control_origin
+     = [ Masc.Tui_decode_tools.Descriptor_origin
+       ; Masc.Tui_decode_tools.Instruction_skill_origin
+       ; Masc.Tui_decode_tools.Composition_control_origin
        ]);
   refused "a composition tool without skill_provenance" [ composition None ];
   refused "a provenance without identity"
@@ -3832,32 +3832,32 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
     ];
   Alcotest.(check bool) "a kind this build does not know is kept as its word" true
     (origins [ tool [ "kind", `String "plugin" ] ]
-     = [ Tui_decode.Unrecognised_origin "plugin" ]);
+     = [ Masc.Tui_decode_tools.Unrecognised_origin "plugin" ]);
   (* effective_tool_origin_kind is the word the Tools column draws. Encoding
      each constructor with it and decoding the result must give the same
      constructor back, so the two spellings of each kind cannot drift. *)
   let encode origin =
     tool
-      (("kind", `String (Tui_decode.effective_tool_origin_kind origin))
+      (("kind", `String (Masc.Tui_decode_tools.effective_tool_origin_kind origin))
        :: (match origin with
-           | Tui_decode.Composition_skill_origin { skill_source_id = Some source_id } ->
+           | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some source_id } ->
              [ ( "skill_provenance"
                , `Assoc [ "identity", `Assoc [ "source_id", `String source_id ] ] )
              ]
-           | Tui_decode.Composition_skill_origin { skill_source_id = None } ->
+           | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None } ->
              [ "skill_provenance", `Null ]
-           | Tui_decode.Descriptor_origin
-           | Tui_decode.Instruction_skill_origin
-           | Tui_decode.Composition_control_origin
-           | Tui_decode.Unrecognised_origin _ -> []))
+           | Masc.Tui_decode_tools.Descriptor_origin
+           | Masc.Tui_decode_tools.Instruction_skill_origin
+           | Masc.Tui_decode_tools.Composition_control_origin
+           | Masc.Tui_decode_tools.Unrecognised_origin _ -> []))
   in
   let every_origin =
-    [ Tui_decode.Descriptor_origin
-    ; Tui_decode.Instruction_skill_origin
-    ; Tui_decode.Composition_skill_origin { skill_source_id = Some "shared-catalog" }
-    ; Tui_decode.Composition_skill_origin { skill_source_id = None }
-    ; Tui_decode.Composition_control_origin
-    ; Tui_decode.Unrecognised_origin "plugin"
+    [ Masc.Tui_decode_tools.Descriptor_origin
+    ; Masc.Tui_decode_tools.Instruction_skill_origin
+    ; Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some "shared-catalog" }
+    ; Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
+    ; Masc.Tui_decode_tools.Composition_control_origin
+    ; Masc.Tui_decode_tools.Unrecognised_origin "plugin"
     ]
   in
   Alcotest.(check bool) "every origin survives its own word" true
@@ -3890,11 +3890,11 @@ let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
       ; "detail", `String "current task declares missing skill"
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
   | Ok
-      { Tui_decode.ts_effective =
+      { Masc.Tui_decode_tools.ts_effective =
           Some
-            (Tui_decode.Effective_surface_unavailable
+            (Masc.Tui_decode_tools.Effective_surface_unavailable
                { ets_reason; ets_detail; _ });
         _ } ->
       Alcotest.(check string) "typed reason" "declared_skill_missing" ets_reason;
@@ -3928,13 +3928,13 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
       ; "tool_surface_sha256", `Null
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~effective []) with
   | Ok
-      { Tui_decode.ts_effective =
+      { Masc.Tui_decode_tools.ts_effective =
           Some
-            (Tui_decode.Effective_surface_available
+            (Masc.Tui_decode_tools.Effective_surface_available
                { ets_tool_delivery =
-                   Tui_decode.Effective_tools_suppressed_runtime_unsupported;
+                   Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported;
                  ets_skill_profiles = [];
                  ets_tool_surface_bytes = 0;
                  ets_skill_tool_surface_bytes = 0;
@@ -4071,14 +4071,14 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
       ]
   in
   match
-    Tui_decode.decode_tool_snapshot
+    Masc.Tui_decode_tools.decode_tool_snapshot
       (tool_snapshot_json ~activations [])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
-      { Tui_decode.ts_skill_activations =
+      { Masc.Tui_decode_tools.ts_skill_activations =
           Some
-            (Tui_decode.Skill_activations_available
+            (Masc.Tui_decode_tools.Skill_activations_available
                { sap_keeper_name
                ; sap_ledger
                ; _
@@ -4155,10 +4155,10 @@ let test_decode_skill_activations_keeps_no_session_distinct () =
       ; "keeper_name", `String "idle-keeper"
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
   | Ok
-      { Tui_decode.ts_skill_activations =
-          Some (Tui_decode.Skill_activations_no_session { sap_keeper_name });
+      { Masc.Tui_decode_tools.ts_skill_activations =
+          Some (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name });
         _ } ->
       Alcotest.(check string) "Keeper" "idle-keeper" sap_keeper_name
   | Ok _ -> Alcotest.fail "no_session was not kept distinct"
@@ -4173,11 +4173,11 @@ let test_decode_skill_activations_does_not_hide_unavailable () =
       ; "detail", `String "decode failed"
       ]
   in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
   | Ok
-      { Tui_decode.ts_skill_activations =
+      { Masc.Tui_decode_tools.ts_skill_activations =
           Some
-            (Tui_decode.Skill_activations_unavailable
+            (Masc.Tui_decode_tools.Skill_activations_unavailable
                { sap_reason; sap_detail; _ });
         _ } ->
       Alcotest.(check string) "reason" "activation_ledger_unreadable" sap_reason;
@@ -4195,7 +4195,7 @@ let test_decode_skill_activations_rejects_cross_session_turn () =
     | other -> other
   in
   let activations = skill_activation_projection_json [ activation ] in
-  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
 
@@ -4205,7 +4205,7 @@ let test_decode_tool_snapshot_requires_both_keeper_projection_fields () =
     | `Assoc fields -> `Assoc (List.remove_assoc "skill_activations" fields)
     | other -> other
   in
-  match Tui_decode.decode_tool_snapshot missing_activations with
+  match Masc.Tui_decode_tools.decode_tool_snapshot missing_activations with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "missing skill_activations field was accepted"
 
@@ -4238,7 +4238,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
   List.iter
     (fun projection ->
        match
-         Tui_decode.decode_tool_snapshot
+         Masc.Tui_decode_tools.decode_tool_snapshot
            (tool_snapshot_json ~activations:projection [])
        with
        | Error _ -> ()
@@ -4302,52 +4302,52 @@ let connector_snapshot_json ?(active = 1) connectors =
 
 let test_decode_connector_snapshot_reads_the_live_shape () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json () ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
-      Alcotest.(check int) "total" 1 snapshot.Tui_decode.cs_total;
-      Alcotest.(check int) "active" 1 snapshot.Tui_decode.cs_active;
-      (match snapshot.Tui_decode.cs_connectors with
+      Alcotest.(check int) "total" 1 snapshot.Masc.Tui_decode_connectors.cs_total;
+      Alcotest.(check int) "active" 1 snapshot.Masc.Tui_decode_connectors.cs_active;
+      (match snapshot.Masc.Tui_decode_connectors.cs_connectors with
        | [ c ] ->
            Alcotest.(check string) "name" "Slack"
-             c.Tui_decode.cn_display_name;
-           Alcotest.(check bool) "available" true c.Tui_decode.cn_available;
-           Alcotest.(check bool) "connected" true c.Tui_decode.cn_connected;
+             c.Masc.Tui_decode_connectors.cn_display_name;
+           Alcotest.(check bool) "available" true c.Masc.Tui_decode_connectors.cn_available;
+           Alcotest.(check bool) "connected" true c.Masc.Tui_decode_connectors.cn_connected;
            Alcotest.(check (option string)) "channel"
-             (Some "#release-deployment") c.Tui_decode.cn_channel;
+             (Some "#release-deployment") c.Masc.Tui_decode_connectors.cn_channel;
            Alcotest.(check bool) "typed connected state" true
-             (c.Tui_decode.cn_connection = Tui_decode.Connector_connected);
+             (c.Masc.Tui_decode_connectors.cn_connection = Masc.Tui_decode_connectors.Connector_connected);
            Alcotest.(check (option string)) "trigger policy"
-             (Some "mention_only") c.Tui_decode.cn_trigger_policy;
+             (Some "mention_only") c.Masc.Tui_decode_connectors.cn_trigger_policy;
            Alcotest.(check (option bool)) "bot token presence" (Some true)
-             c.Tui_decode.cn_bot_token_present;
+             c.Masc.Tui_decode_connectors.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
-             c.Tui_decode.cn_pid;
+             c.Masc.Tui_decode_connectors.cn_pid;
            Alcotest.(check bool) "typed gateway state" true
-             (c.Tui_decode.cn_gateway_state
-              = Some Tui_decode.Connector_gateway_connected);
+             (c.Masc.Tui_decode_connectors.cn_gateway_state
+              = Some Masc.Tui_decode_connectors.Connector_gateway_connected);
            Alcotest.(check bool) "no poll state" true
-             (c.Tui_decode.cn_poll_state = None);
+             (c.Masc.Tui_decode_connectors.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
-             (c.Tui_decode.cn_directory_state
-              = Some Tui_decode.Connector_directory_partial);
+             (c.Masc.Tui_decode_connectors.cn_directory_state
+              = Some Masc.Tui_decode_connectors.Connector_directory_partial);
            Alcotest.(check (list string)) "permission limit"
-             [ "members" ] c.Tui_decode.cn_directory_permission_denied;
-           (match c.Tui_decode.cn_bindings with
+             [ "members" ] c.Masc.Tui_decode_connectors.cn_directory_permission_denied;
+           (match c.Masc.Tui_decode_connectors.cn_bindings with
             | [ binding ] ->
                 Alcotest.(check string) "bound channel" "C09TK9L4DV4"
-                  binding.Tui_decode.cb_channel_id;
+                  binding.Masc.Tui_decode_connectors.cb_channel_id;
                 Alcotest.(check (option string)) "bound channel name"
-                  None binding.Tui_decode.cb_channel_name;
+                  None binding.Masc.Tui_decode_connectors.cb_channel_name;
                 Alcotest.(check string) "bound keeper"
-                  "pinewood-pr-jira-checker" binding.Tui_decode.cb_keeper_name
+                  "pinewood-pr-jira-checker" binding.Masc.Tui_decode_connectors.cb_keeper_name
             | bindings ->
                 Alcotest.failf "expected one binding, got %d"
                   (List.length bindings))
            ; Alcotest.(check int) "public response has no name mappings" 0
-               (List.length c.Tui_decode.cn_name_mappings)
+               (List.length c.Masc.Tui_decode_connectors.cn_name_mappings)
        | cs -> Alcotest.failf "expected one connector, got %d" (List.length cs))
 
 let test_decode_connector_configured_but_unreachable () =
@@ -4355,29 +4355,29 @@ let test_decode_connector_configured_but_unreachable () =
      up but cannot be reached needs a different action than one that was never
      configured, so the two are not folded. *)
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json ~active:1
          [ connector_json ~connected:(`Bool false) ~status:"disconnected" () ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
-      Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "configured" true c.Masc.Tui_decode_connectors.cn_available;
+      Alcotest.(check bool) "but not reachable" false c.Masc.Tui_decode_connectors.cn_connected
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_reads_a_poll_state () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~gateway_state:`Null
              ~poll_state:(`String "degraded") ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
       Alcotest.(check bool) "typed poll state" true
-        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+        (c.Masc.Tui_decode_connectors.cn_poll_state = Some Masc.Tui_decode_connectors.Connector_poll_degraded);
       Alcotest.(check bool) "no gateway state" true
-        (c.Tui_decode.cn_gateway_state = None)
+        (c.Masc.Tui_decode_connectors.cn_gateway_state = None)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -4386,7 +4386,7 @@ let test_decode_connector_reads_a_poll_state () =
    the transports beside it still decode, and the refusal names the row. *)
 let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~id:"discord" ~gateway_state:(`String "half_open") ()
          ; connector_json ~id:"imessage" ~gateway_state:`Null
@@ -4399,27 +4399,27 @@ let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
       Alcotest.(check (list string)) "the readable row still decodes"
         [ "slack" ]
         (List.map
-           (fun (c : Tui_decode.connector) -> c.cn_id)
-           snapshot.Tui_decode.cs_connectors);
+           (fun (c : Masc.Tui_decode_connectors.connector) -> c.cn_id)
+           snapshot.Masc.Tui_decode_connectors.cs_connectors);
       Alcotest.(check (list (pair (option string) int)))
         "each unreadable row is refused by name and position"
         [ (Some "discord", 0); (Some "imessage", 1) ]
         (List.map
-           (fun (r : Tui_decode.connector_refusal) ->
+           (fun (r : Masc.Tui_decode_connectors.connector_refusal) ->
               (r.cr_connector_id, r.cr_row))
-           snapshot.Tui_decode.cs_refused);
+           snapshot.Masc.Tui_decode_connectors.cs_refused);
       List.iter
-        (fun (r : Tui_decode.connector_refusal) ->
+        (fun (r : Masc.Tui_decode_connectors.connector_refusal) ->
            Alcotest.(check bool) "the refusal carries its reason" true
              (String.length r.cr_reason > 0))
-        snapshot.Tui_decode.cs_refused
+        snapshot.Masc.Tui_decode_connectors.cs_refused
 
 let test_decode_connector_hides_nonpositive_pid () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json ~pid:(`Int 0) () ])
   with
-  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; _ } ->
       Alcotest.(check (option int)) "non-process pid omitted" None
         connector.cn_pid
   | Ok _ -> Alcotest.fail "expected one connector"
@@ -4428,17 +4428,17 @@ let test_decode_connector_hides_nonpositive_pid () =
 let test_decode_connector_absent_flags_are_off () =
   (* Defaulting the other way would draw a dead connector as a working one. *)
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json ~active:0
          [ connector_json ~available:`Null ~connected:`Null ~status:"offline"
              ~channel:`Null ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "not available" false c.Tui_decode.cn_available;
-      Alcotest.(check bool) "not connected" false c.Tui_decode.cn_connected;
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "not available" false c.Masc.Tui_decode_connectors.cn_available;
+      Alcotest.(check bool) "not connected" false c.Masc.Tui_decode_connectors.cn_connected;
       Alcotest.(check (option string)) "no channel" None
-        c.Tui_decode.cn_channel
+        c.Masc.Tui_decode_connectors.cn_channel
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -4447,34 +4447,34 @@ let test_decode_connector_absent_flags_are_off () =
 let expect_only_row_refused label result =
   match result with
   | Error err -> Alcotest.failf "%s: one bad row failed the snapshot: %s" label err
-  | Ok { Tui_decode.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
       Alcotest.(check (option string)) (label ^ ": refusal names the row")
-        (Some "slack") refusal.Tui_decode.cr_connector_id
+        (Some "slack") refusal.Masc.Tui_decode_connectors.cr_connector_id
   | Ok _ -> Alcotest.failf "%s: the row was not refused" label
 
 let test_decode_connector_rejects_contradictory_connection () =
   expect_only_row_refused "connected while unavailable"
-    (Tui_decode.decode_connector_snapshot
+    (Masc.Tui_decode_connectors.decode_connector_snapshot
        (connector_snapshot_json
           [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ]))
 
 let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~available:(`Bool false) ~connected:(`Bool true)
              ~status:"offline" ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; _ } ->
       Alcotest.(check bool) "typed degraded connection" true
-        (connector.cn_connection = Tui_decode.Connector_connected_unavailable)
+        (connector.cn_connection = Masc.Tui_decode_connectors.Connector_connected_unavailable)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_rejects_a_malformed_binding () =
   expect_only_row_refused "a binding without channel_id"
-    (Tui_decode.decode_connector_snapshot
+    (Masc.Tui_decode_connectors.decode_connector_snapshot
        (connector_snapshot_json
           [ connector_json
               ~bindings:
@@ -4487,11 +4487,11 @@ let test_decode_connector_rejects_a_malformed_binding () =
 
 let test_decode_connector_order_is_stable () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~id:"slack" (); connector_json ~id:"discord" () ])
   with
-  | Ok { Tui_decode.cs_connectors = first :: second :: []; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = first :: second :: []; _ } ->
       Alcotest.(check string) "first id" "discord" first.cn_id;
       Alcotest.(check string) "second id" "slack" second.cn_id
   | Ok _ -> Alcotest.fail "expected two connectors"
@@ -4519,13 +4519,13 @@ let test_authenticated_name_page_enriches_connector () =
       ]
   in
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json () ]),
-    Tui_decode.decode_connector_name_page page_json
+    Masc.Tui_decode_connectors.decode_connector_name_page page_json
   with
   | Ok { cs_connectors = [ connector ]; _ }, Ok page ->
       let connector =
-        Tui_decode.connector_with_name_pages connector ~pages:[ page ] ~error:None
+        Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages:[ page ] ~error:None
       in
       Alcotest.(check (option string)) "workspace remains separate provenance"
         (Some "T012345") connector.cn_workspace_id;
@@ -4697,9 +4697,9 @@ let test_decode_repository_requires_resolved_local_path () =
    still decode, so "the payload is not accepted" is either a whole-snapshot
    error or at least one refused row. *)
 let memory_health_rejects json =
-  match Tui_decode.decode_memory_health_snapshot json with
+  match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
   | Error _ -> true
-  | Ok snapshot -> snapshot.Tui_decode.mhs_refused_keepers <> []
+  | Ok snapshot -> snapshot.Masc.Tui_decode_memory_health.mhs_refused_keepers <> []
 
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
@@ -4847,7 +4847,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
       "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
   let with_synthesis = replace_field "synthesis" synthesis cycle in
-  (match Tui_decode.decode_memory_health_snapshot (context_payload with_synthesis) with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload with_synthesis) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
       | Some {state=Masc.Keeper_continuity_observation.Not_committed;
@@ -4860,19 +4860,19 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     [replace_field "state" (`String "drained") synthesis;
      replace_field "trace_id" `Null synthesis;
      replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
-  (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
+      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
       | _ -> Alcotest.fail "prepared frontier or bytes lost")
    | Error detail -> Alcotest.fail detail);
   let position = `Assoc ["trace_id", `String "context-trace"; "end_atom", `Int 7] in
   let absorbed = `Assoc ["kind", `String "absorbed"; "frontier", position] in
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (context_payload (replace_field "prepared" (replace_field "input" absorbed prepared) cycle)) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Tui_decode.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
+      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
       | _ -> Alcotest.fail "absorbed position lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
@@ -4913,7 +4913,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         else value) fields)
     | other -> other
   in
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_librarian ~stopped_keepers:1
               [ "state", `String "stopped"
               ; "detail", `String "the range could not be read"
@@ -4922,9 +4922,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    | Ok snapshot ->
      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
      Alcotest.(check bool) "a stopped pass keeps its cause" true
-       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_stopped "the range could not be read"));
      Alcotest.(check bool) "the failure kind is decoded" true
-       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+       (librarian.mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution)
    | Error detail -> Alcotest.fail detail);
   (* A row this build cannot read is refused on its own: the other keeper
      still decodes and the refusal names the keeper and the reason, so a newer
@@ -4932,15 +4932,15 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   List.iter
     (fun (label, stopped_keepers, updates, reason) ->
        match
-         Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
+         Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
        with
        | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
        | Ok snapshot ->
          Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
            [ "healthy" ]
-           (List.map (fun keeper -> keeper.Tui_decode.mkh_keeper_id) snapshot.mhs_keepers);
+           (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id) snapshot.mhs_keepers);
          (match snapshot.mhs_refused_keepers with
-          | [ { Tui_decode.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
+          | [ { Masc.Tui_decode_memory_health.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
             Alcotest.(check bool) (label ^ ": the refusal says why") true
               (String_util.contains_substring mkr_reason reason)
           | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
@@ -4965,7 +4965,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
         if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
     | _ -> unknown_unread in
-  (match Tui_decode.decode_memory_health_snapshot unknown_total with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_total with
    | Ok snapshot -> Alcotest.(check (option int)) "unknown fleet total retained" None
        snapshot.mhs_total_librarian_unread_turns
    | Error detail -> Alcotest.fail detail);
@@ -4987,7 +4987,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     | json -> json in
   Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
     (memory_health_rejects ((with_continuity `Null)));
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
    | Ok snapshot ->
      Alcotest.(check (option int)) "an unmeasured continuity lag stays unknown" None
@@ -4997,7 +4997,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      Alcotest.(check int) "and sums nothing for it" 0
        snapshot.mhs_total_librarian_continuity_unread_atoms
    | Error detail -> Alcotest.fail detail);
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_continuity_totals ~behind:4 ~unmeasured:0 (with_continuity (`Int 4))) with
    | Ok snapshot ->
      Alcotest.(check (option int)) "a measured continuity lag is the row's number" (Some 4)
@@ -5023,12 +5023,12 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
   in
   let stalled_of payload =
-    match Tui_decode.decode_memory_health_snapshot (with_stalled payload) with
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_stalled payload) with
     | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
     | Error detail -> Alcotest.fail detail
   in
   (match stalled_of (gap 2 8) with
-   | Some (Tui_decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
+   | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
    | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
   Alcotest.(check bool) "an empty gap is refused" true
     (memory_health_rejects (with_stalled (gap 8 8)));
@@ -5045,8 +5045,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   (match stalled_of (unmeasured "turn_records_unreadable") with
    | Some
-       (Tui_decode.Stalled_unmeasured
-          { mls_cause = Tui_decode.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
+       (Masc.Tui_decode_memory_health.Stalled_unmeasured
+          { mls_cause = Masc.Tui_decode_memory_health.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
    | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
   Alcotest.(check bool) "a cause this build does not know is refused" true
     (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
@@ -5177,7 +5177,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      that sentence is the whole of what the Memory surface drew -- nothing in
      it says which key, so the operator diffs the payload against the decoder
      by hand. These pin the named groups. *)
-  (match Tui_decode.decode_memory_health_snapshot unknown_field with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_field with
    | Ok _ -> Alcotest.fail "an unknown root field has to be refused"
    | Error detail ->
        Alcotest.(check string) "the refusal names the unknown field"
@@ -5187,18 +5187,18 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      | `Assoc fields -> `Assoc (("schema", `String "twice") :: fields)
      | json -> json
    in
-   match Tui_decode.decode_memory_health_snapshot duplicated_root with
+   match Masc.Tui_decode_memory_health.decode_memory_health_snapshot duplicated_root with
    | Ok _ -> Alcotest.fail "a duplicated root field has to be refused"
    | Error detail ->
        Alcotest.(check string) "the refusal names the duplicated field"
          "memory health snapshot fields mismatch (duplicates=[schema])" detail);
-  match Tui_decode.decode_memory_health_snapshot json with
+  match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
       Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
         [None; Some 1700000000.]
-        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
+        (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
@@ -5225,9 +5225,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            Alcotest.(check int) "failures" 4
              source_only.mkh_librarian_failures;
            (match source_only.mkh_alerts with
-            | [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ] ->
+            | [ { Masc.Tui_decode_memory_health.ma_code = Masc.Tui_decode_memory_health.Librarian_starvation; _ } ] ->
                 (match
-                   Tui_decode.memory_alert_severity Tui_decode.Librarian_starvation
+                   Masc.Tui_decode_memory_health.memory_alert_severity Masc.Tui_decode_memory_health.Librarian_starvation
                  with
                  | `Error -> ()
                  | `Warn -> Alcotest.fail "starvation must carry error severity")
@@ -5328,13 +5328,13 @@ let memory_alert_snapshot = memory_alert_snapshot_with_extra []
 
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
           ~target:"librarian_starvation")
    with
-   | Ok { Tui_decode.mhs_keepers =
-            [ { Tui_decode.mkh_alerts =
-                  [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ]
+   | Ok { Masc.Tui_decode_memory_health.mhs_keepers =
+            [ { Masc.Tui_decode_memory_health.mkh_alerts =
+                  [ { Masc.Tui_decode_memory_health.ma_code = Masc.Tui_decode_memory_health.Librarian_starvation; _ } ]
               ; _
               } ]
         ; _
@@ -5453,12 +5453,12 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
       ]
   in
   let cycle_of snapshot =
-    match snapshot.Tui_decode.mhs_keepers with
-    | [ keeper ] -> keeper.Tui_decode.mkh_context_cycle
+    match snapshot.Masc.Tui_decode_memory_health.mhs_keepers with
+    | [ keeper ] -> keeper.Masc.Tui_decode_memory_health.mkh_context_cycle
     | _ -> Alcotest.fail "the fixture holds one keeper"
   in
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (snapshot_with
           (cycle ~read_position:(Some 12887) ~read_error:None
              ~rewriting_through:(Some 12888) ()))
@@ -5467,20 +5467,20 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
    | Ok snapshot ->
      let cycle = cycle_of snapshot in
      Alcotest.(check (option int)) "the read position is carried" (Some 12887)
-       cycle.Tui_decode.mcc_read_position;
+       cycle.Masc.Tui_decode_memory_health.mcc_read_position;
      Alcotest.(check (option int)) "the rewrite target is carried" (Some 12888)
-       cycle.Tui_decode.mcc_rewriting_through;
+       cycle.Masc.Tui_decode_memory_health.mcc_rewriting_through;
      Alcotest.(check bool) "the position was readable" false
-       cycle.Tui_decode.mcc_read_position_unreadable;
-     match cycle.Tui_decode.mcc_saved with
+       cycle.Masc.Tui_decode_memory_health.mcc_read_position_unreadable;
+     match cycle.Masc.Tui_decode_memory_health.mcc_saved with
      | None -> Alcotest.fail "the fixture saves a cut"
      | Some saved ->
        Alcotest.(check int) "the cut the position is read against" 7694
-         saved.Tui_decode.mcf_end_atom);
+         saved.Masc.Tui_decode_memory_health.mcf_end_atom);
   (* An unreadable position is why there is no number, not a keeper that has
      read nothing. *)
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (snapshot_with
           (cycle ~read_position:None ~read_error:(Some "progress_unreadable")
              ~rewriting_through:None ()))
@@ -5488,7 +5488,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
    | Error detail -> Alcotest.failf "decode failed: %s" detail
    | Ok snapshot ->
      Alcotest.(check bool) "an unreadable position says so" true
-       (cycle_of snapshot).Tui_decode.mcc_read_position_unreadable);
+       (cycle_of snapshot).Masc.Tui_decode_memory_health.mcc_read_position_unreadable);
   (* Both halves of the disagreement: a marker with a number, and a rewrite
      target the cut already reached. *)
   Alcotest.(check bool) "a read error beside a position is refused" true

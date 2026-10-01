@@ -8043,3 +8043,15 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_prepare_keeper_collaboration)))
+
+(rule
+ (alias runtest-test_keeper_continuity_admission)
+ (deps
+  test_keeper_continuity_admission.py
+  ../scripts/harness/workload/keeper_continuity_validation.sh
+  ../config/tools/masc_keeper_up.toml)
+ (action (run python3 %{dep:test_keeper_continuity_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_continuity_admission)))

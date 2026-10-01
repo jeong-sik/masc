@@ -141,6 +141,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
     sequence = producer.get("observation_seq")
     if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
         raise InvalidInput("producer.observation_seq must be a positive completed sequence")
+    if producer.get("coverage_scope") != "whole_producer":
+        raise InvalidInput("Report input requires whole-producer coverage")
     retained = evidence(observation.get("evidence"))
     if not retained or not any(item["sha256"] is not None for item in retained):
         raise InvalidInput("Report input requires a retained upstream output digest")
@@ -177,7 +179,9 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             skipped.add(lane)
             continue
         lane = ports[lane]
-        string(original.get("id"), "row.id")
+        identity = string(original.get("id"), "row.id")
+        if not identity.startswith(f"{producer['instance_id']}/{sequence}/"):
+            raise InvalidInput("Fusion row identity disagrees with the producer sequence")
         row_coordinates(original)
         fields = object_value(original.get("fields"), "row.fields")
         coordinates = (string(fields.get("source_id"), "row.fields.source_id"),
@@ -188,11 +192,14 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if lane == "fusion/status":
             run = object_value(fields.get("fusion_run"), "fusion_run")
             run_id = string(run.get("run_id"), "fusion_run.run_id")
-            string(run.get("keeper"), "fusion_run.keeper")
+            if not string(run.get("keeper"), "fusion_run.keeper").strip():
+                raise InvalidInput("Fusion producer identity must not be blank")
             status = run_state(run.get("status"))
             if status is RunState.FAILED:
                 string(run.get("failure_code"), "fusion_run.failure_code")
                 string(run.get("error"), "fusion_run.error")
+            elif run.get("failure_code") is not None or run.get("error") is not None:
+                raise InvalidInput("Non-failed Fusion run contains failure metadata")
         else:
             if len(original["related_ids"]) != 1:
                 raise InvalidInput("Fusion result must identify its status row")
@@ -203,7 +210,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             if not isinstance(post.get("body"), str):
                 raise InvalidInput("board_post.body must be text")
             origin = object_value(post.get("origin"), "board_post.origin")
-            string(origin.get("fusion_producer"), "board_post.origin.fusion_producer")
+            if not string(origin.get("fusion_producer"), "board_post.origin.fusion_producer").strip():
+                raise InvalidInput("Fusion producer identity must not be blank")
             if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run_id:
                 raise InvalidInput("Report evidence belongs to another Fusion run")
         if original["subject_id"] != run_id:
@@ -233,8 +241,12 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         post = result_row[0]["fields"]["board_post"] if result_row else None
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
+            result_fields = result_row[0]["fields"]
             if result_row[0]["related_ids"] != [status_row[0]["id"]]:
                 raise InvalidInput("Fusion result relation does not identify its paired status row")
+            status_event = string(status_fields.get("source_event_id"), "status.source_event_id")
+            if string(result_fields.get("source_event_id"), "result.source_event_id") != status_event:
+                raise InvalidInput("Fusion status and result belong to different source events")
             if (status_fields.get("evidence_status") != "recorded"
                     or status_fields.get("board_post_id") != post["id"]
                     or status_fields["fusion_run"]["keeper"] != post["origin"]["fusion_producer"]):
@@ -310,5 +322,8 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
 if __name__ == "__main__":
     manifest = tomllib.loads(Path(__file__).with_name("lane.toml").read_text())
     serve("masc-fusion-report", observe,
-          text_summary=lambda output: "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+          text_summary=lambda output: (
+              "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence."
+              if any(item["lane_id"] == "fusion/report" for item in output["rows"])
+              else "No Fusion reports are available; inspect structuredContent coverage for missing inputs."),
           max_reply_bytes=manifest["resources"]["max_reply_bytes"])

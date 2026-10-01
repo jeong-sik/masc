@@ -11,12 +11,17 @@ binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
 reads, a worker-authenticated empty wallet and catalog, PNG delivery, and delivery
-of the exact production dashboard index.
+of the exact production dashboard index. It then authenticates as the synthetic
+Keeper over MCP, buys a free face item, rejects repeat/insufficient purchases
+and unowned equipment, equips the item, and verifies ledger-backed account
+ownership and changed PNG bytes. Restoring the default must restore the
+original PNG; the other slots must stay unchanged.
 
 Inputs are a synthetic paused Keeper in the current metadata schema, an empty
 ledger, and explicit test prices/payout policy. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
-purchase/equipment, a real payout, browser interaction or production rollout.
+purchase/equipment decisions, a paid purchase or real payout, browser interaction
+or production rollout.
 Browser and TUI transition evidence comes from the separate dashboard and
 Test workflows.
 
@@ -36,5 +41,7 @@ python3 scripts/item-http-acceptance.py \
 A failed run is not a passing receipt. Inspect the workflow step and server
 log before interpreting the artifact.
 
+The transaction stage also rejects an owned face item in the head slot and checks that duplicate, insufficient and wrong-slot refusals leave the ledger unchanged. Both the original and equipped PNG must have valid dimensions, chunks and decoded image data.
+
 Authenticated probe HTTP requests reject redirects before following another URL. The route receipt cannot substitute a redirected endpoint for the isolated server.
-The standalone `python3 -I test/test_item_http_redirects.py scripts/item-http-acceptance.py` regression exercises real loopback GET redirects without a native binary. Its scope is the actual extracted helper and redirect refusal, rather than a complete native acceptance run.
+The standalone `python3 -I test/test_item_http_redirects.py scripts/item-http-acceptance.py --mcp` regression exercises real loopback GET and MCP redirects without a native binary. Its scope is the actual extracted helper and redirect refusal, rather than a complete native acceptance run.

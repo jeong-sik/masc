@@ -86,8 +86,13 @@ def row_coordinates(original):
         string(clock.get("domain"), "row.clock.domain")
         string(clock.get("value"), "row.clock.value")
     evidence(original.get("evidence"))
+    related = original.get("related_ids")
+    if not isinstance(related, list):
+        raise InvalidInput("row.related_ids must be an array")
+    for identity in related:
+        string(identity, "row.related_ids entry")
     return {key: original[key] for key in (
-        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence")}
+        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
 
 
 def reports(source: Source, observation: dict, *, recognized: bool):
@@ -131,6 +136,11 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         string(original.get("id"), "row.id")
         row_coordinates(original)
         fields = object_value(original.get("fields"), "row.fields")
+        source_id = string(fields.get("source_id"), "row.fields.source_id")
+        incarnation = string(fields.get("incarnation"), "row.fields.incarnation")
+        if not any(item["source_id"] == source_id and item["incarnation"] == incarnation
+                   for item in upstream_coverage):
+            raise InvalidInput("Fusion row has no matching upstream source coverage")
         boolean(fields.get("input_complete"), "row.input_complete")
         if lane == "fusion/status":
             run = object_value(fields.get("fusion_run"), "fusion_run")
@@ -141,6 +151,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                 string(run.get("failure_code"), "fusion_run.failure_code")
                 string(run.get("error"), "fusion_run.error")
         else:
+            if len(original["related_ids"]) != 1:
+                raise InvalidInput("Fusion result must identify its status row")
             run_id = string(fields.get("fusion_run_id"), "fusion_run_id")
             status = run_state(fields.get("run_status"))
             post = object_value(fields.get("board_post"), "board_post")
@@ -178,6 +190,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         post = result_row[0]["fields"]["board_post"] if result_row else None
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
+            if result_row[0]["related_ids"] != [status_row[0]["id"]]:
+                raise InvalidInput("Fusion result relation does not identify its paired status row")
             if (status_fields.get("evidence_status") != "recorded"
                     or status_fields.get("board_post_id") != post["id"]
                     or status_fields["fusion_run"]["keeper"] != post["origin"]["fusion_producer"]):

@@ -24,7 +24,8 @@
         "body": "검증용 운영 보고서\n\n에이전트가 활용할 결과\n• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.\n• 분석 실패와 근거 누락을 구분할 수 있습니다.\n• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.\n\n다음 연결\n보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.",
         "origin": {
           "source": "fusion",
-          "fusion_run_id": "fusion-request-1"
+          "fusion_run_id": "fusion-request-1",
+          "fusion_producer": "example"
         }
       }
     }
@@ -43,8 +44,8 @@
         "actor": null,
         "evidence": [
           {
-            "uri": "lane-evidence:f996f9ac5d6edf00a0f1c3dcfe71ab6f06bbeac62bb3a97950be618a7d5c7f9e",
-            "sha256": "f996f9ac5d6edf00a0f1c3dcfe71ab6f06bbeac62bb3a97950be618a7d5c7f9e"
+            "uri": "lane-evidence:5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218",
+            "sha256": "5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218"
           }
         ],
         "producer": {
@@ -70,7 +71,7 @@
         "output": {
           "rows": [
             {
-              "id": "projection-1/1/ab21c50fbe88c3f33970de070507306cb08afe467856dc990b1335ae20d0a38a",
+              "id": "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30",
               "lane_id": "projection-1/fusion/status",
               "kind": "event",
               "title": "Fusion completed: fusion-request-1",
@@ -81,7 +82,7 @@
               "fields": {
                 "source_id": "fusion",
                 "incarnation": "fusion-request-1",
-                "source_event_id": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
+                "source_event_id": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
                 "fusion_run": {
                   "run_id": "fusion-request-1",
                   "keeper": "example",
@@ -103,14 +104,14 @@
               },
               "evidence": [
                 {
-                  "uri": "lane-evidence:9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
-                  "sha256": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3"
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
                 }
               ],
               "related_ids": []
             },
             {
-              "id": "projection-1/1/ca385dd347d982d58fe699c15db674a7cfa313247ca7705909f0755b3c631301",
+              "id": "projection-1/1/f389c2544ed0e00df5baf9d2f42269a171a1054124aa99d8b39b26834963ffbc",
               "lane_id": "projection-1/fusion/result",
               "kind": "value",
               "title": "Retained Fusion evidence: fusion-request-1",
@@ -121,7 +122,7 @@
               "fields": {
                 "source_id": "fusion",
                 "incarnation": "fusion-request-1",
-                "source_event_id": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
+                "source_event_id": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
                 "fusion_run_id": "fusion-request-1",
                 "topology": "refine",
                 "run_status": "completed",
@@ -130,7 +131,8 @@
                   "body": "검증용 운영 보고서\n\n에이전트가 활용할 결과\n• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.\n• 분석 실패와 근거 누락을 구분할 수 있습니다.\n• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.\n\n다음 연결\n보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.",
                   "origin": {
                     "source": "fusion",
-                    "fusion_run_id": "fusion-request-1"
+                    "fusion_run_id": "fusion-request-1",
+                    "fusion_producer": "example"
                   }
                 },
                 "decision_preview": "bounded preview",
@@ -140,12 +142,12 @@
               },
               "evidence": [
                 {
-                  "uri": "lane-evidence:9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
-                  "sha256": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3"
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
                 }
               ],
               "related_ids": [
-                "projection-1/1/ab21c50fbe88c3f33970de070507306cb08afe467856dc990b1335ae20d0a38a"
+                "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30"
               ]
             }
           ],
@@ -153,7 +155,7 @@
             {
               "source_id": "fusion",
               "incarnation": "fusion-request-1",
-              "cursor": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
+              "cursor": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
               "complete": true,
               "detail": "Synthetic exact-run capture for stdio composition"
             }
@@ -201,14 +203,14 @@
             {
               "source_id": "fusion",
               "incarnation": "fusion-request-1",
-              "cursor": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
+              "cursor": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
               "complete": true,
               "detail": "Synthetic exact-run capture for stdio composition"
             }
           ],
           "upstream_rows": [
             {
-              "id": "projection-1/1/ab21c50fbe88c3f33970de070507306cb08afe467856dc990b1335ae20d0a38a",
+              "id": "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30",
               "lane_id": "projection-1/fusion/status",
               "kind": "event",
               "subject_id": "fusion-request-1",
@@ -217,13 +219,14 @@
               "actor": null,
               "evidence": [
                 {
-                  "uri": "lane-evidence:9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
-                  "sha256": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3"
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
                 }
-              ]
+              ],
+              "related_ids": []
             },
             {
-              "id": "projection-1/1/ca385dd347d982d58fe699c15db674a7cfa313247ca7705909f0755b3c631301",
+              "id": "projection-1/1/f389c2544ed0e00df5baf9d2f42269a171a1054124aa99d8b39b26834963ffbc",
               "lane_id": "projection-1/fusion/result",
               "kind": "value",
               "subject_id": "fusion-request-1",
@@ -232,9 +235,12 @@
               "actor": null,
               "evidence": [
                 {
-                  "uri": "lane-evidence:9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3",
-                  "sha256": "9366d385178916990365af5a36c5843660533f0b360573e575bcd4ae912cacc3"
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
                 }
+              ],
+              "related_ids": [
+                "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30"
               ]
             }
           ],
@@ -244,8 +250,8 @@
         },
         "evidence": [
           {
-            "uri": "lane-evidence:f996f9ac5d6edf00a0f1c3dcfe71ab6f06bbeac62bb3a97950be618a7d5c7f9e",
-            "sha256": "f996f9ac5d6edf00a0f1c3dcfe71ab6f06bbeac62bb3a97950be618a7d5c7f9e"
+            "uri": "lane-evidence:5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218",
+            "sha256": "5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218"
           }
         ],
         "related_ids": []

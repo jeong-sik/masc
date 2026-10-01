@@ -978,7 +978,7 @@ let assemble_hooks
                 let working_context_recall = if not post_tool_round
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_librarian_context_recall.render
+                     Keeper_librarian_context_recall.render ~base_path:config.base_path
                        ~artifact_reader_available:
                          (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                        ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())

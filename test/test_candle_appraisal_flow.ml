@@ -652,10 +652,57 @@ let test_clock_reversal_retries_but_malformed_history_rejects () =
       ~base_path:config.base_path malformed with
    | Candle_appraise.Rejected _ -> () | _ -> fail "reversed historical order became retryable")
 
+(* An actual lane publication repairs the provider, without a new Goal or
+   manual payout event. The normal maintenance pulse must reconsider debt. *)
+let test_published_appraiser_repair_releases_rejected_payout () =
+  with_workspace @@ fun env config ->
+  let module F = Exact_output_fixture in
+  let waiting = prepared config "configuration-recovery" in
+  Eio.Switch.run (fun sw ->
+    let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+    Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+    @@ fun () ->
+    let refused = F.start_server ~sw ~net ~clock
+      (F.Reply_with (fun _ _ -> `Bad_request,
+         {|{"error":{"message":"model configuration refused","type":"invalid_request_error"}}|})) in
+    let repaired = F.start_server ~sw ~net ~clock
+      (F.Reply (F.openai_response (`Assoc ["grade", `String "medium"]))) in
+    let publish id base_url =
+      let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
+      ignore (F.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[id]
+        snapshot : Runtime_exact_output_registry.t) in
+    publish "refused-slot" refused.base_url;
+    let appraise = Server_candle_appraiser.run ~base_path:config.base_path in
+    Candle_payout_worker.start ~sw ~config ~appraise;
+    await env "permanent provider refusal" (fun () -> F.post_count refused = 1);
+    idle env;
+    Candle_payout_worker.pulse ();
+    idle env;
+    check int "unchanged permanent refusal is not repeated" 1 (F.post_count refused);
+    publish "repaired-slot" repaired.base_url;
+    (* A direct appraiser request verifies the newly published route is live,
+       rather than inferring recovery merely from a saved configuration. *)
+    let identity : A.identity = {goal_id="repair-control";request_id="control";
+      verification_run_id="control-run"} in
+    (match appraise ~identity
+       (A.Grade {title="Control";metric=None;target_value=None}) with
+     | Ok {decision=A.Grade_decided Candle_grade.Medium;_} -> ()
+     | Ok _ -> fail "repaired provider returned a different grade"
+     | Error error -> fail (A.error_to_string error));
+    check int "repaired route was actually dispatched" 1 (F.post_count repaired);
+    Candle_payout_worker.pulse ();
+    idle env;
+    check bool "same obligation remains pending before its repaired dispatch" true
+      (match Candle_payout.state ~goal_id:waiting.goal_id (events config) with
+       | Candle_payout.Waiting _ -> true | _ -> false);
+    check bool "ordinary pulse dispatches repaired appraiser for retained debt" true
+      (F.post_count repaired > 1))
+
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
+      [test_case "published appraiser repair releases rejected payout" `Quick test_published_appraiser_repair_releases_rejected_payout
+      ;test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
       ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
       ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence

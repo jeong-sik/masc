@@ -430,7 +430,7 @@ export async function submitComment(postId: string, parentId?: string) {
     commentText.value = ''
     replyingTo.value = null
     showToast('댓글을 등록했습니다', 'success')
-    await loadPostDetail(postId)
+    await loadPostDetail(postId, parentId)
     refreshBoard()
   } catch (err) {
     console.warn('[board] comment submit failed', err instanceof Error ? err.message : err)

@@ -1979,7 +1979,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
            ; request_label = ""
            ; body = Printf.sprintf "%s · %s · 최근 출력 발췌\n%s"
                note (Masc_tui_answering.lane_word lane)
-               (Tui_decode.sanitize_terminal_text preview.ktp_text_tail)
+               (Masc.Tui_terminal_text.sanitize_terminal_lines preview.ktp_text_tail)
            ; journal = []
            ; markdown_source = Message_layout.Markdown_streaming
            ; turn_rail = Message_layout.Rail_none

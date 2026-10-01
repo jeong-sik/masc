@@ -70,6 +70,9 @@ def output_handoff_scenario(executable):
             h.wait_for_output(process, fd, output, b"FIRST_PROGRESS_LINE", start=0, timeout=12)
             rows = screen(process, fd, output)
             excerpt_at = h.screen_row_of(rows, b"FIRST_PROGRESS_LINE")
+            continuation_at = h.screen_row_of(rows, "한글 진행 내용".encode())
+            if continuation_at <= excerpt_at:
+                raise AssertionError(f"multiline output lost its separate row: {rows!r}")
             activity_at = h.screen_row_of(rows, b"Esc stops it")
             if excerpt_at >= activity_at:
                 raise AssertionError(f"output is outside conversation: {rows!r}")

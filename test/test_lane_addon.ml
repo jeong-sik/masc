@@ -630,9 +630,15 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
       let empty = `Assoc [] in
       let first = inspect anonymous_session
         (`Assoc ["_agent_name", `String owner]) in
-      check bool "first attributed call is rejected by the Lane request schema" false
+      (* The MCP pre-hook removes transport markers before schema validation;
+         attribution still must not authorize private Lane data. *)
+      check bool "first attributed call can inspect shared Lane state" true
         (Tool_result.is_success first);
-      check bool "failed first call cached only an attributed name" true
+      check Alcotest.int "first attributed call exposes no private instance" 0
+        (member "instances" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "first attributed call exposes no private rows" 0
+        (member "rows" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check bool "first call cached only an attributed name" true
         (match Client_registry_eio.get_resolved_name anonymous_session with
          | Some (name, false) -> String.equal name owner
          | Some _ | None -> false);
@@ -674,7 +680,9 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
         (Tool_result.is_success operator_view);
       check Alcotest.int "operator sees private instance" 1
         (member "instances" (Tool_result.data operator_view)
-         |> Yojson.Safe.Util.to_list |> List.length)))
+         |> Yojson.Safe.Util.to_list |> List.length);
+      detach config id;
+      await_phase clock config id "detached"))
 ;;
 
 let test_released_shared_bindings_keep_read_and_cleanup () =
@@ -683,9 +691,13 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     let id = attach config dir "good" in
     await clock (fun () -> int "observation_seq" (instance config id) = 1);
     detach config id; await_phase clock config id "detached";
-    let captured = instance config id |> Yojson.Safe.Util.to_assoc in
-    let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    (* Inspect adds presentation fields; a published binding is the durable
+       record, whose exact shape the released reader must continue to enforce. *)
+    let captured = unwrap (Store.bindings store)
+      |> List.find (fun value -> text "instance_id" value = id)
+      |> Yojson.Safe.Util.to_assoc in
+    let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
     let before = `Assoc released in
     unwrap (Store.save_binding store ~instance_id:id before);
     Runtime.For_testing.reset ();

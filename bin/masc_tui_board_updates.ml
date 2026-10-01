@@ -25,6 +25,7 @@ let leave_board_detail state =
   state.board_focus <- Right_pane;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
+  state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
@@ -66,10 +67,15 @@ let apply_board_post_load state ~report_error request result =
       if state.view <> Board then
         report_error err
     in
+    let initial_read =
+      match Board_detail.view_for state.board_detail ~post_id with
+      | Board_detail.Loading | Board_detail.Failed _ -> true
+      | Board_detail.Absent | Board_detail.Ready _ -> false in
     match result with
-    | Ok (post, comments) when String.equal post.bp_id post_id ->
+    | Ok (post, comments, landing) when String.equal post.bp_id post_id ->
         state.board_detail <-
-          Board_detail.complete state.board_detail request (Ok (post, comments));
+          Board_detail.complete state.board_detail request (Ok (post, comments, landing));
+        if initial_read then state.board_comment_landing <- landing;
         (* A detail response enriches one list row; it does not rank the list.
            Moving the completed post to the front made rapid j/k navigation
            snap back to row zero as asynchronous responses arrived. *)
@@ -78,7 +84,7 @@ let apply_board_post_load state ~report_error request result =
             (fun current ->
               if String.equal current.bp_id post_id then post else current)
             state.board_posts
-    | Ok (post, _) ->
+    | Ok (post, _, _) ->
         fail
           (Printf.sprintf
              "response ID mismatch: expected %s, received %s"

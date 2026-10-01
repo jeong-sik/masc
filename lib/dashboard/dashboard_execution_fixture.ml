@@ -229,6 +229,7 @@ let execution_smoke_fixture_json () =
                 ("name", `String "dm-keeper");
                 ("portrait", portrait);
                 ("candle_balance_milli", `Null);
+                ("candle_account_revision", `Null);
                 ("status", `String "active");
                 ("tone", `String "bad");
                 ("state", `String "critical");
@@ -387,6 +388,7 @@ let execution_smoke_fixture_json () =
                 ("name", `String "dm-keeper");
                 ("portrait", portrait);
                 ("candle_balance_milli", `Null);
+                ("candle_account_revision", `Null);
                 ("status", `String "active");
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);

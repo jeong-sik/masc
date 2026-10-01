@@ -99,6 +99,7 @@ let fixture_entries =
 let fixture : Pane.input =
   { Pane.now
   ; tab = Pane.Tab_fleet
+  ; trace_unavailable = []
   ; keepers_error = None
   ; scope = Pane.Whole_fleet
   ; feed = Pane.Feed_live 1_234
@@ -138,6 +139,57 @@ let span_values (line : Pane.line) =
       | Pane.Ok -> "ok" | Pane.Warn -> "warn" | Pane.Bad -> "bad" | Pane.Info -> "info"
     in
     span.text, tone) line
+
+let test_trace_failure_is_readable_without_hiding_roster () =
+  let input = { fixture with trace_unavailable = ["tester", "missing trace identity"] } in
+  let drawn = Pane.lines ~rows:20 ~cols:90 ~scroll:0 input in
+  let texts = List.map text drawn.Pane.rows in
+  check bool "identity error is named" true
+    (List.exists (contains "Trace unavailable: tester · missing trace identity") texts);
+  check bool "independent roster count remains observed" true
+    (List.exists (contains "4 keepers") texts);
+  check bool "keeper navigation remains available" true
+    (List.exists (function Pane.Target_keeper "tester" -> true | _ -> false) drawn.Pane.targets);
+  let selected = Pane.lines ~rows:20 ~cols:90 ~scroll:0
+    {input with scope = Pane.Selected_only; selected = Some "tester"} in
+  check bool "selected keeper names its attribution failure" true
+    (List.exists (fun line -> contains "missing trace identity" (text line)) selected.Pane.rows)
+
+let test_many_trace_failures_keep_navigation_and_full_reading () =
+  let failures = List.init 20 (fun index ->
+      Printf.sprintf "unbooted-%02d" index, Printf.sprintf "reason-%02d" index) in
+  let input = { fixture with trace_unavailable = failures } in
+  check (option string) "one bounded summary points to full reasons"
+    (Some "Trace unavailable: 20 Keepers · details in Keeper Info / Metadata")
+    (Pane.trace_unavailable_summary failures);
+  List.iter (fun (rows, cols) ->
+      let overview = Pane.lines ~rows ~cols ~scroll:0 input in
+      check int "pane stays inside its row budget" rows (List.length overview.Pane.rows);
+      check bool "failure summaries leave fleet navigation visible" true
+        (List.exists (function Pane.Target_keeper _ | Pane.Target_more -> true | _ -> false)
+           overview.Pane.targets);
+      List.iter (fun line -> check int "narrow rows stay fitted" cols (width line)) overview.Pane.rows)
+    [8, 42; 3, 30];
+  let compact = Pane.lines ~rows:3 ~cols:30 ~scroll:0 input in
+  let compact_scrolled = Pane.lines ~rows:3 ~cols:30 ~scroll:1 input in
+  check int "folding preserves the full body's scroll range"
+    compact.Pane.scroll_max compact_scrolled.Pane.scroll_max;
+  check bool "one-row viewport still scrolls through failures" true
+    (List.exists (fun line -> contains "Trace unavailable:" (text line)) compact_scrolled.Pane.rows);
+  let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
+  check bool "first full failure reason is reachable after the overview" true
+    (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) reading.Pane.rows);
+  List.iter (fun rows ->
+    let first = Pane.lines ~rows ~cols:90 ~scroll:1 input in
+    check bool "first detail survives even one body row" true
+      (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) first.Pane.rows);
+    let all = List.init (first.Pane.scroll_max + 1) (fun scroll ->
+      (Pane.lines ~rows ~cols:90 ~scroll input).Pane.rows)
+      |> List.concat |> List.map text in
+    List.iter (fun (name, reason) ->
+      check bool (name ^ " detail is reachable") true
+        (List.exists (contains (name ^ " · " ^ reason)) all)) failures)
+    [3; 8]
 
 let test_clipped_header_preserves_spans_and_padding () =
   (* The count and the feed are two readings now, each carrying the
@@ -2298,6 +2350,10 @@ let () =
             test_offline_keepers_do_not_draw
         ; test_case "the header names what it left out" `Quick
             test_the_header_names_what_it_left_out
+        ; test_case "identity failure preserves roster navigation" `Quick
+            test_trace_failure_is_readable_without_hiding_roster
+        ; test_case "many identity failures retain navigation and detail" `Quick
+            test_many_trace_failures_keep_navigation_and_full_reading
         ; test_case "an unread roster is not counted as none" `Quick
             test_an_unread_roster_is_not_counted_as_none
         ; test_case "only offline is dropped" `Quick

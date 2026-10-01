@@ -61,6 +61,10 @@ provider/model capability supplies the window. A genuine catalog hard limit
 still clamps an oversized declaration. Model defaults synthesized into custom
 capabilities do not limit a more specific declaration.
 
+A provider-level default applies to every binding under that provider and
+outranks each model default. Use a binding-level declaration when a model
+needs a smaller deployment window.
+
 The same model can therefore serve different windows without duplicating its
 model definition:
 

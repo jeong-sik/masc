@@ -79,6 +79,7 @@ let codex_failure_status = function
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
   | Turn_input_write_failed _
+  | Reasoning_effort_admission_failed _
   | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
   | Runtime_shutting_down
   (* The host raises [Stopped_by_host] to abort a repeated tool loop mid-turn,

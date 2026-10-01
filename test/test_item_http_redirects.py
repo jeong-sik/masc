@@ -55,12 +55,14 @@ for s in servers:
 origin = f'http://127.0.0.1:{servers[0].server_port}'
 foreign = f'http://127.0.0.1:{servers[1].server_port}'
 
-def helpers():
+def helpers(server_generation=1):
     ns = {'urllib': urllib, 'json': json, 'hashlib': hashlib,
           'origin': origin, 'token': 'synthetic-admin-redirect-control',
           'keeper_token': 'synthetic-worker-redirect-control',
-          'records': [], 'rpc_sequence': 0, 'rpc_session': {}, 'server_generation': 1}
+          'records': [], 'rpc_sequence': 0, 'rpc_session': {},
+          'server_generation': 1}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(args.source), 'exec'), ns)
+    ns['server_generation'] = server_generation
     return ns
 
 results = []
@@ -82,6 +84,7 @@ try:
                     except RuntimeError:
                         rejected = True
                     require(ns['records'][0]['status'] == code, 'redirect provenance was concealed')
+                    require(ns['records'][0]['server_generation'] == 1, 'server generation provenance was concealed')
                 else:
                     try:
                         ns['rpc']('tools/call', {})
@@ -98,8 +101,16 @@ try:
     servers[0].redirect = None
     ns = helpers()
     require(ns['request']('/probe')[0] == 200, 'normal GET was rejected')
+    require(ns['records'][-1]['server_generation'] == 1, 'normal GET missing server generation provenance')
     if args.mcp:
         require(ns['rpc']('tools/call', {}) == {'local': True}, 'normal RPC was rejected')
+        require(ns['records'][-1]['server_generation'] == 1, 'normal RPC missing server generation provenance')
+    ns_restarted = helpers(server_generation=2)
+    require(ns_restarted['request']('/probe')[0] == 200, 'restarted GET was rejected')
+    require(ns_restarted['records'][-1]['server_generation'] == 2, 'fixture server generation was concealed in GET')
+    if args.mcp:
+        require(ns_restarted['rpc']('tools/call', {}) == {'local': True}, 'restarted RPC was rejected')
+        require(ns_restarted['records'][-1]['server_generation'] == 2, 'fixture server generation was concealed in RPC')
     # Execute every real request-result assignment against the actual request
     # helper. Only its path argument is changed to this loopback control route;
     # tuple binding remains the harness's original AST.

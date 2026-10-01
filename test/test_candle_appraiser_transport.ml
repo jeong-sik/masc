@@ -361,6 +361,27 @@ let test_cli_timeout_remains_retryable () =
     check (list string) "timeout keeps its dispatch evidence" [F.cli_primary_runtime] (dispatched output))
 ;;
 
+let test_codex_reasoning_admission_remains_retryable () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      Error (Fusion_official_client.Codex_failure
+        (Runtime_codex_app_server.Reasoning_effort_admission_failed
+          {model = "fixture"; detail = "model/list timed out"})) in
+    (match run_declared ~base_path cli_runner with
+     | Error (A.Transport_unavailable _) -> ()
+     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
+       failf "reasoning admission failure stranded the payout: %s" detail
+     | Ok _ -> fail "failed reasoning admission produced an appraisal");
+    let output, selected = check_failure "candle_appraisal_unavailable"
+      (recorded_run ~base_path) in
+    check (option string) "admission receipt names actual runtime"
+      (Some F.cli_primary_runtime) selected;
+    check (list string) "admission failure keeps dispatch evidence"
+      [F.cli_primary_runtime] (dispatched output))
+;;
+
 let test_http_permanent_refusal_then_cli_rest_stays_rejected () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture refused input","type":"invalid_request_error"}}|} in
@@ -569,7 +590,9 @@ let () =
   run
     "candle_appraiser_transport"
     [ ( "declared transports"
-      , [ test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
+      , [ test_case "Codex reasoning admission remains retryable" `Quick
+            test_codex_reasoning_admission_remains_retryable
+        ; test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
         ; test_case
             "HTTP bad request waits for a change"
             `Quick test_http_bad_request_waits_for_change

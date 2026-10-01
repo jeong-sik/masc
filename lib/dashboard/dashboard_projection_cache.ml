@@ -42,6 +42,15 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
      Equipment, balances and supply share one fresh ledger view per response. *)
   let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
   let equipment = Candle_observe.equipment candle in
+  let revisions = Hashtbl.create 16 in
+  let account_revision keeper =
+    match Hashtbl.find_opt revisions keeper with
+    | Some revision -> revision
+    | None ->
+      let revision = Candle_observe.account_revision candle ~keeper in
+      Hashtbl.add revisions keeper revision;
+      revision
+  in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
   let set key value fields =
     if List.mem_assoc key fields then
@@ -59,7 +68,7 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
         | Some keeper -> Candle_observe.balance candle ~keeper
         | None -> None in
       let account_revision = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | Some keeper -> account_revision keeper
         | None -> None in
       `Assoc (fields |> set "portrait" value
         |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)

@@ -24,6 +24,12 @@ result.
 
 Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). The asynchronous merge endpoint includes all open downstack PRs through the selected PR. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
+`pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax
+and committed-credential checks. It has no PR, push or scheduled trigger and does
+not compile the Core library or run behavior suites. Request it deliberately
+when that coverage is needed; it is separate from leader-selected candidate
+verification and does not grant merge permission.
+
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
 profile, dashboard, model checks, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication

@@ -484,9 +484,9 @@ status: reference
     실행한다. 반면 전송 레인이 CLI 전용(`Jev_cli_only`, `Cli_only`)인 경우 Jev는 HTTP 레인 앞에서만
     호출되므로 Jev 판정을 건너뛰고 CLI 슬롯을 직접 실행(`walk_cli_slots`)한다(이관이나 재판정이 아님).
   - 신호 단독 요청 형태(#40505): Jev 요청 상태에는 신호만(`{ "signal": ... }`) 싣고 질문에 키퍼
-    이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 전체 주입으로 인한 편향을 제거했다.
+    이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 본문을 state에서 제거하고 신호와 명시적 관심사로 판정한다.
   - 푸시 이벤트 다중 키퍼 배치(#40521): 새 Board 이벤트 발생 시 `Keeper_board_attention_fanout`을 통해
-    후보 키퍼들을 단일 Jev 요청에 복수 질문으로 묶어 1회 왕복으로 일괄 판정한다.
+    후보 키퍼들을 단일 evaluate 요청에 복수 질문으로 묶어 일괄 판정한다.
   - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
     첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
@@ -2648,7 +2648,7 @@ status: reference
 **Memory OS Recall (기억 회상 / 전송 투영)**
 : 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 조회 도구가 없는 런타임 표면에서만 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인 주입하는 폴백을 쓴다.
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 조회 도구가 없는 런타임 표면이거나 아티팩트 출판·핀 쓰기 실패 시 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인 주입하는 폴백을 쓴다.
   소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 인라인으로 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
   유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.

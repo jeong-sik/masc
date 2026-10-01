@@ -5302,8 +5302,9 @@ type state = {
   mutable tasks_domain: Masc_domain.task list;
   mutable goal_task_links: (string * string list) Masc_tui_agenda.reading;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Primary backlog authority, shared by Home and Agenda. Supplemental
-     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  (* Primary backlog authority, shared by Home and Agenda. Archive coverage
+     stays in tasks_error; Goal-link coverage owns goal_task_links. Neither
+     supplemental source can erase this reading. *)
   mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda

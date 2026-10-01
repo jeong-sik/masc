@@ -291,6 +291,9 @@ def operator_task_survives_supplemental_failure(executable):
             h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
+            if relative == "tasks/goal_task_links.json":
+                assert b"Work:" in visible, visible
+                assert b"Work: reading unavailable" not in visible, visible
             select_home(process, fd, output, b"Operator task", destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
@@ -323,6 +326,44 @@ def operator_task_survives_supplemental_failure(executable):
 
         run(executable, f"Home current task and exact detail survive {relative} failure",
             fixtures, interact, requests, prepare=prepare)
+
+
+def planning_link_failure_has_own_diagnostic(executable):
+    fixtures = fixtures_with_held([])
+    goal = h.planning_goal("goal-source-truth", "Planning link source fixture")
+    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures["/api/v1/dashboard/goals/detail?goal_id=goal-source-truth"] = (200, {"timeline": []})
+    requests = []
+
+    def prepare(base):
+        seed_operator_task(base)
+        path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
+        path.write_text("{unreadable primary")
+        path.with_name(path.name + ".last-good").write_text(json.dumps({"version": 1,
+            "links": [{"goal_id": goal["id"], "task_ids": ["task-777"]}]}))
+
+    def interact(process, fd, _slave, output, base):
+        h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
+        visible = frame(process, fd, output, "primary-work-with-unavailable-goal-links")
+        assert b"Work:" in visible and b"Work: reading unavailable" not in visible, visible
+        # Enter the palette only after it owns input, then navigate by name.
+        h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
+        h.send_and_wait(process, fd, output, b"go Work", b"go Work")
+        h.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        unavailable = h.screen_text(bytes(output))
+        assert b"(none)" not in unavailable, unavailable
+        assert b"task-777" not in unavailable, unavailable
+        path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
+        path.write_text(json.dumps({"version": 1, "links": []}))
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        repaired = h.screen_text(bytes(output))
+        assert b"links unavailable" not in repaired, repaired
+        home.assert_no_decision_posts(requests)
+        os.write(fd, b"q")
+
+    run(executable, "Planning owns unavailable Goal-link coverage beside a current Task backlog",
+        fixtures, interact, requests, prepare=prepare)
 
 
 def recovered_tasks_are_not_current_cards(executable):
@@ -505,8 +546,9 @@ if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for scenario in (same_keeper_distinct_and_duplicate, failed_source_keeps_known_cards,
                      each_failed_source_keeps_other_cards, hidden_help_does_not_pin_unseen_request,
-                     operator_task_survives_supplemental_failure, recovered_tasks_are_not_current_cards,
+                     operator_task_survives_supplemental_failure, planning_link_failure_has_own_diagnostic,
+                     recovered_tasks_are_not_current_cards,
                      refresh_identity_and_deletion, many_cards_keep_continuation,
                      goal_opens_exact_detail, question_identity_and_return):
         scenario(executable)
-    print("Home decision cards PTY: PASS (14 scenarios)")
+    print("Home decision cards PTY: PASS (15 scenarios)")

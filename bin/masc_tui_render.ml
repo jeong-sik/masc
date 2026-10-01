@@ -686,9 +686,12 @@ let render_work_tasks (state : state) =
                day.d_completed) flow.daily in
            c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
                      (List.length flow.daily) (Chart.sparkline ~min:0 completed)));
-      (match Terminal_text.optional_single_line state.tasks_error with
-       | None -> ()
-       | Some reason -> c.push (" Coverage: " ^ reason));
+      let link_error = match state.goal_task_links with
+        | Masc_tui_agenda.Read_failed reason -> Some reason
+        | Not_read | Read _ -> None in
+      (match List.filter_map Terminal_text.optional_single_line [state.tasks_error; link_error] with
+       | [] -> ()
+       | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
       c.push "";
       let room = max 0 (budget - 4) in
       if rows = [] && Option.is_some state.task_flow then
@@ -3420,10 +3423,14 @@ let planning_detail_pane (state : state)
   (match linked_tasks with
    | [] ->
      let note =
-       match local_rows_page state ~error:state.tasks_error with
-       | Page_empty -> "  (none)"
-       | Page_unread -> page_unread_note
-       | Page_failed -> page_failed_note
+       match state.goal_task_links with
+       | Masc_tui_agenda.Not_read -> "  (links not read)"
+       | Read_failed _ -> "  (links unavailable)"
+       | Read _ ->
+           (match local_rows_page state ~error:state.tasks_error with
+            | Page_empty -> "  (none)"
+            | Page_unread -> page_unread_note
+            | Page_failed -> page_failed_note)
      in
      box_line buf cols (Ansi.dim ^ "  Open tasks" ^ note ^ Ansi.reset)
    | _ ->

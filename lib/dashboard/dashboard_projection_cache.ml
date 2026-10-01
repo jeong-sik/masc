@@ -58,8 +58,12 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
       let balance = match Json_util.assoc_string_opt "name" json with
         | Some keeper -> Candle_observe.balance candle ~keeper
         | None -> None in
+      let account_revision = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | None -> None in
       `Assoc (fields |> set "portrait" value
-        |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance))
+        |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)
+        |> set "candle_account_revision" (Json_util.option_to_yojson (fun value -> `String value) account_revision))
     | json -> json in
   let section fields = List.map (function
     | "items", `List rows -> "items", `List (List.map row rows)

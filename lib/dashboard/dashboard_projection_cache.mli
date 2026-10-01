@@ -10,7 +10,7 @@ val normalize_actor_name : string option -> string
 
 val with_current_keeper_observations :
   config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
-(** Refresh Keeper equipment, wallet balances and currency supply together in
+(** Refresh Keeper equipment, wallet balances, Item-account revisions and currency supply together in
     an operator/execution/briefing envelope.
     Call after outer HTTP caches as well as the metadata snapshot cache. *)
 

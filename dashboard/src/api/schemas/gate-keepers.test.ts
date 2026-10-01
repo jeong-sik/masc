@@ -250,4 +250,28 @@ describe('decodeGateKeepers', () => {
     })
     expect(error.message).toContain('effective_meta_error.keeper')
   })
+
+  it('retains producer-declared Portrait unavailability in a readable Gate roster', () => {
+    const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' }, count: 1,
+      keepers: [{ ...keeperWire(), portrait: { state: 'unavailable', reason: 'ledger unreadable' } }],
+      ...listingWire(1),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    expect(data.directoryIssues).toEqual([])
+  })
+
+  it('reports malformed Portrait data as typed Gate drift instead of readable unavailability', () => {
+    const equipment = keeperWire().portrait.equipment
+    for (const portrait of [undefined, null, { state: 'ready' },
+      { state: 'ready', equipment: { ...equipment, head: 'medal' } },
+      { state: 'ready', equipment: { ...equipment, extra: 'crown' } },
+      { state: 'ready', equipment, extra: true }, { state: 'unavailable', reason: ' ' },
+      { state: 'unavailable', reason: 'ledger unreadable', extra: true }]) {
+      const error = expectDrift({ candle: { status: 'off' }, count: 1,
+        keepers: [{ ...keeperWire(), portrait }], ...listingWire(1) })
+      expect(error.issues.some(issue => issue.path.join('.') === 'keepers.0.portrait')).toBe(true)
+    }
+  })
+
 })

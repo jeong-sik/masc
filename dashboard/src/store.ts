@@ -1,4 +1,4 @@
-import { readCandleRosterObservation, type CandleReading } from './api/schemas/candle-observation'
+import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
 import { decodeGoalProof } from './api/goal-proof'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
 // MASC Dashboard — Centralized reactive state via @preact/signals
@@ -1056,12 +1056,17 @@ const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(nu
 export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
   = acceptedExecutionWorkspace
 
+function withdrawExecutionWorkspaceAuthority(): void {
+  acceptedExecutionWorkspace.value = null
+  candleObservation.value = { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+}
+
 function acceptExecutionWorkspace(
   epoch: string | null,
   workspaceRoot: unknown,
 ): void {
   if (epoch === null || typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') {
-    acceptedExecutionWorkspace.value = null
+    withdrawExecutionWorkspaceAuthority()
     return
   }
   const previous = acceptedExecutionWorkspace.peek()
@@ -1120,7 +1125,7 @@ export function invalidateExecutionSnapshotGeneration(
       retireExecutionPublicationEpoch(previousEpoch)
     }
     executionPublicationEpoch = epoch
-    acceptedExecutionWorkspace.value = null
+    withdrawExecutionWorkspaceAuthority()
     executionReconnectPreviousEpoch = null
     executionPublicationGenerationWatermark = generation
     return true
@@ -1139,8 +1144,7 @@ export function resetExecutionSnapshotGeneration(): void {
   executionReconnectAwaitingHttp = true
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
-  acceptedExecutionWorkspace.value = null
-  candleObservation.value = { status: 'unavailable', reason: 'Execution authority changed' }
+  withdrawExecutionWorkspaceAuthority()
 }
 
 /** Hydrate all execution-related signals from a raw data payload.
@@ -1241,7 +1245,9 @@ export function hydrateExecutionSnapshot(
       ? executionMessages
       : mergeMessages(messages.value, executionMessages)
   }
-  candleObservation.value = readCandleRosterObservation(data.candle, data.keepers)
+  candleObservation.value = acceptedExecutionWorkspace.peek() === null
+    ? { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+    : readCandleRosterObservation(data.candle, data.keepers)
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
@@ -1286,15 +1292,19 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const publicationEpoch = executionPublicationEpoch
+  const publicationGeneration = executionPublicationGenerationWatermark
+  const requestStillCurrent = () => requestGeneration === executionHydrationRequestGeneration
+    && publicationEpoch === executionPublicationEpoch
+    && publicationGeneration === executionPublicationGenerationWatermark
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
-      if (requestGeneration !== executionHydrationRequestGeneration) return
-      acceptedExecutionWorkspace.value = null
-      candleObservation.value = { status: 'unavailable', reason: 'Server is initializing' }
+      if (!requestStillCurrent()) return
+      withdrawExecutionWorkspaceAuthority()
       scheduleExecutionWarmRetry()
       return
     }
@@ -1302,7 +1312,7 @@ async function doFetchExecution(): Promise<void> {
     hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
-    if (requestGeneration !== executionHydrationRequestGeneration) return
+    if (!requestStillCurrent()) return
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)

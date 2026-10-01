@@ -14417,7 +14417,7 @@ let render_surface (state : state) =
        | Board_compose -> Masc_tui_render_board.render_board_compose state
        | Board_read post_id ->
            match Board_detail.view_for state.board_detail ~post_id with
-           | Board_detail.Ready (post, _) -> Masc_tui_render_board.render_board_read state post
+           | Board_detail.Ready (post, _, _) -> Masc_tui_render_board.render_board_read state post
            | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
                (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
                 | Some post -> Masc_tui_render_board.render_board_read state post

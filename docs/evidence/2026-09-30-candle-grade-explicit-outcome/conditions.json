@@ -1,0 +1,22 @@
+{
+  "status": "measurement_complete",
+  "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "baseline_evidence_commit": "7028cc511a06093660dca6349747973c778b0971",
+  "planned_calls_each": 240,
+  "changed_prompt_files": [
+    "candle_appraiser_grade.md"
+  ],
+  "human_calibration": "not_performed",
+  "operator_acceptance_thresholds": "not_adopted",
+  "private_runtime_config": "omitted; its hash remains in plan.json",
+  "scope": "Isolated production appraiser calls; no Goal, Task, Candle ledger or Paid mutations",
+  "same_binary_runtime_corpus": true,
+  "trial_order": "same complete case/trial sequence as the baseline",
+  "unique_run_ids_across_both_runs": true,
+  "observed_calls": 240,
+  "statuses": {
+    "ok": 239,
+    "transport_unavailable": 1
+  }
+}

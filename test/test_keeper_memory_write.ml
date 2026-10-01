@@ -721,6 +721,68 @@ let test_unsupported_derived_write_is_proven_pre_effect () =
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 ;;
 
+let test_recall_artifacts_follow_history_retention () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "recall-retention" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let store = Masc.Tool_blob_store.create ~base_path in
+  let write content =
+    let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_args ~title:"" ~content) in
+    let response = Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output in
+    Alcotest.(check bool) "memory write succeeds" true (json_field "ok" response = `Bool true)
+  in
+  let render now =
+    Masc.Keeper_memory_os_recall.render_if_enabled ~config ~meta ~keepers_dir
+      ~keeper_id:meta.name ~now () |> Option.get
+  in
+  let artifact prompt =
+    let json = List.hd (List.rev (String.split_on_char '\n' prompt))
+        |> Yojson.Safe.from_string in
+    match Masc.Tool_output.normalized_artifact_ref_of_json json with
+    | Masc.Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | _ -> Alcotest.fail "expected published recall artifact"
+  in
+  let sweep mode =
+    match Tool_blob_maintenance.run ~base_path
+        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+  in
+  let present (reference : Masc.Tool_output.artifact_ref) =
+    match Masc.Tool_blob_store.fetch store ~sha256:reference.sha256 with
+    | Ok value -> Option.is_some value
+    | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error)
+  in
+  write "The first historical memory remains readable.";
+  let first = artifact (render 1.) in
+  write "A later decision changes the complete snapshot.";
+  let latest = artifact (render 2.) in
+  Alcotest.(check bool) "changed memory creates a distinct snapshot" false
+    (String.equal first.sha256 latest.sha256);
+  sweep Tool_blob_maintenance.Observe_only;
+  sweep Tool_blob_maintenance.Delete_previous_candidates;
+  Alcotest.(check bool) "historical snapshot survives GC" true (present first);
+  Alcotest.(check bool) "latest snapshot survives GC" true (present latest);
+  let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
+  let history_dir = Filename.concat keeper_dir
+      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
+  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  sweep Tool_blob_maintenance.Observe_only;
+  sweep Tool_blob_maintenance.Delete_previous_candidates;
+  Alcotest.(check bool) "expired historical snapshot becomes collectable" false (present first);
+  Alcotest.(check bool) "current snapshot stays reachable" true (present latest);
+  let current_pin = Filename.concat keeper_dir "memory-recall-current.json" in
+  Sys.remove current_pin;
+  Unix.mkdir current_pin 0o700;
+  let failed = render (Time_compat.now ()) in
+  Alcotest.(check bool) "failed retention does not publish an artifact" false
+    (contains ~needle:"keeper_artifact_read" failed);
+  Alcotest.(check bool) "failed retention marks recall unavailable" true
+    (contains ~needle:"memory is unavailable" failed)
+;;
+
 let test_source_bound_write_discards_stale_claim_and_recreates () =
   with_temp_dir
   @@ fun base_path ->
@@ -3256,6 +3318,10 @@ let () =
             "retract cascades and journals durable reason"
             `Quick
             test_retract_cascades_through_public_tool_and_journals_reason
+        ; Alcotest.test_case
+            "recall snapshots survive GC until history retention releases them"
+            `Quick
+            test_recall_artifacts_follow_history_retention
         ; Alcotest.test_case
             "source change discards stale claim until recreation"
             `Quick

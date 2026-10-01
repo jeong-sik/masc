@@ -6,6 +6,12 @@
     their old claim. The complete projection is stored as an immutable artifact;
     the prompt carries its identity and availability, not all stored knowledge.
     Search and paged artifact reads retain access to every selected fact.
+    Before publication, each snapshot reference is persisted structurally in
+    the keeper runtime tree. The latest published snapshot has a current pin;
+    historical references follow the existing dated Keeper history retention
+    policy. Replacing memory or the latest prompt capture does not release
+    snapshots while their dated reference history remains retained.
+    A failed pin write publishes unavailable recall instead of an unowned link.
 
     Each store is rendered as present, authoritatively empty/absent, or
     unavailable. Empty and absent states explicitly supersede earlier current
@@ -18,7 +24,8 @@
     invalidations and per-pass source readability. Snapshot commit revisions
     and update times remain in the durable stores and tools; identical facts
     recommitted by a later Librarian tick render identically. The wall clock
-    passed as [now] drives revalidation only and never appears in the text. *)
+    passed as [now] drives revalidation and dates retention history; it never
+    appears in the text. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)

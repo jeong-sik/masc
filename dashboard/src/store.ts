@@ -1140,6 +1140,7 @@ export function resetExecutionSnapshotGeneration(): void {
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
   acceptedExecutionWorkspace.value = null
+  candleObservation.value = { status: 'unavailable', reason: 'Execution authority changed' }
 }
 
 /** Hydrate all execution-related signals from a raw data payload.
@@ -1302,6 +1303,7 @@ async function doFetchExecution(): Promise<void> {
         throw new ExecutionRefreshUnavailable('Execution initialization was superseded by a newer observation')
       }
       acceptedExecutionWorkspace.value = null
+      candleObservation.value = { status: 'unavailable', reason: 'Server is initializing' }
       scheduleExecutionWarmRetry()
       throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }

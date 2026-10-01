@@ -25,10 +25,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_configs import (  # noqa: E402
     ARMS,
     PROVIDERS,
+    REPO_ROOT,
     candidate_runtime_ids,
     effective_runtime_id,
     keeper_route,
     render_arm,
+)
+from masc_config_provenance import (  # noqa: E402
+    ConfigProvenance,
+    config_provenance,
+    provenance_metadata,
 )
 from masc_dist import (  # noqa: E402
     DistIdentity,
@@ -108,6 +114,7 @@ class MascAgent(BaseInstalledAgent):
         self._route = keeper_route(
             self.arm, self.runtime_id, self.fallback_runtime_ids)
         self._dist_identity: DistIdentity | None = None
+        self._config_provenance: ConfigProvenance | None = None
 
     @staticmethod
     def name() -> str:
@@ -167,6 +174,10 @@ class MascAgent(BaseInstalledAgent):
                     await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
             await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
             try:
+                # Taken from the directory about to be uploaded, so it names the
+                # config the container gets and not one rendered again later.
+                self._config_provenance = await asyncio.to_thread(
+                    config_provenance, config_dir, REPO_ROOT, self.effort)
                 await environment.upload_dir(config_dir, f"{REMOTE}/config")
             finally:
                 # render_arm hands back a directory of its own so that
@@ -211,6 +222,10 @@ class MascAgent(BaseInstalledAgent):
             # episode failure this block exists to preserve — a truncated
             # result.json would surface as a JSONDecodeError from the
             # recovery path instead of as the run error.
+            try:
+                self.record_install_identity(context)
+            except Exception:  # noqa: BLE001 - metadata recording cannot replace the run error
+                self.logger.exception("recording install identity failed")
             deadline = asyncio.get_running_loop().time() + RECOVERY_TOTAL_TIMEOUT_SEC
             try:
                 async with asyncio.timeout_at(deadline):
@@ -332,7 +347,16 @@ class MascAgent(BaseInstalledAgent):
             "fallback_runtime_ids": list(self.fallback_runtime_ids),
             "candidates": list(self._candidates),
             "route": self._route,
+            **provenance_metadata(self._config_provenance),
         }
+
+    def record_install_identity(self, context: AgentContext) -> None:
+        """Preserve what was configured/installed even when the run fails or recovery fails."""
+        if context.metadata is None:
+            context.metadata = {}
+        context.metadata.update(self._arm_metadata())
+        context.metadata.update(
+            identity_metadata(getattr(self, "_dist_identity", None)))
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"

@@ -447,6 +447,19 @@ let save_credential_in_transaction (Credential_transaction config) (cred : agent
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
   let previous_target = load_redirect_target config stub_file in
+  (* The named record is now authoritative. Failing this already-committed
+     publication would discard a newly minted bearer at the public caller.
+     Superseded payloads cannot authenticate through the named-owner index. *)
+  let retire_superseded target =
+    try remove_file_if_exists target with
+    | Sys_error detail ->
+      Log.Auth.warn "Credential published; superseded payload cleanup failed: %s" detail
+    | Unix.Unix_error (error, operation, argument) ->
+      Log.Auth.warn "Credential published; superseded payload cleanup failed: %s(%s): %s"
+        operation argument (Unix.error_message error)
+    | Eio.Io _ as exn ->
+      Log.Auth.warn "Credential published; superseded payload cleanup failed: %s"
+        (Printexc.to_string exn) in
   Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config) (fun () ->
     match cred.id with
     | Some cid ->
@@ -456,11 +469,11 @@ let save_credential_in_transaction (Credential_transaction config) (cred : agent
         `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ] in
       save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub);
       (match previous_target with
-       | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
+       | Some old_file when old_file <> uuid_file -> retire_superseded old_file
        | _ -> ())
     | None ->
       save_private_text_file stub_file json_str;
-      Option.iter remove_file_if_exists previous_target)
+      Option.iter retire_superseded previous_target)
 
 ;;
 
@@ -807,7 +820,15 @@ let list_credential_results config =
       else read_dir dir |> Array.to_list
         |> List.filter (fun file -> Filename.check_suffix file ".json")
         |> List.sort String.compare
-        |> List.map (fun file -> read (Filename.concat dir file))
+        |> List.filter_map (fun file ->
+          let result = read (Filename.concat dir file) in
+          let owner = match result with
+            | Ok credential -> Some credential.agent_name
+            | Error (Invalid_credential_expiry { agent_name; _ }) -> Some agent_name
+            | Error (Unreadable_credential _) -> None in
+          match owner with
+          | Some name when not (String.equal file (Common.safe_filename name ^ ".json")) -> None
+          | Some _ | None -> Some result)
     with
     | Sys_error reason -> [ unreadable dir reason ]
     | Unix.Unix_error (error, operation, argument) ->
@@ -1251,8 +1272,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
         (* Keep canonical discovery authority until every dependent path is
            retired. A failed sidecar/alias/UUID unlink must remain retryable. *)
         unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
-        List.iter (fun alias -> unlink_prune_path (credential_file config alias))
-          retirement.alias_names;
+        List.iter (fun alias ->
+          unlink_prune_path (raw_token_file config alias);
+          unlink_prune_path (credential_file config alias)) retirement.alias_names;
         Option.iter unlink_prune_path retirement.uuid_target;
         unlink_prune_path (credential_file config retirement.retiring_agent_name);
         Ok ())

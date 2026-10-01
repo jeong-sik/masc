@@ -1464,6 +1464,7 @@ let rec observe_repeated_call state fingerprint =
 
 type raw_trace_stage =
   | Run_start
+  | Reasoning_effort
   | Assistant_block
   | Tool_start
   | Tool_finish
@@ -1473,6 +1474,7 @@ type raw_trace_stage =
 
 let raw_trace_stage_label = function
   | Run_start -> "run_start"
+  | Reasoning_effort -> "reasoning_effort"
   | Assistant_block -> "assistant_block"
   | Tool_start -> "tool_start"
   | Tool_finish -> "tool_finish"

@@ -210,7 +210,8 @@ let validate_settlement (waiting : waiting) events body =
     else if List.exists (fun (id, keeper) -> match keeper, List.assoc_opt id tasks with
         | None, Some (Candle_event.Found _) -> false
         | Some keeper, Some (Candle_event.Found {assignee=Some assignee;_}) -> not (String.equal keeper assignee)
-        | _ -> true) task_keepers
+        | Some _, Some (Candle_event.Found {assignee=None;_}) -> true
+        | (None | Some _), (None | Some Candle_event.Deleted) -> true) task_keepers
     then Error "candidate Keeper eligibility does not match the observed assignee"
     else
       let classified = List.filter_map snd task_keepers |> List.sort_uniq String.compare in

@@ -223,8 +223,28 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 `APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode
-checks review eligibility. Publishing an approval requires `--body` with the
-verdict and evidence.
+checks review eligibility.
+
+Capture the base SHA and complete diff identity **before source review** and
+keep them with the reviewed head and evidence. Run these commands from the repository
+checkout with authenticated `gh`, Git, Python 3 and `jq` available. The diff helper
+fetches missing exact objects using `gh` credentials without interactive prompts.
+
+```bash
+# Set repo and pr to the pull request being reviewed.
+snapshot=$(gh api "repos/$repo/pulls/$pr")
+head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
+review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
+review_diff=$(python3 scripts/review/review-diff.py \
+  --repo "$repo" --base "$review_base" --head "$head")
+# Read the complete diff and its source context, then write review-body.md.
+scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
+  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+```
+
+Publishing requires `--body`, `--review-base` and `--review-diff`. The guard rejects
+scope changes during admission. If the change differs, review it again and capture
+new evidence; do not refresh the digest merely to approve unreviewed changes.
 Release verdicts additionally cite `run: <full-CI-run-id>` for completed full
 verification of that head. Read current reviews and comments before integration;
 blocking reviews and later FAIL/HOLD decisions take precedence. Land stacks bottom

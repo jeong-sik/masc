@@ -4,7 +4,7 @@ This is a source candidate. No local Dune build, typecheck, native test, browser
 
 ## Parent and scope
 
-This reader repair is #40256. Current source commit `a6938d8ac7a578ea97c1decf26851eeae45def3a` (tree `e7159c770853af6c2379e7d1e727fb341727a1b5`) follows PR head `9048a4ac4eb03a27e6a5144e22ca14e9596e5222`. The descriptor-reader follow-up and nine authored fixture cases are frozen at that source commit; the following evidence-only commit regenerates the manifests and check records without changing code.
+This reader repair is #40256. Current source commit `308ab9eb1d8a25c01906a7e48c055e39d4d7fd43` follows parent PR #40214 at `38b8b93ced4f3eefda8b72b03f7e04af9056fcaa`. The following evidence-only commit regenerates the source manifests without changing reader code. Fixture symbol locations from `a6938d8ac7a578ea97c1decf26851eeae45def3a` are retained explicitly as historical metadata.
 
 The original publication and local-source provenance are retained under `initial_publication` in `composition.json`. They are historical records, not claims that later diagnostic and descriptor-reader changes preserved the original source bytes.
 
@@ -51,6 +51,6 @@ FIFO cases fork before creating an Eio environment. Their child has a five-secon
 
 ## Verification and remaining evidence
 
-`parse-checks.json` records eight current-source OCaml parse-only checks; `source-checks.json` records six current-source gates. All exit 0. `composition.json` binds the current source/tree, fixture symbols and duplicate file hashes; `source-sha256.json` hashes the current source plus regenerated evidence files and excludes itself. These files identify exact bytes, not native execution or merge readiness.
+`parse-checks.json` and `source-checks.json` retain the earlier checks of `a6938d8ac7a578ea97c1decf26851eeae45def3a`; they are not execution evidence for the current composition. `composition.json` binds the current source tree and per-file hashes. `source-sha256.json` hashes the current source and evidence files, excluding itself. The current files were rehashed from the committed tree; this refresh does not claim a new native test or typecheck.
 
 No Dune build/typecheck, native test, CI dispatch, container, installed-binary or production operation was performed.

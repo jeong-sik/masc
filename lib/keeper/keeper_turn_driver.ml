@@ -76,6 +76,7 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 
@@ -425,11 +426,11 @@ let assignment_walk_rest ~now assignment_id =
    (RFC-provider-path-rest §3.1).
 
    A deferred suffix names where the input goes next, and its walk decides.
-   Without a suffix the turn used every path the input may take: a rate limit
-   or quota waits for the failed path's rest, and no less than the moment a
-   fresh walk of the assignment can start on a serving path, so the wait never
-   ends on a head that still rests. Every other failure without a suffix has
-   no provider wait. *)
+   Without a suffix a multi-candidate assignment follows its fresh walk's
+   rest. A final candidate's quota does not rest siblings that failed for
+   unrelated reasons; a serving head returns to ordinary cadence, not an
+   immediate replay. A single/unresolved assignment also retains the failed
+   response's rest. Other failures without a suffix have no provider wait. *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
@@ -454,18 +455,31 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
     , None ) ->
-    let failed_release_at = route_release retry_class retry_after in
-    let release_at, waiting_on, basis =
-      match assignment_walk_rest ~now assignment_id with
-      | Walk_waits_until { release_at; resting_runtime_id }
-        when Float.compare release_at failed_release_at > 0 ->
-        release_at, resting_runtime_id, Observed_path_rest
-      | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
-        failed_release_at, assignment_id, Observed_path_rest
-      | Walk_head_serving _ ->
-        failed_release_at, assignment_id, Failure_response
-    in
-    Some (Wait_until { release_at; waiting_on; basis })
+    (match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
+     | Ok { order = _ :: _ :: _; _ } ->
+       (* The refusal names the last failed candidate, not every path in the
+          lane. Other candidates may already serve again after a transient
+          failure. Keep normal cadence when a fresh walk can start; only the
+          walk's own observed rest can delay all of its pending inputs. *)
+       (match assignment_walk_rest ~now assignment_id with
+        | Walk_head_serving _ -> None
+        | Walk_waits_until { release_at; resting_runtime_id } ->
+          Some (Wait_until
+            { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest }))
+     | Ok { order = [] | [ _ ]; _ }
+     | Error (Assignment_missing | Catalog_unavailable _) ->
+       let failed_release_at = route_release retry_class retry_after in
+       let release_at, waiting_on, basis =
+         match assignment_walk_rest ~now assignment_id with
+         | Walk_waits_until { release_at; resting_runtime_id }
+           when Float.compare release_at failed_release_at > 0 ->
+           release_at, resting_runtime_id, Observed_path_rest
+         | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
+           failed_release_at, assignment_id, Observed_path_rest
+         | Walk_head_serving _ ->
+           failed_release_at, assignment_id, Failure_response
+       in
+       Some (Wait_until { release_at; waiting_on; basis }))
   | ( ( Route.Retry_after_observed
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
@@ -2264,6 +2278,7 @@ let run_named
                  Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution
              ; tool_result_inline_ceiling_bytes =
                  Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime_instance.execution
+             ; tool_surface_enabled = surface_enabled
              ; usage_report = Runtime_execution.usage_report runtime.Runtime_instance.execution
              })
         on_runtime_attempt;
@@ -2389,6 +2404,7 @@ let run_named
           in
           Keeper_codex_runtime.run
             ?on_tool_execution
+            ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture

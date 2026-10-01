@@ -182,7 +182,12 @@ let search_durable_facts
   with
   | Error detail -> Error (Source_revalidate_failed detail)
   | Ok source_projection ->
-  let source_facts = source_projection.facts in
+  (* A retained claim is not a verified search result. Recall exposes only
+     deferred source identities until this read boundary can validate bytes. *)
+  let source_facts = List.filter
+      (fun (fact : Keeper_memory_source_current.fact) ->
+        not (List.mem fact.source.path source_projection.unverified_paths))
+      source_projection.facts in
   let total_candidates = List.length facts + List.length source_facts in
   let ordinary_whole, ordinary_fragments =
     answering

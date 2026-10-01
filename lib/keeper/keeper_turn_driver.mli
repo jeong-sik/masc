@@ -179,10 +179,11 @@ val assignment_walk_rest : now:float -> string -> walk_rest
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
     A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
-    Without a suffix a rate limit or quota waits for the later of the failed
-    path's rest and {!assignment_walk_rest}; [waiting_on] then names the
-    assignment or the resting head. Every other failure without a suffix is
-    [None]: no provider wait. *)
+    Without a suffix a multi-candidate assignment uses its fresh walk's rest:
+    a serving head returns [None] (ordinary cadence), while a resting head
+    waits for that walk's release. A single or unresolved assignment also
+    retains the failed response's own rest. Every other failure without a
+    suffix is [None]: no provider wait. *)
 type wait_basis = Failure_response | Observed_path_rest
 (** Whether a wait has only the failed response as evidence, or a path rest
     observed while choosing the next dispatch. Observed evidence can be
@@ -238,13 +239,17 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
     Keeper turn. Together with [lane_attempt_index] it joins raw response usage
     to routed/completed/failed manifest rows. Lane
-    assignment ids and later runtime-table lookups are not attempt authority. *)
+    assignment ids and later runtime-table lookups are not attempt authority.
+    [tool_surface_enabled] reflects the selected runtime's tool capability,
+    including Claude Code's model-level tools suppression. Hooks intersect
+    this with their current tool names before advertising retrieval. *)
 
 type attempt_input =
   { attempt_goal_blocks : Agent_core.Types.content_block list option

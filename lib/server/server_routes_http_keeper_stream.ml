@@ -1443,16 +1443,16 @@ let canonical_reply_payload_of_body ~redact_text body =
     | None -> Error Invalid_turn_ref
   in
   let* external_effect_target =
-    (* The outcome and the terminal-effect receipt are decided from the same
-       [terminal_effect_state] (keeper_agent_run.ml), and the only terminal
-       effect receipt is a surface post (keeper_turn.ml
-       terminal_effect_fields). The decoder holds both directions - the
-       delivery target is present iff the outcome is Terminal_effect_settled -
-       so [Some] here is the proof the External_effect_completed event
-       needs. *)
-    let completed_external_effect =
-      Keeper_turn_outcome.equal turn_outcome
-        Keeper_turn_outcome.Terminal_effect_settled
+    (* A surface post can finish before the operation yields. Its delivery
+       receipt remains evidence without overriding the continuation boundary
+       or making the durable direct operation successful. *)
+    let receipt_required, receipt_allowed =
+      match turn_outcome with
+      | Keeper_turn_outcome.Terminal_effect_settled -> true, true
+      | Keeper_turn_outcome.Continuation_checkpoint -> false, true
+      | Keeper_turn_outcome.Visible_reply
+      | Keeper_turn_outcome.Awaiting_gate_approval
+      | Keeper_turn_outcome.No_visible_reply -> false, false
     in
     let values_of key =
       List.filter_map
@@ -1462,13 +1462,13 @@ let canonical_reply_payload_of_body ~redact_text body =
     in
     match values_of Keeper_surface_post.delivery_target_wire_key with
     | [] ->
-      if completed_external_effect
+      if receipt_required
       then
         Error
           (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
       else Ok None
     | [ value ] ->
-      if not completed_external_effect
+      if not receipt_allowed
       then
         Error
           (Invalid_external_effect_target

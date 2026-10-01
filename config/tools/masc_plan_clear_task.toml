@@ -3,7 +3,7 @@ title = "Clear Current Task"
 description = """
 Clear your current task assignment without completing it.
 
-The task's own status does not change. Use when switching to a different task, abandoning work, or resetting session state. Use masc_transition to change task status separately."""
+The task's own status does not change. Use when switching to a different task, abandoning work, or resetting session state. To hand a task you hold back to the backlog, use keeper_task_release. To stop it for good, use keeper_task_cancel."""
 additional_properties = false
 
 

@@ -1,0 +1,13 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_workspace_activity_layout_pty: start 2026-09-30T07:30:50Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_workspace_activity_layout_pty.py ../bin/masc_tui.exe)
+Workspace Activity responsive rows and full context: PASS
+[targeted] test_tui_workspace_activity_layout_pty: OK in 47s
+[targeted] test_tui_keyboard_input-repositories: start 2026-09-30T07:31:37Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe repositories)
+tui Repositories regression: PASS
+[targeted] test_tui_keyboard_input-repositories: OK in 17s
+[targeted] test_tui_keyboard_input-changes-newline: start 2026-09-30T07:31:54Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe changes-newline)
+tui Changes newline projection regression: PASS
+[targeted] test_tui_keyboard_input-changes-newline: OK in 9s

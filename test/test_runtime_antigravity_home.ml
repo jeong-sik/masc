@@ -381,10 +381,14 @@ let test_pointerless_store_preserves_entries_outside_managed_scope () =
        Unix.mkdir path 0o700;
        write_file ~mode:0o600 notes "operator state"
      | `Unknown_directory -> Unix.mkdir path 0o700
-     | `Public_generation -> Unix.mkdir path 0o755
+     | `Public_generation ->
+       Unix.mkdir path 0o755;
+       Unix.chmod path 0o755
      | `Public_child ->
        Unix.mkdir path 0o700;
-       Unix.mkdir (Filename.concat path ".gemini") 0o755
+       let child = Filename.concat path ".gemini" in
+       Unix.mkdir child 0o755;
+       Unix.chmod child 0o755
      | `Atomic_symlink -> Unix.symlink oauth_source path
      | `Atomic_public -> write_file ~mode:0o644 path "external file"
      | `Atomic_hardlink -> Unix.link oauth_source path);

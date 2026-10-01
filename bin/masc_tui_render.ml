@@ -13771,7 +13771,9 @@ let render_runtime_params (state : state) =
       @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
       @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
       @ (row.rpr_choices
-         |> List.mapi (fun index choice -> value_field (Printf.sprintf "Choice %d" (index + 1)) choice)
+         |> List.mapi (fun index choice ->
+              value_field (Printf.sprintf "Choice %d" (index + 1))
+                (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
       @ field "Contract" row.rpr_description
       @ (match row.rpr_surface with

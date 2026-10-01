@@ -153,6 +153,7 @@ def failed_source_keeps_known_cards(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"known-held-card", start=0, timeout=10)
         h.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
         visible = frame(process, fd, output, "partial-source-success")
         for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
@@ -495,7 +496,8 @@ def question_identity_and_return(executable):
         current[0] = (200, reordered)
         h.wait_for_output(process, fd, output, b"refreshed pinned ask-one prompt",
                           start=len(output), timeout=5)
-        h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
+        h.send_and_wait(process, fd, output, b"1", b"1 answered")
+        assert b"1 (o) c-yes" in h.screen_text(bytes(output))
         home.assert_no_decision_posts(requests)
         current[0] = (503, {"error": "question source offline"})
         h.wait_for_output(process, fd, output, b"questions stale", start=len(output), timeout=5)

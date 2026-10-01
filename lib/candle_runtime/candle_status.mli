@@ -1,28 +1,41 @@
-(** Is Candle on right now (RFC-goal-candle-ledger 3.9)?
+(** Configuration availability and synchronization of the ledger's half-life.
+    [current] owns the existing first-use recovery; [current_view] never repairs
+    or truncates a ledger. A failed policy publication disables the view. *)
 
-    [configured] reads configuration and checks appraiser availability without
-    touching the ledger. [current] additionally owns ledger recovery.
-    [for_recording] reads the same configuration and owns the same recovery
-    without checking the appraiser: its temporary absence cannot discard
-    Snapshot or PayoutOwed facts.
+type prepared = private {
+  events : Candle_event.t list;
+  policy_events : Candle_event.t list;
+  balance : Candle_balance.t;
+}
+val prepare : at:Candle_time.t -> half_life:Candle_decay.half_life ->
+  Candle_event.t list -> (prepared, Candle_balance.error) result
+(** Validate all historical money and policy facts before preparing a policy
+    change. [policy_events] is empty for an unchanged policy, otherwise the one
+    required policy fact. Callers append it with their own operation under CAS. *)
 
-    The first eligible recovery call for a base path in this process runs
-    {!Candle_ledger.recover_at_start}: a tail left by an append that never
-    finished is cut, and a ledger that cannot be read makes the answer
-    [Disabled] instead of blocking
-    what asked. A failed recovery is not remembered, so the next call tries
-    again and a repaired ledger clears the answer without a restart.
+type view = private {
+  policy : Candle_config.policy;
+  at : Candle_time.t;
+  events : Candle_event.t list;
+  balance : Candle_balance.t;
+}
+type error =
+  | Off
+  | Disabled of string
+  | Invalid_time of string
+  | Invalid_ledger of Candle_balance.error
+  | Ledger_unavailable of string
+val error_to_string : error -> string
+val observed_view : now:(unit -> float) -> base_path:string -> (view, error) result
+(** Read-only ledger observation. Amounts use only recorded half-life boundaries;
+    the desired config policy is available for the catalog but takes monetary
+    effect only when an authorized writer publishes its boundary. Never appends,
+    repairs, or truncates the ledger. *)
 
-    A ledger that another process is writing right now is not one that cannot
-    be read. The recovery is skipped and not remembered, and the answer stays
-    [Enabled], so [Enabled] means the ledger was recovered or its recovery is
-    waiting for that lock. A Goal that passes meanwhile is refused by the
-    Snapshot step (it asks the ledger for the same lock) and not let through
-    without a Snapshot.
-
-    Recovery runs once per process. A tail left later refuses every transition
-    until the server restarts. Two things leave one: a second writer that died
-    mid-append, and an append of this process whose rollback failed too. *)
+val current_view : now:(unit -> float) -> base_path:string -> (view, error) result
+(** One immutable current view. Configuration and trusted clock are observed
+    again on each CAS attempt. The desired half-life is published before the
+    returned amounts are accepted; failure returns no usable balance. *)
 
 val configured : base_path:string -> Candle_config.t
 (** Current configuration and appraiser availability only. Does not recover,
@@ -30,7 +43,9 @@ val configured : base_path:string -> Candle_config.t
     this before their authoritative ledger read. *)
 
 val current : base_path:string -> Candle_config.t
-
+(** Goal control availability and first-use recovery only. A live writer lock
+    retains Enabled so Snapshot/Owed's own CAS refuses the transition instead
+    of silently skipping its mandatory record. This is not a monetary view. *)
 val for_recording : base_path:string -> Candle_config.t
 (** Configuration and ledger recovery for durable Snapshot and PayoutOwed
     facts. An unavailable appraiser postpones settlement without discarding
@@ -38,11 +53,4 @@ val for_recording : base_path:string -> Candle_config.t
     Off/Disabled semantics as {!current}. Each append still acquires its lock. *)
 
 val report_at_start : base_path:string -> unit
-(** Reports {!current}, including appraiser availability. If availability
-    postpones recovery at startup, {!for_recording} recovers before the first
-    durable Goal fact is written. *)
-
 val install_appraiser_check : (unit -> (unit, string) result) -> unit
-(** Server-owned dynamic availability check, installed before any Goal lifecycle
-    writer starts. Without one, configured Candle is Disabled with an explicit
-    reason. Each read observes current lane configuration. *)

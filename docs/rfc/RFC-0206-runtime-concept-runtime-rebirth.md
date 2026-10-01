@@ -56,12 +56,12 @@ Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) tri
 
 runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selection FSM으로 살아남지 않는다. Selecting/Trying/round-robin/fallback은 single-binding 모델에서 소멸한다.
 
-그러나 keeper 소비자(`keeper_composite_observer`, `keeper_registry`의 packed state, 5개 invariant)가 이를 turn-observation/FSM-invariant로 매치한다. 재배치:
+그러나 keeper 소비자(`keeper_composite_observer`, `keeper_registry`의 packed state, 관측 invariant)가 이를 turn-observation/FSM-invariant로 매치한다. 재배치:
 
 - **keeper 소유 slimmed enum**: `keeper_turn_phase = Turn_idle | Turn_dispatching | Turn_done | Turn_exhausted`. `Trying → Turn_dispatching`, `Selecting`은 삭제(in-turn 선택 없음).
 - `Runtime_routed` event_kind, `Runtime_backpressured` 신호는 단일 dispatch 이벤트 + turn-terminal `Timeout`/`Admission_denied` 에러로 collapse(capacity 거부는 더 이상 provider-level backpressure가 아님).
 - **exhaustion 분류는 재생성 금지**: `keeper_meta_contract.runtime_exhaustion_reason`(10 variant: Connection_refused/Dns_failure/No_providers_available/All_providers_failed/Candidates_filtered_after_cycles/Max_turns_exceeded/Structural_attempt_timeout/Capacity_exhausted/No_tool_capable/Other_detail) + `blocker_class`(`Runtime_exhausted` carrier)는 HEAD에 이미 keeper-owned로 생존(`keeper_meta_contract.mli:139-196`). **그대로 재사용.** 이 표면은 operator 대시보드가 파싱하는 frozen seam이므로 rename 금지.
-- `check_no_runtime_before_measurement` 등 5개 invariant는 keeper concern으로 생존하되 `Turn_dispatching` gate로 retarget.
+- Composite observer는 실제 registry 입력으로 계산하는 `event_priority_monotone`과 `phase_derivation_agreement`를 투영한다. 측정하지 않는 속성에 성공값을 합성하거나 이를 dispatch gate의 근거로 쓰지 않는다.
 
 ## 5. 계승 / 폐기
 

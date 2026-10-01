@@ -136,7 +136,7 @@ let append_boundary ?history_at_start config ~trace_id ~turn ~recorded_at messag
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start =
               (match history_at_start with
                | Some history_at_start -> history_at_start
@@ -1959,7 +1959,7 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
   let position = match Boundaries.position_of_messages completed with
     | Ok position -> position | Error detail -> fail detail in
   append (Boundaries.Turn_ended
-      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
+      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
         history_at_start = Boundaries.Fresh_history; position }) 4.;
   let in_flight = completed @ List.map message ["new unfinished"; "repeated endpoint"] in
   save_checkpoint config ~trace_id in_flight 5;
@@ -2015,7 +2015,7 @@ let with_consumed_shorter_history f =
   (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
       { recorded_at = 3.; event = Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
             history_at_start = Boundaries.Fresh_history; position } } with
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
@@ -2446,7 +2446,7 @@ let append_official_boundary config ~trace_id ~turn ~recorded_at =
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start = Boundaries.Continued_history
           ; position = Boundaries.No_atom_history
           }
@@ -2614,6 +2614,7 @@ let test_a_failed_official_turn_is_read () =
     }
   in
   Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+    ~task_context:Masc.Keeper_turn_task_context.No_task
     ~config
     ~meta:(meta trace_id)
     ~turn_ref:failed_ref

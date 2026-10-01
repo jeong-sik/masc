@@ -1,0 +1,7 @@
+### Fixed
+
+- Preserve the admitted Task and linked Goal criteria on durable Keeper turn boundaries, including official-client error boundaries. Task and Goal changes after admission no longer change this saved evidence. This is the writer prerequisite for #40643; Librarian range consumers are still incomplete.
+
+### Changed
+
+- Turn boundary rows now require explicit admission context. Old `Turn_ended` rows without `task_context` are unreadable; historical journals are not upgraded. No migration, reset, or deployment is included.

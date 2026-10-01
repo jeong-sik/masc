@@ -175,7 +175,11 @@ let test_outcomes_are_not_inferred () = with_fixture (fun clock fixture ->
   List.iter (fun (request_id,outcome,expected) ->
     fixture.outcome := outcome;
     ignore (act fixture id request_id (`Int 1) |> unwrap);
-    ignore (await_state clock fixture id request_id expected);
+    let retained = await_state clock fixture id request_id expected in
+    (match outcome with
+     | Lost_reply -> check bool "unknown outcome permits no received result" true
+         (member "result" retained = `Null)
+     | Confirm | Refuse | Unknown -> ());
     ignore (act fixture id request_id (`Int 1) |> unwrap))
     ["refused",Refuse,"failed_before_effect";
      "unknown",Unknown,"outcome_unknown";"lost-reply",Lost_reply,"outcome_unknown"];
@@ -236,8 +240,10 @@ let test_orphan_receipts_are_not_replayed () = with_fixture (fun clock fixture -
       executor=Some (Store.digest id);input_sha256=Action.input_digest arguments;
       action;state;result=None;detail=None} in
     Store.save_action store ~instance_id:id ~request_id (Action.to_json receipt) |> unwrap;
-    check string "retained state recovers without another worker" expected
-      (text "state" (status fixture id request_id));
+    let recovered = status fixture id request_id in
+    check string "retained state recovers without another worker" expected (text "state" recovered);
+    check bool "pre-effect failure and abandoned dispatch may have no result" true
+      (member "result" recovered = `Null);
     check string "recovery itself is persisted" expected
       (Store.load_action store ~instance_id:id ~request_id |> unwrap |> Option.get |> text "state"))
     ["was-running",Action.Running,"outcome_unknown";
@@ -320,7 +326,109 @@ let test_result_survives_failed_parent_sync () = with_fixture (fun clock fixture
     check int "uncertain durable publication never repeats the action" 1 !(fixture.calls);
     detach clock fixture id)))
 
+let test_observation_publication_keeps_sequence_and_action_uncertainty () =
+  List.iter (fun (before,unreadable) -> with_fixture (fun clock fixture ->
+    let armed=ref false in
+    let injected=ref false in
+    let hidden=ref None in
+    let replaced_bytes=ref None in
+    let writer ~store ~instance_id ~seq ~sources output =
+      let replace_file path bytes =
+        if !armed && not !injected then (
+          injected:=true;
+          let result=Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+            ~sync_file:(fun path ->
+              if before then raise (Unix.Unix_error (Unix.EIO,"fsync",path))
+              else let fd=Unix.openfile path [Unix.O_RDONLY] 0 in
+                Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
+            ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) path bytes in
+          (match result with
+           | Error {Fs_compat.stage=Fs_compat.After_rename;_} ->
+             replaced_bytes:=Some (path,Fs_compat.load_file path);
+             if unreadable then (let held=path ^ ".held" in Unix.rename path held;hidden:=Some (path,held))
+           | Ok () | Error {Fs_compat.stage=Fs_compat.Before_rename;_} -> ());
+          result)
+        else Fs_compat.save_file_atomic_strict_staged path bytes in
+      Store.For_testing.append_observation ~replace_file store ~instance_id ~seq ~sources output in
+    Runtime.For_testing.with_observation_writer writer (fun () ->
+      let id=attach clock fixture ~acting:true in
+      let initial=number "observation_seq" (inspect fixture id) in
+      armed:=true;
+      ignore (act fixture id "uncertain-observation" (`Int 1) |> unwrap);
+      let unknown=await_state clock fixture id "uncertain-observation" "outcome_unknown" in
+      check int "the actual action ran once" 1 !(fixture.calls);
+      check int "the received result is retained despite evidence uncertainty" 1
+        (member "result" unknown |> number "calls");
+      let expected=if before then initial else initial+1 in
+      check int "published sequence converges only after actual rename" expected
+        (number "observation_seq" (inspect fixture id));
+      if not before then (
+        let phase=member "phase" (inspect fixture id) in
+        check string "published observation remains failed until recovery" "failed" (text "kind" phase);
+        let live=dispatch fixture Runtime.Inspect ["instance_id",str id] |> unwrap in
+        check bool "visible output never claims complete producer durability" true
+          (values "coverage" live |> List.exists (fun coverage -> member "complete" coverage=`Bool false)));
+      (match !hidden with None -> () | Some (path,held) -> Unix.rename held path);
+      (match !replaced_bytes with
+       | None -> check bool "before-rename produced no target" true before
+       | Some (path,bytes) ->
+         check string "the failed published record is retained exactly" bytes (Fs_compat.load_file path);
+         let store=Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
+         check bool "visible observation cannot be accepted while directory sync fails" true
+           (Result.is_error (Store.For_testing.read_observation ~sync_file:Unix.fsync
+             ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",Filename.dirname path)))
+             ~instance_id:id ~seq:expected ~max_bytes:65536 store));
+         check string "failed read leaves the exact retained bytes" bytes (Fs_compat.load_file path);
+         let recovered=Store.read_observation ~instance_id:id ~seq:expected ~max_bytes:65536 store |> unwrap in
+         check bool "strict resync recovers the actual action evidence" true
+           (List.exists (fun (row:Types.row) -> List.assoc_opt "action_request" row.fields=Some (str "uncertain-observation")) recovered.rows));
+      ignore (act fixture id "uncertain-observation" (`Int 1) |> unwrap);
+      check int "unknown outcome never replays the action" 1 !(fixture.calls);
+      ignore (dispatch fixture Runtime.Observe ["instance_id",str id] |> unwrap);
+      await clock (fun () -> number "observation_seq" (inspect fixture id)>expected);
+      check int "explicit retry commits the next available sequence" (expected+1)
+        (number "observation_seq" (inspect fixture id));
+      check int "observation recovery is not action replay" 1 !(fixture.calls);
+      ignore (act fixture id "next-action" (`Int 1) |> unwrap);
+      ignore (await_state clock fixture id "next-action" "confirmed");
+      check int "a later distinct request still works" 2 !(fixture.calls);
+      check string "recovery never upgrades the original unknown outcome" "outcome_unknown"
+        (text "state" (status fixture id "uncertain-observation"));
+      (match !replaced_bytes with None -> () | Some (path,bytes) ->
+        check string "later retries never overwrite the failed published record" bytes (Fs_compat.load_file path));
+      detach clock fixture id))) [true,false;false,false;false,true]
+
+let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  let request_id = "retained-confirmation" in
+  let _accepted = act fixture id request_id (`Int 1) |> unwrap in
+  let confirmed = await_state clock fixture id request_id "confirmed" in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
+  let path = Filename.concat (Store.root store)
+    (Filename.concat "actions" (Filename.concat (Store.digest id) (Store.digest request_id ^ ".json"))) in
+  let saved_receipt = Fs_compat.load_file path in
+  let corrupt = match confirmed with
+    | `Assoc fields -> obj (("result",`Null)::List.remove_assoc "result" fields)
+    | _ -> fail "expected confirmed receipt object" in
+  Store.save_action store ~instance_id:id ~request_id corrupt |> unwrap;
+  let corrupt_bytes = Fs_compat.load_file path in
+  rejects "confirmed receipt without its result" (dispatch fixture Runtime.Action_status
+    ["instance_id",str id;"request_id",str request_id]);
+  rejects "duplicate request with an unreadable confirmation" (act fixture id request_id (`Int 1));
+  check int "receipt corruption does not replay the effect" 1 !(fixture.calls);
+  check string "receipt corruption is preserved for repair" corrupt_bytes (Fs_compat.load_file path);
+  Fs_compat.save_file_atomic_strict path saved_receipt |> unwrap;
+  let repaired = status fixture id request_id in
+  check string "restored confirmation retains its received result"
+    (member "result" confirmed |> Yojson.Safe.to_string)
+    (member "result" repaired |> Yojson.Safe.to_string);
+  let _duplicate = act fixture id request_id (`Int 1) |> unwrap in
+  check int "restoring exact receipt bytes does not replay the effect" 1 !(fixture.calls);
+  detach clock fixture id)
+
 let () = run "Lane action workflow" ["optional world actions",[
+  test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;
+  test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;
   test_case "held action preserves another observer and Slice" `Quick test_held_action_preserves_other_activity;

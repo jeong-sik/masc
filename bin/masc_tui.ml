@@ -1544,6 +1544,24 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
       Error detail
     end
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
 (* Capture the endpoint authority before an extracted request can suspend. *)
 let capture_workspace_check state ~mailbox =
   let authority = state.workspace_authority in
@@ -1586,23 +1604,6 @@ let fork_workspace_job state ~sw run =
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     Printexc.raise_with_backtrace exn backtrace
 
-(* The server this screen reads. It runs on this machine, so the address is
-   loopback and there is nothing to configure.
-
-   It used to read MASC_HOST, which is the *server's* bind address
-   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
-   [configured_bind_host]). That answers a different question -- which
-   interfaces to accept on -- and its documented non-default values are the
-   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
-   exists to name as "every interface" rather than a reachable peer. Setting
-   it the way the server's own help recommends therefore pointed this screen
-   at an address that is not a destination.
-
-   Reading it also made a second setting: the roster, the task backlog, the
-   keeper metrics and the context occupancy are read from [base_path] on
-   local disk, and nothing checked that the two named the same machine. With
-   one of them gone there is nothing left to disagree. *)
-let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* A request owns both its cancellation context and its completion. Recheck the
    endpoint before dispatch: an unchanged port can now serve another root. *)

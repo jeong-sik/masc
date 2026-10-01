@@ -662,7 +662,7 @@ let render_modal_card ~width ~height:_ p =
   let add s = lines := s :: !lines in
   let add_text text =
     Masc_tui_message_layout.wrap_words ~max_cells:inner_width
-      (String.trim (Masc.Tui_decode.sanitize_terminal_text text))
+      (String.trim (Masc.Tui_terminal_text.sanitize_terminal_text text))
     |> List.iter (fun line -> add ("  " ^ line)) in
   List.iter add card;
   add "";

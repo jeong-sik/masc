@@ -1425,6 +1425,7 @@
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector
+  masc_tui_observation_layout
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste

@@ -61,6 +61,9 @@ let image ?(compact = false) c ~name ~equipment size =
     | None ->
         let body = Look.body_of_name name in
         let picture =
+          (* The compact silhouette draws only the body and its dish. Keep
+             that geometry where it is complete; other slots need the full
+             drawing rather than silently losing their observed equipment. *)
           match compact, equipment.Look.face, equipment.Look.neck,
                 equipment.Look.head, equipment.Look.hand with
           | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->

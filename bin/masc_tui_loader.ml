@@ -1912,7 +1912,7 @@ let load_keeper_board_quarantines ~(host : string) ~(port : int)
    it. One fetch rather than two: a list of providers and a list of
    attachments cannot disagree if they arrive together. *)
 let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string)
-  : (Masc_tui_types.identity_provider list, string) result
+  : (Masc_tui_identity_model.identity_provider list, string) result
   =
   match Masc_tui_http.fetch_attached_tools ~host ~port ~keeper_name with
   | Error err -> Error ("identity providers load failed: " ^ err)
@@ -1943,7 +1943,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
               in
               match string_field "provider", string_field "problem" with
               | Some idp_id, Some idp_problem ->
-                Some (Masc_tui_types.Identity_unreadable { idp_id; idp_problem })
+                Some (Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem })
               | Some idp_id, None ->
                 let idp_label =
                   Option.value ~default:idp_id (string_field "provider_label")
@@ -1975,7 +1975,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                 in
                 let idp_switch_problem = string_field "switch_problem" in
                 Some
-                  (Masc_tui_types.Identity_declared
+                  (Masc_tui_identity_model.Identity_declared
                      { idp_id; idp_label; idp_tools; idp_also_on
                      ; idp_enabled; idp_switch_problem })
               | None, _ -> None)

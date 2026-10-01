@@ -3745,7 +3745,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_surface_navigation
+ (libraries masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -6343,7 +6343,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries masc_tui_identity_model alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)

@@ -1,3 +1,15 @@
+let namespace_pause_status_json (config : Workspace.config) : Yojson.Safe.t =
+  let initialized = Workspace.is_initialized config in
+  let paused =
+    if initialized then `Bool (Workspace.read_state config).paused else `Null
+  in
+  `Assoc
+    [ "ok", `Bool true
+    ; "initializing", `Bool (not initialized)
+    ; "paused", paused
+    ]
+;;
+
 let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state = Workspace.read_state config in
   let cluster = Env_config_core.cluster_name () in

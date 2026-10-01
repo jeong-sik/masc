@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
+  readPauseStatus: vi.fn(),
   dispatchOperatorAction: vi.fn(),
   confirmOperatorPendingAction: vi.fn(),
   requestConfirm: vi.fn(),
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
 }))
 vi.mock('../../api/mcp', () => ({ callMcpTool: mocks.callMcpTool }))
-vi.mock('../../api/core', () => ({ currentDashboardActor: () => 'test-operator' }))
+vi.mock('../../api/core', () => ({ currentDashboardActor: () => 'test-operator', get: mocks.readPauseStatus }))
 vi.mock('../../operator-store', () => ({
   dispatchOperatorAction: mocks.dispatchOperatorAction,
   confirmOperatorPendingAction: mocks.confirmOperatorPendingAction,
@@ -62,7 +63,7 @@ describe('flow-control-state', () => {
     })
     mocks.confirmOperatorPendingAction.mockResolvedValue({ status: 'ok' })
     mocks.requestConfirm.mockResolvedValue(true)
-    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: true }))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: true })
   })
   afterEach(() => { flowState.value = 'unknown' })
 
@@ -70,20 +71,30 @@ describe('flow-control-state', () => {
     snapshot(true)
     await fetchPauseStatus()
     expect(flowState.value).toBe('paused')
-    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
     expect(mocks.refreshNamespaceTruth).not.toHaveBeenCalled()
+  })
+
+  it('reads pause state without depending on operator-only MCP tools', async () => {
+    mocks.callMcpTool.mockRejectedValue(new Error("Tool 'masc_pause_status' is not available on this MCP endpoint."))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: false })
+    await resumeWorkspace()
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(flowState.value).toBe('running')
+    expect(mocks.showToast).toHaveBeenCalledWith('Namespace resumed.', 'success')
   })
 
   it('revalidates cached running state when another client has paused', async () => {
     snapshot(false)
     await fetchPauseStatus()
-    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
     expect(flowState.value).toBe('paused')
   })
 
   it('withdraws cached running state when direct pause status is unavailable', async () => {
     snapshot(false)
-    mocks.callMcpTool.mockRejectedValue(new Error('unavailable'))
+    mocks.readPauseStatus.mockRejectedValue(new Error('unavailable'))
     await fetchPauseStatus()
     expect(flowState.value).toBe('unknown')
   })
@@ -93,13 +104,13 @@ describe('flow-control-state', () => {
     await fetchPauseStatus()
     expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
     expect(flowState.value).toBe('paused')
-    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
   })
 
   it('revalidates running after the initial forced projection read', async () => {
     mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(false))
     await fetchPauseStatus()
-    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
     expect(flowState.value).toBe('paused')
   })
 
@@ -118,7 +129,7 @@ describe('flow-control-state', () => {
   ] as const)('confirms %s then reads its result', async (action, run, before, after, message) => {
     snapshot(before)
     mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(before))
-    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: after }))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: after })
     await run()
     expect(mocks.dispatchOperatorAction).toHaveBeenCalledWith({
       actor: 'test-operator', action_type: action, target_type: 'workspace', payload: {},
@@ -126,7 +137,7 @@ describe('flow-control-state', () => {
     expect(mocks.requestConfirm).toHaveBeenCalledTimes(1)
     expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'confirm', { refresh: 'background' })
     expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
-    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
     expect(flowState.value).toBe(after ? 'paused' : 'running')
     expect(mocks.showToast).toHaveBeenCalledWith(message, 'success')
     expect(flowLoading.value).toBe(false)
@@ -135,11 +146,11 @@ describe('flow-control-state', () => {
   it('reads and acknowledges before an unrelated namespace refresh completes', async () => {
     let finishRefresh!: () => void
     mocks.refreshNamespaceTruth.mockImplementation(() => new Promise<void>(resolve => { finishRefresh = resolve }))
-    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: false }))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: false })
     await resumeWorkspace()
     expect(mocks.showToast).toHaveBeenCalledWith('Namespace resumed.', 'success')
     expect(flowLoading.value).toBe(false)
-    expect(mocks.callMcpTool.mock.invocationCallOrder[0]).toBeLessThan(mocks.refreshNamespaceTruth.mock.invocationCallOrder[0]!)
+    expect(mocks.readPauseStatus.mock.invocationCallOrder[0]).toBeLessThan(mocks.refreshNamespaceTruth.mock.invocationCallOrder[0]!)
     finishRefresh()
   })
 
@@ -163,7 +174,7 @@ describe('flow-control-state', () => {
   it('does not claim success when readback fails, even with stale running status', async () => {
     snapshot(true)
     mocks.serverStatus.value = { paused: false }
-    mocks.callMcpTool.mockRejectedValue(new Error('readback failed'))
+    mocks.readPauseStatus.mockRejectedValue(new Error('readback failed'))
     mocks.refreshNamespaceTruth.mockImplementation(async () => {
       mocks.namespaceTruth.value = null
       mocks.namespaceTruthError.value = 'readback failed'
@@ -209,7 +220,7 @@ describe('flow-control-state', () => {
     { ok: true, initializing: false, any_pause_active: false },
   ])('rejects unavailable Workspace readback %j', async readback => {
     snapshot(false)
-    mocks.callMcpTool.mockResolvedValue(JSON.stringify(readback))
+    mocks.readPauseStatus.mockResolvedValue(readback)
     await resumeWorkspace()
     expect(flowState.value).toBe('unknown')
     expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
@@ -220,7 +231,7 @@ describe('flow-control-state', () => {
     mocks.shellAuthSummary.value = { effective_role: 'reader' }
     await resumeWorkspace()
     expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()
-    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
     expect(mocks.showToast).toHaveBeenCalledWith('Current role is reader; admin role is required.', 'error', 6000)
   })
 

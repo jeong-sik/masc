@@ -456,6 +456,30 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
+let test_namespace_pause_status_reads_current_workspace () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let read () =
+    Server_dashboard_http_core_entities.namespace_pause_status_json config
+  in
+  let member field json = Yojson.Safe.Util.member field json in
+  let initial = read () in
+  check bool "uninitialized namespace is initializing" true
+    (member "initializing" initial = `Bool true);
+  check bool "uninitialized namespace has no pause authority" true
+    (member "paused" initial = `Null);
+  ignore (Workspace.init config ~agent_name:None);
+  check bool "initialized namespace is running" true
+    (member "paused" (read ()) = `Bool false);
+  Workspace.pause config ~by:"pause-readback-test" ~reason:"current state";
+  check bool "a later pause is read directly" true
+    (member "paused" (read ()) = `Bool true);
+  ignore (Workspace.resume config ~by:"pause-readback-test");
+  check bool "resume does not reuse the previous paused snapshot" true
+    (member "paused" (read ()) = `Bool false);
+  Workspace.pause config ~by:"another-operator" ~reason:"later mutation";
+  check bool "another operator's pause remains observable" true
+    (member "paused" (read ()) = `Bool true)
+
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
@@ -7203,6 +7227,8 @@ let () =
             test_keeper_github_login_stream_flushes_each_event;
           test_case "GitHub token route refuses an unreadable hostname" `Quick
             test_github_token_post_refuses_an_unreadable_hostname;
+          test_case "namespace pause status reads current workspace" `Quick
+            test_namespace_pause_status_reads_current_workspace;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick

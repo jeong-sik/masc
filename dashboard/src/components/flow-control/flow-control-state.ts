@@ -1,6 +1,6 @@
 import { signal, effect } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
-import { currentDashboardActor } from '../../api/core'
+import { currentDashboardActor, get } from '../../api/core'
 import { dispatchOperatorAction, confirmOperatorPendingAction } from '../../operator-store'
 import {
   namespaceTruth, namespaceTruthInitializing, namespaceTruthError, refreshNamespaceTruth,
@@ -59,7 +59,7 @@ effect(() => {
 async function readWorkspacePause(): Promise<boolean> {
   const sequence = ++pauseReadSequence
   try {
-    const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
+    const observed = await get<unknown>('/api/v1/operator/pause-status')
     if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
       || typeof observed.paused !== 'boolean') {
       throw new Error('Namespace pause readback is unavailable.')

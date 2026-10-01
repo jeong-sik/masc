@@ -3048,6 +3048,14 @@ let add_routes ~sw ~clock router =
              (handle_gate_rule_delete_body state operator_name request reqd))
          request reqd)
 
+  |> Http.Router.get "/api/v1/operator/pause-status" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let json = Eio_unix.run_in_systhread (fun () ->
+           Server_dashboard_http_core_entities.namespace_pause_status_json config)
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =

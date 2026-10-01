@@ -22,7 +22,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  let account = { status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
+  let account = { status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
   let failed = false
   let releaseResponse = null
   const requests = []
@@ -55,10 +55,10 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 })
 
   // A free purchase changes ownership, with the wallet and outfit fixed.
-  account = { ...account, owned_items: ['crown', 'glasses'] }
+  account = { ...account, account_revision: 'b'.repeat(64), owned_items: ['crown', 'glasses'] }
   let release
   releaseResponse = new Promise(resolve => { release = resolve })
-  await page.evaluate(() => window.updateKeeperItemsFixture('a'.repeat(64)))
+  await page.evaluate(() => window.updateKeeperItemsFixture('b'.repeat(64)))
   await page.getByRole('status').filter({ hasText: 'Item 계정 불러오는 중' }).waitFor()
   if (await page.getByText('0.800 Candle').count()) throw new Error('stale account visible while reloading')
   await capture('keeper-items-loading')
@@ -69,9 +69,9 @@ try {
   await capture('keeper-items-free-purchase')
 
   // A price-only observation also refreshes an already open Item tab.
-  account = { ...account, catalog: catalog.map(item => item.id === 'crown'
+  account = { ...account, account_revision: 'c'.repeat(64), catalog: catalog.map(item => item.id === 'crown'
     ? { ...item, price_milli: '300' } : item) }
-  await page.evaluate(() => window.updateKeeperItemsFixture('b'.repeat(64)))
+  await page.evaluate(() => window.updateKeeperItemsFixture('c'.repeat(64)))
   await page.getByText('0.300 Candle').waitFor()
   await capture('keeper-items-price-change')
 

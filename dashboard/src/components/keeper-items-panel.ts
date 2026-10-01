@@ -1,17 +1,19 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
+import { ApiRequestError, currentStoredTokenRevision } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
 import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
-import { executionWorkspaceRevision, keeperRosterObservationRevision, serverStatus } from '../store'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority, keeperRosterObservationRevision } from '../store'
 import { readCandleAccountRevision } from '../api/schemas/candle-observation'
 
 type Reading =
   | { kind: 'loading'; identity: string }
-  | { kind: 'loaded'; identity: string; value: KeeperItemsReading }
-  | { kind: 'error'; identity: string; message: string }
+  | { kind: 'loaded'; identity: string; authority: ExecutionWorkspaceAuthority; value: KeeperItemsReading }
+  | { kind: 'error'; identity: string; authority: ExecutionWorkspaceAuthority; message: string }
 
 type ItemSlot = keyof KeeperEquipment
 
@@ -25,54 +27,60 @@ function candle(milli: string): string {
 }
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
+  const authority = executionWorkspaceAuthority.value
+  const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
   const rosterObservation = keeperRosterObservationRevision.value
   const accountRevision = readCandleAccountRevision(keeper.candle_account_revision)
   const revisionObserved = accountRevision !== undefined
-  const workspaceRevision = executionWorkspaceRevision.value
-  const project = serverStatus.value?.project ?? null
-  const identity = JSON.stringify([workspaceRevision, project, keeper.name, equipmentKey, keeper.candle_balance_milli, accountRevision, revisionObserved, revision])
+  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, accountRevision, revisionObserved, revision, authRevision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
     setReading({ kind: 'loading', identity })
-    if (!revisionObserved) return
+    if (authority === null || !revisionObserved) return
     const controller = new AbortController()
-    const currentAuthority = () => !controller.signal.aborted
-      && executionWorkspaceRevision.value === workspaceRevision
-      && (serverStatus.value?.project ?? null) === project
+    const currentRequest = () => !controller.signal.aborted
+      && executionWorkspaceAuthority.peek() === authority
+      && currentStoredTokenRevision() === authRevision
     fetchKeeperItems(keeper.name, controller.signal)
       .then(value => {
-        if (!currentAuthority()) return
+        if (!currentRequest()) return
         if (value.account_revision !== accountRevision) {
           throw new Error('Item 계정 관측이 변경되었습니다. 다음 Keeper 관측에서 다시 읽습니다.')
         }
-        setReading({ kind: 'loaded', identity, value })
+        setReading({ kind: 'loaded', identity, authority, value })
       })
       .catch(error => {
-        if (currentAuthority()) setReading({ kind: 'error', identity, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
+        const message = error instanceof ApiRequestError
+          ? error.detail ?? '계정 요청에 실패했습니다. 다시 시도해주세요.'
+          : error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다'
+        if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
-  }, [identity])
+  }, [identity, authority, authRevision])
 
-  // Retry a settled failure only when another accepted roster observation arrives.
-  // Reading state changes alone must neither spin nor abort a pending request.
+  // Only a fresh roster observation retries a settled current failure.
   useEffect(() => {
-    if (revisionObserved && reading.kind === 'error' && reading.identity === identity) {
+    if (authority !== null && revisionObserved && reading.kind === 'error'
+      && reading.identity === identity && reading.authority === authority) {
       setRevision(value => value + 1)
     }
   }, [rosterObservation])
 
-  const current = revisionObserved && reading.identity === identity ? reading : { kind: 'loading' as const, identity }
+  const current = revisionObserved && reading.identity === identity
+    && (reading.kind === 'loading' || reading.authority === authority)
+    ? reading : { kind: 'loading' as const, identity }
   const account = current.kind === 'loaded' && current.value.status === 'ready' ? current.value : null
   return html`
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-xs text-[var(--color-fg-muted)]">Keeper가 직접 구매하고 착용한 결과를 보여 줍니다.</p>
       <button type="button" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]" onClick=${() => setRevision(value => value + 1)}>새로고침</button>
     </div>
-    ${!revisionObserved ? html`<p role="status">현재 Keeper의 Item 계정 관측을 확인하는 중…</p>`
+    ${authority === null ? html`<p role="status">현재 작업 공간을 확인하는 중…</p>`
+      : !revisionObserved ? html`<p role="status">현재 Keeper의 Item 계정 관측을 확인하는 중…</p>`
       : current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}
     ${current.kind === 'error' ? html`<p role="alert">Item 계정을 읽지 못했습니다: ${current.message}</p>` : null}
     ${current.kind === 'loaded' && current.value.status === 'off' ? html`<p role="status">Candle 기능이 꺼져 있습니다.</p>` : null}

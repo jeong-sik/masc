@@ -293,11 +293,12 @@ status: reference
   Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
   Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
   시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
-  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  TUI `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
   Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
   액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
-  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
-  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  TUI에서는 Keeper 상세 화면 맨 위, 대화 화면의 Keeper 목록 아래, 아이템 미리보기, `/about`에
+  그려진다. 터미널이 알려 준 능력에 따라 실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
+  `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
@@ -2116,6 +2117,21 @@ status: reference
   → [docs/constitution.xml](../constitution.xml) ·
   [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
   [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+
+**ROLL (롤 / 일괄 착지 규약)**
+: 여러 작업 또는 여러 PR을 단일 묶음 PR/커밋으로 묶어 검증한 뒤 한 건만 착지시키는 MASC 내부 일괄 병합 규약.
+  GitHub 공식 기능인 Native Stack이나 수동 브랜치 체인과 구별되는 고유한 운영 프로토콜이다(세계 헌법 `a-34749e1e`·`a-213da42f`).
+  - 고정과 합집합 영수증: BASE와 멤버 PR들의 head를 고정하고, 각 멤버의 필수 테스트 스위트 합집합과
+    실행 결과를 영수증으로 대조한다. 멤버 누락, 빈 목록, tree 또는 main과의 불일치가 있으면 일괄 착지를 거절한다.
+  - 멤버 대체와 독립 검토: 멤버 PR들의 개별 CI·PASS·승인은 ROLL의 종합 영수증으로 대체할 수 있으나,
+    각 멤버는 고정 head·기준 SHA·범위·원문 좌표·검토자를 갖춘 독립적인 내용 검토(CR·FAIL 부재)를 반드시 거쳐야 한다.
+  - 착지와 원본 닫기: 현재 head의 PASS, 독립 승인, approve-guard 및 merge-guard 검증을 거쳐 ROLL PR 한 건만 main에
+    병합하며, 착지 직전 재확인과 도착 부모·tree·포함 증명을 확인한 뒤에만 원본 멤버 PR들을 병합 없이 닫는다.
+  - Native Stack과의 경계: GitHub의 Native Stack(`stack != null`)은 각 층의 PR이 유지되면서 하위 층을 포함해
+    비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
+    원본을 닫는 내부 운영 규약이다.
+  → [docs/constitution.xml](../constitution.xml) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
 **Disposable Build Volume (일회용 빌드 볼륨)**

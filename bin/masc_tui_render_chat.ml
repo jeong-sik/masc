@@ -2131,7 +2131,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    result, and it settles when the turn ends.
 
    [needle] is trimmed by its caller and case-folded inside
-   {!Masc_tui_types.palette_contains}, which keeps case folding out of a
+   {!Masc_tui_pick_list.lowercase_contains}, which keeps case folding out of a
    module whose one rule about [String.lowercase_ascii] is that it does not
    appear here.
 
@@ -2161,7 +2161,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
       |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_types.palette_contains ~needle entry.body)
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
     in
     match matched with
     | None -> None

@@ -222,6 +222,7 @@ Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해
   - 못 읽음이 하나라도 있으면 `Candidates` 를 쓰지 않고 다음에 다시 한다(3.2). 이 일꾼이 쓰는 archive reader 는 새로 만든 엄격한 것이다. 모양이 다르거나 못 읽는 행을 빈 목록이나 건너뛰기로 바꾸지 않고 못 읽음으로 돌려준다.
 - 후보 Task 는 찾음 상태이고 `done` 이며 끝난 시각이 Goal 생성 시각보다 늦고 확정 시각 이전인 Task 다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 다른 keeper 의 Task 를 후보에서 빼는 일을 막으려는 것이다. 끝난 시각과 담당자는 `done` 상태에 적힌 값이라서 일꾼이 언제 읽어도 같다.
 - 후보 keeper 는 후보 Task 담당자 가운데 keeper 인 사람이다. 담당자 이름을 `Keeper_id.Keeper_name.of_string`(`lib/keeper_registry/keeper_id.mli`)으로 파싱하고, 통과한 이름에 keeper 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. `Keeper_identity.Keeper_id.of_string` 은 소문자로 바꾸고 빈 문자열만 거절하는 함수라서 파일 경로를 만들기 전에 쓰지 않는다(`lib/keeper/keeper_identity.ml:15-45`). 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다.
+- `candidate_task_keepers` 는 후보 Task id마다 당시 Keeper로 확인한 담당자 이름 또는 `null`을 기록한다. 정산은 이 목록이 모든 후보 Task를 한 번씩 포함하고, 이름이 해당 Task 담당자와 일치하며, `candidate_keepers`가 그 이름들의 정확한 집합인지 확인한다. 나중의 Keeper 설정으로 과거 판정을 다시 만들지 않는다.
 - `Candidates` 는 모델을 부르기 전에 쓴다. 대기 중에 설정 파일이 바뀌어도 후보는 그대로다. 지금 Goal 에 연결된 done Task 9건은 모두 Goal 생성 뒤에 끝났다.
 - 연결에는 시각이 없어서(2장) 끝난 뒤에 붙은 Task 를 가려낼 수 없다. 끝난 Task 를 연결하지 못하게 하면(5장 2번 (나)) 그런 Task 는 새로 생기지 않는다. 끝나기 전에 붙은 관계없는 Task 는 관계 판정이 거른다.
 

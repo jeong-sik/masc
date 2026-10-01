@@ -31,11 +31,14 @@ let relations ~appraise ~identity goal tasks ids =
           | A.Grade_decided _ | A.Weights_decided _ -> Error (A.Invalid_response "appraiser returned the wrong stage"))
        | Some E.Deleted | None -> Error (A.Transport_unavailable ("candidate task is absent: " ^ task_id))) in
   loop [] ids
-let related_tasks tasks candidate_keepers relations =
-  List.filter_map (fun (r : A.task_relation) -> match r.relation, List.assoc_opt r.task_id tasks with
-    | A.Related, Some (E.Found {title;assignee=Some keeper;_}) when List.mem keeper candidate_keepers ->
+let related_tasks tasks task_keepers relations =
+  List.filter_map (fun (r : A.task_relation) ->
+    match r.relation, List.assoc_opt r.task_id tasks, List.assoc_opt r.task_id task_keepers with
+    | A.Related, Some (E.Found {title;_}), Some (Some keeper) ->
       Some {A.task_id=r.task_id;title;keeper}
-    | A.Related, (Some (E.Found _) | Some E.Deleted | None) | A.Unrelated, _ -> None) relations
+    | A.Unrelated, _, _
+    | A.Related, (Some E.Deleted | None), _
+    | A.Related, Some (E.Found _), (Some None | None) -> None) relations
 let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : Candle_payout.waiting) =
   let identity = identity waiting in
   match Candle_payout.pass_of waiting events, Candle_payout.candidates_of waiting events, candidate_tasks waiting events with
@@ -54,7 +57,7 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
      | Ok overdue_hours ->
        let* grade, grade_trace = grade ~appraise ~identity pass.goal in
        let* relations = relations ~appraise ~identity pass.goal tasks candidates.candidate_task_ids in
-       let related = related_tasks tasks candidates.candidate_keepers relations in
+       let related = related_tasks tasks candidates.candidate_task_keepers relations in
        let attribution = {E.grade;grade_trace;relations} in
        match related with
        | [] ->

@@ -60,6 +60,7 @@ val pass_of : waiting -> Candle_event.t list -> pass option
 type candidates =
   { candidate_task_ids : string list
   ; candidate_keepers : string list
+  ; candidate_task_keepers : (string * string option) list
   }
 
 val candidates_of : waiting -> Candle_event.t list -> candidates option

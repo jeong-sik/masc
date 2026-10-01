@@ -24,23 +24,31 @@ function fields(value: Record<string, unknown>, names: readonly string[]): boole
 function member<Id extends string>(ids: readonly Id[], value: unknown): value is Id {
   return typeof value === 'string' && ids.some(id => id === value)
 }
-export function readKeeperPortrait(value: unknown): KeeperPortraitReading {
-  if (record(value)) {
-    if (value.state === 'unavailable' && fields(value, ['state', 'reason'])
-      && typeof value.reason === 'string' && value.reason.trim().length > 0) {
-      return { state: 'unavailable', reason: value.reason }
-    }
-    const equipment = value.equipment
-    if (value.state === 'ready' && fields(value, ['state', 'equipment'])
-      && record(equipment) && fields(equipment, ['face', 'neck', 'head', 'hand', 'base'])
-      && member(EQUIPMENT_IDS.face, equipment.face) && member(EQUIPMENT_IDS.neck, equipment.neck)
-      && member(EQUIPMENT_IDS.head, equipment.head) && member(EQUIPMENT_IDS.hand, equipment.hand)
-      && member(EQUIPMENT_IDS.base, equipment.base)) {
-      return { state: 'ready', equipment: { face: equipment.face, neck: equipment.neck,
-        head: equipment.head, hand: equipment.hand, base: equipment.base } }
-    }
+export function isKeeperEquipment(value: unknown): value is KeeperEquipment {
+  return record(value) && fields(value, ['face', 'neck', 'head', 'hand', 'base'])
+    && member(EQUIPMENT_IDS.face, value.face) && member(EQUIPMENT_IDS.neck, value.neck)
+    && member(EQUIPMENT_IDS.head, value.head) && member(EQUIPMENT_IDS.hand, value.hand)
+    && member(EQUIPMENT_IDS.base, value.base)
+}
+
+/** A malformed portrait is not a producer-declared unavailable row. */
+export function isKeeperPortraitReading(value: unknown): value is KeeperPortraitReading {
+  if (!record(value) || !Object.hasOwn(value, 'state')) return false
+  switch (value.state) {
+    case 'unavailable': return fields(value, ['state', 'reason'])
+      && typeof value.reason === 'string' && value.reason.trim().length > 0
+    case 'ready': return fields(value, ['state', 'equipment']) && isKeeperEquipment(value.equipment)
+    default: return false
   }
-  return { state: 'unavailable', reason: 'Portrait observation missing or malformed' }
+}
+
+export function readKeeperPortrait(value: unknown): KeeperPortraitReading {
+  if (!isKeeperPortraitReading(value)) {
+    return Object.freeze({ state: 'unavailable', reason: 'Portrait observation missing or malformed' })
+  }
+  return value.state === 'ready'
+    ? Object.freeze({ state: 'ready', equipment: Object.freeze({ ...value.equipment }) })
+    : Object.freeze({ state: 'unavailable', reason: value.reason })
 }
 export function keeperEquipmentKey(equipment: KeeperEquipment): string {
   return JSON.stringify([equipment.face, equipment.neck, equipment.head, equipment.hand, equipment.base])

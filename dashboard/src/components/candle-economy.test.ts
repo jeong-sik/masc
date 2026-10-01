@@ -1,10 +1,10 @@
 import { html } from 'htm/preact'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardExecutionResponse } from '../types'
 import { CandleSummary } from './candle-economy'
 import { KeeperDetailHeaderInfo } from './keeper-detail-shell'
 import { candleObservation, hydrateExecutionSnapshot, keepers, executionWorkspaceAuthority, invalidateExecutionSnapshotGeneration, resetExecutionSnapshotGeneration, refreshExecution } from '../store'
+import type { DashboardExecutionResponse } from '../types'
 
 const fetchDashboardExecution = vi.hoisted(() => vi.fn())
 vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
@@ -67,7 +67,9 @@ describe('Candle existing screen consumers', () => {
     expect(keepers.value[0]).toBe(retainedKeeper)
 
     fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' }, keepers: [] })
-    await act(async () => { await refreshExecution({ immediate: true }) })
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing')
+    })
     expect(candleObservation.value.status).toBe('unavailable')
     expect(keepers.value[0]).toBe(retainedKeeper)
     const recovered = { status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }
@@ -78,13 +80,17 @@ describe('Candle existing screen consumers', () => {
 
     // A successful warm-up without a reconnect also withdraws the accepted money.
     fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' } })
-    await act(async () => { await refreshExecution({ immediate: true }) })
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing')
+    })
     expect(screen.getByTestId('candle-summary').textContent).not.toContain('7.000 Candle')
     expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('0.500 Candle')
     fetchDashboardExecution.mockRejectedValueOnce(new Error('current endpoint failed'))
-    await act(async () => { await refreshExecution({ immediate: true }) })
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('current endpoint failed')
+    })
     expect(screen.getByTestId('candle-summary').textContent).toContain('current endpoint failed')
-    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('current endpoint failed')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('Workspace authority is being verified')
     expect(keepers.value[0]?.name).toBe('alpha')
     fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
     await act(async () => { await refreshExecution({ immediate: true }) })
@@ -101,8 +107,16 @@ describe('Candle existing screen consumers', () => {
     let started!: () => void
     const requested = new Promise<void>(resolve => { started = resolve })
     fetchDashboardExecution.mockImplementationOnce(() => { started(); return held })
-    let refresh!: Promise<void>
-    await act(async () => { refresh = refreshExecution({ immediate: true }); await requested })
+    let rejected!: Promise<void>
+    await act(async () => {
+      const refresh = refreshExecution({ immediate: true })
+      rejected = expect(refresh).rejects.toThrow(
+        outcome === 'initializing'
+          ? 'Execution initialization was superseded by a newer observation'
+          : 'Execution failure was superseded by a newer observation',
+      )
+      await requested
+    })
     await act(async () => {
       reconnect()
       observe({ status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }, '500', '/fixture/candle-b')
@@ -110,13 +124,12 @@ describe('Candle existing screen consumers', () => {
     await act(async () => {
       if (outcome === 'initializing') finish({ status: { project: 'initializing' } } as DashboardExecutionResponse)
       else fail(new Error('old endpoint failed'))
-      await refresh
+      await rejected
     })
     expect(screen.getByTestId('candle-summary').textContent).toContain('7.000 Candle')
     expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
     expect(vi.getTimerCount()).toBe(0)
   })
-
 
   it('withdraws current currency when the real fetch path receives a warm-up envelope', async () => {
     vi.useFakeTimers()
@@ -124,11 +137,36 @@ describe('Candle existing screen consumers', () => {
     render(html`<${View} />`)
     expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('9007199254740.993')
     fetchDashboardExecution.mockResolvedValue({ status: { project: 'initializing' } })
-    await act(async () => { await refreshExecution({ immediate: true }) })
+    await act(async () => { await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing') })
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
     expect(executionWorkspaceAuthority.peek()).toBeNull()
     expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
     expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+  })
+
+  it('ignores a held warm-up reply after a newer pushed execution snapshot', async () => {
+    vi.useFakeTimers()
+    observe(ready, '1000')
+    render(html`<${View} />`)
+    let release!: (value: unknown) => void
+    fetchDashboardExecution.mockReturnValue(new Promise(resolve => { release = resolve }))
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = refreshExecution({ force: true })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    await act(async () => { observe(ready, '2000') })
+    const authority = executionWorkspaceAuthority.peek()
+    await act(async () => {
+      release({ status: { project: 'initializing' } })
+      await expect(pending).rejects.toThrow('superseded by a newer observation')
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 2.000 Candle')
+    expect(candleObservation.peek().status).toBe('ready')
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
   })
 
   it('withdraws both summary and Keeper wallet through reconnect warm-up', async () => {

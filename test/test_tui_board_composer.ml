@@ -128,6 +128,23 @@ let test_format_addressing_hint () =
     (String.contains h3 'D')
 ;;
 
+let test_unicode_mentions_fit_cells () =
+  let targets = ["한글가나다라마"; "ascii-혼합"; "👩‍💻개발자"] in
+  List.iter
+    (fun width ->
+      let hint = Composer.format_addressing_hint ~max_cells:width
+          (Composer.Mentions targets) in
+      Alcotest.(check bool) "valid UTF-8 after fitting" true
+        (String_util.is_valid_utf8 hint);
+      Alcotest.(check bool) "hint stays inside requested cells" true
+        (Masc_tui_message_layout.display_width hint <= width))
+    [0; 1; 2; 20; 42; 43; 44; 45; 46; 47; 48; 49; 50; 60; 80];
+  let wide = Composer.format_addressing_hint ~max_cells:200
+      (Composer.Mentions ["한글"]) in
+  Alcotest.(check bool) "short target is not cut" true
+    (String_util.contains_substring wide "@한글 ->")
+;;
+
 let test_compute_caret_position () =
   let (r1, c1) = Composer.compute_caret_position ~chrome_top_rows:6 ~cols:80 ~visible_lines:[] in
   Alcotest.(check int) "empty visible lines row" 7 r1;
@@ -150,6 +167,7 @@ let () =
     ; ( "addressing"
       , [ Alcotest.test_case "addressing analysis" `Quick test_addressing_analysis
         ; Alcotest.test_case "addressing hint formatting" `Quick test_format_addressing_hint
+        ; Alcotest.test_case "Unicode mentions fit cells" `Quick test_unicode_mentions_fit_cells
         ] )
     ; ( "caret"
       , [ Alcotest.test_case "caret calculation" `Quick test_compute_caret_position ] )

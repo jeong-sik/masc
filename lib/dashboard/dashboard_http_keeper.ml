@@ -914,7 +914,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       row)
       names
   in
-  let candle = Candle_observe.read ~base_path:config.base_path in
+  let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
   let equipment = Candle_observe.equipment candle in
   let summaries = List.filter_map Fun.id rows |> List.map (fun row ->
     let portrait = match Json_util.assoc_string_opt "name" row with

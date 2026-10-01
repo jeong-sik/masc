@@ -17,9 +17,13 @@ val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.act
 val notify_fusion_run : run_id:string -> unit
 (** Capture hints for exact-run bindings against the process-wide Fusion registry.
     No I/O or package callback; work is carried to the owner domain. *)
-val authorize_retained_read : access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
-(** Pure read authorization against the strict durable visibility codec. The
-    supplied access is host-owned; no request field can set it. *)
+val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
+(** Pure read authorization against one authoritative full binding snapshot.
+    Explicit durable visibility remains required for current records. The exact
+    published v0.48.0 envelope is readable only after its complete retained
+    producer graph proves shared visibility. Cycles, absent or ambiguous
+    incarnations and private dependencies fail closed. The supplied access is
+    host-owned; no request field can set it. No stored bytes are changed. *)
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {

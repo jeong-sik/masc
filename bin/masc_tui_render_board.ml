@@ -111,7 +111,7 @@ let render_board_compose (state : state) =
     Ansi.dim (Masc_tui_message_layout.count_noun line_count "line") (Masc_tui_message_layout.count_noun draft_chars "char") Ansi.reset
   in
   let addressing_kind = Board_composer.analyze_addressing draft_content in
-  let addressing_line = Board_composer.format_addressing_hint ~max_cells:cols addressing_kind in
+  let addressing_line = Board_composer.format_addressing_hint ~max_cells:(framed_inner_width cols) addressing_kind in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;

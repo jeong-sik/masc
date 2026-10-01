@@ -145,10 +145,8 @@ type error_certainty =
   | Verified_failed
   | Outcome_unverified
 
-(** How one line of the server-sent event stream reads. Exposed so the
-    incremental decoder that drives the live view frames the stream exactly
-    as the strict whole-body decode below does; the two differ in what they
-    extract from an event, not in what counts as one. *)
+(** Line classification for journal metadata and MCP/observer consumers.
+    Keeper chat buffered and incremental readers use Sse_wire event framing. *)
 type sse_line =
   | Sse_ignored
   | Sse_id of int

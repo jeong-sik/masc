@@ -254,10 +254,13 @@ receipt remains evidence rather than completing the original operation. MASC
 returns that result, refuses further host tools in the closing turn, and waits
 for vendor completion before retaining the continuation.
 
-The retained continuation survives restart while queued or claimed before
-resume admission. A crash after resume authority has been consumed remains an
-interrupted execution; MASC does not silently replay potentially completed
-effects. A changed conversation or tool surface also requires recovery instead
+The retained continuation survives restart while queued or preparing a claimed
+resume. Codex consumes that authority immediately before its durable turn-start
+transition; other runtimes use their fallible model-input admission boundary.
+A stale Codex preparation that never reached turn-start restores the same settled
+conversation. A crash after admission remains an interrupted execution, including
+the interval before the transport writes; MASC does not silently replay effects
+that may have completed. A changed conversation or tool surface also requires recovery instead
 of replaying the original input into a new session.
 
 ## Where the numbers here came from

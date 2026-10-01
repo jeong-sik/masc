@@ -296,6 +296,8 @@ val run_turn
           its provider or client, and the error. A failure returns no
           [run_result], so this is the only place the caller learns which
           candidates the walk reached and with what. *)
+  -> ?before_dispatch:(unit -> (unit, string) result)
+       (* Fallible durable resume admission, before provider effects. *)
   -> ?on_produced_checkpoint:
        (runtime_id:string -> attempt:int -> Agent_core.Checkpoint.t -> unit)
   -> ?on_runtime_lane_terminal_error:

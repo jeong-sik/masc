@@ -17,6 +17,7 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  ?before_dispatch:(unit -> (unit, string) result) ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->

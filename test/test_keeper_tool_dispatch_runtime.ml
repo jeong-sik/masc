@@ -9137,6 +9137,9 @@ let native_gate_fixture ~config ~meta ~deferred () =
   let command = Filename.concat config.base_path "native-gate-codex" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
 import json, sys
+if sys.argv[1:3] == ['debug', 'models']:
+    print(json.dumps({'models':[{'slug':'gate-fixture','max_context_window':1000000,'effective_context_window_percent':95}]}))
+    sys.exit(0)
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
 capture = %S

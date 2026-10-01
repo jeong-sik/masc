@@ -771,6 +771,21 @@ let run_keeper_invocation_turn_admitted_inner
                  stays in [dynamic_context] and the persisted user message. *)
               { dynamic_context; dynamic_context_for_tools = None }
             in
+            (* Claiming the queue slot is not dispatch. Keep the typed
+               checkpoint recoverable until the runtime admits provider work;
+               a crash during setup can then requeue the same operation. Once
+               committed, interruption is uncertain and must not replay it. *)
+            let before_dispatch = Option.bind direct_resume (function
+              | Keeper_agent_run.Checkpoint_continuation admission ->
+                let admitted = ref false in
+                Some (fun () ->
+                  if !admitted then Ok ()
+                  else Result.map (fun () -> admitted := true)
+                    (Keeper_direct_checkpoint_continuation.consume
+                      ~base_path:ctx.config.base_path ~keeper_name:meta.name
+                      ~operation_id admission))
+              | Keeper_agent_run.Gate_continuation _
+              | Keeper_agent_run.Runtime_continuation _ -> None) in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
@@ -778,10 +793,8 @@ let run_keeper_invocation_turn_admitted_inner
 	            let settlement, latency_ms =
 	              Inference_utils.timed (fun () ->
                       let consume = match direct_resume with
-                        | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
-                        | Some (Keeper_agent_run.Checkpoint_continuation admission) ->
-                          Keeper_direct_checkpoint_continuation.consume
-                            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
+                        | None | Some (Keeper_agent_run.Gate_continuation _
+                            | Keeper_agent_run.Checkpoint_continuation _) -> Ok ()
                         | Some (Keeper_agent_run.Runtime_continuation admission) -> Keeper_direct_runtime_continuation.consume
                             ~base_path:ctx.config.base_path ~keeper_name:meta.name
                             ~operation_id admission in
@@ -795,6 +808,7 @@ let run_keeper_invocation_turn_admitted_inner
                     (fun () ->
                       Keeper_agent_run.run_turn
                                       ?direct_resume
+                                      ?before_dispatch
                                       ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
                                       ~on_gate_deferred:(fun approval_id -> gate_ids := approval_id :: !gate_ids)

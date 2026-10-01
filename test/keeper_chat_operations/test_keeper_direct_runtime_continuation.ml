@@ -496,7 +496,40 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
     check bool "cancel terminalizes official continuation" true (Semantic.is_terminal (execution store));
     check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 
+let test_cooperative_dispatch_boundary_survives_only_before_admission () =
+  let seed = Semantic.create ~id:(Scope.direct_operation operation_id)
+      ~input ~sources:[] ~now:1. |> function
+    | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
+  let official : Semantic.official_client_checkpoint =
+    { client_kind=Codex; runtime_id="codex.test"; session_id="original-thread";
+      turn_id="settled-turn"; tool_surface_sha256=String.make 64 'a'; frame=seed.frame } in
+  List.iter (fun authority -> with_path (fun path ->
+    with_open path (fun store ->
+      let original = admitted store in
+      ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+        ~execution_digest:original.execution_digest ~checkpoint:authority |> ok);
+      ignore (claim store));
+    (* Process death during local resume preparation, before admission. *)
+    with_open path (fun store ->
+      check int "preparation is restartable" 0
+        (List.length (Store.settle_running_after_restart store ~now:20. |> ok));
+      check bool "original input and attachments survive" true ((current store).input = Some input);
+      check bool "exact continuation survives" true
+        (Store.direct_checkpoint store ~operation_id |> ok = Some authority);
+      ignore (claim store);
+      Store.resume_direct_checkpoint store ~now:21. ~operation_id ~observed:authority |> ok);
+    (* Admission committed: a write might have escaped before this death. *)
+    with_open path (fun store ->
+      check int "dispatch uncertainty is fenced" 1
+        (List.length (Store.settle_running_after_restart store ~now:22. |> ok));
+      check bool "uncertain effects are not replayed" true
+        (Store.claim_next store ~now:23. |> ok = None);
+      check bool "semantic input remains available for reconciliation" true
+        ((execution store).input = Some input))))
+    [Semantic.Agent_core (checkpoint "completed effect history"); Semantic.Official_client official]
+
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "cooperative preparation restarts, dispatch uncertainty does not replay" `Quick test_cooperative_dispatch_boundary_survives_only_before_admission;
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
   test_case "fresh batch stops before a queued continuation" `Quick test_fresh_batch_stops_before_queued_continuation;

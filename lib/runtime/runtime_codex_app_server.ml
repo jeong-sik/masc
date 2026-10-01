@@ -2166,11 +2166,18 @@ let sub_agent_overrides =
    suppresses both shell and unified exec registration; disable both explicitly.
    Native_full retains its explicitly selected vendor execution surface.
    Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
-let client_argv (config : config) =
+let client_argv ?context_catalog ?auto_compact_limit (config : config) =
   [ config.cli_path; "app-server"; "--stdio" ]
+  @ (match context_catalog with
+     | None -> []
+     | Some path -> ["-c"; "model_catalog_json=" ^ Yojson.Safe.to_string (`String path)])
   @ (match config.context_window with
      | None -> []
-     | Some tokens -> [ "-c"; Printf.sprintf "model_context_window=%d" tokens ])
+     | Some tokens ->
+       [ "-c"; Printf.sprintf "model_context_window=%d" tokens ])
+  @ (match auto_compact_limit with
+     | None -> [] (* Custom models retain the client's fallback metadata. *)
+     | Some tokens -> ["-c"; Printf.sprintf "model_auto_compact_token_limit=%d" tokens])
   @ (match config.isolated_home with
      | None -> []
      | Some home ->
@@ -2183,7 +2190,7 @@ let client_argv (config : config) =
   @ sub_agent_overrides
 ;;
 
-let with_spawned_client ~mgr ~clock ~cwd config run =
+let with_spawned_client ?context_catalog ?auto_compact_limit ~mgr ~clock ~cwd config run =
   let selected_home = match config.isolated_home with
     | Some home -> Some home
     | None -> config.account_home in
@@ -2202,7 +2209,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
             |> List.filter (fun entry -> env_key entry <> "CODEX_HOME")
             |> fun entries -> Array.of_list (("CODEX_HOME=" ^ path) :: entries))
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-        (client_argv config)
+        (client_argv ?context_catalog ?auto_compact_limit config)
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
@@ -2287,10 +2294,12 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
+let run_spawned ?context_catalog ?auto_compact_limit ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
   with_spawned_client
+    ?context_catalog
+    ?auto_compact_limit
     ~mgr
     ~clock
     ~cwd
@@ -2451,6 +2460,103 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
+(* Cache only admitted catalog metadata, never auth/config contents. Each
+   connection slot replaces its previous revision; no age-based assumption. *)
+let context_admission_cache = Hashtbl.create 8
+let context_admission_cache_mutex = Mutex.create ()
+let context_admission_identity ~cwd config =
+  Eio_guard.run_in_systhread ~label:"codex-context-revision" (fun () ->
+  let source_home = match config.isolated_home with
+    | Some home -> Some home | None -> config.account_home in
+  let selected_home = effective_account_home source_home in
+  let* environment = client_environment source_home in
+  let fingerprint path =
+    try
+      let stat = Unix.stat path in
+      Printf.sprintf "%s:%d:%d:%d:%.17g:%.17g" path stat.st_dev stat.st_ino
+        stat.st_size stat.st_mtime stat.st_ctime
+    with Unix.Unix_error (Unix.ENOENT, _, _) -> path ^ ":absent" in
+  let rec inherited_configs directory =
+    let parent = Filename.dirname directory in
+    Filename.concat directory ".codex/config.toml" ::
+    (if parent = directory then [] else inherited_configs parent) in
+  let executable = Runtime_official_cli_install.spawn_path Codex ~command:config.cli_path in
+  let config_files = "/etc/codex/config.toml" :: inherited_configs cwd @
+    Option.to_list (Option.map (fun home -> Filename.concat home "config.toml") selected_home) in
+  let* catalog_files = List.fold_left (fun result config_path ->
+    let* files = result in
+    let* dependencies = Runtime_verification_codex_home.model_catalog_dependencies ~config_path
+      |> Result.map_error (fun detail -> Invalid_config detail) in
+    Ok (dependencies @ files)) (Ok []) config_files in
+  let source_files = catalog_files @ config_files @ Option.fold ~none:[] ~some:(fun home ->
+    List.map (Filename.concat home) ["auth.json"; "models_cache.json"]) selected_home in
+  let revisions = List.map (fun path ->
+    fingerprint path ^ (if Sys.file_exists path then Fs_compat.load_file path else "")) source_files in
+  let key = Digestif.SHA256.(to_hex (digest_string
+    (String.concat "\000" ([config.cli_path; cwd; Option.value selected_home ~default:"";
+      Option.value config.model ~default:"";
+      Option.fold ~none:"" ~some:string_of_int config.context_window])))) in
+  let revision = Digestif.SHA256.(to_hex (digest_string
+    (String.concat "\000" (fingerprint executable :: revisions @ Array.to_list environment)))) in
+  Ok (key, revision))
+;;
+
+let admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config =
+  match config.context_window with
+  | None -> Ok None
+  | Some requested ->
+    let* model = match config.model with
+      | Some model -> Ok model
+      | None -> Error (Invalid_config "a declared Codex context requires an explicit model") in
+    let* cache_key, revision = context_admission_identity ~cwd:protocol_cwd config in
+    (* Readiness owns a fresh short-lived home. Never retain its catalog in a
+       process-global cache after that home has been removed. *)
+    let cacheable = Option.is_none config.isolated_home in
+    let cached = if not cacheable then None else
+      Mutex.protect context_admission_cache_mutex (fun () ->
+        Hashtbl.find_opt context_admission_cache cache_key) in
+    match cached with
+    | Some (cached_revision, cached_model, cached_requested, catalog)
+      when cached_revision = revision && cached_model = model && cached_requested = requested -> Ok (Some catalog)
+    | Some _ | None ->
+    let directory = Filename.temp_dir "masc-codex-context-" "" |> Unix.realpath in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
+      let source_home = match config.isolated_home with
+        | Some home -> Some home | None -> config.account_home in
+      let* home = Eio_guard.run_in_systhread ~label:"codex-context-home" (fun () ->
+        Runtime_verification_codex_home.prepare ~preserve_model_catalog:true ?source_home ~directory ())
+        |> Result.map_error (fun detail -> Invalid_config detail) in
+      let* environment = client_environment source_home in
+      (* Relocate only the CLI store. Credential filtering must remain identical
+         to execution, including inherited auth when no account was selected. *)
+      let environment = environment |> Array.to_list
+        |> List.filter (fun entry -> env_key entry <> "CODEX_HOME")
+        |> fun entries -> Array.of_list (("CODEX_HOME=" ^ home) :: entries) in
+      let overrides = Runtime_verification_codex_home.cli_overrides ~home
+        |> List.concat_map (fun value -> ["-c"; value]) in
+      let diagnostics = Buffer.create 128 in
+      let payload = with_idle_timeout clock config.admission_timeout_s (fun () ->
+        Eio.Process.parse_out mgr Eio.Buf_read.take_all ~cwd ~env:environment
+          ~stderr:(Eio.Flow.buffer_sink diagnostics)
+          ([config.cli_path; "debug"; "models"] @ overrides)) in
+      let* catalog = try Ok (Yojson.Safe.from_string payload)
+        with Yojson.Json_error _ -> Error (Invalid_config "Codex context catalog is not JSON") in
+      let* admitted = Runtime_codex_context_admission.resolve ~model ~requested catalog
+        |> Result.map_error (fun error -> Invalid_config (Runtime_codex_context_admission.error_to_string error)) in
+      Log.Runtime_agent.info "Codex context admitted model=%s requested=%d client_maximum=%s usable_input=%s"
+        model admitted.requested
+        (match admitted.maximum with None -> "unbounded_by_catalog" | Some maximum -> string_of_int maximum)
+        (match admitted.usable_input with None -> "client_fallback" | Some tokens -> string_of_int tokens);
+      let* _, after_revision = context_admission_identity ~cwd:protocol_cwd config in
+      if revision <> after_revision then
+        Error (Invalid_config "Codex connection changed during context admission; retry with the current connection")
+      else (
+        if cacheable then
+          Mutex.protect context_admission_cache_mutex (fun () ->
+            Hashtbl.replace context_admission_cache cache_key (revision, model, requested, (payload, admitted.usable_input)));
+        Ok (Some (payload, admitted.usable_input))))
+;;
+
 let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
@@ -2487,7 +2593,14 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
          | None -> "-");
       (match
          (try
-            run_spawned
+            let* context_catalog = admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config in
+            let auto_compact_limit = Option.bind context_catalog snd in
+            let context_catalog = Option.map (fun (payload, _) ->
+              let path = Filename.temp_file "masc-codex-admitted-models-" ".json" in
+              Out_channel.with_open_bin path (fun channel -> output_string channel payload);
+              path) context_catalog in
+            Fun.protect ~finally:(fun () -> Option.iter Sys.remove context_catalog) (fun () ->
+            run_spawned ?context_catalog ?auto_compact_limit
               ~mgr
               ~clock
               ~cwd
@@ -2506,7 +2619,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
               ~on_turn_dispatched:(fun () -> turn_accepted := true)
               ~on_prompt_sent
               ~on_turn_started
-              ~on_stream_event
+              ~on_stream_event)
           with
           | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn

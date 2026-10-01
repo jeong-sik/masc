@@ -1600,6 +1600,56 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
        "original request with completed effects")
 ;;
 
+let test_cooperative_resume_recovers_only_undispatched_claims () =
+  List.iter (fun active ->
+    with_workspace "masc-cooperative-preparation-" (fun base_path ->
+      let keeper_name = "cooperative-preparation" in
+      let claimed = claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id:"codex.default" ~owner_epoch ~at:1. in
+      let started = mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"same-thread" ~updated_at:2. |> Result.get_ok in
+      let starting = mark_turn_starting ~base_path ~keeper_name ~expected:started
+        ~session_id:"same-thread" ~updated_at:3. |> Result.get_ok in
+      let inflight = mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"same-thread" ~turn_id:"settled-turn"
+        ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+      let settled = settle ~base_path ~keeper_name ~expected:inflight
+        ~session_id:"same-thread" ~turn_id:"settled-turn" ~updated_at:5. |> Result.get_ok in
+      let observed : Keeper_semantic_execution.official_client_checkpoint =
+        { client_kind=Codex; runtime_id="codex.default"; session_id="same-thread";
+          turn_id="settled-turn"; tool_surface_sha256=empty_surface;
+          frame=Keeper_repetition_snapshot.empty } in
+      let prepare expected = claim ~base_path ~keeper_name ~expected:(Some expected)
+        ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch
+        ~tool_surface_sha256:empty_surface ~updated_at:6. |> Result.get_ok in
+      let preparing = prepare settled in
+      let preparing = if active then mark_active ~base_path ~keeper_name ~expected:preparing
+        ~session_id:"same-thread" ~updated_at:7. |> Result.get_ok else preparing in
+      let recover ~current_owner_epoch expected =
+        Keeper_direct_checkpoint_continuation.For_testing.recover_undispatched_official_resume
+          ~base_path ~keeper_name ~current_owner_epoch ~observed ~expected:(Some expected)
+        |> Result.get_ok |> Option.get in
+      check bool "live preparation cannot be stolen" true
+        (recover ~current_owner_epoch:owner_epoch preparing = preparing);
+      let restored = recover ~current_owner_epoch:next_owner_epoch preparing in
+      check bool "dead preparation restores the exact settled conversation" true
+        (restored.phase = settled.phase && restored.turn_count = settled.turn_count);
+      check bool "restored session is durable" true
+        (load ~base_path ~keeper_name |> Result.get_ok = Some restored);
+      ignore (Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok);
+      let admitted = prepare restored in
+      let admitted = mark_active ~base_path ~keeper_name ~expected:admitted
+        ~session_id:"same-thread" ~updated_at:8. |> Result.get_ok in
+      let admitted = mark_turn_starting ~base_path ~keeper_name ~expected:admitted
+        ~session_id:"same-thread" ~updated_at:9. |> Result.get_ok in
+      check bool "uncertain dispatch is never automatically released" true
+        (recover ~current_owner_epoch:next_owner_epoch admitted = admitted);
+      check bool "uncertain dispatch cannot resume its old checkpoint" true
+        (Result.is_error (Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+          ~observed ~expected:(Some admitted))))) [false; true]
+;;
+
 let test_operator_interrupt_preserves_older_cooperative_turn () =
   with_workspace "masc-official-operator-continuation-" (fun base_path ->
     let keeper_name = "operator-continuation" in
@@ -2090,6 +2140,8 @@ let () =
             test_input_rejection_codec_keeps_exact_wire_domain
         ; test_case "cooperative continuation preserves its thread after steering" `Quick
             test_cooperative_resume_preserves_thread_after_newer_steering
+        ; test_case "cooperative preparation survives restart but dispatched work is fenced" `Quick
+            test_cooperative_resume_recovers_only_undispatched_claims
         ; test_case "operator interruption preserves an older cooperative turn" `Quick
             test_operator_interrupt_preserves_older_cooperative_turn
         ; test_case "a continuation is admitted only for the turn it left" `Quick

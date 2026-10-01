@@ -68,6 +68,7 @@ export interface DashboardRuntimeProviderBehaviorCapabilities {
 }
 
 export interface DashboardRuntimeDeclaredProviderSpec {
+  max_context?: number | null
   id?: string | null
   display_name?: string | null
   protocol?: string | null
@@ -121,6 +122,7 @@ export interface DashboardRuntimeDeclaredModelSpec {
 }
 
 export interface DashboardRuntimeDeclaredBindingSpec {
+  max_context?: number | null
   provider_id?: string | null
   model_id?: string | null
   is_default?: boolean
@@ -517,6 +519,7 @@ function decodeRuntimeProviderBehaviorCapabilities(
 function decodeRuntimeDeclaredProviderSpec(raw: unknown): DashboardRuntimeDeclaredProviderSpec | null {
   if (!isRecord(raw)) return null
   return {
+    max_context: asNumber(raw.max_context) ?? null,
     id: asNullableString(raw.id),
     display_name: asNullableString(raw.display_name),
     protocol: asNullableString(raw.protocol),
@@ -580,6 +583,7 @@ function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredM
 function decodeRuntimeDeclaredBindingSpec(raw: unknown): DashboardRuntimeDeclaredBindingSpec | null {
   if (!isRecord(raw)) return null
   return {
+    max_context: asNumber(raw.max_context) ?? null,
     provider_id: asNullableString(raw.provider_id),
     model_id: asNullableString(raw.model_id),
     is_default: asBoolean(raw.is_default),

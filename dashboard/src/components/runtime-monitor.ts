@@ -436,6 +436,7 @@ function runtimeParameterDetailRows(
     detailRow('declared provider', 'provider', spec?.provider?.id),
     detailRow('declared provider', 'display name', spec?.provider?.display_name),
     detailRow('declared provider', 'protocol', spec?.provider?.protocol),
+    detailRow('declared provider', 'context', countText(spec?.provider?.max_context)),
     detailRow('declared provider', 'api format', spec?.provider?.api_format),
     detailRow('declared provider', 'transport', spec?.provider?.transport),
     detailRow('declared provider', 'auth kind', spec?.provider?.auth_kind),
@@ -462,6 +463,7 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
     detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
     detailRow('binding', 'default', boolText(binding?.is_default)),
+    detailRow('binding', 'context', countText(binding?.max_context)),
     detailRow('binding', 'concurrency', countText(binding?.max_concurrent)),
     detailRow(
       'binding',

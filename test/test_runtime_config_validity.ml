@@ -6055,7 +6055,7 @@ supports-tool-choice = true
 default = "scoped.shared"
 |}
     (if http then "protocol = \"openai-compatible-http\"\nkind = \"openai_compat\"\nendpoint = \"http://127.0.0.1:1/v1\"\ncredentials = { type = \"inline\", value = \"fixture\" }"
-     else "protocol = \"codex-app-server\"\ncommand = \"codex\"\naccount-home = \"/tmp/context-fixture-account\"")
+     else "protocol = \"codex-app-server\"\nis-non-interactive = true\ncommand = \"codex\"\naccount-home = \"/tmp/context-fixture-account\"")
     provider_context model_context binding_context
 ;;
 
@@ -6065,7 +6065,8 @@ let scoped_context_runtime text =
     | Error errors -> failf "scoped context parse: %s" (render_parse_errors errors) in
   match Runtime_instance.of_binding config (List.hd config.bindings) with
   | Ok runtime -> runtime
-  | Error _ -> fail "scoped context binding must materialize"
+  | Error reason -> failf "scoped context binding must materialize: %s"
+      (Runtime_config_error.string_of_drop_reason reason)
 ;;
 
 let test_context_declaration_precedence_and_http_agreement () =
@@ -6094,7 +6095,7 @@ let test_context_declaration_precedence_and_http_agreement () =
 
 let test_same_model_context_windows_coexist () =
   let provider id extra = Printf.sprintf
-    "[providers.%s]\nprotocol = \"codex-app-server\"\ncommand = \"codex\"\naccount-home = \"/tmp/shared-context-account\"\n%s\n" id extra in
+    "[providers.%s]\nprotocol = \"codex-app-server\"\nis-non-interactive = true\ncommand = \"codex\"\naccount-home = \"/tmp/shared-context-account\"\n%s\n" id extra in
   let text = String.concat "\n"
     [provider "standard" ""; provider "medium" "max-context = 400000";
      provider "large" "max-context = 400000";
@@ -6108,7 +6109,9 @@ let test_same_model_context_windows_coexist () =
   List.iter (fun (provider_id, expected) ->
     let binding = List.find (fun (binding : Runtime_schema.binding) -> binding.provider_id = provider_id) cfg.bindings in
     let runtime = match Runtime_instance.of_binding cfg binding with
-      | Ok runtime -> runtime | Error _ -> fail "coexisting binding must materialize" in
+      | Ok runtime -> runtime
+      | Error reason -> failf "coexisting binding must materialize: %s"
+          (Runtime_config_error.string_of_drop_reason reason) in
     check string "shared provider API model" "gpt-6.1-sol" runtime.model.api_name;
     let row = List.find (fun row -> Yojson.Safe.Util.(row |> member "provider_id" |> to_string) = provider_id) inventory in
     check int "wizard keeps the served binding declaration" expected

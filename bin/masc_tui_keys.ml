@@ -45,9 +45,9 @@ let config_bindings =
   ; b Navigate "L" "logs"
       ~help:"server logs under System", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+      ~help:"pages runtime.toml, the voice reading and the detail of params, prompts \
              and presets, and moves the selection a page on models and themes",
-      Some [ Config_runtime; Config_models; Config_prompts; Config_presets
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
   ; b Navigate "Home/End" "detail"
       ~help:"first and last wrapped detail rows of the selected preset",
@@ -1276,9 +1276,9 @@ let code_notes_bindings =
 let code_history_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Act "H" "close"
   ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]

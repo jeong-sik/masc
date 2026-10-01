@@ -1,27 +1,20 @@
 #!/usr/bin/env bash
-# Validate YAML syntax for every .github/workflows/*.yml.
+# Validate every Git-tracked .yml/.yaml file, including hidden configuration.
 #
-# This script parses every workflow file with PyYAML, aggregates parse
+# This script parses repository YAML with PyYAML, aggregates parse
 # failures across all files, prints one ::error annotation per failing
 # file, and exits non-zero if any file failed (i.e. it does not
 # fail-fast — operators get the full list of broken files in a single
 # CI run).
 #
-# Dependency: PyYAML. The consolidated CI lint job installs it explicitly.
+# Dependency: PyYAML. The manual syntax job installs it explicitly.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-shopt -s nullglob
-files=(.github/workflows/*.yml .github/workflows/*.yaml)
-shopt -u nullglob
-
-if [[ ${#files[@]} -eq 0 ]]; then
-  echo "yaml-syntax: no workflow files found"
-  exit 0
-fi
-
-python3 - "${files[@]}" <<'PY'
+python3 - <<'PYCODE'
+import os
+import subprocess
 import sys
 import yaml
 from yaml.constructor import ConstructorError
@@ -64,18 +57,22 @@ def gha_escape(s: str) -> str:
 
 
 failed = 0
-for path in sys.argv[1:]:
+# The checked-out repository is the validation scope. NUL separation preserves
+# spaces and newlines in filenames; generated dependency trees are not scanned.
+paths = subprocess.check_output(["git", "ls-files", "-z", "--", "*.yml", "*.yaml"])
+files = sorted(os.fsdecode(path) for path in paths.split(b"\0") if path)
+for path in files:
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             yaml.load(fh, Loader=UniqueKeyLoader)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, OSError, UnicodeError) as exc:
         failed += 1
         msg = gha_escape(f"YAML parse error: {exc}")
         print(f"::error file={path}::{msg}", file=sys.stderr)
 
 if failed:
-    print(f"yaml-syntax: {failed} workflow file(s) failed to parse", file=sys.stderr)
+    print(f"yaml-syntax: {failed} YAML file(s) failed to parse", file=sys.stderr)
     sys.exit(1)
 
-print(f"yaml-syntax: {len(sys.argv) - 1} workflow file(s) parsed OK")
-PY
+print(f"yaml-syntax: {len(files)} YAML file(s) parsed OK")
+PYCODE

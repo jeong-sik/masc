@@ -218,7 +218,8 @@ jobs:
             exit 0
           fi
           log() { printf '%s\n' "$*" | tee -a "${CI_TEST_LOG_FILE}"; }
-          export DUNE_SOURCEROOT="$(pwd -P)"
+          DUNE_SOURCEROOT="$(pwd -P)"
+          export DUNE_SOURCEROOT
           if [ -n "${TARGET_EIO_BACKEND}" ]; then
             export EIO_BACKEND="${TARGET_EIO_BACKEND}"
           fi
@@ -388,7 +389,7 @@ jobs:
           exit "${status}"
 
       # Only an explicitly targeted Usage visual run installs browser
-      # tooling. Normal PR gates and nightly suites keep their existing path.
+      # tooling. Other manually selected suites keep their existing path.
       - name: Capture Usage fixture PTY screenshots
         if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_usage_studio_pty') }}
         env:

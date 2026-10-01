@@ -2306,10 +2306,11 @@ let planning_detail_viewport (state : state) =
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
+  let tail = Printf.sprintf "  %s %s"
+    (bracketed ~max_cells:planning_phase_column (planning_phase_label goal.pg_phase))
+    (Terminal_text.single_line goal.pg_id) in
   let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
-    ~after:(Printf.sprintf "  %s %s"
-      (bracketed ~max_cells:planning_phase_column (planning_phase_label goal.pg_phase))
-      (Terminal_text.single_line goal.pg_id)) in
+    ~after:tail ^ tail in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;

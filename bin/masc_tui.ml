@@ -11966,6 +11966,7 @@ let handle_goal_confirmation_key state ~mailbox =
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
+           state.planning_scroll <- 0;
            Eio.Fiber.fork ~sw (fun () ->
              let result =
                let ( let* ) = Result.bind in

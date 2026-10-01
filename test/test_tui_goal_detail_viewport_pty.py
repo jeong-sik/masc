@@ -112,6 +112,13 @@ def run(executable):
                 h.drain_until_quiet(process, fd, output)
                 start, end, count = window(output)
                 assert start > 1 and end == count, (start, end, count)
+                if width >= 80:
+                    # Only the pinned header names this Goal at the document's
+                    # end; lifecycle actions must retain that exact context.
+                    header = next(line for line in screen(output).splitlines()
+                                  if b"MASC Work" in line)
+                    assert GOAL_ID.encode() in header, (width, rows, header)
+                    assert b"executing" in header, (width, rows, header)
                 print("GOAL_DETAIL_VIEWPORT " + json.dumps({"width": width, "rows": rows,
                        "window": [start, end, count], "screen": screen(output).decode("utf-8", "replace")}), flush=True)
                 h.send_and_wait(process, fd, output, b"\x1b[H", b"TITLEHEAD")

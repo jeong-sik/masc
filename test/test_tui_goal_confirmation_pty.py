@@ -142,8 +142,11 @@ def run(executable: str, *, replace_proof: bool) -> None:
             raise AssertionError("Home did not return to the same inspected proof")
         if read_count != 1 or posted:
             raise AssertionError("reader edges must not reread or post the proof")
-        h.resize_and_wait(process, master_fd, output, rows=50, columns=160,
-                          needle=b"CONFIRM THIS PROOF", final_cursor=b"\x1b[?25l")
+        # Submit from the overflowed last window, where metadata remains
+        # scrollable even after the proof is replaced by a Sending row.
+        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        if reader_window()[0] <= 1 or reader_window()[1] != total:
+            raise AssertionError("submission must start from the proof document's end")
         if replace_proof:
             verdict["verification_run_id"] = "run-2"
         needle = (
@@ -153,6 +156,13 @@ def run(executable: str, *, replace_proof: bool) -> None:
             submitting_frame = h.send_and_wait(
                 process, master_fd, output, b"a", b"Sending proof confirmation..."
             )
+            if reader_window()[0] != 1:
+                raise AssertionError("Sending state must reset the document to its first row")
+            complete_end = output.rfind(h.FRAME_END)
+            header = next(row for row in h.screen_text(bytes(output[:complete_end + len(h.FRAME_END)])).splitlines()
+                          if b"MASC Work" in row)
+            if goal_id.encode() not in header or b"confirming" not in header:
+                raise AssertionError(f"Sending header lost Goal identity or phase: {header!r}")
             if not h.wait_for_fixture_event(
                 process, master_fd, output, submit_entered, timeout=3.0
             ):
@@ -164,6 +174,10 @@ def run(executable: str, *, replace_proof: bool) -> None:
             h.send_and_wait(
                 process, master_fd, output, b"\r", b"Sending proof confirmation..."
             )
+            # Keep the existing result evidence at its original geometry;
+            # the held in-flight assertions above exercised the short reader.
+            h.resize_and_wait(process, master_fd, output, rows=50, columns=160,
+                              needle=b"Sending proof confirmation...", final_cursor=b"\x1b[?25l")
             result_start = len(output)
         finally:
             release_submit.set()

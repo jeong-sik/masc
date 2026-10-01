@@ -1,32 +1,3 @@
-(* Test funding is a complete historical payout, not an orphan mint. *)
-let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
-  let identity = payment.identity in
-  let keeper = match payment.allocations with
-    | [allocation] -> allocation.Candle_payment.keeper
-    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
-  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
-  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
-  ; {Candle_event.at;body=Candle_event.Snapshot
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
-       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
-         | Ok value -> value | Error detail -> Alcotest.fail detail);
-       due_date=None;title="Completed funding fixture";metric=Some "completed";
-       target_value=Some "1";linked_task_ids=task_ids}}
-  ; {Candle_event.at;body=Candle_event.Payout_owed
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
-  ; {Candle_event.at;body=Candle_event.Candidates
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;
-       tasks=List.map (fun id -> id, Candle_event.Found
-         {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
-       candidate_task_ids=task_ids;candidate_keepers=[keeper]}}
-  ; {Candle_event.at;body=Candle_event.Paid payment}
-  ]
-;;
-
 open Alcotest
 open Masc
 

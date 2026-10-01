@@ -195,7 +195,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     ["paid-once:2";"paid-once:3";"paid-once:4"]
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
-  check bool "ledger decode replays the same integer calculation" true (decoded = p)
+  check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
 
 let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
   let scenario ~goal_id ~amount ~weight_max ~weight expected =

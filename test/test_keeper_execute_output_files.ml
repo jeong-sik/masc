@@ -2,7 +2,7 @@ module Capture = Process_output_capture
 module Publish = Masc.Keeper_execute_output_files
 module Redaction = Masc.Keeper_secret_redaction
 
-let stdout = "publisher stdout proof\n"
+let stdout = "publisher stdout proof — 한글\n"
 let stderr = "publisher stderr proof\n"
 
 (* The ceiling a call gets when no lane widened its projection: the Execute
@@ -140,6 +140,30 @@ let blob_bytes ~base_path field fields =
      | Ok None -> Alcotest.failf "%s names a blob the store does not hold" field
      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
 
+(* The child can emit binary bytes or byte-cut UTF-8 even under the inline
+   ceiling. Its result must cross JSON transport without losing the evidence. *)
+let test_non_utf8_child_output_is_preserved () =
+  let stdout = "한글 intact\n" ^ "\x89PNG\r\n\x1a\n" in
+  let stderr = "cut Korean: \xed\x95" in
+  with_process_output ~stdout ~stderr (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
+    match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+    | Error error -> Alcotest.fail (Publish.error_to_string error)
+    | Ok publication ->
+      let fields = publication.Publish.fields in
+      let wire = Yojson.Safe.to_string (`Assoc fields) in
+      Alcotest.(check bool) "JSON transport contains only valid UTF-8" true
+        (String_util.is_valid_utf8 wire);
+      ignore (Yojson.Safe.from_string wire);
+      Alcotest.(check bool) "binary output is not misrepresented as inline text" false
+        (List.mem_assoc "output" fields);
+      Alcotest.(check string) "combined bytes remain available" (stdout ^ stderr)
+        (blob_bytes ~base_path "output_artifact" fields);
+      Alcotest.(check string) "stdout remains byte-identical" stdout
+        (blob_bytes ~base_path "stdout_artifact" fields);
+      Alcotest.(check string) "stderr retains its partial character" stderr
+        (blob_bytes ~base_path "stderr_artifact" fields);
+      publication.release_sources ())
+
 let test_claude_lane_returns_20000_bytes_inline () =
   publish_payload ~lane:claude_lane 20_000 (fun ~base_path:_ ~payload fields ->
     Alcotest.(check bool) "20,000 bytes come back inline on the Claude Code lane" true
@@ -173,6 +197,8 @@ let () =
           test_changed_eof_source_is_not_published
       ; Alcotest.test_case "publication waits for the caller to release sources" `Quick
           test_publication_retains_sources_until_release
+      ; Alcotest.test_case "non-UTF-8 child output survives JSON transport" `Quick
+          test_non_utf8_child_output_is_preserved
       ]
     ; "lane ceiling",
       [ Alcotest.test_case "Claude Code lane returns 20,000 bytes inline" `Quick

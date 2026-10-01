@@ -1,0 +1,34 @@
+{
+  "roster_phases": [
+    "ready",
+    "ready",
+    "malformed-supply",
+    "malformed-supply",
+    "malformed-supply",
+    "ready"
+  ],
+  "posts": [
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/keepers/alpha/directive",
+      "body": {
+        "action": "pause"
+      }
+    }
+  ]
+}

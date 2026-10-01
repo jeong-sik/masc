@@ -198,30 +198,18 @@ def run(binary, captures):
             wait(lambda text: b"b.settled" in text, "fresh B roster after release")
             h.resize_and_wait(process, fd, output, rows=35,
                 columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(h.FULL_REDRAW,))
-            open_items()
-            wait(lambda text: b"Balance 7.500 Candle" in text, "B Item account did not load")
-            assert b"12.500" not in visible() and b"99.999" not in visible()
-            assert b"2.000" in item_row(b"glasses") and b"owned" not in item_row(b"glasses")
-            h.send_and_wait(process, fd, output, b"j" * 10, b"Items 11/18")
-            wait(lambda text: b"crown" in text and b"owned" in text, "B's owned crown")
-            assert b"2.000" in item_row(b"crown") and b"owned" in item_row(b"crown")
-            capture("b-ready")
-            h.send_and_wait(process, fd, output, b"k" * 10, b"Items 1/18")
-            wire.change_account("failed")
-            os.write(fd, b"r")
-            wait(lambda text: b"Account unavailable:" in text and b"current Item ledger unreadable" in text,
-                "B's failed current read was hidden")
+            # B is intentionally foreign to the local workspace. Its roster
+            # remains observable, but Item reads never acquire admission.
+            assert b"MISMATCH local " in visible()
             assert b"Balance " not in visible() and b"owned" not in visible()
-            capture("b-unread")
-            wire.change_account("off")
-            os.write(fd, b"r")
-            wait(lambda text: b"Candle off" in text, "Off retained a monetary reading")
-            assert b"Balance " not in visible() and b"owned" not in visible()
-            capture("b-off")
-            wire.change_account("ready")
-            os.write(fd, b"r")
-            wait(lambda text: b"Balance 7.500 Candle" in text, "B account did not recover")
-            capture("b-recovered")
+            assert "▸Items".encode() not in visible()
+            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+                "late A Item money was rendered while B was unadmitted"
+            with wire.lock:
+                assert not [event for event in wire.events
+                    if event["event"] == "items" and event["phase"].startswith("b")], \
+                    "foreign B acquired an Item account read"
+            capture("b-unadmitted-after-late-a")
             wire.publish("a-returned")
             wait(lambda text: b"a.returned" in text and b"MISMATCH" not in text
                 and "▸Items".encode() not in text, "return to A retained B Item detail")
@@ -232,6 +220,25 @@ def run(binary, captures):
             assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered after the workspace boundary"
             capture("a-current-after-return")
+            h.send_and_wait(process, fd, output, b"j" * 14, b"Items 15/18")
+            wait(lambda text: b"quill" in text and b"owned" in text, "returned A's owned quill")
+            assert b"1.750" in item_row(b"quill") and b"owned" in item_row(b"quill")
+            h.send_and_wait(process, fd, output, b"k" * 14, b"Items 1/18")
+            wire.change_account("failed")
+            os.write(fd, b"r")
+            wait(lambda text: b"Account unavailable:" in text and b"current Item ledger unreadable" in text,
+                "admitted A's failed current read was hidden")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("a-unread")
+            wire.change_account("off")
+            os.write(fd, b"r")
+            wait(lambda text: b"Candle off" in text, "Off retained a monetary reading")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("a-off")
+            wire.change_account("ready")
+            os.write(fd, b"r")
+            wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
+            capture("a-recovered")
             wire.set_roster_unavailable(True)
             wait(lambda text: b"Item account revision" in text,
                  "an unavailable roster retained monetary facts")

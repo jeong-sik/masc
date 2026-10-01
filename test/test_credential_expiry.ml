@@ -191,8 +191,11 @@ let test_persisted_invalid_invite_reaches_diagnostic_projections () =
          (Inventory.error_row (Auth.Invalid_credential_expiry { agent_name; role; timestamp }))
      | _ -> fail "named and UUID-backed corruption must each produce exactly one diagnostic");
     (match Invite.list ~base_path ~now:(Time_compat.now ()) with
-     | Error (Auth.Invalid_credential_expiry { timestamp = "not-a-timestamp"; _ }) -> ()
-     | Error error -> fail (Auth.credential_listing_error_to_string error)
+     | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp "not-a-timestamp")) -> ()
+     | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp stamp)) ->
+         fail ("unexpected invalid expiry: " ^ stamp)
+     | Error (Invite.Credentials_unavailable error) ->
+         fail (Masc_domain.masc_error_to_string error)
      | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
     [ false; true ]
 
@@ -288,7 +291,7 @@ let test_dangling_credential_directory_is_unreadable () =
    | [ Error (Auth.Unreadable_credential _) ] -> ()
    | _ -> fail "a dangling agents directory is a storage failure, not an empty store");
   (match Invite.list ~base_path ~now:(Time_compat.now ()) with
-   | Error (Auth.Unreadable_credential _) -> ()
+   | Error (Invite.Credentials_unavailable _) -> ()
    | _ -> fail "Play must preserve credential directory failures")
 
 let test_nonregular_inventory_entries_are_unreadable () =
@@ -305,10 +308,10 @@ let test_nonregular_inventory_entries_are_unreadable () =
           fifo, named
       | `Redirect ->
           let id = Masc_domain.Credential_id.generate () in
-          let target = Masc_domain.Credential_id.to_string id in
+          let target = Masc_domain.Credential_id.to_string id ^ ".json" in
           Auth.save_private_text_file named
             (Yojson.Safe.to_string (`Assoc ["redirect_to", `String target]));
-          let fifo = Filename.concat (Filename.dirname named) (target ^ ".json") in
+          let fifo = Filename.concat (Filename.dirname named) target in
           fifo, fifo
     in
     Unix.mkfifo fifo 0o600;
@@ -324,8 +327,7 @@ let test_nonregular_inventory_entries_are_unreadable () =
            check string "inventory retains the failed path" diagnostic_path path
        | _ -> fail "a nonregular entry must be one unreadable diagnostic");
       (match Invite.list ~base_path ~now:(Time_compat.now ()) with
-       | Error (Auth.Unreadable_credential {path;_}) ->
-           check string "Play preserves the diagnostic path" diagnostic_path path
+       | Error (Invite.Credentials_unavailable _) -> ()
        | _ -> fail "Play must refuse an unreadable credential store")))
     [`Direct; `Symlink; `Redirect]
 

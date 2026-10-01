@@ -51,7 +51,10 @@ val find_static_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 (** Static bearer-only lookup. OAuth bootstrap uses this entrypoint so an
     OAuth access token cannot mint a new OAuth grant recursively. General
-    request authentication should use {!find_credential_by_token}. *)
+    request authentication should use {!find_credential_by_token}. Static
+    candidates must match the complete current named credential, including
+    after a cache rebuild; standalone UUID payloads are data, not independent
+    bearer authority. *)
 
 val find_static_credential_in_index :
   (string, agent_credential list) Hashtbl.t -> token:string ->
@@ -164,3 +167,6 @@ val verify_token_owner_alias :
 
 val verify_token :
   string -> agent_name:string -> token:string -> (agent_credential, masc_error) result
+(** Static verification through a UUID or stored redirect alias requires the
+    complete credential to still match its owner's current named binding.
+    Direct UUID data reads do not grant independent bearer authority. *)

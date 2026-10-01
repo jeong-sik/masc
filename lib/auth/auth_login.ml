@@ -41,11 +41,7 @@ let single_quote_shell value =
    [Auth.raw_token_file], so a rename cannot leave a reader looking in the old
    place. *)
 let read_persisted_token ~base_path ~agent_name =
-  let path = Auth.raw_token_file base_path agent_name in
-  match In_channel.with_open_bin path In_channel.input_all with
-  | contents ->
-      if String.trim contents = "" then None else Some contents
-  | exception Sys_error _ -> None
+  Auth.load_raw_token base_path ~agent_name
 
 (* Two flags can name a lifetime, and they name different ones. Both at once is
    refused rather than resolved by precedence: whichever one lost would hand the

@@ -38,6 +38,17 @@ val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Saf
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val sampling_requests : t -> instance_id:string -> (Yojson.Safe.t list, string) result
+val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+(** Independently retain the terminal request/outcome link before replacing the
+    primary request index. Recovery can discover it if that replacement fails. *)
+val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
+  f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
+(** Stream recovery records with bounded per-record reads and constant directory
+    memory. Terminal recovery links are visited first, then unresolved requests.
+    The callback can stop immediately with [Error]; directory and decoding errors
+    are explicit. Call from a system thread. No ordering is guaranteed. *)
+
 (** Discover requests after cancellation or restart, including pending rows that
     have no terminal evidence. Records are atomically replaced, never removed. *)
 val bindings : t -> (Yojson.Safe.t list, string) result

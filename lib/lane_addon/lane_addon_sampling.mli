@@ -8,6 +8,10 @@ type t
 val for_worker : t -> package:Lane_addon_types.package -> instance_id:string ->
   (Agent_core.Mcp.sampling_handler, string) result
 (** Refuse a broker created for a different worker before creating a container. *)
+val package_response : Mcp_protocol.Sampling.create_message_result ->
+  Mcp_protocol.Sampling.create_message_result
+(** Remove all callback metadata before exposing a response to a package.
+    The original response remains unchanged in host-retained evidence. *)
 val create :
   store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   instance_id:string -> route:string ->

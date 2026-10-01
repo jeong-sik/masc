@@ -48,6 +48,13 @@ let encode_bounded ~max_bytes json =
   try value json; Ok (Yojson.Safe.to_string json)
   with Evidence_too_large -> Error "sampling evidence exceeds package byte envelope"
 
+let package_response (answer : S.create_message_result) = {answer with _meta=None}
+
+let validate_response answer =
+  try S.create_message_result_of_yojson (S.create_message_result_to_yojson answer) with
+  | Not_found -> Error "host response has missing fields for its content discriminator"
+  | Yojson.Safe.Util.Type_error (detail, _) -> Error detail
+
 let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
   let* () = match package.model_access with
     | Types.Host_sampling -> Ok ()
@@ -80,8 +87,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       Store.save_sampling_request store ~instance_id ~request_id (record state)) in
     let* () = save Pending in
     let outcome = try match invoke ~route ~request params with
-      | Ok answer when String.trim answer.S.model<>"" -> Answer answer
-      | Ok answer -> Invalid_response (answer, "host response has no model identity")
+      | Ok answer ->
+          (match validate_response answer with
+           | Error detail -> Invalid_response (answer, detail)
+           | Ok _ when String.trim answer.S.model = "" ->
+               Invalid_response (answer, "host response has no model identity")
+           | Ok _ -> Answer answer)
       | Error detail -> Host_error detail
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -102,6 +113,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
             "error",`String detail;"request",Types.evidence_to_json request])) in
       let references = `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence] in
+      let* () = match Eio_unix.run_in_systhread (fun () ->
+        Store.save_sampling_outcome store ~instance_id ~request_id (record (Finished evidence))) with
+        | Ok () -> Ok ()
+        | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
+            "error",`String detail;"request",Types.evidence_to_json request;
+            "evidence",references])) in
       let* () = match save (Finished evidence) with
         | Ok () -> Ok ()
         | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
@@ -112,9 +129,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let* references = retained in
     match outcome with
     | Answer answer ->
-        let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
-        Ok {answer with _meta=Some (`Assoc (("masc.lane_sampling",references)
-          :: List.filter (fun (key, _) -> not (String.equal key "masc.lane_sampling")) metadata))}
+        let answer = package_response answer in
+        Ok {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
     | Host_error detail ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "host_error";
           "error",`String detail;"evidence",references]))

@@ -23134,7 +23134,7 @@ and is loaded on demand through keeper_skill.
                           state.planning_filter <- Planning_filter_active);
                      navigate Planning;
                      state.planning_mode <- Planning_detail goal_id;
-                     reconcile_home_request_detail state;
+                     Masc_tui_home.reconcile_home_request_detail state;
                      state.planning_scroll <- 0;
                      state.goal_timeline <- None;
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id

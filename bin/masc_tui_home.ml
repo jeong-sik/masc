@@ -170,12 +170,12 @@ let home_continue_rows (state : state) =
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                    && keeper_available_for_new_message state name ->
         [ Home_resume name,
-          "Continue with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
+          "Continue with " ^ Masc_tui_ansi.Terminal_text.single_line name
           ^ save_notice ]
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                          && Option.is_some state.keepers_error ->
         [ Home_read_last name,
-          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
+          "Last conversation with " ^ Masc_tui_ansi.Terminal_text.single_line name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
     | Some _ | None -> []
@@ -189,7 +189,7 @@ let home_continue_rows (state : state) =
                "Create a Keeper · conversation history unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                "Create a Keeper · last conversation "
-               ^ Masc.Tui_terminal_text.sanitize_terminal_text name ^ " unavailable"
+               ^ Masc_tui_ansi.Terminal_text.single_line name ^ " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
     | _ ->
@@ -200,7 +200,7 @@ let home_continue_rows (state : state) =
                 | Unreadable_chat_receipt _, _ ->
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-                    "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
+                    "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
                     ^ (if state.workspace_identity = Workspace_identity_unread
                        then " unavailable · workspace identity not read · choose a Keeper"
                        else " unavailable · choose a Keeper")

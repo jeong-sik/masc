@@ -77,6 +77,7 @@ import {
   CONTENT_CATEGORIES,
   detailPost,
   detailLoading,
+  detailReadPhase,
   detailLoadingOlder,
   detailPostId,
   detailFocusedCommentId,
@@ -1449,9 +1450,12 @@ export function BoardSurface() {
     ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
     : null
 
-  if (postId && !post && detailPostId.value !== postId && !detailLoading.value) {
-    void loadPostDetail(postId, route.value.params.comment ?? null)
-  }
+  useEffect(() => {
+    if (postId && !post && !detailLoading.value
+      && (detailPostId.value !== postId || detailReadPhase.value === 'failed')) {
+      void loadPostDetail(postId, route.value.params.comment ?? null)
+    }
+  }, [postId, post?.id, route.value.params.comment])
 
   if (postId) {
     return post

@@ -79,6 +79,7 @@ vi.mock('./board-state', () => ({
   detailComments: { value: [] },
   detailCommentPage: { value: { offset: 0, total: 0 } },
   detailLoading: { value: false },
+  detailReadPhase: { value: 'idle' },
   detailLoadingOlder: { value: false },
   detailPostId: { value: null },
   detailFocusedCommentId: { value: null },

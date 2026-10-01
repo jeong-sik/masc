@@ -62,6 +62,9 @@ export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
 export const detailPost = signal<BoardPost | null>(null)
 export const detailComments = signal<BoardComment[]>([])
 export const detailCommentPage = signal<BoardCommentPage>({ offset: 0, total: 0 })
+// Initial post GET; ancestor pagination keeps the existing loading flags.
+export type DetailReadPhase = 'idle' | 'loading' | 'loaded' | 'failed'
+export const detailReadPhase = signal<DetailReadPhase>('idle')
 export const detailLoading = signal(false)
 export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
@@ -345,6 +348,7 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   detailCommentPage.value = { offset: 0, total: 0 }
   detailLoadingOlder.value = false
   detailLoading.value = true
+  detailReadPhase.value = 'loading'
   try {
     const data = await fetchBoardPost(postId)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
@@ -375,6 +379,7 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
       // dropped here even after the wire/list-normalization fix landed.
       closed: data.closed,
     }
+    detailReadPhase.value = 'loaded'
     let comments = data.comments
     let page = data.commentPage
     detailComments.value = comments
@@ -400,6 +405,7 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   } catch (err) {
     console.warn('[Board] failed to load post detail:', postId, err)
     if (detailPostId.value === postId && detailRequestId === requestId) {
+      detailReadPhase.value = 'failed'
       detailPost.value = null
       detailComments.value = []
       detailCommentPage.value = { offset: 0, total: 0 }

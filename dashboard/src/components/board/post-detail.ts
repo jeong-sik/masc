@@ -29,6 +29,7 @@ import {
   detailComments,
   detailCommentPage,
   detailLoading,
+  detailReadPhase,
   detailLoadingOlder,
   detailPostId,
   detailFocusedCommentId,
@@ -547,6 +548,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   useEffect(() => {
     if (detailPostId.value !== post.id
       || detailFocusedCommentId.value !== focusedCommentId
+      || detailReadPhase.value === 'failed'
       || (focusedCommentId && !detailLoading.value && detailCommentPage.value.offset > 0
         && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)

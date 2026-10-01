@@ -5397,11 +5397,15 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -7949,11 +7953,13 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;

@@ -1702,7 +1702,7 @@ type async_msg =
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of
-      ( Masc.Tui_decode.keeper_lanes_snapshot
+      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
@@ -1777,7 +1777,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
-  | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Connectors_loaded of unit ref * (Masc.Tui_decode.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
       results :
@@ -1911,7 +1911,7 @@ type async_msg =
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
+  | Keeper_schedules_loaded of unit ref * string * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -3338,7 +3338,18 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
            enqueue_async mailbox
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
+let server_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+
 let launch_keeper_schedules_load state ~mailbox ~keeper_name =
+  if server_authority_ready state then
+  let authority = state.detail_read_authority in
   match state.keeper_schedules_inflight with
   | Some inflight when String.equal inflight keeper_name -> ()
   | Some _ | None ->
@@ -3349,11 +3360,11 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       Masc_tui_async_read.launch
         ~source:Masc_tui_async_read.Keeper_schedule
         ~on_not_run:(fun () ->
-          if Option.equal String.equal state.keeper_schedules_inflight
+          if authority == state.detail_read_authority && Option.equal String.equal state.keeper_schedules_inflight
                (Some keeper_name)
           then state.keeper_schedules_inflight <- None)
         ~deliver:(fun result ->
-          enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result)))
+          enqueue_async mailbox (Keeper_schedules_loaded (authority, keeper_name, result)))
         (fun () ->
           Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
@@ -4208,6 +4219,7 @@ let mark_detail_read_started state ~tab ~keeper =
     ~now_ns:(Mtime_clock.elapsed_ns ())
 
 let launch_keeper_config_view state ~mailbox keeper_name =
+  if server_authority_ready state then
   let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4227,13 +4239,6 @@ let item_account_revision state keeper_name =
     String.equal row.kr_name keeper_name) rows
   |> Option.map (fun row -> keeper_name, row.Tui_decode.kr_candle_account_revision)
 
-let server_authority_ready state =
-  match state.server_identity with
-  | Some identity ->
-      identity.Tui_decode.sid_state_ready <> Some false
-      && not (String.equal identity.sid_base_path "")
-      && not (String.equal identity.sid_masc_root "")
-  | None -> false
 
 let withdraw_keeper_items_reading state =
   state.item_account_revision <- None;
@@ -4274,6 +4279,7 @@ let refresh_visible_item_account state ~mailbox =
   | _ -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
+  if server_authority_ready state then
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4283,8 +4289,10 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
     (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  if server_authority_ready state then
   let host = server_peer_host in
   let port = state.port in
+  state.keeper_sandbox_logs_requested <- Some keeper_name;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   let generation = state.keeper_sandbox_logs_generation in
   state.keeper_sandbox_logs_inflight <-
@@ -4436,6 +4444,7 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
              items ))
 
 let launch_github_identity_view state ~mailbox keeper_name =
+  if server_authority_ready state then
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4447,6 +4456,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
         ~keeper_name)
 
 let launch_identity_view state ~mailbox keeper_name =
+  if server_authority_ready state then
   let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4618,6 +4628,8 @@ let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
         (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
+  if server_authority_ready state then
+  let authority = state.detail_read_authority in
   if state.connectors_inflight then ()
   else begin
     state.connectors_inflight <- true;
@@ -4625,9 +4637,9 @@ let launch_connectors_load state ~mailbox =
     let port = state.port in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Connectors
-      ~on_not_run:(fun () -> state.connectors_inflight <- false)
+      ~on_not_run:(fun () -> if authority == state.detail_read_authority then state.connectors_inflight <- false)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Connectors_loaded result))
+        enqueue_async mailbox (Connectors_loaded (authority, result)))
       (fun () -> Masc_tui_loader.load_connectors ~host ~port)
   end
 
@@ -5564,6 +5576,7 @@ let launch_harness_load state ~mailbox =
   end
 
 let launch_fusion_runs_load state ~mailbox =
+  if server_authority_ready state then
   match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (fusion_runs, request) ->
@@ -5668,15 +5681,17 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
       enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
 
 let launch_keeper_lanes_load state ~mailbox =
+  if server_authority_ready state then
+  let authority = state.detail_read_authority in
   if state.keeper_lanes_inflight then ()
   else begin
     state.keeper_lanes_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.keeper_lanes_inflight <- false)
+      ~on_not_run:(fun () -> if authority == state.detail_read_authority then state.keeper_lanes_inflight <- false)
       ~deliver:(fun keeper_result ->
-        enqueue_async mailbox (Lanes_loaded keeper_result))
+        enqueue_async mailbox (Lanes_loaded (authority, keeper_result)))
       (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
@@ -10710,6 +10725,34 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_overview_goals_load state) results.http_overview_goals;
   Option.iter (apply_account_emails_load state) results.http_account_emails
 
+(* Revoke the whole workspace-owned detail population before any successor
+   starts. Queued plain replies carry the old authority token; fetched reads
+   and Sandbox logs have their own monotonic request generations. *)
+let revoke_detail_readings state =
+  state.detail_reads <- [];
+  state.detail_read_authority <- ref ();
+  state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+  state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
+  state.keeper_sandbox_logs_inflight <- None;
+  state.keeper_sandbox_logs <- None;
+  state.keeper_sandbox_logs_error <- None;
+  state.keeper_lanes_inflight <- false;
+  state.lanes <- None;
+  state.keeper_secrets <- [];
+  state.lanes_error <- None;
+  state.connectors_inflight <- false;
+  state.connectors_reload_after_inflight <- false;
+  state.connectors <- None;
+  state.connectors_error <- None;
+  state.connector_unbind_offer_pending <- [];
+  state.connector_unbind_offer <- None;
+  state.connector_unbind_armed <- None;
+  state.connector_unbind_all_armed <- None;
+  state.keeper_schedules_inflight <- None;
+  state.keeper_schedules <- None;
+  state.keeper_schedules_error <- None;
+  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
+
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
    replacement still moves A -> B as soon as /health succeeds. The local
@@ -10734,8 +10777,7 @@ let apply_server_identity_reading state reading =
     withdraw_keeper_items_reading state;
     (* Every detail ticket needs the workspace authority that launched it.
        Unread authority revokes replies without moving the operator away. *)
-    state.detail_reads <- [];
-    state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+    revoke_detail_readings state;
     state.candle_observation <- None;
     state.candle_read_authority <- ref ()
   end;
@@ -10754,8 +10796,7 @@ let apply_server_identity_reading state reading =
     (* Pending detail tokens belong to the workspace that launched them.
        Keep the generation monotonic so an A -> B -> A return cannot admit
        an old response after the operator opens a new detail read. *)
-    state.detail_reads <- [];
-    state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+    revoke_detail_readings state;
     state.item_account <- None;
     state.item_account_error <- None;
     state.item_account_revision <- None;
@@ -10859,7 +10900,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
         match state.keeper_sandbox_logs, state.keeper_sandbox_logs_error with
         | Some (stamp, _), _ | _, Some (stamp, _) ->
             String.equal stamp keeper.k_name
-        | None, None -> false
+        | None, None -> Option.equal String.equal state.keeper_sandbox_logs_requested (Some keeper.k_name)
       in
       if logs_were_open then launch_keeper_sandbox_logs state ~mailbox keeper.k_name
   | Detail_instructions ->
@@ -13804,8 +13845,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       withdraw_keeper_items_reading state;
-      state.detail_reads <- [];
-      state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+      revoke_detail_readings state;
       state.candle_observation <- None;
       state.candle_read_authority <- ref ();
       state.server_identity <- None;
@@ -14064,7 +14104,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if current && still_selected then
+      if current && still_selected && server_authority_ready state then
         match result with
         | Ok lines ->
             state.keeper_config_view <- Some (keeper_name, lines);
@@ -14094,7 +14134,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if current && still_selected then
+      if current && still_selected && server_authority_ready state then
         match result with
         | Ok reading ->
             state.keeper_sandbox_view <- Some (keeper_name, reading);
@@ -14109,7 +14149,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             && request.slr_generation = generation
         | None -> false
       in
-      if is_current then begin
+      if is_current && server_authority_ready state then begin
         state.keeper_sandbox_logs_inflight <- None;
         match result with
         | Ok logs ->
@@ -14576,7 +14616,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if current && still_selected then
+      if current && still_selected && server_authority_ready state then
         match result with
         | Ok lines ->
             state.github_identity_view <- Some (keeper_name, lines);
@@ -14605,7 +14645,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if current && still_selected then
+      if current && still_selected && server_authority_ready state then
         match result with
         | Ok providers ->
             state.identity_view <- Some (keeper_name, providers);
@@ -14825,21 +14865,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
-  | Keeper_schedules_loaded (keeper_name, result) ->
-      (match state.keeper_schedules_inflight with
-       | Some inflight when String.equal inflight keeper_name ->
-           state.keeper_schedules_inflight <- None
-       | Some _ | None -> ());
-      (* A page that arrived for a keeper the cursor has left is not this tab's
-         answer; filing it would show one Keeper's schedules under another's
-         name. *)
-      (match result with
-       | Ok snapshot ->
-           state.keeper_schedules <- Some (keeper_name, snapshot);
-           state.keeper_schedules_error <- None
-       | Error err ->
-           state.keeper_schedules <- None;
-           state.keeper_schedules_error <- Some (keeper_name, err))
+  | Keeper_schedules_loaded (authority, keeper_name, result) ->
+      if authority == state.detail_read_authority && server_authority_ready state then begin
+        (match state.keeper_schedules_inflight with
+         | Some inflight when String.equal inflight keeper_name ->
+             state.keeper_schedules_inflight <- None
+         | Some _ | None -> ());
+        (* A page that arrived for a keeper the cursor has left is not this tab's
+           answer; filing it would show one Keeper's schedules under another's
+           name. *)
+        (match result with
+         | Ok snapshot ->
+             state.keeper_schedules <- Some (keeper_name, snapshot);
+             state.keeper_schedules_error <- None
+         | Error err ->
+             state.keeper_schedules <- None;
+             state.keeper_schedules_error <- Some (keeper_name, err))
+      end
   | Schedule_cancel_done (schedule_id, result) -> (
       match result with
       | Ok message ->
@@ -16010,101 +16052,103 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
       reload_connectors_after_write state ~mailbox
-  | Connectors_loaded result ->
-      state.connectors_inflight <- false;
-      if state.connectors_reload_after_inflight then begin
-        state.connectors_reload_after_inflight <- false;
-        launch_connectors_load state ~mailbox
-      end;
-      (match result with
-      | Ok snapshot ->
-          let previous_id =
-            Option.bind state.connectors (fun previous ->
-                Option.map
-                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
-                  (List.nth_opt previous.cs_connectors state.connectors_cursor))
-          in
-          state.connectors <- Some snapshot;
-          state.connectors_error <- None;
-          state.connectors_cursor <-
-            (match previous_id with
-             | None -> 0
-             | Some id ->
-                 let rec find index = function
-                   | [] -> 0
-                   | (connector : Tui_decode.connector) :: rest ->
-                       if String.equal connector.cn_id id then index
-                       else find (index + 1) rest
-                 in
-                 find 0 snapshot.cs_connectors);
-          state.connectors_binding_cursor <- 0;
-          state.connector_unbind_armed <- None;
-          (* Every Keeper paused or shut down since the last read gets its
-             answer from this one. The answering load may have started
-             before the pause landed; a pause does not change bindings, so
-             what it read is still what the Keeper holds. *)
-          let pending = List.rev state.connector_unbind_offer_pending in
-          state.connector_unbind_offer_pending <- [];
-          let unreadable =
-            Masc_tui_connector_unbind.unreadable_transports
-              snapshot.cs_connectors
-          in
-          List.iter
-            (fun keeper_name ->
-               match
-                 Masc_tui_connector_unbind.targets ~keeper_name
-                   snapshot.cs_connectors
-               with
-               | [] -> (
-                   (* No readable binding. An unreadable transport may still
-                      hold some, and saying nothing would read as none. *)
-                   match unreadable with
-                   | [] -> ()
-                   | _ :: _ ->
-                       report_action state "system"
-                         (Masc_tui_connector_unbind.nothing_to_unbind
-                            ~keeper_name ~unreadable))
-               | targets ->
-                   (* The offer takes the next key only where that key would
-                      mean this Keeper: its row or its detail is the one
-                      selected, and nothing else is armed. Anywhere else a
-                      [U] means something else, so the line only informs. *)
-                   let offer_here =
-                     Masc_tui_types.shows_selected_keeper state.view
-                     && (match selected_keeper state with
-                         | Some keeper -> String.equal keeper.k_name keeper_name
-                         | None -> false)
-                     && Option.is_none state.connector_unbind_all_armed
-                     && not state.composer_focused
+  | Connectors_loaded (authority, result) ->
+      if authority == state.detail_read_authority && server_authority_ready state then begin
+        state.connectors_inflight <- false;
+        if state.connectors_reload_after_inflight then begin
+          state.connectors_reload_after_inflight <- false;
+          launch_connectors_load state ~mailbox
+        end;
+        (match result with
+        | Ok snapshot ->
+            let previous_id =
+              Option.bind state.connectors (fun previous ->
+                  Option.map
+                    (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                    (List.nth_opt previous.cs_connectors state.connectors_cursor))
+            in
+            state.connectors <- Some snapshot;
+            state.connectors_error <- None;
+            state.connectors_cursor <-
+              (match previous_id with
+               | None -> 0
+               | Some id ->
+                   let rec find index = function
+                     | [] -> 0
+                     | (connector : Tui_decode.connector) :: rest ->
+                         if String.equal connector.cn_id id then index
+                         else find (index + 1) rest
                    in
-                   if offer_here then begin
-                     (* The frame count keeps a key typed before this line
-                        was drawn from answering it. *)
-                     state.connector_unbind_offer <-
-                       Some
-                         { Masc_tui_connector_unbind.offer_keeper = keeper_name
-                         ; offer_targets = targets
-                         ; offered_at = state.frames_presented
-                         };
-                     report_action state "system"
-                       (Masc_tui_connector_unbind.offer_prompt ~keeper_name
-                          ~unreadable targets)
-                   end
-                   else
-                     report_action state "system"
-                       (Masc_tui_connector_unbind.still_bound ~keeper_name
-                          targets))
-            pending
-      | Error detail ->
-          state.connectors_error <- Some detail;
-          let pending = List.rev state.connector_unbind_offer_pending in
-          state.connector_unbind_offer_pending <- [];
-          List.iter
-            (fun keeper_name ->
-               report_action state "error"
-                 (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
-                    ~detail))
-            pending)
+                   find 0 snapshot.cs_connectors);
+            state.connectors_binding_cursor <- 0;
+            state.connector_unbind_armed <- None;
+            (* Every Keeper paused or shut down since the last read gets its
+               answer from this one. The answering load may have started
+               before the pause landed; a pause does not change bindings, so
+               what it read is still what the Keeper holds. *)
+            let pending = List.rev state.connector_unbind_offer_pending in
+            state.connector_unbind_offer_pending <- [];
+            let unreadable =
+              Masc_tui_connector_unbind.unreadable_transports
+                snapshot.cs_connectors
+            in
+            List.iter
+              (fun keeper_name ->
+                 match
+                   Masc_tui_connector_unbind.targets ~keeper_name
+                     snapshot.cs_connectors
+                 with
+                 | [] -> (
+                     (* No readable binding. An unreadable transport may still
+                        hold some, and saying nothing would read as none. *)
+                     match unreadable with
+                     | [] -> ()
+                     | _ :: _ ->
+                         report_action state "system"
+                           (Masc_tui_connector_unbind.nothing_to_unbind
+                              ~keeper_name ~unreadable))
+                 | targets ->
+                     (* The offer takes the next key only where that key would
+                        mean this Keeper: its row or its detail is the one
+                        selected, and nothing else is armed. Anywhere else a
+                        [U] means something else, so the line only informs. *)
+                     let offer_here =
+                       Masc_tui_types.shows_selected_keeper state.view
+                       && (match selected_keeper state with
+                           | Some keeper -> String.equal keeper.k_name keeper_name
+                           | None -> false)
+                       && Option.is_none state.connector_unbind_all_armed
+                       && not state.composer_focused
+                     in
+                     if offer_here then begin
+                       (* The frame count keeps a key typed before this line
+                          was drawn from answering it. *)
+                       state.connector_unbind_offer <-
+                         Some
+                           { Masc_tui_connector_unbind.offer_keeper = keeper_name
+                           ; offer_targets = targets
+                           ; offered_at = state.frames_presented
+                           };
+                       report_action state "system"
+                         (Masc_tui_connector_unbind.offer_prompt ~keeper_name
+                            ~unreadable targets)
+                     end
+                     else
+                       report_action state "system"
+                         (Masc_tui_connector_unbind.still_bound ~keeper_name
+                            targets))
+              pending
+        | Error detail ->
+            state.connectors_error <- Some detail;
+            let pending = List.rev state.connector_unbind_offer_pending in
+            state.connector_unbind_offer_pending <- [];
+            List.iter
+              (fun keeper_name ->
+                 report_action state "error"
+                   (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
+                      ~detail))
+              pending)
+      end
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
@@ -16324,18 +16368,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
-  | Lanes_loaded result ->
-      state.keeper_lanes_inflight <- false;
-      (match result with
-      | Ok (snapshot, secrets) ->
-          state.lanes <- Some snapshot;
-          state.keeper_secrets <- secrets;
-          state.lanes_error <- None
-      | Error detail ->
-          (* Keep the previous rows visible. The error says that they are
-             stale; clearing them would turn a failed refresh into an empty
-             reading. *)
-          state.lanes_error <- Some detail)
+  | Lanes_loaded (authority, result) ->
+      if authority == state.detail_read_authority && server_authority_ready state then begin
+        state.keeper_lanes_inflight <- false;
+        (match result with
+        | Ok (snapshot, secrets) ->
+            state.lanes <- Some snapshot;
+            state.keeper_secrets <- secrets;
+            state.lanes_error <- None
+        | Error detail ->
+            (* Keep the previous rows visible. The error says that they are
+               stale; clearing them would turn a failed refresh into an empty
+               reading. *)
+            state.lanes_error <- Some detail)
+      end
   | Standalone_lanes_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
       if generation = state.standalone_lanes_generation then (

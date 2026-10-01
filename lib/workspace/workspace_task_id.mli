@@ -21,12 +21,21 @@ val archive_entries_of_json : Yojson.Safe.t -> Yojson.Safe.t list
     file does not exist. *)
 val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 
-(** Append [tasks] to [tasks-archive.json], deduplicating by task id.
+(** Append [tasks] to [tasks-archive.json]. The tasks given are the current
+    copies: each replaces the archive row with the same id, whatever that row
+    holds (an older copy, or a row that does not decode as a task). Every other
+    row stays as it is, rows with no id and repeated ids included.
     The read/merge/write sequence is wrapped in [with_file_lock] so
     concurrent callers cannot lose each other's archive entries.
-    No-op when [tasks] is empty. *)
+
+    [Ok ()] means the archive now holds [tasks]. [Error] means the caller must
+    not treat them as archived: the existing file could not be read, or the
+    write failed. A missing file is an empty archive; a file that is blank,
+    does not parse, or has no [tasks] list is an [Error] and is left as it was,
+    never replaced by a new archive holding only [tasks].
+    [Ok ()] without touching the file when [tasks] is empty. *)
 val append_archive_tasks :
-  Workspace_utils_backend_setup.config -> task list -> unit
+  Workspace_utils_backend_setup.config -> task list -> (unit, string) result
 
 (** Non-terminal tasks currently sitting in [tasks-archive.json] — obligations a
     buggy GC pass stranded. An [AwaitingVerification] obligation must remain in
@@ -43,9 +52,10 @@ val drop_archive_tasks :
   Workspace_utils_backend_setup.config -> ids:string list -> unit
 
 (** Next task number =
-    [max(existing backlog ids, archive ids, durable event task ids) + 1].
+    [max(existing backlog ids, deletion receipt ids, archive ids,
+    durable event task ids) + 1].
     Event history remains authoritative after a workspace state restore, so
     omitting it can alias a new task onto an older lifecycle. Returns [1] when
-    all three sources are empty. *)
+    all four sources are empty. *)
 val next_task_number :
   Workspace_utils_backend_setup.config -> backlog -> int

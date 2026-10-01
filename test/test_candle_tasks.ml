@@ -94,7 +94,12 @@ let write_backlog config tasks =
     }
 ;;
 
-let write_archive config tasks = Workspace.append_archive_tasks config tasks
+let write_archive config tasks =
+  match Workspace.append_archive_tasks config tasks with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail ("archive write failed: " ^ detail)
+;;
+
 let write_links config links = Workspace_goal_index.write_goal_task_links config links
 let lookups config ids = Candle_tasks.lookups config ~goal_id:"goal-1" ids
 

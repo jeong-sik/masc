@@ -155,7 +155,7 @@ let load_active_tasks (base_path : string) :
     * string option
     * Masc_tui_task_flow.t option
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
-    * unit Masc_tui_agenda.reading =
+    * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -167,7 +167,7 @@ let load_active_tasks (base_path : string) :
       , Some reason
       , None
       , Masc_tui_agenda.Read_failed reason
-      , Masc_tui_agenda.Not_read )
+      , Goal_links_not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -176,23 +176,22 @@ let load_active_tasks (base_path : string) :
             report path recovery.primary_error;
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
-      (* The backlog says what the tasks are; the goal-task registry says what
-         they serve. A task record carries no goal on purpose -- the registry
-         is the source of truth -- so reading only the backlog is what left
-         every task on this screen unable to name its goal.
-
-         A registry that cannot be read leaves the links empty rather than
-         failing the whole load: the tasks are still worth showing, and the
-         reason is reported beside them rather than as an absence of links. *)
-      let goals_for_task, goal_link_error =
+      (* Goal links are supplemental to tasks, but only a successful primary
+         registry read can establish their presence or absence. *)
+      let goal_task_links =
         match Workspace_goal_index.read_goal_task_links_authoritative_r config with
-        | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
+        | Error err ->
+            let reason = "goal links unavailable: " ^ err in
+            Goal_links_read_failed reason
         | Ok goal_task_links ->
-          let index =
-            Workspace_goal_index.build_task_goal_index ~goal_task_links ()
-          in
-          ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
-          , None )
+            Goal_links_read
+              (Workspace_goal_index.build_task_goal_index ~goal_task_links ())
+      in
+      let goals_for_task =
+        match goal_task_links with
+        | Goal_links_read index ->
+            fun task_id -> Workspace_goal_index.goals_for_task index ~task_id
+        | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
         match read_archived_tasks config with
@@ -211,7 +210,7 @@ let load_active_tasks (base_path : string) :
              observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match List.filter_map Fun.id
-                 [ recovery_error; goal_link_error; archive_error ] with
+                 [ recovery_error; archive_error ] with
          | [] -> None
          | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
@@ -232,9 +231,7 @@ let load_active_tasks (base_path : string) :
                      ; what = Masc.Operator_task_attention.summary item
                      ; since_iso = Masc.Operator_task_attention.waiting_since item
                      })))
-      , (match goal_link_error with
-         | Some reason -> Masc_tui_agenda.Read_failed reason
-         | None -> Masc_tui_agenda.Read []) )
+      , goal_task_links )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -320,72 +317,10 @@ let report_action (state : state) event_type content =
   state.last_action <-
     Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
-(** Load state from .masc directory *)
-let load_from_masc_dir (state : state) (base_path : string) =
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
-
-  (* Load agents *)
-  let agents_dir = Filename.concat masc_dir "agents" in
-  state.agents <- (
-    if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
-      Sys.readdir agents_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-           try
-             let path = Filename.concat agents_dir f in
-             let json = Yojson.Safe.from_file path in
-             match Tui_decode.decode_agent json with
-             | Ok agent -> Some agent
-             | Error err ->
-                 report path err;
-                 None
-           with Yojson.Json_error err ->
-             report (Filename.concat agents_dir f) ("invalid JSON: " ^ err);
-             None
-           | Sys_error err ->
-             report (Filename.concat agents_dir f) err;
-             None
-         )
-    else []
-  );
-
-  (* Load tasks from their single durable source. The domain rows land first:
-     a detail view open across this refresh keeps its row even when the task
-     just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, task_goal_links =
-    load_active_tasks base_path
-  in
-  state.tasks_domain <- tasks_domain;
-  state.task_reading <- rows;
-  state.tasks <-
-    (match rows with
-     | Masc_tui_overview_tasks.Rows_read tasks -> tasks
-     | Masc_tui_overview_tasks.Rows_unread
-     | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
-  state.tasks_error <- tasks_error;
-  (* A chosen task that left rows that were read (finished, or back to Todo)
-     is dropped here, where the rows change, and said once. A failed read
-     keeps the choice: it did not look, so nothing left. With that task's
-     detail open the detail still shows it, so the footer says nothing that
-     the screen contradicts. *)
-  (let focus, left =
-     Masc_tui_overview_tasks.after_read rows state.task_focus
-   in
-   state.task_focus <- focus;
-   Option.iter
-     (fun task_id ->
-       if not (Option.equal String.equal state.task_detail_id (Some task_id))
-       then
-         report_action state "system"
-           (Printf.sprintf "%s left the held tasks; nothing is chosen"
-              task_id))
-     left);
-  state.task_flow <- task_flow;
-  state.operator_stalled <- operator_stalled;
-  state.task_goal_links <- task_goal_links;
-  state.goals_to_confirm <- load_goals_to_confirm base_path;
-
+(* Local metadata and the public remote roster share identity-based navigation.
+   Replacing rows never reads a local directory. *)
+let replace_keeper_rows ~preserve_on_error (state : state)
+    ~keepers:loaded_keepers ~error:keepers_error =
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
   let current_keeper_ids =
@@ -439,18 +374,17 @@ let load_from_masc_dir (state : state) (base_path : string) =
         Keeper_selection.List_cursor state.keeper_cursor
   in
 
-  (* Load keepers *)
-  let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
     | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
-                   | Keeper_runtime_pick) ->
+                   | Keeper_runtime_pick) when preserve_on_error ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
            target and can render the unavailable state safely. *)
         state.keepers
-    | Some _, Some (Keeper_list | Keeper_message) | Some _, None | None, _ ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick
+                   | Keeper_list | Keeper_message) | Some _, None | None, _ ->
         loaded_keepers
   in
   state.keepers <- keepers;
@@ -492,9 +426,6 @@ let load_from_masc_dir (state : state) (base_path : string) =
 
   let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
 
-  (* Load live context for the selected keeper. Metadata-only refresh paths do
-     not read metrics, but an empty roster must clear any cached log state. *)
-  load_selected_live_context state base_path selected_keeper;
   let current_logs : Metrics_tail.snapshot =
     { entries = state.log_entries; error = state.log_error }
   in
@@ -504,25 +435,98 @@ let load_from_masc_dir (state : state) (base_path : string) =
   Metrics_tail.reconcile_selection ~current:current_logs
     ~previous_keeper:selected_keeper_name
     ~selected_keeper:selected_keeper_name_after_refresh
-  |> apply_keeper_log_snapshot state;
+  |> apply_keeper_log_snapshot state
+
+(** Load state from .masc directory *)
+let load_from_masc_dir (state : state) (base_path : string) =
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
+
+  (* Load agents *)
+  let agents_dir = Filename.concat masc_dir "agents" in
+  state.agents <- (
+    if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
+      Sys.readdir agents_dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.filter_map (fun f ->
+           try
+             let path = Filename.concat agents_dir f in
+             let json = Yojson.Safe.from_file path in
+             match Tui_decode.decode_agent json with
+             | Ok agent -> Some agent
+             | Error err ->
+                 report path err;
+                 None
+           with Yojson.Json_error err ->
+             report (Filename.concat agents_dir f) ("invalid JSON: " ^ err);
+             None
+           | Sys_error err ->
+             report (Filename.concat agents_dir f) err;
+             None
+         )
+    else []
+  );
+
+  (* Load tasks from their single durable source. The domain rows land first:
+     a detail view open across this refresh keeps its row even when the task
+     just turned terminal, because the projection below drops exactly those. *)
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
+    load_active_tasks base_path
+  in
+  state.tasks_domain <- tasks_domain;
+  state.goal_task_links <- goal_task_links;
+  state.task_reading <- rows;
+  state.tasks <-
+    (match rows with
+     | Masc_tui_overview_tasks.Rows_read tasks -> tasks
+     | Masc_tui_overview_tasks.Rows_unread
+     | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
+  state.tasks_error <- tasks_error;
+  (* A chosen task that left rows that were read (finished, or back to Todo)
+     is dropped here, where the rows change, and said once. A failed read
+     keeps the choice: it did not look, so nothing left. With that task's
+     detail open the detail still shows it, so the footer says nothing that
+     the screen contradicts. *)
+  (let focus, left =
+     Masc_tui_overview_tasks.after_read rows state.task_focus
+   in
+   state.task_focus <- focus;
+   Option.iter
+     (fun task_id ->
+       if not (Option.equal String.equal state.task_detail_id (Some task_id))
+       then
+         report_action state "system"
+           (Printf.sprintf "%s left the held tasks; nothing is chosen"
+              task_id))
+     left);
+  state.task_flow <- task_flow;
+  state.operator_stalled <- operator_stalled;
+  state.goals_to_confirm <- load_goals_to_confirm base_path;
+
+  let keepers, error = load_keepers base_path in
+  replace_keeper_rows ~preserve_on_error:true state ~keepers ~error;
+  load_selected_live_context state base_path
+    (List.nth_opt state.keepers state.keeper_cursor);
 
   state.local_workspace <- Local_workspace_read
 
-let clear_local_workspace (state : state) =
+let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.goal_task_links <- Goal_links_not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- Masc_tui_agenda.Not_read;
-  state.task_goal_links <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
-  state.keepers <- [];
-  state.keepers_error <- None;
+  if not keep_keeper_rows then begin
+    state.keepers <- [];
+    state.keepers_error <- None;
+    state.keeper_cursor <- 0
+  end;
   state.lanes_action_error <- None;
-  state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
   state.live_context <- Context_state.empty;
@@ -1174,7 +1178,7 @@ let load_board_list ~(host : string) ~(port : int)
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
 let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
-    ~(post_id : string) () : (board_post * board_comment list, string) result =
+    ~(post_id : string) () : (board_post * board_comment list * string option, string) result =
   let read_page offset =
     let* json =
       Masc_tui_frame_timing.time_stage ~name:"board.http_json"
@@ -1188,17 +1192,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.required_list_field json
+          (if full_history then "comments" else "comment_context") in
         let* comments = decode_board_comments comments_json in
+        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+        let* () = if String.length revision=64 && String.for_all
+            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+          then Ok () else Error "board detail comment revision is malformed" in
         let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
         let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
         let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total))
+        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
   in
-  let* (first_json, first_comments, first_offset, total) =
+  let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
   in
   let post_json =
@@ -1211,9 +1220,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
       (fun () -> decode_board_post ~require_body:true post_json)
   in
   let rec read_remaining offset total reversed =
-    if offset >= total then Ok (post, List.rev reversed)
+    if offset >= total then Ok (post, List.rev reversed, None)
     else
-      let* (_, comments, _, total) = read_page (Some offset) in
+      let* (_, comments, _, page_total, page_revision) = read_page (Some offset) in
+      let* () = if page_revision=revision && page_total=total then Ok ()
+        else Error "Board comment thread changed during full history read; refresh to read one snapshot" in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"
@@ -1222,7 +1233,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   if full_history then
     read_remaining (first_offset + List.length first_comments) total
       (List.rev first_comments)
-  else Ok (post, first_comments)
+  else
+    let* page_json = Masc.Tui_decode_fields.required_list_field first_json "comments" in
+    let* page_comments = decode_board_comments page_json in
+    let* () =
+      if List.for_all (fun page_comment ->
+          List.exists (fun context_comment ->
+            String.equal page_comment.bc_id context_comment.bc_id) first_comments)
+          page_comments then Ok ()
+      else Error "Board comment context is missing a page comment"
+    in
+    let landing =
+      if List.length first_comments = List.length page_comments then None
+      else match List.rev page_comments with
+        | [] -> None
+        | comment :: _ -> Some comment.bc_id in
+    Ok (post, first_comments, landing)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1290,7 +1316,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
-  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+  rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
 }
 
 (** Load the Runtime operator surface from its identity projection and optional
@@ -1319,7 +1345,7 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              match probe_result with
              | Error detail -> Error ("runtime probe load failed: " ^ detail)
              | Ok probe_json ->
-                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
                   | Ok probe -> Ok probe
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
@@ -1516,23 +1542,23 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
 let load_tools ~(host : string) ~(port : int) ?keeper () :
-    (Tui_decode.tool_snapshot, string) result =
+    (Masc.Tui_decode_tools.tool_snapshot, string) result =
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_tool_snapshot json
+  | Ok json -> Masc.Tui_decode_tools.decode_tool_snapshot json
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
-    (Tui_decode.skills_catalog, string) result =
-  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
+    (Masc.Tui_decode_tools.skills_catalog, string) result =
+  Result.bind (fetch_skills_catalog ~host ~port) Masc.Tui_decode_tools.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
-    (Tui_decode.connector_snapshot, string) result =
+    (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Tui_decode.decode_connector_snapshot json with
+      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
@@ -1540,13 +1566,13 @@ let load_connectors ~(host : string) ~(port : int) :
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
                | Error detail ->
                  List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
-                 (match Tui_decode.decode_connector_name_page json with
+                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
@@ -1596,7 +1622,7 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Tui_decode.connector_with_name_pages connector ~pages
+                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
                     ~error:
                       (match read_problems with
                        | [] -> None
@@ -1657,10 +1683,10 @@ let load_repository_changes ~(host : string) ~(port : int)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
 
 let load_memory_health ~(host : string) ~(port : int) :
-    (Tui_decode.memory_health_snapshot, string) result =
+    (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_health_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
@@ -1820,10 +1846,10 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) :
-    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port with
+  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
@@ -1836,8 +1862,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total, candle) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show

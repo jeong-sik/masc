@@ -395,13 +395,10 @@ let restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present =
   notice_pending && saved_checkpoint_present
 ;;
 
-let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
-  Keeper_turn_preview.reset ~keeper_name ~now:(Time_compat.now ())
-    ~redaction:
-      (Keeper_secret_redaction.snapshot ~base_path:config.Workspace.base_path
-         ~keeper_name);
+let turn_progress_callbacks ~preview ~observation_token ~config ~keeper_name ~downstream ~turn_id =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
+      ~observation_token
       ~base_path:config.Workspace.base_path
       keeper_name
       ~event_kind
@@ -433,6 +430,6 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
     else None
   in
   let on_event = Some (fun event ->
-    Keeper_turn_preview.note_stream ~keeper_name ~now:(Time_compat.now ()) event;
+    Keeper_turn_preview.note_stream ~writer:preview ~now:(Time_compat.now ()) event;
     registry_progress_on_event ~record_turn_progress downstream event) in
   (record_turn_progress, yield_on_tool, on_yield, on_resume, on_event)

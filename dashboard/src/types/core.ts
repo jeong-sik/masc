@@ -1,4 +1,4 @@
-import type { KeeperPortraitReading } from '../api/schemas/keeper-portrait'
+import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
@@ -215,6 +215,8 @@ export interface BoardPost {
 }
 
 export interface BoardComment {
+  /** Position in the companion context's server thread snapshot. */
+  thread_offset?: number
   id: string
   post_id: string
   parent_id?: string | null
@@ -1330,6 +1332,8 @@ export function sandboxContainerCli(raw: string | null | undefined): string | nu
 export interface Keeper {
   /** Required by the live wire; absent local fixtures are explicitly unavailable. */
   portrait?: KeeperPortraitReading
+  candle_balance_milli?: string | null
+  candle_account_revision?: string | null
   declaration_only?: boolean
   preparation_requirements?: Array<'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid'>
   name: string

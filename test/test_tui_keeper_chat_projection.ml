@@ -193,6 +193,25 @@ let test_request_body_and_identity () =
 (* Since #33103 every projected frame carries id: <seq>. The strict decode
    reads events, not positions: a body with id lines decodes to exactly what
    the same body without them does. *)
+let test_active_decode_uses_complete_sse_frames () =
+  let events = [ acceptance (); run_started; text_start; delta "hello";
+    reply_details (); text_end; run_finished ] in
+  let canonical = events |> List.map sse_event |> String.concat "" in
+  let expected = Chat.decode_response_with_provenance ~request canonical in
+  check bool "control completes" true (Result.is_ok expected);
+  List.iter (fun newline ->
+    let wire = "\239\187\191" ^ String.concat "" (List.map (fun event ->
+      let lines = Yojson.Safe.pretty_to_string event |> String.split_on_char '\n' in
+      String.concat newline (List.map (fun line -> "data:" ^ line) lines)
+      ^ newline ^ newline) events) in
+    check bool "actual decoder accepts BOM, no-space and multiline frames" true
+      (Chat.decode_response_with_provenance ~request wire = expected)) ["\n"; "\r\n"; "\r"];
+  check bool "unfinished acceptance is discarded at EOF" true
+    (match Chat.decode_response ~request
+       ("data:" ^ Yojson.Safe.to_string (acceptance ())) with
+     | Error Chat.Missing_acceptance -> true
+     | _ -> false)
+
 let test_id_lines_do_not_change_the_strict_decode () =
   let events =
     [ acceptance (); run_started; text_start; delta "hel"; delta "lo"
@@ -1555,6 +1574,23 @@ let test_an_unstageable_image_is_refused_not_pathed () =
       Alcotest.fail "an empty .png should say so, not silently become a path")
 ;;
 
+let test_http_error_preview_preserves_utf8 () =
+  let prefix = "Keeper chat HTTP 500: " in
+  List.iter
+    (fun boundary ->
+      let body = String.make boundary 'a' ^ "한글가나다라마" in
+      let rendered = Chat.error_to_string (Chat.Http_error {status = 500; body}) in
+      check bool "HTTP error preview is valid UTF-8" true
+        (String_util.is_valid_utf8 rendered);
+      check bool "byte budget includes the cut mark" true
+        (String.length rendered <= String.length prefix + 240);
+      check bool "overflow uses the shared cut mark" true
+        (String.ends_with ~suffix:Masc_tui_message_layout.cut_mark rendered))
+    [235; 236; 237; 238; 239; 240; 241];
+  check string "short Unicode HTTP body remains intact"
+    (prefix ^ "짧은 오류")
+    (Chat.error_to_string (Chat.Http_error {status = 500; body = "짧은 오류"}))
+
 let test_missing_file_is_named_in_the_error () =
   match Masc_tui_attachment.of_file ~path:"/nonexistent/masc-attach-probe.png" with
   | Ok _ -> Alcotest.fail "a missing path must not attach"
@@ -1616,6 +1652,8 @@ let () =
             test_a_resume_position_rides_beside_the_request
         ; test_case "id lines do not change the strict decode" `Quick
             test_id_lines_do_not_change_the_strict_decode
+        ; test_case "active decoder complete SSE framing" `Quick
+            test_active_decode_uses_complete_sse_frames
         ; test_case "matching acceptance and reply" `Quick
             test_matching_acceptance_and_reply
         ; test_case "acceptance id mismatch" `Quick
@@ -1659,6 +1697,7 @@ let () =
             test_a_recalled_line_still_carries_its_emoji
         ; test_case "request labels keep random suffix" `Quick
             test_request_labels_keep_random_suffix
+        ; test_case "HTTP preview UTF-8 boundaries" `Quick test_http_error_preview_preserves_utf8
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "unauthenticated reader keeps the operation open" `Quick
             test_reader_unauthenticated

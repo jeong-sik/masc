@@ -12,6 +12,7 @@
 
 type FetchFn = () => Promise<void>
 type Priority = 'none' | 'normal' | 'urgent'
+type Completion = { resolve: () => void; reject: (error: unknown) => void }
 
 interface FetchSchedulerConfig {
   /** Minimum ms between consecutive fetches. Prevents burst after rapid events. */
@@ -31,6 +32,7 @@ export class FetchScheduler {
 
   private inflight: Promise<void> | null = null
   private lastFetchAt = 0
+  private pendingCompletions: Completion[] = []
   private pendingPriority: Priority = 'none'
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   private cooldownTimer: ReturnType<typeof setTimeout> | null = null
@@ -56,22 +58,32 @@ export class FetchScheduler {
   /**
    * Request an immediate refresh. Skips debounce window, but still
    * deduplicates with any inflight request — sets urgent dirty flag
-   * so a re-fetch fires as soon as the current one completes.
+   * so a re-fetch fires as soon as the current one completes. The returned
+   * promise settles from that requested fetch, including its real failure.
    */
-  requestNow(): void {
+  requestNow(): Promise<void> {
+    const completion = new Promise<void>((resolve, reject) => {
+      this.pendingCompletions.push({ resolve, reject })
+    })
+    // Background callers may ignore this result. Awaiting callers still receive
+    // its actual rejection; observing it here only prevents unhandled events.
+    void completion.catch(() => {})
     if (this.inflight) {
       this.raisePriority('urgent')
-      return
+    } else {
+      this.clearTimers()
+      this.pendingPriority = 'none'
+      void this.doFetch()
     }
-    this.clearTimers()
-    this.pendingPriority = 'none'
-    void this.doFetch()
+    return completion
   }
 
-  /** Cancel all pending timers. Does not abort inflight requests. */
+  /** Cancel pending timers and requested follow-ups; the active fetch continues. */
   dispose(): void {
     this.clearTimers()
     this.pendingPriority = 'none'
+    const cancelled = this.pendingCompletions.splice(0)
+    for (const completion of cancelled) completion.reject(new Error('Pending refresh was cancelled'))
   }
 
   /** Whether a fetch is currently in progress. */
@@ -118,12 +130,17 @@ export class FetchScheduler {
   }
 
   private async doFetch(): Promise<void> {
-    this.inflight = this.fetchFn()
+    // Requests arriving during this fetch belong to its queued follow-up, not
+    // to this captured batch. A completed old fetch cannot release them early.
+    const completions = this.pendingCompletions.splice(0)
     try {
+      this.inflight = this.fetchFn()
       await this.inflight
-    } catch {
-      // Error handling is the fetchFn's responsibility (signals, retries, etc.).
-      // Scheduler only manages timing.
+      for (const completion of completions) completion.resolve()
+    } catch (error) {
+      // The fetch owner updates its own signals; requested completion also
+      // carries the same failure to callers that explicitly await it.
+      for (const completion of completions) completion.reject(error)
     } finally {
       this.lastFetchAt = Date.now()
       this.inflight = null

@@ -41,3 +41,38 @@ it('propagates only explicit caller cancellation while a model preparation is pe
   controller.abort()
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
 })
+
+it('retains open Codex effort vocabulary and reported defaults through discovery and context preparation', async () => {
+  const reported = { ...model, supported_reasoning_efforts: ['low', 'ultra', 'adaptive-v2'], default_reasoning_effort: 'native-auto' }
+  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/models')
+    ? { models: [reported, { ...model, id: 'empty', supported_reasoning_efforts: [], default_reasoning_effort: 'medium' }] }
+    : { model: model.id, context: 2048 }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  const discovered = await discoverSetupModels(source)
+  expect(discovered[0]).toMatchObject(reported)
+  expect(discovered[1]).toMatchObject({ supported_reasoning_efforts: [], default_reasoning_effort: 'medium' })
+  expect(await prepareSetupModel(source, discovered[0]!, false)).toMatchObject({ ...reported, context: 2048 })
+})
+
+it.each([
+  { supported_reasoning_efforts: ['ultra'] },
+  { default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: null, default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: 'ultra', default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: [1], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: [''], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: ['ultra', 'ultra'], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: ['ultra'], default_reasoning_effort: null },
+  { supported_reasoning_efforts: ['ultra'], default_reasoning_effort: '' },
+])('refuses malformed present reasoning effort metadata %j', async metadata => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [{ ...model, ...metadata }] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  await expect(discoverSetupModels(source)).rejects.toThrow('Invalid model reasoning effort metadata')
+})
+
+it('does not invent Codex effort fields for providers that omit them', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [model] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  const discovered = await discoverSetupModels(source)
+  expect(discovered[0]).not.toHaveProperty('supported_reasoning_efforts')
+  expect(discovered[0]).not.toHaveProperty('default_reasoning_effort')
+})

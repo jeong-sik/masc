@@ -454,8 +454,10 @@ export interface DashboardExecutionContinuityBrief {
 }
 
 export interface DashboardExecutionResponse {
+  candle?: unknown
   execution_publication_epoch?: string
   execution_publication_generation?: number
+  candle_observation_sequence?: number
   execution_invalidated?: boolean
   generated_at?: string
   status?: ServerStatus

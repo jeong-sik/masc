@@ -463,6 +463,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                ; account_home = exec.account_home
                ; isolated_home = None
                ; model = exec.model
+               ; context_window = Some (Runtime_instance.max_context_of_runtime rt)
                ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
@@ -474,8 +475,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                }
              in
              let reasoning_effort =
-               Runtime_inference.clamp_reasoning_effort_to_catalog
-                 ~model_id:exec.model ~requested:rt.model.reasoning_effort
+               rt.model.reasoning_effort
              in
              (match
                 Runtime_codex_app_server.run_turn

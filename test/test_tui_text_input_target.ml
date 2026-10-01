@@ -373,6 +373,37 @@ let test_reader_discards_active_and_queued_voice () =
      = Some Masc.Voice_bridge.Keep_what_was_heard)
 ;;
 
+let test_workspace_withdrawal_discards_queued_voice () =
+  List.iter (fun return_to_local ->
+    let state = fresh_state () in
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    state.Tui_types.voice_capture <- Some "analyst";
+    state.Tui_types.voice_continuous <- Some "analyst";
+    state.Tui_types.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+    Tui_types.withdraw_voice_capture state;
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_unread;
+    if return_to_local then
+      state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    check (option string) "withdrawal keeps microphone occupied"
+      (Some "analyst") state.Tui_types.voice_capture;
+    check (option string) "withdrawal stops automatic rearm"
+      None state.Tui_types.voice_continuous;
+    (* A second authority change or a later keep request cannot revive A's
+       completion, even after A becomes the local workspace again. *)
+    Tui_types.withdraw_voice_capture state;
+    Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+    check bool "queued transcript remains discarded" true
+      (Tui_types.settle_voice_transcript state ~keeper:"analyst"
+       = Some Masc.Voice_bridge.Discard);
+    check (option string) "completion releases microphone"
+      None state.Tui_types.voice_capture;
+    check (option string) "completion cannot restart continuous mode"
+      None state.Tui_types.voice_continuous;
+    check string "withdrawn draft stays empty" ""
+      (Buffer.contents state.Tui_types.msg_input))
+    [false; true]
+;;
+
 let test_ask_answer_input_ownership () =
   let state = fresh_state () in
   let question : Masc.Tui_decode_asks.ask_question =
@@ -515,6 +546,7 @@ let () =
     [ ( "which field takes text",
         [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
+          test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
           test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
           test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;

@@ -6789,8 +6789,7 @@ let request_voice_stop (state : state) request =
   | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
       state.voice_stop_requested <- Some request
 
-let release_composer_for_browser_reader (state : state) =
-  state.composer_focused <- false;
+let withdraw_voice_capture (state : state) =
   state.voice_continuous <- None;
   state.voice_floor <- None;
   state.voice_level_db <- None;
@@ -6798,6 +6797,10 @@ let release_composer_for_browser_reader (state : state) =
      composer cannot start a second microphone while this one shuts down. *)
   if Option.is_some state.voice_capture then
     request_voice_stop state Masc.Voice_bridge.Discard
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  withdraw_voice_capture state
 
 (* The transcript may already be in the mailbox when the reader opens.
    Settle ownership before deciding whether its text can reach the draft. *)

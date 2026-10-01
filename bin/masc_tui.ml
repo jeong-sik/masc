@@ -10711,6 +10711,7 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state =
+  withdraw_voice_capture state;
   state.msg_loaded_pages <- [];
   let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
   Buffer.clear state.msg_input;

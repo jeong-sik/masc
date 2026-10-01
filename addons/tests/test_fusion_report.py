@@ -368,13 +368,28 @@ class FusionReport(unittest.TestCase):
         self.assertIn("provider_error", fields["body"])
         self.assertIn("분석 실패", fields["body"])
 
-    def test_failed_result_without_status_remains_incomplete(self):
-        output = project(detail("failed", "recorded"))
-        output["rows"] = [item for item in output["rows"] if item["lane_id"] == "fusion/result"]
-        report = call("fusion-report", [upstream(output)])["structuredContent"]
-        self.assertEqual(reports(report)[0]["fields"]["run_status"], "failed")
-        self.assertFalse(reports(report)[0]["fields"]["input_complete"])
-        self.assertFalse(report["coverage"][0]["complete"])
+    def test_result_without_status_remains_incomplete(self):
+        for status in ("completed", "failed"):
+            with self.subTest(status=status):
+                output = project(detail(status, "recorded"))
+                output["rows"] = [item for item in output["rows"] if item["lane_id"] == "fusion/result"]
+                report = call("fusion-report", [upstream(output)])["structuredContent"]
+                self.assertEqual(reports(report)[0]["fields"]["run_status"], status)
+                self.assertFalse(reports(report)[0]["fields"]["input_complete"])
+                self.assertFalse(report["coverage"][0]["complete"])
+
+    def test_paired_rows_require_the_same_source_coordinates(self):
+        for key in ("source_id", "incarnation"):
+            with self.subTest(coordinate=key):
+                output = project(detail())
+                result = next(item for item in output["rows"] if item["lane_id"] == "fusion/result")
+                result["fields"][key] = "other-capture"
+                other_coverage = copy.deepcopy(output["coverage"][0])
+                other_coverage[key] = "other-capture"
+                output["coverage"].append(other_coverage)
+                refused = call("fusion-report", [upstream(output)])
+                self.assertTrue(refused["isError"])
+                self.assertIn("different source coordinates", refused["content"][0]["text"])
 
     def test_running_missing_and_stale_producer_are_partial(self):
         for value in (detail("running", "pending"), detail("completed", "absent")):
@@ -414,7 +429,8 @@ class FusionReport(unittest.TestCase):
         selected = copy.deepcopy(first)
         selected["rows"] = [selected["rows"][1]]
         report = call("fusion-report", [upstream(selected, output_id="result", selected_lanes=["fusion/result"])])["structuredContent"]
-        self.assertTrue(report["coverage"][0]["complete"])
+        self.assertFalse(report["coverage"][0]["complete"])
+        self.assertFalse(reports(report)[0]["fields"]["input_complete"])
         selected_producer = contexts(report)[0]["fields"]["producer"]
         self.assertEqual(selected_producer["output_id"], "result")
         self.assertEqual(selected_producer["output_selection"], {"lanes": ["fusion/result"]})

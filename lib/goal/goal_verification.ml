@@ -403,7 +403,7 @@ type reopen_outcome =
   | Proof_reset of record
 
 let archive_reopened_proof config ~goal_id ~actor ~at completion =
-  Goal_store.append_audit_event config
+  Goal_store.append_audit_event_after_pending_locked config
     (`Assoc
       [ "ts", `String at
       ; "goal_id", `String goal_id

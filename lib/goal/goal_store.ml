@@ -774,16 +774,20 @@ let upsert_event_intents ~actor ~revision (goal : goal) action =
 let append_audit_event config json =
   let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   try
-    let outcome = Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-      if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then
-        None, Error "goal event ledger has an incomplete tail"
-      else Some (Yojson.Safe.to_string json ^ "\n"), Ok ()) in
+    let expected = try (Unix.stat path).Unix.st_size with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> 0 in
+    let rec append expected_end_offset =
+      match Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+          path ~expected_end_offset (Yojson.Safe.to_string json ^ "\n") with
+      | Fs_compat.Private_file_succeeded (Error (Fs_compat.End_offset_mismatch {actual;_})) -> append actual
+      | outcome -> outcome in
+    let outcome = append expected in
     match outcome with
-    | Fs_compat.Private_file_succeeded result -> result
+    | Fs_compat.Private_file_succeeded result -> Result.map (fun _ -> ()) result |> Result.map_error Fs_compat.private_jsonl_append_error_to_string
     | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
         Log.Misc.warn "goal event transaction cleanup failed: %s"
           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-        value
+        Result.map (fun _ -> ()) value |> Result.map_error Fs_compat.private_jsonl_append_error_to_string
     | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
     | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
         Error (Fs_compat.durable_append_error_to_string error ^ "; "
@@ -874,11 +878,14 @@ let flush_pending_events config =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
+let append_audit_event_after_pending_locked config json =
+  let* () = flush_pending_events_locked config in
+  append_audit_event config json
+
 let append_audit_event_after_pending config json =
   try
     Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      let* () = flush_pending_events_locked config in
-      append_audit_event config json)
+      append_audit_event_after_pending_locked config json)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)

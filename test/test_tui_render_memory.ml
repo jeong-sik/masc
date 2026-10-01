@@ -1634,7 +1634,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
     let texts = Option.get (Types.surface_row_texts state Types.Memory) in
     let effective = Types.surface_search_query Types.Memory query in
     check int "cursor matcher reaches every filtered row" expected
-      (List.length (List.filter (Types.palette_contains ~needle:effective) texts))
+      (List.length (List.filter (Masc_tui_pick_list.lowercase_contains ~needle:effective) texts))
   in
   List.iter (fun typing ->
     List.iter (fun query -> verify ~typing query 1)

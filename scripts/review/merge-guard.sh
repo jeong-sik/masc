@@ -3,7 +3,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 GH="${GUARD_GH:-gh}"
-repo=""; pr=""; head=""; run=""; check=0
+repo=""; pr=""; head=""; run=""; check=0; scope_json=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--run) [ $# -ge 2 ] && [ -n "$2" ] && [[ "$2" != --* ]] || exit 1;;
@@ -11,11 +11,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --repo) repo="$2"; shift 2;; --pr) pr="$2"; shift 2;;
     --head) head="$2"; shift 2;; --run) run="$2"; shift 2;;
-    --check) check=1; shift;; *) echo "merge-guard: unknown argument $1" >&2; exit 1;;
+    --check) check=1; shift;; --scope-json) scope_json=1; shift;; *) echo "merge-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ && "$head" =~ ^[0-9a-f]{40}$ ]] || exit 2
 [ -z "$run" ] || [[ "$run" =~ ^[1-9][0-9]*$ ]] || exit 2
+[ "$scope_json" -eq 0 ] || [ "$check" -eq 1 ] || { echo "merge-guard: --scope-json requires --check" >&2; exit 2; }
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
 check_verdict() {
@@ -34,6 +35,7 @@ snapshot_scope() {
 }
 scope=$(snapshot_scope)
 native=$(printf '%s' "$scope" | jq -r '.stack != null')
+target=$(printf '%s' "$scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
 if [ "$native" = false ] && [ "$(printf '%s' "$scope" | jq -r '.scope[0].identity.base.ref')" != main ]; then
   echo "WAITING PARENT #$pr: non-native branch chain; land the parent and retarget to main" >&2
   exit 2
@@ -51,8 +53,8 @@ admit_scope() {
   done <<<"$members"
 }
 # Revalidate every included PR, then freeze the same membership and identities.
-admit_scope
-admit_scope
+if [ "$scope_json" -eq 1 ]; then admit_scope >&2; admit_scope >&2
+else admit_scope; admit_scope; fi
 current_scope=$(snapshot_scope)
 if [ "$scope" != "$current_scope" ]; then
   echo "REFUSED: stack membership, PR head, base or identity moved during admission" >&2
@@ -60,10 +62,11 @@ if [ "$scope" != "$current_scope" ]; then
 fi
 members=$(printf '%s' "$scope" | jq -r '[.scope[] | select(.identity.state == "open") | "#" + (.number|tostring)] | join(", ")')
 if [ "$check" -eq 1 ]; then
-  echo "WOULD MERGE $members through #$selected_pr head $selected_head native_stack=$native"
+  if [ "$scope_json" -eq 1 ]; then printf '%s\n' "$scope"
+  else echo "WOULD MERGE $members through #$selected_pr into $target head $selected_head native_stack=$native"; fi
   exit 0
 fi
 # GitHub exposes a SHA precondition only for the selected PR, not an all-head
 # compare-and-swap. The snapshot is admission evidence, not an atomic guarantee.
 response=$("$GH" api -X PUT "repos/$repo/pulls/$selected_pr/merge-async" -f merge_method=squash -f "sha=$selected_head")
-printf 'ASYNC MERGE RECEIPT for %s (acceptance is not completion):\n%s\n' "$members" "$response"
+printf 'ASYNC MERGE RECEIPT for %s (preflight target: %s; accepted destination unconfirmed; acceptance is not completion):\n%s\n' "$members" "$target" "$response"

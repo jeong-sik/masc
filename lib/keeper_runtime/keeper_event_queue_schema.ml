@@ -5,11 +5,9 @@
    #25867 (cluster: durable-schema-migration-enforcement): hard-cut schema
    changes shipped without a migration story froze the fleet three times
    (#29516, #29601, #29666) and lost durable data before that (#25078 and
-   friends). The policy-level enforcement lives in
-   scripts/wire-field-removal-schema-gate.sh (task-598, #35285); this module
-   is the type-level half: the writer's marker, the reader's expectation,
-   and the snapshot filename generation all come from here, so they cannot
-   drift apart inside a PR — renaming the store file while leaving the
+   friends). This module holds the type-level guard: the writer's marker,
+   the reader's expectation, and the snapshot filename generation all come
+   from here, so they cannot drift apart inside a PR — renaming the store file while leaving the
    marker, or bumping the marker without the file, is visible as one-line
    diffs against one module.
 

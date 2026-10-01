@@ -1,3 +1,4 @@
+import { readKeeperPortrait, type KeeperPortraitReading } from '../api/schemas/keeper-portrait'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -19,6 +20,8 @@ describe('keeperPortraitUrl', () => {
     expect(keeperPortraitUrl('a/b c', 32)).toBe('/api/v1/keepers/a%2Fb%20c/portrait.png?size=64')
   })
 })
+
+const ready: KeeperPortraitReading = { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } }
 
 const png = () => new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), { status: 200 })
 const refused = (status: number) => new Response('{"error":"refused"}', { status })
@@ -53,8 +56,8 @@ describe('KeeperPortrait', () => {
   })
 
   const fallback = html`<span data-testid="fallback">KB</span>`
-  const portrait = (name: string) =>
-    html`<${KeeperPortrait} name=${name} sizePx=${40} fallback=${fallback} />`
+  const portrait = (name: string, reading: KeeperPortraitReading = ready) =>
+    html`<${KeeperPortrait} name=${name} reading=${reading} sizePx=${40} fallback=${fallback} />`
   const shown = () => container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
 
   it('reserves its box while the portrait is on its way', () => {
@@ -121,6 +124,39 @@ describe('KeeperPortrait', () => {
 
     render(null, container)
     expect(revoked).toEqual(['blob:portrait-1', 'blob:portrait-2'])
+  })
+
+  it('refreshes an open Keeper on equipment change and removes stale pictures on failure', async () => {
+    const fetchMock = vi.fn(async () => png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
+    const equipped = readKeeperPortrait({ state: 'ready', equipment: { ...ready.equipment, head: 'crown' } })
+    render(portrait('wick-tester', equipped), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-2'))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(revoked).toEqual(['blob:portrait-1'])
+    render(portrait('wick-tester', readKeeperPortrait({ state: 'unavailable', reason: 'ledger unreadable' })), container)
+    await waitFor(() => expect(revoked).toEqual(['blob:portrait-1', 'blob:portrait-2']))
+    expect(shown()).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-portrait-unavailable"]')?.getAttribute('title')).toBe('ledger unreadable')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    let recover: (response: Response) => void = () => {}
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(resolve => { recover = resolve }))
+    render(portrait('wick-tester', equipped), container)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(shown()).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-portrait-loading"]')).not.toBeNull()
+    recover(png())
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-3'))
+  })
+
+  it('does not manufacture a picture for missing or malformed equipment', () => {
+    const fetchMock = vi.fn(async () => png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester', readKeeperPortrait(undefined)), container)
+    expect(container.querySelector('[data-testid="keeper-portrait-unavailable"]')).not.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('abandons a request still on its way when it unmounts', async () => {

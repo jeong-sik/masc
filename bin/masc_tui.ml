@@ -19946,7 +19946,13 @@ and is loaded on demand through keeper_skill.
                 let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
                 (match targets with
-                 | [] -> ()
+                 | [] ->
+                     let count, height = Masc_tui_render.answering_viewport state in
+                     let move = match k with
+                       | "j" | "down" -> Masc_tui_scroll.down
+                       | _ -> Masc_tui_scroll.up
+                     in
+                     state.answering_scroll <- move ~count ~height state.answering_scroll
                  | _ ->
                      let position =
                        let rec find i = function
@@ -19974,15 +19980,23 @@ and is loaded on demand through keeper_skill.
                        state.answering_scroll <- cursor
                      else if cursor >= state.answering_scroll + height then
                        state.answering_scroll <- cursor - height + 1)
+            | "pageup" | "pagedown" | "home" | "end" ->
+                let count, height = Masc_tui_render.answering_viewport state in
+                state.answering_scroll <-
+                  (match k with
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.answering_scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.answering_scroll
+                   | "home" -> 0
+                   | _ -> Masc_tui_scroll.maximum ~count ~height)
             | "\r" ->
                 let lines = Masc_tui_render_prim.answering_lines state in
-                (match List.nth_opt lines state.answering_cursor with
-                 | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
+                (match Masc_tui_render.answering_selected_target state ~lines with
+                 | Some keeper_name ->
                      close ();
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path ~mailbox:async_messages)
-                 | Some _ | None -> ())
+                 | None -> ())
             | _ -> ())
        | Some k when state.link_modal_open ->
            let close () =

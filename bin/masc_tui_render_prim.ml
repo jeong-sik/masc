@@ -5034,7 +5034,9 @@ let keeper_deletions_hints (state : state) ~scrollable =
    held call is the one thing that needs answering now, and the wakes recede
    the same way they do on the strip. *)
 let answering_lines (state : state) =
+  let _, cols = get_terminal_size () in
   Masc_tui_answering.overlay
+    ~width:(max 0 (framed_inner_width cols - 2))
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error

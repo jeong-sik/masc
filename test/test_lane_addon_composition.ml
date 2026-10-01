@@ -528,8 +528,15 @@ let fusion_package (package : Types.package) ~binding ~sources =
 sys.path.insert(0, sys.argv[1])
 from test_packages import ProtocolCase
 summaries = {
-    "fusion-results": "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
-    "fusion-report": "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+    "fusion-results": lambda output: (
+        "Fusion status and retained Board evidence are available in structuredContent with exact run identity."
+        if any(row["lane_id"] == "fusion/result" for row in output["rows"])
+        else "Fusion status is available in structuredContent with exact run identity; no retained Board evidence is available in this capture."
+        if output["rows"] else "No Fusion snapshot rows are available; structuredContent reports the observation coverage."),
+    "fusion-report": lambda output: (
+        "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence."
+        if any(row["lane_id"] == "fusion/report" for row in output["rows"])
+        else "No Fusion reports are available; inspect structuredContent coverage for missing inputs."),
 }
 output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
                              expected_summary=summaries[sys.argv[2]])

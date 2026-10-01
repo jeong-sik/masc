@@ -88,7 +88,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
          through the catalog clamp and then the CLI's own vocabulary
          ([Keeper_official_client_host.effective_reasoning_effort],
          [Runtime_claude_code.cli_admitted_reasoning_effort]), which today
-         changes only [minimal] on Claude Code and efforts outside a model's
+         changes [minimal] and [ultra] on Claude Code and efforts outside a model's
          accepted set. The key says which of the two it is; surfacing the
          other belongs to the detail view, which has room to say both. *)
     ; ( "declared_reasoning_effort"

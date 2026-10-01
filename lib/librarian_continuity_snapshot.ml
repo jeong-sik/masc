@@ -183,6 +183,15 @@ let prefix_sha256 messages range =
   |> fun messages -> Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List messages)) |> to_hex)
 ;;
 
+(* Only the lines of the history's current generation can witness where it
+   stands. [witness_line] keeps an end line it saw before a restart, and a
+   digest does not say which generation an atom position belongs to, so an
+   earlier generation that ended at the same atom and digest would be chosen
+   over the start state this generation's official-client turn wrote. *)
+let generation_lines ~history_start_boundary_line lines =
+  List.filter (fun (line, _) -> line >= history_start_boundary_line) lines
+;;
+
 let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
   let end_atom = Option.value end_atom ~default:range.R.end_atom in
   let catch_up_end_atom =
@@ -194,15 +203,15 @@ let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~message
     else match Window.atom_opening_digest messages (end_atom - 1) with
       | None -> Error Uncovered_history | Some digest -> Ok digest in
   let* end_boundary_line, end_turn_ref =
-    match List.find_map (function
-      | line, Ok { B.event = B.Turn_ended
-          { turn_ref; position = B.Atom_history { end_atom; last_atom_digest }; _ }; _ }
-        when line >= range.history_start_boundary_line
-          && String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
-          && end_atom = range.end_atom
-          && String.equal last_atom_digest range.last_atom_digest -> Some (line, turn_ref)
-      | _ -> None) lines with
-    | Some ending -> Ok ending
+    (* The one test of whether a position stands on the log. An official-client
+       turn writes no atom position at its end, so the line that states where
+       the checkpoint's atoms end is the start state of a turn. *)
+    match
+      B.witness_line ~trace_id ~end_atom:range.end_atom
+        ~last_atom_digest:range.last_atom_digest
+        (generation_lines ~history_start_boundary_line:range.history_start_boundary_line lines)
+    with
+    | Some (line, _recorded_at, turn_ref) -> Ok (line, turn_ref)
     | None -> Error Uncovered_history
   in
   validate
@@ -236,14 +245,16 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
   else
     let source = match snapshot.origin with Witnessed_history -> source_range | Captured_checkpoint_prefix -> checkpoint_prefix_range in
     let* range = source ~trace_id ~lines ~messages in
-    let boundary_present = List.exists (function
-      | line, Ok { B.event = B.Turn_ended
-          { turn_ref; position = B.Atom_history { end_atom; last_atom_digest }; _ }; _ } ->
-        line = snapshot.end_boundary_line
-        && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref
-        && end_atom = snapshot.covering_end_atom
-        && String.equal last_atom_digest snapshot.covering_last_atom_digest
-      | _ -> false) lines
+    let boundary_present =
+      match
+        B.witness_line ~through:snapshot.end_boundary_line ~trace_id
+          ~end_atom:snapshot.covering_end_atom
+          ~last_atom_digest:snapshot.covering_last_atom_digest
+          (generation_lines ~history_start_boundary_line:snapshot.history_start_boundary_line lines)
+      with
+      | Some (line, _recorded_at, turn_ref) ->
+        line = snapshot.end_boundary_line && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref
+      | None -> false
     in
     if range.history_start_boundary_line <> snapshot.history_start_boundary_line
        || range.end_atom < snapshot.covering_end_atom || not boundary_present

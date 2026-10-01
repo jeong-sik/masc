@@ -96,15 +96,21 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
 (* One goal as the event log remembers it. Local to this reader: the JSON is the
    contract, and putting the record in the interface would invite a second
    reader of the same rows. *)
+type snapshot_title =
+  | No_snapshot_title
+  | Committed_title of { version : int; title : string }
+  | Conflicting_title of int
+
 type goal_history_entry = {
   gh_opened_at : string option;
-  gh_title : string option;
+  gh_title : snapshot_title;
+  gh_unordered_snapshot : bool;
   gh_last_phase : string option;
   gh_last_phase_at : string option;
 }
 
 let empty_goal_history_entry =
-  { gh_opened_at = None; gh_title = None;
+  { gh_opened_at = None; gh_title = No_snapshot_title; gh_unordered_snapshot = false;
     gh_last_phase = None; gh_last_phase_at = None }
 
 (* Goals the event log remembers and goals.json no longer lists. goals.json
@@ -118,7 +124,9 @@ let empty_goal_history_entry =
    left.
 
    [opened_at] comes from [goal_created], and [title] from the latest creation
-   or update. A goal without a creation row reports no guessed opening. [closed_at]
+   or update with the greatest committed store version, never append order.
+   Missing/invalid versions or conflicting latest titles report unknown title
+   ordering rather than inventing a winner. A goal without a creation row reports no guessed opening. [closed_at]
    is filled only when the last phase reached is terminal -- a goal that left the
    list without one is a gap, and dating it would invent an outcome. A negative
    [lifetime_hours] is reported as measured rather than clamped: out-of-order
@@ -127,9 +135,34 @@ let empty_goal_history_entry =
 let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
   let table = Hashtbl.create 16 in
   let rows_without_goal_id = ref 0 in
+  let unordered_snapshot_rows = ref 0 in
   let unrecognised = ref [] in
   let note_unrecognised name =
     if not (List.mem name !unrecognised) then unrecognised := name :: !unrecognised
+  in
+  let snapshot_title current payload =
+    match payload with
+    | `Assoc fields ->
+        (match List.filter (fun (key, _) -> String.equal key "store_version") fields,
+               List.filter (fun (key, _) -> String.equal key "title") fields with
+         | [ _, `Int version ], [ _, `String title ] when version > 0 ->
+             let gh_title = match current.gh_title with
+               | No_snapshot_title -> Committed_title {version; title}
+               | Committed_title previous when version > previous.version ->
+                   Committed_title {version; title}
+               | Conflicting_title previous when version > previous ->
+                   Committed_title {version; title}
+               | Committed_title previous
+                 when version = previous.version && not (String.equal title previous.title) ->
+                   Conflicting_title version
+               | Committed_title _ | Conflicting_title _ -> current.gh_title in
+             {current with gh_title}
+         | _ ->
+             incr unordered_snapshot_rows;
+             {current with gh_unordered_snapshot = true})
+    | _ ->
+        incr unordered_snapshot_rows;
+        {current with gh_unordered_snapshot = true}
   in
   List.iter
     (fun json ->
@@ -147,11 +180,10 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
         let updated =
           match Json_util.get_string json "event_type" with
           | Some "goal_created" ->
-            { current with
-              gh_opened_at = ts;
-              gh_title = Json_util.get_string payload "title" }
+            let snapshot = snapshot_title current payload in
+            { snapshot with gh_opened_at = ts }
           | Some "goal_updated" ->
-            { current with gh_title = Json_util.get_string payload "title" }
+            snapshot_title current payload
           | Some "goal_phase" ->
             { current with
               gh_last_phase = Json_util.get_string payload "phase";
@@ -195,7 +227,13 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
     let closed_at = if reached_terminal then entry.gh_last_phase_at else None in
     `Assoc
       [ "goal_id", `String goal_id
-      ; "title", Json_util.string_opt_to_json entry.gh_title
+      ; ("title", match entry.gh_title, entry.gh_unordered_snapshot with
+          | Committed_title {title; _}, false -> `String title
+          | (No_snapshot_title | Committed_title _ | Conflicting_title _), _ -> `Null)
+      ; ("title_ordering", `String (match entry.gh_title, entry.gh_unordered_snapshot with
+          | Committed_title _, false -> "committed"
+          | Conflicting_title _, false -> "conflicting"
+          | (No_snapshot_title | Committed_title _ | Conflicting_title _), _ -> "unknown"))
       ; "opened_at", Json_util.string_opt_to_json entry.gh_opened_at
       ; "closed_at", Json_util.string_opt_to_json closed_at
       ; "final_phase", Json_util.string_opt_to_json entry.gh_last_phase
@@ -216,7 +254,8 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
     [ "unlisted", `List (List.map entry_json ordered)
     ; ( "coverage"
       , `Assoc
-          [ "malformed_event_lines", `Int malformed_lines
+          [ "unordered_snapshot_rows", `Int !unordered_snapshot_rows
+          ; "malformed_event_lines", `Int malformed_lines
           ; "rows_without_goal_id", `Int !rows_without_goal_id
           ; ( "unrecognised_event_types"
             , `List (List.rev_map (fun name -> `String name) !unrecognised) )
@@ -385,7 +424,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
             ( "approval_queue_state",
-              Keeper_approval_queue.approval_queue_ready_state_json );
+              Keeper_approval_queue_result.approval_queue_ready_state_json );
             ("goal", tree_node_to_json ~events_for_goal ~verification_for_goal
                         ~measurement_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
@@ -400,7 +439,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
 let goal_detail_json_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~goal_id =
   match read_pending ~base_path:config.base_path with
   | Ok pending_approvals ->
@@ -411,7 +450,7 @@ let goal_detail_json_with_pending_reader
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
             ( "approval_queue_state",
-              Keeper_approval_queue.approval_queue_unavailable_state_json
+              Keeper_approval_queue_result.approval_queue_unavailable_state_json
                 error );
             ("goal", `Null);
             ("linked_tasks", `Null);
@@ -472,7 +511,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
       ( "approval_queue_state",
-        Keeper_approval_queue.approval_queue_ready_state_json );
+        Keeper_approval_queue_result.approval_queue_ready_state_json );
       ( "tree",
         `List
           (List.map
@@ -503,7 +542,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
 let dashboard_goals_tree_json_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) =
   match read_pending ~base_path:config.base_path with
   | Ok pending_approvals ->
@@ -513,7 +552,7 @@ let dashboard_goals_tree_json_with_pending_reader
         [
           ("generated_at", `String (Masc_domain.now_iso ()));
           ( "approval_queue_state",
-            Keeper_approval_queue.approval_queue_unavailable_state_json error );
+            Keeper_approval_queue_result.approval_queue_unavailable_state_json error );
           ("tree", `Null);
           ("summary", `Null);
         ]

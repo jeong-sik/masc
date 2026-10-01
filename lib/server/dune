@@ -19,6 +19,9 @@
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row
   ;; (3.2). dune does not re-export it through masc.
   masc.masc_candle
+  ;; The Item account route branches on Candle_config's closed price/status
+  ;; variants; this library is not re-exported through masc_candle_runtime.
+  masc.masc_candle_config
   masc.masc_candle_runtime
   masc.keeper_tool_name
   masc.owner_process_identity

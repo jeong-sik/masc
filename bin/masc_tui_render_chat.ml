@@ -1807,56 +1807,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   layout_entries
 
 
-(* What a queued line is waiting on. "Pending" reads the same behind this
-   Keeper's turn that is still out and behind another queued line, and the
-   difference is whether the wait is ordinary. Computed here rather than in
-   the queue module: the answer needs the in-flight list, and the queue
-   cannot see it without a dependency cycle through [masc_tui_types]. *)
-let chat_pending_behind (state : state)
-  (item : Masc_tui_keeper_chat_queue.item) =
-  let keeper_name =
-  item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-  in
-  let held =
-  List.length
-    (List.filter
-       (fun (entry : Masc_tui_types.inflight) ->
-          String.equal entry.Masc_tui_types.sent_request.keeper_name
-            keeper_name)
-       state.msg_inflight)
-  in
-  let ahead =
-  List.filter
-    (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
-       String.equal
-         waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-         keeper_name
-       && waiting.submission_seq > item.submission_seq
-       &&
-       (* A steer precedes ordinary input whatever its seq; a NEXT line
-          ahead of a steer is not ahead at all. *)
-       (match (waiting.intent, item.intent) with
-        | Steer_after_interrupt, Next -> true
-        | Next, Steer_after_interrupt -> false
-        | _ -> waiting.submission_seq > item.submission_seq))
-    (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
-  in
-  match (item.intent, held, ahead) with
-  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, 0, [] ->
-    Some "after the interrupted turn settles"
-  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, _, _ ->
-    Some "behind this Keeper's turn still out"
-  | Masc_tui_keeper_chat_queue.Next, 0, [] -> None
-  | Masc_tui_keeper_chat_queue.Next, 0, waiting_ahead :: _ -> (
-    match waiting_ahead.intent with
-    | Steer_after_interrupt -> Some "behind a queued steer"
-    | Next -> Some "behind an earlier queued message")
-  | Masc_tui_keeper_chat_queue.Next, 1, _ ->
-    Some "behind this Keeper's running turn"
-  | Masc_tui_keeper_chat_queue.Next, held, _ ->
-    Some
-      (Printf.sprintf "behind this Keeper's %d running turns" held)
-
 (* The operator's own lines that have left the composer and not settled yet:
    the one a running turn is answering, and the ones waiting behind it.
 
@@ -1907,11 +1857,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
                | Masc_tui_keeper_chat_queue.Next -> "NEXT"
                | Masc_tui_keeper_chat_queue.Steer_after_interrupt -> "STEER"
              in
-             let note =
-               match chat_pending_behind state item with
-               | Some reason -> Printf.sprintf "%s %d · %s" intent position reason
-               | None -> Printf.sprintf "%s %d" intent position
-             in
+             let note = Printf.sprintf "%s %d" intent position in
              entry ~at:item.submitted_at ~label:"YOU" ~note
                ~body:item.Masc_tui_keeper_chat_queue.request.Keeper_chat.message
          | Pending_preview_omitted omitted ->
@@ -2185,7 +2131,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    result, and it settles when the turn ends.
 
    [needle] is trimmed by its caller and case-folded inside
-   {!Masc_tui_types.palette_contains}, which keeps case folding out of a
+   {!Masc_tui_pick_list.lowercase_contains}, which keeps case folding out of a
    module whose one rule about [String.lowercase_ascii] is that it does not
    appear here.
 
@@ -2215,7 +2161,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
       |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_types.palette_contains ~needle entry.body)
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
     in
     match matched with
     | None -> None
@@ -3686,8 +3632,13 @@ let render_keeper_message (state : state) =
     if split then begin
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
-      let portrait = Masc_tui_chat_portrait.shown ~name:keeper_name
-        ~rows:pane_rows ~cols:keeper_roster_pane_cols in
+      let portrait =
+        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+        | Keeper_control.Present runtime ->
+            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
+              ~rows:pane_rows ~cols:keeper_roster_pane_cols
+        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+      in
       let roster_rows = match portrait with
         | None -> pane_rows
         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in

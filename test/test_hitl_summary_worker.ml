@@ -47,7 +47,7 @@ let install_queue base_path =
   Masc.Keeper_registry.For_testing.clear ();
   match Q.install_persistence ~base_path with
   | Ok _ -> ()
-  | Error error -> fail (Q.install_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 ;;
 
 let ensure_registered_keeper ~base_path keeper_name =
@@ -105,12 +105,12 @@ let pending_entry
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Q.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match Q.mark_summary_pending ~id with
    | Ok true -> ()
    | Ok false -> fail "summary did not enter pending state"
-   | Error error -> fail (Q.summary_transition_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error));
   match Q.For_testing.get_pending_entry_unchecked ~id with
   | Some entry ->
     ensure_registered_keeper ~base_path entry.keeper_name;
@@ -1442,14 +1442,14 @@ let test_completion_identity_conflict_stays_deterministic () =
          match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
          | Some { exact_attempt = QT.Exact_bound binding; _ } ->
            let transition_exn operation = function
-             | Ok { Q.write_outcome = Q.Fsync_completed; _ } -> ()
-             | Ok { Q.write_outcome = Q.Visible_sync_unconfirmed detail; _ } ->
+             | Ok { Masc.Keeper_approval_queue_result.write_outcome = Masc.Keeper_approval_queue_result.Fsync_completed; _ } -> ()
+             | Ok { Masc.Keeper_approval_queue_result.write_outcome = Masc.Keeper_approval_queue_result.Visible_sync_unconfirmed detail; _ } ->
                failf "%s was not durable: %s" operation detail
              | Error error ->
                failf
                  "%s failed: %s"
                  operation
-                 (Q.exact_attempt_error_to_string error)
+                 (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
            in
            Q.release_summary_exact_attempt_before_dispatch
              ~id:entry.id
@@ -1484,7 +1484,7 @@ let test_completion_identity_conflict_stays_deterministic () =
             (prepare_exn entry)
         with
         | Worker.Exact_rejection_blocked
-            (Q.Exact_attempt_identity_conflict binding) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_identity_conflict binding) ->
           check string
             "typed replacement identity survives"
             replacement_call_id
@@ -1492,8 +1492,8 @@ let test_completion_identity_conflict_stays_deterministic () =
         | Worker.Exact_rejection_blocked rejection ->
           failf
             "wrong deterministic rejection: %s"
-            (Q.exact_attempt_error_to_string
-               (Q.Exact_attempt_rejected rejection))
+            (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string
+               (Masc.Keeper_approval_queue_result.Exact_attempt_rejected rejection))
         | Worker.Executed ->
           fail "deterministic completion conflict reported success"
         | Worker.Identity_unbound_blocked ->
@@ -2411,11 +2411,11 @@ let test_orphaned_start_reservation_recovers_a_worker () =
             ~input_hash:entry.input_hash
             ~sequence:entry.sequence
             ~reason_code:QT.Summary_pre_worker_start_reserved
-            ~operator_detail:Q.summary_attempt_start_reserved_operator_detail
+            ~operator_detail:Masc.Keeper_approval_queue_result.summary_attempt_start_reserved_operator_detail
         with
         | Ok true -> ()
         | Ok false -> fail "start reservation was not stored"
-        | Error error -> fail (Q.exact_attempt_error_to_string error));
+        | Error error -> fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
         | Some
             { summary_attempt_disposition =
@@ -2708,7 +2708,7 @@ let test_cli_bind_rejection_after_release_settles_the_entry () =
          then (
            incr cli_bind_rejections;
            Error
-             (Q.Exact_attempt_rejected (Q.Exact_attempt_summary_not_pending id)))
+             (Masc.Keeper_approval_queue_result.Exact_attempt_rejected (Masc.Keeper_approval_queue_result.Exact_attempt_summary_not_pending id)))
          else
            Q.bind_summary_exact_attempt
              ~id

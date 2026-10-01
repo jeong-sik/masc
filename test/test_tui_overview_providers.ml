@@ -96,7 +96,7 @@ let meter_of row =
 
 let test_section_draws_three_line_shapes () =
   let windows =
-    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
@@ -178,7 +178,7 @@ let test_section_draws_three_line_shapes () =
    is the reason a Keeper on it is stuck. It draws no meter. *)
 let test_silent_account_draws_only_its_exhaustion () =
   let windows =
-    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
@@ -203,7 +203,7 @@ let test_silent_account_draws_only_its_exhaustion () =
 
 let reported_section ~width =
   let windows =
-    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
@@ -275,7 +275,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
 }|}
   in
   let windows =
-    match Tui_decode.decode_provider_usage_windows json with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows json with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
@@ -322,7 +322,7 @@ let test_unknown_role_is_rejected () =
 }|}
   in
   check bool "an unknown role fails the reading" true
-    (Result.is_error (Tui_decode.decode_provider_usage_windows json))
+    (Result.is_error (Masc.Tui_decode_usage.decode_provider_usage_windows json))
 
 let full_cells n = String.concat "" (List.init n (fun _ -> "\xe2\x96\x88"))
 
@@ -350,13 +350,13 @@ let test_values_read_in_one_unit () =
   List.iter
     (fun (label, utilization, expected) ->
       check string label expected (Providers.utilization_text utilization))
-    [ ("a fraction reads as a percent", Tui_decode.Utilization_fraction 0.67, "67%")
-    ; ("binary noise does not lose a percent", Tui_decode.Utilization_fraction 0.29, "29%")
-    ; ("just under full is not full", Tui_decode.Utilization_fraction 0.9999, "99%")
-    ; ("a full fraction is 100%", Tui_decode.Utilization_fraction 1.0, "100%")
-    ; ("past full is not clamped", Tui_decode.Utilization_fraction 1.4, "140%")
-    ; ("a percent reads as reported", Tui_decode.Utilization_percent 100, "100%")
-    ; ("a percent past full as reported", Tui_decode.Utilization_percent 140, "140%")
+    [ ("a fraction reads as a percent", Masc.Tui_decode_usage.Utilization_fraction 0.67, "67%")
+    ; ("binary noise does not lose a percent", Masc.Tui_decode_usage.Utilization_fraction 0.29, "29%")
+    ; ("just under full is not full", Masc.Tui_decode_usage.Utilization_fraction 0.9999, "99%")
+    ; ("a full fraction is 100%", Masc.Tui_decode_usage.Utilization_fraction 1.0, "100%")
+    ; ("past full is not clamped", Masc.Tui_decode_usage.Utilization_fraction 1.4, "140%")
+    ; ("a percent reads as reported", Masc.Tui_decode_usage.Utilization_percent 100, "100%")
+    ; ("a percent past full as reported", Masc.Tui_decode_usage.Utilization_percent 140, "140%")
     ]
 
 let test_failed_read_is_one_line () =
@@ -371,7 +371,7 @@ let test_failed_read_is_one_line () =
   | None -> fail "a failed read is drawn"
 
 let test_empty_read_names_missing_usage_data () =
-  let empty : Tui_decode.provider_usage_windows =
+  let empty : Masc.Tui_decode_usage.provider_usage_windows =
     { puws_since = now; puws_accounts = [] }
   in
   match
@@ -389,7 +389,7 @@ let test_empty_read_names_missing_usage_data () =
    account that draws no row draws no email either. *)
 let test_account_emails_name_their_accounts () =
   let windows =
-    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
@@ -446,13 +446,13 @@ let test_account_emails_name_their_accounts () =
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
     (Result.is_error
-       (Tui_decode.decode_provider_usage_windows (resolved "paused")))
+       (Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "paused")))
 
 let test_history_preserves_reported_days_and_units () =
   let json = Yojson.Safe.from_string
     {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
   in
-  match Tui_decode.decode_provider_usage_history json with
+  match Masc.Tui_decode_usage.decode_provider_usage_history json with
   | Error detail -> fail detail
   | Ok history ->
       check int "declared UTC days" 14 history.puh_days;
@@ -460,30 +460,30 @@ let test_history_preserves_reported_days_and_units () =
        | [point] ->
            check string "opaque scope" "abc12345" point.puhp_scope_id;
            (match point.puhp_unit with
-            | Tui_decode.Utilization_fraction value ->
+            | Masc.Tui_decode_usage.Utilization_fraction value ->
                 check (float 0.0001) "reported fraction" 0.4 value
-            | Tui_decode.Utilization_percent _ -> fail "unit changed")
+            | Masc.Tui_decode_usage.Utilization_percent _ -> fail "unit changed")
        | _ -> fail "expected one reported point")
 
 (* The trend is built once from the answer. A day without a report is the
    no-report mark, never the lowest bar; a scope whose only point is outside
    the window keeps its row and says it reported no day. *)
 let test_trend_is_built_from_the_answer () =
-  let point ~scope_id ~observed_at unit : Tui_decode.provider_usage_history_point =
+  let point ~scope_id ~observed_at unit : Masc.Tui_decode_usage.provider_usage_history_point =
     { puhp_scope_id = scope_id; puhp_kind = "five_hour"; puhp_limit_id = None;
       puhp_unit = unit; puhp_observed_at = observed_at }
   in
   let generated_at = 1780000000.0 in
   let day = 86400.0 in
-  let history : Tui_decode.provider_usage_history =
+  let history : Masc.Tui_decode_usage.provider_usage_history =
     { puh_days = 3; puh_generated_at = generated_at; puh_unreadable_reports = 1;
       puh_points =
         [ point ~scope_id:"s1" ~observed_at:(generated_at -. (2.0 *. day))
-            (Tui_decode.Utilization_fraction 0.0)
+            (Masc.Tui_decode_usage.Utilization_fraction 0.0)
         ; point ~scope_id:"s1" ~observed_at:generated_at
-            (Tui_decode.Utilization_percent 100)
+            (Masc.Tui_decode_usage.Utilization_percent 100)
         ; point ~scope_id:"s0" ~observed_at:(generated_at -. (30.0 *. day))
-            (Tui_decode.Utilization_fraction 0.5)
+            (Masc.Tui_decode_usage.Utilization_fraction 0.5)
         ] }
   in
   let trend =
@@ -503,7 +503,7 @@ let test_trend_is_built_from_the_answer () =
 (* The id the section names a scope by is the server's, carried on the row,
    so the trend's points and the current windows cannot disagree. *)
 let test_scope_id_is_the_servers () =
-  match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+  match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
   | Error err -> failf "fixture should decode: %s" err
   | Ok windows ->
       check (list string) "ids as the server sent them"

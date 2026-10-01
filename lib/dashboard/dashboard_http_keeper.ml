@@ -744,7 +744,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       `Assoc
                         [
                           ( "approval_queue_state",
-                            Keeper_approval_queue
+                            Keeper_approval_queue_result
                             .approval_queue_unavailable_state_json
                               error );
                           ("count", `Null);
@@ -759,7 +759,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       `Assoc
                         [
                           ( "approval_queue_state",
-                            Keeper_approval_queue
+                            Keeper_approval_queue_result
                             .approval_queue_ready_state_json );
                           ("count", `Int (List.length linked));
                           ( "nodes",
@@ -914,7 +914,16 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       row)
       names
   in
-  let summaries = List.filter_map Fun.id rows in
+  let equipment = Candle_equipment.reader ~base_path:config.base_path () in
+  let summaries = List.filter_map Fun.id rows |> List.map (fun row ->
+    let portrait = match Json_util.assoc_string_opt "name" row with
+      | Some keeper -> (match equipment ~keeper with
+          | Ok value -> Keeper_portrait_equipment.Ready value
+          | Error reason -> Keeper_portrait_equipment.Unavailable reason)
+      | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
+    match row with
+    | `Assoc fields -> `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait) :: List.remove_assoc "portrait" fields)
+    | json -> json) in
   `Assoc [
     ("keepers", `List summaries);
     ("total", `Int (List.length summaries));

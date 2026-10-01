@@ -522,9 +522,10 @@ let terminal_outcome = function
 ;;
 
 (* What TypeSafe AI Jev answered for a candidate before any catalog slot ran.
-   Only [Jev_relevant] settles the candidate: an explicit relevant answer. A not-relevant verdict drops the post for
-   this keeper, so the LLM lane judges it again, as it does an explicit uncertain answer
-   ([Jev_uncertain]) and every arm where Jev gave no answer.
+   [Jev_decided] settles the candidate with Jev's decision. A decision below
+   [\[typesafeai\].board_attention_confidence_floor] ([Jev_low_confidence]),
+   an explicit uncertain answer ([Jev_uncertain]) and every arm where Jev gave
+   no answer go to the LLM lane.
    The terminal log line carries this value, so what Jev said and what the
    lane then decided are read from one entry. *)
 type jev_first =
@@ -536,23 +537,25 @@ type jev_first =
       (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
           front of the HTTP lane. *)
   | Jev_not_pending
-      (** Jev is on, but the candidate is not [Pending], so it is not eligible
-          for a new judgment. *)
-  | Jev_relevant of
+      (** Jev is on, but the candidate is neither pending nor a durably
+          requeued pending one, so it is not eligible for a new judgment. *)
+  | Jev_decided of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; verdict : Keeper_board_attention_judgment.t
+      ; confidence : float
       ; judged_at : float
       }
-  | Jev_not_relevant of
+  | Jev_low_confidence of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
-      ; rationale : string
+      ; verdict : Keeper_board_attention_judgment.t
+      ; confidence : float
       }
   | Jev_uncertain of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; rationale : string
       ; confidence : float
       }
-      (** Jev explicitly requested full review. Confidence is observation only. *)
+      (** Jev explicitly requested full review. *)
   | Jev_failed of { reason : string }
 
 let ask_jev ~clock prepared =
@@ -573,11 +576,27 @@ let ask_jev ~clock prepared =
       (match prepared.transport with
        | Cli_only _ -> Jev_cli_only
        | Http_flow _ ->
-         (match prepared.candidate.status with
-          | Keeper_board_attention_candidate.Judged _
-          | Keeper_board_attention_candidate.Consumed _
-          | Keeper_board_attention_candidate.Quarantine _ -> Jev_not_pending
-          | Keeper_board_attention_candidate.Pending _ ->
+         (* The same view [prepare] admits by: a durably requeued pending
+            candidate is judged like a pending one, so Jev is asked first for
+            both. *)
+         (match
+            Keeper_board_attention_candidate.status_view
+              prepared.candidate.Keeper_board_attention_candidate.status
+          with
+          | Keeper_board_attention_candidate.Suspended_quarantine _
+          | Keeper_board_attention_candidate.Direct_resumable
+              ( Keeper_board_attention_candidate.Resumable_judged _
+              | Keeper_board_attention_candidate.Resumable_consumed _ )
+          | Keeper_board_attention_candidate.Requeued_resumable
+              { resumable =
+                  ( Keeper_board_attention_candidate.Resumable_judged _
+                  | Keeper_board_attention_candidate.Resumable_consumed _ )
+              ; _
+              } -> Jev_not_pending
+          | Keeper_board_attention_candidate.Direct_resumable
+              (Keeper_board_attention_candidate.Resumable_pending _)
+          | Keeper_board_attention_candidate.Requeued_resumable
+              { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ } ->
             (* A direct-style Eio request on this keeper's board-attention
                worker fiber: the wait suspends that fiber alone, as the
                [Exact_output] request does, so it delays this candidate's
@@ -595,32 +614,30 @@ let ask_jev ~clock prepared =
                 | Typesafeai_board_attention.Needs_review rationale ->
                   Jev_uncertain { provenance; rationale; confidence }
                 | Typesafeai_board_attention.Decided verdict ->
-                  (match verdict.Keeper_board_attention_judgment.decision with
-                   | Keeper_board_attention_judgment.Relevant ->
-                     Jev_relevant
-                       { provenance; verdict; judged_at = Eio.Time.now clock }
-                   | Keeper_board_attention_judgment.Not_relevant ->
-                     Jev_not_relevant
-                       { provenance
-                       ; rationale = verdict.Keeper_board_attention_judgment.rationale
-                       }))))))
+                  if
+                    Float.compare
+                      confidence
+                      (Typesafeai_config.board_attention_confidence_floor ())
+                    >= 0
+                  then
+                    Jev_decided
+                      { provenance; verdict; confidence; judged_at = Eio.Time.now clock }
+                  else Jev_low_confidence { provenance; verdict; confidence })))))
 ;;
 
 let jev_answer_label = function
   | Jev_off -> "off"
   | Jev_cli_only -> "cli_only"
   | Jev_not_pending -> "not_pending"
-  | Jev_relevant _ ->
+  | Jev_decided { verdict; _ } ->
     Keeper_board_attention_judgment.decision_to_string
-      Keeper_board_attention_judgment.Relevant
-  | Jev_not_relevant _ ->
-    Keeper_board_attention_judgment.decision_to_string
-      Keeper_board_attention_judgment.Not_relevant
+      verdict.Keeper_board_attention_judgment.decision
+  | Jev_low_confidence _ -> "low_confidence"
   | Jev_uncertain _ -> "uncertain"
   | Jev_failed _ -> "failed"
 ;;
 
-(* [rejudged] appears after a not-relevant or uncertain answer. It is the
+(* [rejudged] appears after a low-confidence or uncertain answer. It is the
    decision the complete LLM lane then returned after its HTTP and declared
    CLI slots, or [null] when the lane returned no judgment. *)
 let jev_first_to_yojson jev_first result =
@@ -642,14 +659,19 @@ let jev_first_to_yojson jev_first result =
   in
   match jev_first with
   | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
-  | Jev_relevant { provenance; _ } ->
-    with_provenance provenance [ answer ]
+  | Jev_decided { provenance; confidence; _ } ->
+    with_provenance provenance [ answer; "confidence", `Float confidence ]
   | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
-  | Jev_not_relevant { provenance; rationale } ->
+  | Jev_low_confidence { provenance; verdict; confidence } ->
     with_provenance
       provenance
       [ answer
-      ; "rationale", `String rationale
+      ; ( "decision"
+        , `String
+            (Keeper_board_attention_judgment.decision_to_string
+               verdict.Keeper_board_attention_judgment.decision) )
+      ; "rationale", `String verdict.Keeper_board_attention_judgment.rationale
+      ; "confidence", `Float confidence
       ; "rejudged", rejudged
       ]
   | Jev_uncertain { provenance; rationale; confidence } ->
@@ -824,7 +846,7 @@ let execute_current
              Error (Cli_slots_exhausted { prior_error = None; failures }))
         | Http_flow attempt ->
           (match jev_first with
-           | Jev_relevant { provenance; verdict; judged_at } ->
+           | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->
              Ok
                { Keeper_board_attention_candidate.verdict
                ; slot_id = provenance.answering_model_id
@@ -832,7 +854,12 @@ let execute_current
                    Keeper_board_attention_candidate.Vendor_system_one provenance
                ; judged_at
                }
-           | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_uncertain _ | Jev_failed _ ->
+           | Jev_off
+           | Jev_cli_only
+           | Jev_not_pending
+           | Jev_low_confidence _
+           | Jev_uncertain _
+           | Jev_failed _ ->
              let flow =
                Exact_output.execute_flow_once
                  ~net:prepared.net

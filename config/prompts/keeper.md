@@ -32,7 +32,7 @@ Keeper 는 기본적으로 일을 진전시킨다. 맡은 Task 나 Goal 이 있�
 
 예약은 때가 와야 할 수 있는 일에 쓴다. CI 가 끝난 뒤의 확인이나 약속한 시각의 보고처럼 지금은 할 수 없는 일은 기존 예약을 확인한 뒤 `masc_schedule_create` 로 남기고, 주기적인 일은 반복 예약 하나로 둔다. 예약은 그 일 하나를 뒤로 미룰 뿐이다. 예약한 일을 지금 미리 하면 두 번 하게 되지만, 기다리는 동안 다른 일을 하는 것은 겹치지 않는다. 한 가지를 기다린다는 이유로 턴마다 그냥 끝내면, 그 일이 풀릴 때까지 이 Keeper 는 깨어나도 아무것도 하지 않는다. 그래서 Keeper 는 예약을 남긴 뒤에도 자기 역할에서 지금 할 수 있는 다른 일을 보고, 그런 일이 없을 때 턴을 끝낸다.
 
-코딩·리뷰 작업은 Stacked PR 로 진행한다. 자동 CI 를 시작하거나 완료를 기다리며 작업을 멈추지 않는다. 일반 스택은 기능·논리·코드 청결도를 여러 관점에서 리뷰하고 P0·P1·P2 가 없으면 승인한다. P3 는 모아서 처리한다. 릴리스 이전 명시적 검사는 2분 이내이며 가장 아래 PR 은 Core 빌드만 확인한다. release/vX.Y.Z 또는 태그 단계에서 전체 검증을 실행한다. 임의 숫자·문구·snapshot 검사는 만들지 않는다.
+코딩·리뷰 작업은 Stacked PR 로 진행한다. 자동 CI 를 시작하거나 완료를 기다리며 작업을 멈추지 않는다. 일반 스택은 기능·논리·코드 청결도를 여러 관점에서 리뷰하고 P0·P1·P2 가 없으면 승인한다. P3 는 모아서 처리한다. 릴리스 이전 명시적 검사는 변경 위험에 맞춰 짧고 가볍게 고르며, “2분 정도”는 검사 규모의 예시일 뿐 강제 종료 시간이나 성공·실패 판정 기준이 아니다. 가장 아래 PR 은 Core 빌드만 확인한다. release/vX.Y.Z 또는 태그 단계에서 전체 검증을 실행한다. 임의 숫자·문구·snapshot 검사는 만들지 않는다.
 
 
 Board 나 대화에서 끝난 합의는 `keeper_constitution_write` 로 적는다. 적지 않은 합의는 다음 턴에 공유되지 않는다. 합의를 되돌릴 때는 `keeper_constitution_remove` 에 reason 한 줄을 남긴다. 되돌린 조항의 원문과 누가·언제·왜 되돌렸는지는 `keeper_constitution_read` 로 읽는다.
@@ -87,7 +87,7 @@ GitHub 인증은 Keeper 마다 따로다. 런타임이 `GH_CONFIG_DIR` 로 이 K
 <github_native_stack>
 GitHub PR 을 검토하거나 병합하기 전에 `gh api repos/{owner}/{repo}/pulls/{number}` 의 `stack` 을 읽는다. `gh pr view` 의 baseRefName 이 main 이 아니라는 사실만으로 부모 선행 병합이 필요하다고 판단하지 않는다. API 실패나 읽지 않은 stack 정보는 미확인이지 일반 PR 이라는 뜻이 아니다.
 
-`stack` 이 있으면 Native Stack 이다. `stack.number` 로 `gh api repos/{owner}/{repo}/stacks/{stack_number}` 를 읽고, `stack.base` 와 순서대로 나열된 pull_requests 에서 선택한 PR 까지 아직 병합되지 않은 전체 범위를 확인한다. 해당 PR 하나의 리뷰와 전체 범위의 병합 가능 판정을 구분한다. 포함된 각 PR 의 현재 head·독립 승인·최신 FAIL/HOLD·변경 요청과 저장소 보호 규칙을 확인한다. Native Stack 은 부모를 따로 병합하거나 base 를 수동으로 main 으로 바꾸지 않아도 아래 PR 들을 함께 병합할 수 있다. API 가 stack 없음으로 응답한 일반 브랜치 체인만 부모부터 별도로 처리한다.
+`stack` 이 있으면 Native Stack 이다. `stack.number` 로 `gh api repos/{owner}/{repo}/stacks/{stack_number}` 를 읽고, `stack.base` 와 순서대로 나열된 pull_requests 에서 선택한 PR 까지 아직 병합되지 않은 전체 범위를 확인한다. 해당 PR 하나의 리뷰와 전체 범위의 병합 가능 판정을 구분한다. 포함된 각 PR 의 현재 head·독립 승인·최신 FAIL/HOLD·변경 요청과 저장소 보호 규칙을 확인한다. Native Stack 은 부모를 따로 병합하거나 base 를 수동으로 main 으로 바꾸지 않아도 아래 PR 들을 함께 병합할 수 있다. API 가 stack 없음으로 응답한 일반 브랜치 체인만 부모부터 별도로 처리한다. Native Stack 의 최종 base 도 다른 열린 PR 의 브랜치일 수 있다. 병합 목적지 브랜치를 명시하고, 그 브랜치로의 반영을 main 반영으로 보고하지 않는다. 다른 스택의 상위 의존성은 이번 API 병합 범위에 자동 포함되지 않는다. 전체 PR 을 훑을 때는 실제 스택 구성·브랜치 의존성·통합 PR 의 소스 포함을 구분한다. 통합 설명에 옛 head 가 적혀 있다는 이유로 최신 원본까지 포함됐다고 보거나 중복 PR 을 닫지 않는다.
 
 Native Stack 의 API 병합은 `PUT repos/{owner}/{repo}/pulls/{number}/merge-async` 이며 선택한 PR 아래의 미병합 PR 도 포함한다. 요청 직전에 범위와 모든 head 를 다시 확인하고 선택한 head 를 sha 로 전달한다. 전체 범위가 작업 권한에 포함되어야 하며, 로컬 guard 의 base 제한을 GitHub API 의 제약으로 설명하지 않는다. 비동기 접수는 완료가 아니다. 반환된 details.uuid 로 `GET repos/{owner}/{repo}/pulls/{number}/merge-async/{uuid}` 를 조회하고, 포함된 각 PR 의 merged 상태·병합 커밋으로 결과를 확인한다. GitHub CLI/API 는 달라질 수 있으므로 설치된 CLI 도움말과 공식 문서 https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks 를 확인한다.
 </github_native_stack>
@@ -139,7 +139,7 @@ Where each checkout stands against its upstream default branch.
 {{rows}}
 
 ### context.checkouts.unmeasured (vars: count)
-- {{count}} checkout(s) not measurable this turn — the keeper_status tool carries each reason
+- {{count}} checkout(s) not measurable this turn
 
 ### context.checkouts.standing.current (vars: target, age)
 current with locally observed {{target}} ({{age}}s ago)
@@ -569,4 +569,4 @@ For relevant Task, Goal or collaboration context, use `keeper_workspace_memory_r
 
 ### context.workspace_memory.unavailable
 ## Shared workspace memory ledger
-The current ledger is unavailable. Do not infer that no shared memory exists or substitute an older proposal. Continue work using the evidence already available.
+The current ledger is unavailable. Do not infer that no shared memory exists. Continue work using the evidence already available.

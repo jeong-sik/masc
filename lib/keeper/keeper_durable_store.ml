@@ -708,7 +708,7 @@ let gate_pending_store =
               ~decode:(fun ~path:_ contents ->
                 match Yojson.Safe.from_string contents with
                 | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-                | json -> Keeper_approval_queue.validate_pending_snapshot ~base_path json)))
+                | json -> Keeper_approval_queue_codec.validate_pending_snapshot ~base_path json)))
   }
 ;;
 

@@ -13,7 +13,8 @@ type judged =
       (** The configured destination, exact request-body digest, and the model
           the System One response says answered. *)
   ; confidence : float
-      (** Validated 0..1 confidence retained for observation, never routing. *)
+      (** Validated 0..1 confidence. The Board attention flow sends a decision
+          below its settle floor to the LLM lane. *)
   }
 
 val judge_candidate :
@@ -23,5 +24,17 @@ val judge_candidate :
   unit ->
   (judged, string) result
 (** Evaluates the current signal with explicit relevant, not_relevant and
-    uncertain choices. Uncertainty is [Needs_review]; confidence is observation
-    only. Returns [Error] for transport, invalid response or unoffered choice. *)
+    uncertain choices. Uncertainty is [Needs_review]; the caller compares
+    [confidence] with its floor. Returns [Error] for transport, invalid
+    response or unoffered choice. *)
+
+val judge_candidates :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  destinations:Typesafeai_config.destinations ->
+  candidates:Keeper_board_attention_candidate.candidate list ->
+  unit ->
+  ((Keeper_board_attention_candidate.candidate * (judged, string) result) list, string) result
+(** Evaluate one signal with one question per candidate. All candidates must
+    carry the same signal and distinct identities. Empty input makes no call.
+    Transport failures and structurally malformed responses affect the batch.
+    Missing answers and decoded but unoffered choices affect only their candidate. Callers apply keeper exclusions before calling. *)

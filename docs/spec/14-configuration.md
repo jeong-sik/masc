@@ -392,3 +392,27 @@ non-secret recovery receipt. Native account references exist before the CLI
 starts. Antigravity captures a reference during normal completion or graceful
 interruption; an abrupt server kill before capture can leave an interrupted
 receipt without a reference. Such a receipt must not be presented as successful.
+
+### Codex context admission
+
+A scoped `max-context` is a requested nominal window. Before a Codex thread or
+turn is dispatched, MASC reads the selected binary's catalog through an isolated
+connection and refuses a request above its `max_context_window`. It never silently
+calls a clamped request effective. The admitted catalog is passed to the actual
+client as `model_catalog_json`, so a different account-local cached catalog cannot
+change the ceiling between admission and dispatch. An unavailable or malformed
+catalog refuses dispatch; no model prompt or tool call has been submitted.
+
+Successful catalog admission is cached per binary, connection, workspace and
+model/window. Binary metadata, account configuration, credentials, original catalog,
+inherited configuration, and filtered environment revisions invalidate that cache.
+Only digests and public model metadata are retained. There is no age-based cache.
+An unchanged connection avoids a catalog subprocess on later turns.
+
+MASC also overrides `model_auto_compact_token_limit` with the requested nominal
+window. Codex applies its own model-native compaction headroom; an account-local
+smaller threshold no longer silently controls a MASC turn. The catalog's usable
+input percentage is recorded separately from the nominal window. This check does
+not tokenize the vendor-composed prompt or prove that a 1M declaration is available
+on an account whose client advertises a smaller maximum. The vendor remains the
+authority for exact token admission and actual compaction.

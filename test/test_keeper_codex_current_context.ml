@@ -17,6 +17,9 @@ let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_re
 import json, sys, os
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
+if sys.argv[1:3] == ['debug', 'models']:
+    print(json.dumps({'models':[{'slug':'context-fixture','max_context_window':1000000,'effective_context_window_percent':95}]}))
+    sys.exit(0)
 capture = %S
 with open(capture+'.argv', 'a') as out:
     out.write(json.dumps(sys.argv[1:])+'\n')

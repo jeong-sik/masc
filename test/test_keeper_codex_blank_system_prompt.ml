@@ -59,6 +59,7 @@ let fixture_script ~base_path ~capture_path =
     output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n")
   in
   output_string output "#!/bin/sh\n";
+  output_string output "if [ \"$1\" = debug ]; then printf '%s\\n' '{\"models\":[{\"slug\":\"gpt-fixture\",\"max_context_window\":1000000,\"effective_context_window_percent\":95}]}'; exit 0; fi\n";
   output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
   read_request ();
   emit init_result;

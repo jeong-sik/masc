@@ -759,6 +759,9 @@ from pathlib import Path
 import sys
 
 args = sys.argv[1:]
+if args[:2] == ["debug", "models"]:
+    print(json.dumps({"models": [{"slug": "gpt-6.1-sol", "max_context_window": 1000000, "effective_context_window_percent": 95}]}))
+    sys.exit(0)
 if "auth" in args and "status" in args:
     print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
     sys.exit(0)
@@ -920,6 +923,29 @@ default = "fixture.selected"
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"
         ])))
+;;
+
+let test_codex_context_home_preserves_selected_catalog () =
+  let directory = Filename.temp_dir "codex-context-home-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
+    let source = Filename.concat directory "source" in
+    let target = Filename.concat directory "target" in
+    Unix.mkdir source 0o700; Unix.mkdir target 0o700;
+    let write name body = Out_channel.with_open_bin (Filename.concat source name)
+      (fun channel -> output_string channel body) in
+    write "config.toml" "profile = \"custom\"\nmodel_catalog_json = \"root.json\"\n[profiles.custom]\nmodel_catalog_json = \"chosen.json\"\n";
+    write "chosen.json" "{\"models\":[]}";
+    write "models_cache.json" "selected-client-owned-cache";
+    match Runtime_verification_codex_home.prepare ~preserve_model_catalog:true
+      ~source_home:source ~directory:target () with
+    | Error detail -> fail detail
+    | Ok home ->
+      check string "cache identity remains the client's responsibility" "selected-client-owned-cache"
+        (Fs_compat.load_file (Filename.concat home "models_cache.json"));
+      let config = Fs_compat.load_file (Filename.concat home "config.toml") |> Otoml.Parser.from_string in
+      check (option string) "profile-specific catalog remains anchored to original home"
+        (Some (Filename.concat source "chosen.json"))
+        (Otoml.find_opt config Otoml.get_string ["model_catalog_json"]))
 ;;
 
 let test_codex_readiness_excludes_inherited_tools () =
@@ -1512,6 +1538,7 @@ let () =
         ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
         ; test_case "Muse private MCP readiness" `Quick test_muse_private_tool_roundtrip
+        ; test_case "Codex context isolation preserves selected catalog" `Quick test_codex_context_home_preserves_selected_catalog
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "official probes preserve selected effort on the wire" `Quick
             test_official_probes_preserve_selected_effort

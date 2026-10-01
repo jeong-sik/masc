@@ -209,6 +209,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   in
   output_string output "#!/bin/sh\n";
   output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
+  output_string output ("if [ \"$1\" = debug ]; then printf '%s\\n' " ^ shell_quote "{\"models\":[{\"slug\":\"gpt-fixture\",\"context_window\":272000,\"max_context_window\":1000000,\"effective_context_window_percent\":95}]}" ^ "; exit 0; fi\n");
   read_request ~expect_version:true ();
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
@@ -300,6 +301,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
   output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
+  output_string output ("if [ \"$1\" = debug ]; then printf '%s\\n' " ^ shell_quote "{\"models\":[{\"slug\":\"gpt-fixture\",\"context_window\":272000,\"max_context_window\":1000000,\"effective_context_window_percent\":95}]}" ^ "; exit 0; fi\n");
   output_string output "count=0\n";
   output_string output
     ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"
@@ -348,6 +350,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; account_home
       ; isolated_home
       ; context_window
+      ; model = Option.map (fun _ -> "gpt-fixture") context_window
       ; native
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
@@ -2017,6 +2020,58 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
+let test_context_admission_cache_keeps_coexisting_windows () =
+  let probes = Filename.temp_file "codex-catalog-probes-" ".log" in
+  Fun.protect ~finally:(fun () -> Sys.remove probes) (fun () ->
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+      (fun path ->
+        let original = In_channel.with_open_bin path In_channel.input_all in
+        let instrumented = original |> String.split_on_char '\n'
+          |> List.concat_map (fun line ->
+            if String.starts_with ~prefix:"if [ \"$1\" = debug ]" line then
+              ["if [ \"$1\" = debug ]; then printf 'probe\\n' >> " ^ shell_quote probes ^ "; fi"; line]
+            else [line]) |> String.concat "\n" in
+        Out_channel.with_open_bin path (fun out -> output_string out instrumented);
+        List.iter (fun context_window -> match run_fixture ~context_window path with
+          | Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+          [272000; 400000; 272000; 400000];
+        check int "each coexisting declaration probes once" 2
+          (List.length (In_channel.with_open_bin probes In_channel.input_lines))))
+;;
+
+let test_selected_client_context_admission () =
+  let module Admission = Runtime_codex_context_admission in
+  let catalog maximum = `Assoc ["models", `List [`Assoc
+    ["slug", `String "gpt-fixture"; "max_context_window", `Int maximum;
+     "effective_context_window_percent", `Int 95]]] in
+  List.iter (fun requested ->
+    match Admission.resolve ~model:"gpt-fixture" ~requested (catalog 1000000) with
+    | Ok admitted ->
+      check int "nominal request remains operator intent" requested admitted.requested;
+      check int "input headroom is reported separately" (requested / 100 * 95) admitted.usable_input
+    | Error error -> fail (Admission.error_to_string error)) [272000; 400000; 1000000];
+  (match Admission.resolve ~model:"gpt-fixture" ~requested:1000000 (catalog 872000) with
+   | Error (Admission.Requested_above_maximum {requested=1000000; maximum=872000; _}) -> ()
+   | _ -> fail "a client ceiling must reject a larger declaration");
+  List.iter (fun thread_mode ->
+    List.iter (fun context_window ->
+      with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+        (fun path -> match run_fixture ~context_window ~thread_mode path with
+          | Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
+      [272000; 400000; 1000000])
+    [Runtime_codex_app_server.Start; Resume {thread_id="thread-1"}];
+  let capture_path = Filename.temp_file "codex-context-refused-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
+    with_fixture ~capture_path [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+      (fun path ->
+        (match run_fixture ~context_window:1100000 path with
+         | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "oversized declaration dispatched a turn");
+        check string "no thread or turn starts after refusal" ""
+          (In_channel.with_open_bin capture_path In_channel.input_all)))
+;;
+
 let test_client_argv_carries_posture_and_sub_agent_overrides () =
   List.iter (fun (native, context_window) ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
@@ -2034,11 +2089,19 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
           (match run_fixture ~native ?context_window path with
            | Ok _ -> ()
            | Error error -> fail (Runtime_codex_app_server.error_to_string error)));
-      let argv = In_channel.with_open_bin argv_path In_channel.input_lines in
+      let raw_argv = In_channel.with_open_bin argv_path In_channel.input_lines in
+      let rec separate_catalog = function
+        | "-c" :: value :: rest when String.starts_with ~prefix:"model_catalog_json=" value ->
+          Some value, rest
+        | first :: rest -> let catalog, rest = separate_catalog rest in catalog, first :: rest
+        | [] -> None, [] in
+      let catalog, argv = separate_catalog raw_argv in
+      check bool "same client receives the admitted catalog" (Option.is_some context_window) (Option.is_some catalog);
       let expected = ["app-server"; "--stdio"] @
         (match context_window with
          | None -> []
-         | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens]) @
+         | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens;
+             "-c"; Printf.sprintf "model_auto_compact_token_limit=%d" tokens]) @
         (match native with
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
@@ -7307,6 +7370,10 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
+        ; test_case "context admission cache retains coexisting declarations" `Quick
+            test_context_admission_cache_keeps_coexisting_windows
+        ; test_case "selected client context admits supported start and resume windows" `Quick
+            test_selected_client_context_admission
         ; test_case "invalid context window is refused before dispatch" `Quick
             test_invalid_context_window_is_process_free
         ; test_case "scheduling handoff preserves active protocol" `Quick

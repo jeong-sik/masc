@@ -1,3 +1,5 @@
+let ( let* ) = Result.bind
+
 (* Verification must not inherit MCP servers, plugins, hooks, or instructions.
    Only connection/auth configuration is projected into this private home. *)
 let connection_key = function
@@ -88,7 +90,21 @@ let inherited_server_names ~directory =
 let auth_file = "auth.json"
 let auth_path ~codex_home = Filename.concat codex_home auth_file
 
-let prepare ?source_home ~directory () =
+let configured_model_catalog_path ~home =
+  let path = Filename.concat home "config.toml" in
+  if not (Sys.file_exists path) then Ok None else
+  try
+    let doc = Otoml.Parser.from_string (Fs_compat.load_file path) in
+    let root = Otoml.find_opt doc Otoml.get_string ["model_catalog_json"] in
+    let configured = match Otoml.find_opt doc Otoml.get_string ["profile"] with
+      | None -> root
+      | Some profile -> (match Otoml.find_opt doc Otoml.get_string ["profiles"; profile; "model_catalog_json"] with
+          | Some _ as value -> value | None -> root) in
+    Ok (Option.map (fun path -> if Filename.is_relative path then Filename.concat home path else path) configured)
+  with Otoml.Type_error _ | Otoml.Parse_error _ -> Error "The selected Codex model catalog configuration is invalid."
+;;
+
+let prepare ?(preserve_model_catalog = false) ?source_home ~directory () =
   (* These are the external Codex client's credential/configuration locations,
      not MASC configuration knobs. Read its existing CODEX_HOME/HOME contract
      at this projection boundary so the ordinary client and verifier select
@@ -112,7 +128,15 @@ let prepare ?source_home ~directory () =
         (Filename.concat destination name) in
       Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)
     in
+    let* config = if not preserve_model_catalog then Ok config else
+      let* catalog = configured_model_catalog_path ~home:source in
+      Ok (match catalog with
+        | None -> config
+        | Some path -> "model_catalog_json = " ^ Yojson.Safe.to_string (`String path) ^ "\n" ^ config) in
     write "config.toml" config;
+    if preserve_model_catalog then (
+      let cache = Filename.concat source "models_cache.json" in
+      if Sys.file_exists cache then write "models_cache.json" (Fs_compat.load_file cache));
     let auth = auth_path ~codex_home:source in
     if Sys.file_exists auth then write auth_file (Fs_compat.load_file auth);
     Ok destination

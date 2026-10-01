@@ -1607,6 +1607,56 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
        true
        (summary |> member "reacted" |> to_bool)
 
+let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
+  let post = match Board_dispatch.create_post ~author:"context-reader"
+      ~content:"comment context" ~post_kind:Board.Human_post () with
+    | Ok post -> post | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let post_id = Board.Post_id.to_string post.id in
+  let add ?parent_id content = match Board_dispatch.add_comment ~post_id
+      ~author:"context-reader" ~content ?parent_id () with
+    | Ok comment -> Board.Comment_id.to_string comment.id
+    | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let root = add "root" in
+  let old_reply = add ~parent_id:root "old focused reply" in
+  for index = 1 to 20 do ignore (add (string_of_int index)) done;
+  let newest_reply = add ~parent_id:root "newest reply" in
+  let read ?focused_comment () =
+    let status, body = Server_routes_http_runtime.board_post_detail_json
+      ?focused_comment ~config:None ~voter:None ~reaction_actor:None
+      ~response_format:Server_board_post_response_format.Flat ~post_id () in
+    Alcotest.(check bool) "detail available" true (status = `OK);
+    Yojson.Safe.from_string body in
+  let ids key json = Yojson.Safe.Util.(json |> member key |> to_list)
+    |> List.map (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string)) in
+  let latest = read () in
+  Alcotest.(check bool) "ordinary numeric page excludes old root" false
+    (List.mem root (ids "comments" latest));
+  Alcotest.(check bool) "newest reply stays in the page" true
+    (List.mem newest_reply (ids "comments" latest));
+  Alcotest.(check bool) "ordinary context restores its parent" true
+    (List.mem root (ids "comment_context" latest));
+  let focused = read ~focused_comment:old_reply () in
+  Alcotest.(check bool) "direct focus includes the old reply" true
+    (List.mem old_reply (ids "comment_context" focused));
+  Alcotest.(check bool) "direct focus retains its ancestor" true
+    (List.mem root (ids "comment_context" focused));
+  let missing = read ~focused_comment:"deleted-comment" () in
+  Alcotest.(check (list string)) "missing focus still returns the ordinary context"
+    (ids "comment_context" latest) (ids "comment_context" missing);
+  (match Board_dispatch.vote_comment ~comment_id:newest_reply ~voter:"context-voter"
+      ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let voted = read () in
+  Alcotest.(check bool) "a vote does not invalidate pagination structure" true
+    (Yojson.Safe.Util.member "comment_revision" latest =
+     Yojson.Safe.Util.member "comment_revision" voted);
+  ignore (add "appended after the page");
+  let changed = read () in
+  Alcotest.(check bool) "appending invalidates the page snapshot revision" true
+    (Yojson.Safe.Util.member "comment_revision" latest <>
+     Yojson.Safe.Util.member "comment_revision" changed)
+
 let test_board_post_response_format_query_contract () =
   let check_format label expected query =
     match Server_board_post_response_format.of_query query with
@@ -1865,6 +1915,20 @@ let test_hearths () =
   Alcotest.(check int) "automation excluded" 0 (count "automation-hearth" direct_only);
   Alcotest.(check int) "human retained" 1 (count "test-hearth" direct_only)
 
+let test_whitespace_hearth_becomes_none () =
+  (* Issue #40070: a whitespace-only hearth must not become Some "" in the
+     store. The list filter (board_dispatch.ml) trims and lowercases before
+     matching, so a stored Some "" identifies a hearth that cannot be
+     selected by any hearth= value. Treat whitespace-only as None. *)
+  match
+    Board_dispatch.create_post ~author:"hearth-ws" ~content:"whitespace hearth"
+      ~hearth:"   " ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      Alcotest.(check (option string)) "whitespace-only hearth stored as None"
+        None post.hearth
+
 let test_set_thread_id () =
   match
     Board_dispatch.create_post ~author:"thread-test" ~content:"link me"
@@ -1944,6 +2008,68 @@ let test_set_pinned_persistence_failure_rolls_back () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
+
+(* A write that raises no SSE event -- an edit, a thread change, a pin, a close,
+   a reopen, a delete -- still changes what a cached page of the board answers.
+   The write hook is how the server drops those pages; it runs once per write
+   the store took. *)
+let test_write_hook_runs_after_each_write_that_raises_no_event () =
+  let writes = ref 0 in
+  let events = ref 0 in
+  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Board_dispatch.set_board_sse_hook (fun _ -> incr events);
+  let post =
+    match
+      Board_dispatch.create_post ~author:"write-hook" ~content:"a post to write to"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let ok label = function
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (label ^ ": " ^ Board.show_board_error e)
+  in
+  Alcotest.(check int) "creating raises an event, not a write" 0 !writes;
+  Alcotest.(check int) "and the event reached the SSE hook" 1 !events;
+  ok "update"
+    (Board_dispatch.update_post ~post_id ~editor:"write-hook"
+       ~content:"a post to write to, edited" ());
+  Alcotest.(check int) "an edit" 1 !writes;
+  ok "thread" (Board_dispatch.set_thread_id ~post_id ~thread_id:"write-hook-thread");
+  Alcotest.(check int) "a thread change" 2 !writes;
+  ok "pin" (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  Alcotest.(check int) "a pin" 3 !writes;
+  ok "close"
+    (Board_dispatch.set_closed ~post_id ~closed_by:"write-hook"
+       ~successor:Board.No_successor ~summary:"done" ());
+  Alcotest.(check int) "a close" 4 !writes;
+  ok "reopen" (Board_dispatch.reopen ~post_id);
+  Alcotest.(check int) "a reopen" 5 !writes;
+  ok "delete" (Board_dispatch.delete_post ~post_id);
+  Alcotest.(check int) "a delete" 6 !writes;
+  Alcotest.(check int) "none of them raised an SSE event" 1 !events
+
+(* A write the store refuses changed nothing, so nothing is dropped. *)
+let test_write_hook_skips_a_write_the_store_refuses () =
+  let writes = ref 0 in
+  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  let missing = "never-existed-write-hook" in
+  let refused label = function
+    | Ok _ -> Alcotest.fail (label ^ ": a missing post took the write")
+    | Error _ -> ()
+  in
+  refused "update"
+    (Board_dispatch.update_post ~post_id:missing ~editor:"write-hook"
+       ~content:"nothing to edit" ());
+  refused "thread" (Board_dispatch.set_thread_id ~post_id:missing ~thread_id:"t");
+  refused "pin" (Board_dispatch.set_pinned ~post_id:missing ~pinned:true);
+  refused "close"
+    (Board_dispatch.set_closed ~post_id:missing ~closed_by:"write-hook"
+       ~successor:Board.No_successor ~summary:"done" ());
+  refused "delete" (Board_dispatch.delete_post ~post_id:missing);
+  Alcotest.(check int) "no refused write reached the hook" 0 !writes
 
 let test_set_closed_and_reopen_round_trip () =
   match
@@ -2522,6 +2648,10 @@ let () =
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
       Alcotest.test_case "content clock survives activity and reload" `Quick
         (with_eio test_content_update_time_survives_activity_and_reload);
+      Alcotest.test_case "write hook runs after each write that raises no event"
+        `Quick (with_eio test_write_hook_runs_after_each_write_that_raises_no_event);
+      Alcotest.test_case "write hook skips a write the store refuses" `Quick
+        (with_eio test_write_hook_skips_a_write_the_store_refuses);
       Alcotest.test_case "update by owner persists" `Quick
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick
@@ -2616,6 +2746,8 @@ let () =
          (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
        Alcotest.test_case "post detail response format boundary" `Quick
          test_board_post_response_format_query_contract;
+       Alcotest.test_case "comment context restores page and focus ancestors" `Quick
+         (with_eio test_dashboard_comment_context_contains_page_and_focus_ancestors);
        Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick
@@ -2633,6 +2765,8 @@ let () =
       Alcotest.test_case "stats" `Quick (with_eio test_stats);
       Alcotest.test_case "search" `Quick (with_eio test_search);
       Alcotest.test_case "hearths" `Quick (with_eio test_hearths);
+      Alcotest.test_case "whitespace-only hearth becomes None" `Quick
+        (with_eio test_whitespace_hearth_becomes_none);
       Alcotest.test_case "set_thread_id" `Quick (with_eio test_set_thread_id);
       Alcotest.test_case "set_pinned toggle + restart" `Quick (with_eio test_set_pinned);
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);

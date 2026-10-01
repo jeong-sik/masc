@@ -23,6 +23,8 @@ type row_error =
     }
 
 type load_error =
+  | Remote_workspace
+  | Workspace_unconfirmed
   | Storage_error of Dated_jsonl.read_error
   | Row_errors of {
       physical_rows : int;
@@ -55,6 +57,8 @@ let row_error_to_string = function
         physical_index names_keeper
 
 let error_to_string = function
+  | Remote_workspace -> "Keeper metrics require the matching server workspace"
+  | Workspace_unconfirmed -> "Keeper metrics unavailable: server workspace not observed"
   | Storage_error error ->
       "metrics storage: " ^ Dated_jsonl.read_error_to_string error
   | Row_errors { physical_rows; errors } ->
@@ -220,5 +224,7 @@ let visible ~entries ~content_height ~scroll =
 
 let empty_message = function
   | None -> "(no log entries found)"
+  | Some Remote_workspace -> "(metrics not read for the remote workspace)"
+  | Some Workspace_unconfirmed -> "(metrics not read: server workspace not observed)"
   | Some (Storage_error _) -> "(log entries unavailable)"
   | Some (Row_errors _) -> "(no valid rows in newest physical window)"

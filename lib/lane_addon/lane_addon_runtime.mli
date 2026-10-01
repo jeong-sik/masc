@@ -7,13 +7,15 @@ val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
   project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
     recipient:string -> (unit,string) result;
 }
 val register_fleet_backend : fleet_backend -> unit
 (** Install trusted host roster capture and idempotent single-recipient projection.
-    Snapshot is captured before durable admission, never on retry. *)
+    Snapshot receives verified access, so speaker identity and self-exclusion
+    do not depend on the attributed caller name. It is captured before durable
+    admission, never on retry. *)
 val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
 (** Scan durable intentions and schedule independent commit/recipient jobs on
     the supplied server-root switch. Returns after scheduling, without waiting
@@ -100,5 +102,10 @@ module For_testing : sig
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Fiber-local persistence replacement captured before filesystem offload.
       Allows the existing strict writer to inject a real post-rename failure. *)
+  val with_observation_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> seq:int ->
+      sources:Yojson.Safe.t -> Lane_addon_types.output ->
+      (unit, Lane_addon_store.observation_write_error) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local staged publication injection captured before offload. *)
   val reset : unit -> unit
 end

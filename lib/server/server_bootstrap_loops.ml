@@ -1718,8 +1718,10 @@ let start_keeper_loops_owned
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_board_signal_hook (fun signal ->
+    let config = Mcp_server.workspace_config state in
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:(Mcp_server.workspace_config state)
+      ~dispatch_attention:(Keeper_board_attention_fanout.dispatch ~sw ~clock ~base_path:config.base_path)
+      ~config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
@@ -1825,6 +1827,10 @@ let start_keeper_loops_owned
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
+  (* An edit, pin, close, reopen, delete or thread change raises no event above,
+     and the cached pages still answer from before it. *)
+  Board_dispatch.set_board_write_hook
+    Server_dashboard_http_core_cache.invalidate_board_projections;
   (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
      entry and wakes the named keeper. Every registered keeper then gets the
      same transcript row for its conversation window, with no mention stamp,
@@ -1882,17 +1888,10 @@ let start_keeper_loops_owned
     mention_outcome
   in
   Lane_addon_runtime.register_fleet_backend {
-    snapshot=(fun ~config ~caller ->
+    snapshot=(fun ~config ~caller ~access ->
       let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
-      let same name=String.equal (String.lowercase_ascii (String.trim name))
-        (String.lowercase_ascii (String.trim caller)) in
-      let sender_authority=match Keeper_identity.Keeper_id.of_string caller with
-        | Some _ when List.exists (fun (entry : Keeper_registry.registry_entry) -> entry.name=caller) registered ->
-            Lane_addon_broadcast_delivery.Keeper_sender
-        | Some _ | None -> Lane_addon_broadcast_delivery.External_sender in
-      Ok (sender_authority,List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-        if same entry.name then None else Some entry.name) registered
-        |> List.sort_uniq String.compare));
+      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
+        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
     project=(fun ~config ~sender_authority ~delivery ~recipient ->
       append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
         ~sender_authority delivery ~keeper_name:recipient);

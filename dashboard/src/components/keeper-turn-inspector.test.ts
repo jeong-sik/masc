@@ -980,7 +980,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect.soft(tokenBar.textContent).toContain(label)
     expect.soft(tokenBar.textContent).toContain('50,000')
     expect.soft(tokenBar.textContent).toContain('10,000')
-    expect.soft(tokenBar.querySelector('.ctxpct')?.textContent).toBe(`컨텍스트 ${context} / 200K`)
+    expect.soft(tokenBar.querySelector('.ctxpct')?.textContent).toBe(`설정 기준 컨텍스트 ${context} / 200K`)
 
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
     await waitFor(() => expect(container.querySelector('.ti-kv')).toBeTruthy())
@@ -989,6 +989,40 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect.soft(metadata.get('usage scope')).toBe(label)
     expect.soft(metadata.get('ctx window')).toBe(`${context} / 200,000`)
     expect.soft(metadata.get('est. cost')).toBe(cost)
+  })
+
+  it.each([
+    { requested: 250000, reported: 237500 },
+    { requested: 500000, reported: 475000 },
+    { requested: 750000, reported: 712500 },
+    { requested: 1000000, reported: 828400 },
+  ])('shows request $requested separately from reported $reported', async ({ requested, reported }) => {
+    const response = turnRecordsWithMemoryOs()
+    Object.assign(response.entries[1]!.record, {
+      context_window: requested, provider_context_window: reported,
+      usage_scope: 'per_request', input_tokens: reported / 2,
+    })
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+    await waitFor(() => expect(container.textContent).toContain('T42'))
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy())
+    const bar = container.querySelector('[data-testid="turn-token-bar"]')!
+    expect(bar.querySelector('.ctxpct')?.textContent).toContain('실측 컨텍스트 50.0%')
+    expect(bar.textContent).toContain(`설정 ${requested.toLocaleString()}`)
+    expect(bar.textContent).toContain(`클라이언트 보고 ${reported.toLocaleString()}`)
+    expect(bar.textContent).toContain('설정과 다름')
+  })
+
+  it('does not invent a reported window from the configured value', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+    await waitFor(() => expect(container.textContent).toContain('T42'))
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy())
+    const bar = container.querySelector('[data-testid="turn-token-bar"]')!
+    expect(bar.textContent).toContain('클라이언트 보고 미측정')
+    expect(bar.querySelector('.ctxpct')?.textContent).toContain('설정 기준 컨텍스트')
   })
 
   it('renders missing token observations as unknown without synthetic values', async () => {
@@ -1020,7 +1054,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(tokenBar?.textContent).toContain('측정 없음')
     expect(tokenBar?.textContent).toContain('입력 미상')
     expect(tokenBar?.textContent).toContain('출력 미상')
-    expect(tokenBar?.querySelector('.ctxpct')?.textContent).toBe('컨텍스트 미상')
+    expect(tokenBar?.querySelector('.ctxpct')?.textContent).toBe('설정 기준 컨텍스트 미상')
     expect(tokenBar?.querySelector('.seg-in')).toBeNull()
     expect(tokenBar?.querySelector('.seg-out')).toBeNull()
   })

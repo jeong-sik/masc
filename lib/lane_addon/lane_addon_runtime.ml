@@ -74,7 +74,7 @@ type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
   project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
     recipient:string -> (unit,string) result;
 }
@@ -307,17 +307,30 @@ let finalize_actions m e =
   let finish (receipt : Lane_addon_action.receipt) state detail =
     let detail = match receipt.detail with None -> detail | Some previous -> previous ^ "; " ^ detail in
     let receipt = {receipt with Lane_addon_action.state; detail = Some detail} in
-    match save_action m receipt with Ok () -> ()
-    | Error message -> Log.Misc.error "Lane action finalization persistence: %s" message in
-  Option.iter (fun (receipt : Lane_addon_action.receipt) ->
-    match receipt.state with
-    | Queued -> finish receipt Lane_addon_action.Failed_before_effect "worker lifetime ended before dispatch"
-    | _ -> finish receipt Lane_addon_action.Outcome_unknown
-        "worker lifetime ended before a durable action result; no automatic retry") e.current_action;
-  e.current_action <- None;
-  Queue.iter (fun receipt -> finish receipt Lane_addon_action.Failed_before_effect
-    "worker lifetime ended while request was queued") e.action_queue;
+    match save_action m receipt with
+    | Ok () -> None
+    | Error message ->
+        Log.Misc.error "Lane action finalization persistence: %s" message;
+        Some receipt in
+  (match e.current_action with
+   | None -> ()
+   | Some receipt ->
+       let state, detail = match receipt.state with
+         | Lane_addon_action.Queued -> Lane_addon_action.Failed_before_effect,
+             "worker lifetime ended before dispatch"
+         | Lane_addon_action.Running | Lane_addon_action.Confirmed
+         | Lane_addon_action.Failed_before_effect | Lane_addon_action.Outcome_unknown ->
+             Lane_addon_action.Outcome_unknown,
+             "worker lifetime ended before a durable action result; no automatic retry" in
+       (* A failed fallback cannot erase knowledge of an unconfirmed terminal
+          rename. Keep the exact received result until repair is durable. *)
+       e.current_action <- finish receipt state detail);
+  Queue.iter (fun receipt -> ignore (finish receipt Lane_addon_action.Failed_before_effect
+    "worker lifetime ended while request was queued")) e.action_queue;
   Queue.clear e.action_queue
+type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:int ->
+  sources:Yojson.Safe.t -> output -> (unit, Lane_addon_store.observation_write_error) result
+let observation_writer_key : observation_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
   (* The package limit bounds its reply, before host-owned identity prefixes.
@@ -333,11 +346,41 @@ let commit_output m e ~sources output =
   let* () =
     if Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output))) <= max_namespaced_bytes
     then Ok () else Error "namespaced observation exceeds the package output envelope" in
-  let* () = offload (fun () -> Lane_addon_store.append_observation m.store
+  let write = match Eio.Fiber.get observation_writer_key with
+    | Some write -> write
+    | None -> (fun ~store ~instance_id ~seq ~sources output ->
+        Lane_addon_store.append_observation store ~instance_id ~seq ~sources output) in
+  let published = offload (fun () -> write ~store:m.store
     ~instance_id:e.instance_id ~seq ~sources output) in
-  e.seq <- seq; e.output <- output;
-  if not e.stopping then e.phase <- Attached;
-  let* () = persist m e in wake_dependents m e; Ok ()
+  let converge () = e.seq <- seq; e.output <- output in
+  match published with
+  | Ok () ->
+    converge ();
+    if not e.stopping then e.phase <- Attached;
+    let* () = persist m e in wake_dependents m e; Ok ()
+  | Error (Lane_addon_store.Observation_rejected detail) -> Error detail
+  | Error (Lane_addon_store.Publication_failed {failure;verification_error}) ->
+    let cause=Lane_addon_store.observation_write_error_to_string
+      (Lane_addon_store.Publication_failed {failure;verification_error}) in
+    (match failure.Fs_compat.stage with
+     | Fs_compat.Before_rename -> ()
+     | Fs_compat.After_rename ->
+       converge ();
+       if not e.stopping then e.phase <- Failed
+         ("observation published with unconfirmed durability: " ^
+           cause));
+    let detail = match failure.stage with
+      | Fs_compat.Before_rename -> cause
+      | Fs_compat.After_rename -> "observation published with unconfirmed durability: " ^ cause in
+    let saved = match failure.stage with
+      | Fs_compat.Before_rename -> Ok ()
+      | Fs_compat.After_rename -> persist m e in
+    wake_dependents m e;
+    (match failure.exception_ with
+     | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+     | _ -> match saved with
+       | Ok () -> Error detail
+       | Error error -> Error (detail ^ "; binding persistence: " ^ error))
 let perform_action m e c (queued : Lane_addon_action.receipt) =
   e.current_action <- Some queued;
   let running = {queued with state = Lane_addon_action.Running; executor = Some c.container_id} in
@@ -942,6 +985,15 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let retained_action_unlocked m ~instance_id ~request_id =
+  (* Never durably reconfirm a visible terminal file while the live worker
+     retains a failed-publication outcome. Persist that knowledge first. *)
+  let* () = match Hashtbl.find_opt m.entries instance_id with
+    | Some e -> (match e.current_action with
+        | Some current when current.request_id = request_id
+            && current.state = Lane_addon_action.Outcome_unknown ->
+            save_action_unlocked m current
+        | _ -> Ok ())
+    | None -> Ok () in
   let* json = offload (fun () -> Lane_addon_store.load_action m.store ~instance_id ~request_id) in
   match json with
   | None -> Ok None
@@ -949,21 +1001,6 @@ let retained_action_unlocked m ~instance_id ~request_id =
       let* receipt = Lane_addon_action.of_json json in
       let* () = if receipt.instance_id = instance_id && receipt.request_id = request_id then Ok ()
         else Error "retained receipt belongs to a different request" in
-      let* receipt =
-        let failed_publication = match Hashtbl.find_opt m.entries instance_id with
-          | Some e -> (match e.current_action with
-              | Some current when current.request_id = request_id
-                  && current.state = Lane_addon_action.Outcome_unknown
-                  && (receipt.state = Lane_addon_action.Confirmed
-                      || receipt.state = Lane_addon_action.Failed_before_effect) -> Some current
-              | _ -> None)
-          | None -> None in
-        match failed_publication with
-        | None -> Ok receipt
-        | Some current ->
-            (* The terminal file may be visible even though its mandatory fsync
-               failed. Retain the known uncertainty before returning a receipt. *)
-            let* () = save_action_unlocked m current in Ok current in
       let active = match Hashtbl.find_opt m.entries instance_id with
         | Some e when e.running ->
             let owns (queued : Lane_addon_action.receipt) = queued.request_id = request_id in
@@ -1037,7 +1074,7 @@ let fleet_store m = Fleet_ledger.create ~root:(Filename.concat (Lane_addon_store
 let observe_fleet_settlement (receipt : Fleet_ledger.receipt) =
   Option.iter (fun detail -> Log.Misc.warn "Lane Fleet durable result has descriptor settlement failure: %s" detail)
     receipt.settlement_error
-let admit_fleet m ~config ~caller ~request_id evidence =
+let admit_fleet m ~config ~caller ~access ~request_id evidence =
   let* backend = match !fleet_backend with Some value -> Ok value
     | None -> Error "Fleet delivery host boundary is unavailable" in
   let* fields=object_ evidence in let* content=text fields "message" in
@@ -1053,7 +1090,7 @@ let admit_fleet m ~config ~caller ~request_id evidence =
   let* previous=offload (fun () -> Fleet_ledger.find ledger ~caller ~operation_id) |> fleet_result in
   let* sender_authority,recipients=match previous with
     | Some receipt -> Ok (receipt.record.payload.sender_authority,receipt.record.payload.recipients)
-    | None -> backend.snapshot ~config ~caller in
+    | None -> backend.snapshot ~config ~caller ~access in
   let payload : Fleet_ledger.payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
   let* receipt=offload (fun () -> Fleet_ledger.admit ledger payload) |> fleet_result in
   observe_fleet_settlement receipt;
@@ -1289,7 +1326,7 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
                      | Some id -> Ok id | None -> Error "Broadcast request identity is missing" in
                    let* operation=match broadcast_request_id with
                      | Some value -> Ok value | None -> Error "Broadcast operation identity is missing" in
-                   let* record=admit_fleet m ~config ~caller ~request_id:operation evidence in
+                   let* record=admit_fleet m ~config ~caller ~access ~request_id:operation evidence in
                    let* () = if Fleet_ledger.Request_id.to_string record.workspace_request_id<>request_id then
                      Error "Fleet durable identity contradicts prepared evidence" else Ok () in
                    m.fleet_nudge ();
@@ -1630,6 +1667,7 @@ module For_testing = struct
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
   let with_action_writer write f = Eio.Fiber.with_binding action_writer_key write f
+  let with_observation_writer write f = Eio.Fiber.with_binding observation_writer_key write f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;

@@ -8,7 +8,9 @@
 
     A row that does not read fails the whole read. Paying and buying refuse to
     run on a ledger nobody can read, so a bad row has to stop them, not be
-    skipped. *)
+    skipped. Settlement rows must also agree with preceding obligation,
+    Snapshot and Candidates rows. Reads and appends use the same pure payout
+    admission. *)
 
 val path : base_path:string -> string
 
@@ -46,7 +48,8 @@ type 'error update_error =
   | Read_failed of read_error
   | Refused of 'error  (** The caller's [decide] returned [Error]. Nothing was written. *)
   | Event_unwritable of string
-      (** An event would not read back. Nothing was written. *)
+      (** An event would not read back, or a new [Paid] row does not satisfy
+          the current payout arithmetic. Nothing was written. *)
   | Write_failed of
       { path : string
       ; detail : string
@@ -73,4 +76,6 @@ val update :
     whether to ask again later.
 
     An empty event list writes nothing. Any other failure, an unreadable file
-    or a write that failed, is returned and not retried. *)
+    or a write that failed, is returned and not retried. New [Paid] rows pass
+    {!Candle_payment.validate_for_append}; reading existing rows never invokes
+    that check or changes their recorded allocations. *)

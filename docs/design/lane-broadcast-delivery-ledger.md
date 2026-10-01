@@ -1,12 +1,9 @@
 # Optional Lane Broadcast delivery ledger
 
-This child unit builds on #40233 commit 3da12eba97c42cf756fd71c322588893db8c737b.
-The parent already retains exact published evidence under a stable caller key
-and lets same-key retries recover a committed receipt while fanout is blocked.
-This first response unit adds durable intentions and recipient outcomes.
-It does not change the current Broadcast request, message commit, fleet handler,
-background recovery or TUI. The parent CR is assessed against its own
-implementation; this unit alone does not prove durable Fleet delivery.
+Optional Lane Evidence Broadcast preserves an immutable artifact under a stable
+caller-owned operation key. The durable recipient ledger owns recovery after
+workspace publication, so a blocked recipient does not hold the client request.
+Ordinary Broadcast continues to use immediate projection and same-key replay.
 
 The host admits one operation under the authenticated caller and caller-retained
 operation ID. The payload contains the exact published artifact SHA-256,
@@ -40,9 +37,9 @@ Pending journal filenames must be exact lowercase SHA-256 identities.
 
 Callers offload blocking ledger operations through the existing host boundary.
 
-## Runtime integration child
+## Runtime integration
 
-The next child activates the journal for optional Lane Evidence Broadcast.
+The journal is active for optional Lane Evidence Broadcast.
 The authenticated Evidence path publishes its immutable artifact, captures the
 registered Fleet roster, and durably admits the caller's retained operation key
 before the workspace commit. A retry reuses that original audience and artifact.
@@ -75,16 +72,28 @@ still does not establish that a Keeper read or used the report.
 
 An admitted intention whose workspace write is rejected reports pending_commit.
 A failure with uncertain commit evidence reports outcome_unknown. Both retain
-the operation key for retry; only an authoritative committed receipt acknowledges
-it in the TUI. Durable descriptor cleanup issues are logged without converting
-an accepted write into a replayable rejection.
+the operation key for retry. The TUI retires the matching request only when its
+committed receipt transfers or ends the client-owned recovery obligation:
 
-The child adds source fixtures for receipt return before blocked projection,
+| Receipt `fanout_state` | Evidence | TUI retry identity |
+| --- | --- | --- |
+| `not_started` | This invocation has not projected recipients | Retained |
+| `active` | Immediate projection is still owned by a live invocation | Retained |
+| `finished` | Immediate delivery invocation ended | Retired |
+| `durable_admitted` | Authoritative message and durable recipient obligations committed | Retired; the server ledger owns recovery |
+
+Plain `Deferred_fleet` publication returns `not_started`. The Lane host upgrades
+it to `durable_admitted` only after validating the workspace row and committing
+its sequence to the recipient ledger. Failure or uncertainty before that boundary
+cannot acknowledge the client identity. None of these states proves that every
+Keeper read or used the evidence. Durable descriptor cleanup issues remain visible
+without converting an accepted write into a replayable rejection.
+
+Source fixtures cover receipt return before blocked projection,
 partial recipient failure and restart, fixed-audience recovery, interrupted
 workspace publication, independent sibling and newly admitted operation progress,
 duplicate scans and cancellation retry, and the production adapter's transcript deduplication.
 These are proposed native fixtures, not executed native or live delivery proof.
-The child has no provider/model execution evidence. Current-caller and strict saved visibility authorization are inherited from
-privacy parent #40233 c327e74d4ba9f6f81da237d7938a78992286e9f5 through
-#40330 bad4c98f17a5a250d59a3c1e92afddb85281eb75. Cached retries validate
+There is no provider/model execution evidence. Current-caller and saved visibility
+authorization remain required. Cached retries validate
 the saved operation before looking up a source binding that may have been removed.

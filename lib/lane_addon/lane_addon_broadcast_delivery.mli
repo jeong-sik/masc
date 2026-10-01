@@ -7,6 +7,10 @@ type t
 type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int
 type sender_authority = Keeper_sender | External_sender
+val sender_snapshot : caller:string -> access:Lane_addon_sources.access -> registered:string list ->
+  (sender_authority * string list,string) result
+(** Use verified standing to classify the sender. An operator whose actor name
+    happens to match a Keeper remains external and that Keeper receives the row. *)
 type payload = {
   sender_authority : sender_authority;
   caller : string;

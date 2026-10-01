@@ -1,0 +1,853 @@
+{
+  "schema": "masc.browser.scene.v1",
+  "documentId": "073ea1812634688252a0ea04c48c5413",
+  "url": "about:blank",
+  "title": "",
+  "viewport": {
+    "width": 1400,
+    "height": 1800,
+    "scrollX": 0,
+    "scrollY": 0
+  },
+  "nodes": [
+    {
+      "kind": "control",
+      "nodeId": "n1",
+      "tag": "label",
+      "text": "Card A",
+      "rects": [
+        {
+          "x": 8,
+          "y": 25,
+          "width": 44.80000305175781,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "label",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": true,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n33",
+      "tag": "label",
+      "text": "Card B",
+      "rects": [
+        {
+          "x": 57,
+          "y": 25,
+          "width": 44.5,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "label",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": true,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n3",
+      "tag": "button",
+      "text": "Save\ndraft",
+      "rects": [
+        {
+          "x": 105.69999694824219,
+          "y": 8,
+          "width": 41.78334045410156,
+          "height": 38
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n4",
+      "tag": "button",
+      "text": "Store\ndraft",
+      "rects": [
+        {
+          "x": 151.68333435058594,
+          "y": 8,
+          "width": 45.133331298828125,
+          "height": 38
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n5",
+      "tag": "div",
+      "text": "Left\tRight",
+      "rects": [
+        {
+          "x": 8,
+          "y": 46,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "button",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n6",
+      "tag": "input",
+      "text": "Visible agree",
+      "rects": [
+        {
+          "x": 12,
+          "y": 69,
+          "width": 14,
+          "height": 14
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "checkbox",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": true,
+      "indeterminate": false,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "text",
+      "nodeId": "n7",
+      "tag": "label",
+      "text": "Visible agree",
+      "rects": [
+        {
+          "x": 29,
+          "y": 67,
+          "width": 85.14999389648438,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n8",
+      "tag": "input",
+      "text": "Visible choice",
+      "rects": [
+        {
+          "x": 123.35000610351562,
+          "y": 69,
+          "width": 14,
+          "height": 14
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "radio",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": false,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "text",
+      "nodeId": "n9",
+      "tag": "label",
+      "text": "Visible choice",
+      "rects": [
+        {
+          "x": 140.35000610351562,
+          "y": 67,
+          "width": 91.21665954589844,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n10",
+      "tag": "main",
+      "text": "Delegated heading\n\nDelegated paragraph",
+      "rects": [
+        {
+          "x": 8,
+          "y": 106.91667175292969,
+          "width": 1384,
+          "height": 125.91665649414062
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": {
+        "nodeId": "n10",
+        "role": "main",
+        "label": "Delegated heading"
+      },
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "main",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "text",
+      "nodeId": "n11",
+      "tag": "h2",
+      "text": "Delegated heading",
+      "rects": [
+        {
+          "x": 8,
+          "y": 106.91667175292969,
+          "width": 199.98333740234375,
+          "height": 30
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": {
+        "nodeId": "n10",
+        "role": "main",
+        "label": "Delegated heading"
+      },
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 24,
+      "fontWeight": "700",
+      "whiteSpace": "normal",
+      "headingLevel": 2
+    },
+    {
+      "kind": "text",
+      "nodeId": "n12",
+      "tag": "p",
+      "text": "Delegated paragraph",
+      "rects": [
+        {
+          "x": 8,
+          "y": 156.8333282470703,
+          "width": 139.61666870117188,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": {
+        "nodeId": "n10",
+        "role": "main",
+        "label": "Delegated heading"
+      },
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "headingLevel": null
+    },
+    {
+      "kind": "raster",
+      "nodeId": "n13",
+      "tag": "img",
+      "text": "Delegated raster",
+      "rects": [
+        {
+          "x": 8,
+          "y": 192.8333282470703,
+          "width": 40,
+          "height": 40
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": {
+        "nodeId": "n10",
+        "role": "main",
+        "label": "Delegated heading"
+      },
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal"
+    },
+    {
+      "kind": "control",
+      "nodeId": "n14",
+      "tag": "label",
+      "text": "Explicit label action",
+      "rects": [
+        {
+          "x": 8,
+          "y": 249.8333282470703,
+          "width": 129.88333129882812,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "label",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n15",
+      "tag": "input",
+      "text": "Associated label action",
+      "rects": [
+        {
+          "x": 146.0833282470703,
+          "y": 251.8333282470703,
+          "width": 14,
+          "height": 14
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "checkbox",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": true,
+      "indeterminate": false,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n16",
+      "tag": "label",
+      "text": "Associated label action",
+      "rects": [
+        {
+          "x": 163.0833282470703,
+          "y": 249.8333282470703,
+          "width": 153.40000915527344,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "label",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": true,
+      "indeterminate": false,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n17",
+      "tag": "button",
+      "text": "Save the draft",
+      "rects": [
+        {
+          "x": 320.683349609375,
+          "y": 248.8333282470703,
+          "width": 99.08332824707031,
+          "height": 22
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n18",
+      "tag": "button",
+      "text": "SAVE DRAFT",
+      "rects": [
+        {
+          "x": 419.76666259765625,
+          "y": 248.8333282470703,
+          "width": 91.88333129882812,
+          "height": 22
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n19",
+      "tag": "button",
+      "text": "Save   the\n draft",
+      "rects": [
+        {
+          "x": 515.8499755859375,
+          "y": 232.8333282470703,
+          "width": 73.04998779296875,
+          "height": 38
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "pre",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n20",
+      "tag": "button",
+      "text": "Visible opacity",
+      "rects": [
+        {
+          "x": 593.0999755859375,
+          "y": 248.8333282470703,
+          "width": 215.63333129882812,
+          "height": 22
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n21",
+      "tag": "button",
+      "text": "Visible clipped",
+      "rects": [
+        {
+          "x": 812.933349609375,
+          "y": 232.8333282470703,
+          "width": 180,
+          "height": 38
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n22",
+      "tag": "div",
+      "text": "Mixed checkbox",
+      "rects": [
+        {
+          "x": 8,
+          "y": 270.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "checkbox",
+      "ariaChecked": "mixed",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n23",
+      "tag": "div",
+      "text": "Mixed menu checkbox",
+      "rects": [
+        {
+          "x": 8,
+          "y": 290.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "menuitemcheckbox",
+      "ariaChecked": "mixed",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n24",
+      "tag": "div",
+      "text": "Mixed radio",
+      "rects": [
+        {
+          "x": 8,
+          "y": 310.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "radio",
+      "ariaChecked": "false",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n25",
+      "tag": "div",
+      "text": "Mixed menu radio",
+      "rects": [
+        {
+          "x": 8,
+          "y": 330.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "menuitemradio",
+      "ariaChecked": "false",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n26",
+      "tag": "div",
+      "text": "Mixed switch",
+      "rects": [
+        {
+          "x": 8,
+          "y": 350.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "switch",
+      "ariaChecked": "false",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n27",
+      "tag": "button",
+      "text": "Unsupported checked button",
+      "rects": [
+        {
+          "x": 8,
+          "y": 370.83331298828125,
+          "width": 193.73333740234375,
+          "height": 22
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 13.3333,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "button",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n28",
+      "tag": "label",
+      "text": "Native mixed",
+      "rects": [
+        {
+          "x": 205.93333435058594,
+          "y": 371.83331298828125,
+          "width": 88.33332824707031,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "label",
+      "disabled": false,
+      "editable": false,
+      "role": null,
+      "checked": false,
+      "indeterminate": true,
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n29",
+      "tag": "div",
+      "text": "Selectable tab",
+      "rects": [
+        {
+          "x": 8,
+          "y": 392.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "tab",
+      "ariaSelected": "true",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "control",
+      "nodeId": "n30",
+      "tag": "div",
+      "text": "Selected option",
+      "rects": [
+        {
+          "x": 8,
+          "y": 412.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "option",
+      "clickable": true,
+      "headingLevel": null
+    },
+    {
+      "kind": "text",
+      "nodeId": "n31",
+      "tag": "div",
+      "text": "First role heading",
+      "rects": [
+        {
+          "x": 8,
+          "y": 432.83331298828125,
+          "width": 116.93333435058594,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "headingLevel": 2
+    },
+    {
+      "kind": "control",
+      "nodeId": "n32",
+      "tag": "div",
+      "text": "Fallback button",
+      "rects": [
+        {
+          "x": 8,
+          "y": 452.83331298828125,
+          "width": 1384,
+          "height": 20
+        }
+      ],
+      "sourceContext": null,
+      "ancestorRegion": null,
+      "color": "rgb(0, 0, 0)",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "whiteSpace": "normal",
+      "controlType": "div",
+      "disabled": false,
+      "editable": false,
+      "role": "button",
+      "clickable": true,
+      "headingLevel": null
+    }
+  ],
+  "chars": 497,
+  "truncated": false,
+  "scope": null,
+  "view": "content",
+  "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+}

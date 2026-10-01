@@ -314,6 +314,16 @@ let stored_bytes ~base_path field result =
      | Ok None -> Alcotest.failf "%s names a blob the store does not hold" field
      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
 
+let test_non_utf8_capture_uses_artifacts () =
+  let stdout = "한글\n\x89PNG\ncut: \xed\x95" in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path result ->
+    check bool "tool result can cross a UTF-8 JSON transport" true
+      (String_util.is_valid_utf8 (Yojson.Safe.to_string result));
+    check bool "non-UTF-8 output is externalized below the size ceiling" true
+      (Json.member "output" result = `Null);
+    check string "the output artifact retains every captured byte" stdout
+      (stored_bytes ~base_path "output_artifact" result))
+
 let test_claude_lane_returns_20000_bytes_inline () =
   let stdout = payload 20_000 in
   with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path:_ result ->
@@ -358,6 +368,8 @@ let () =
     ; ( "lane-ceiling"
       , [ test_case "Claude Code lane returns 20,000 bytes inline" `Quick
             test_claude_lane_returns_20000_bytes_inline
+        ; test_case "non-UTF-8 capture remains byte-identical across JSON" `Quick
+            test_non_utf8_capture_uses_artifacts
         ; test_case "Claude Code lane stores 40,000 bytes byte-identical" `Quick
             test_claude_lane_stores_40000_bytes_byte_identical
         ; test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick

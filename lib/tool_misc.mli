@@ -52,7 +52,8 @@ val dispatch :
   ?lane_access:Lane_addon_sources.access -> context -> name:string ->
   args:Yojson.Safe.t -> Tool_result.result option
 (** [lane_access] is host-verified authority for Lane operations. An omitted
-    value is unauthenticated; [context.agent_name] is attribution only. *)
+    value is unauthenticated. Keeper access supplies the canonical Lane caller;
+    [context.agent_name] remains attribution for unrelated tools. *)
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

@@ -1,0 +1,46 @@
+{
+  "scope": "current bound alias source and required contracts; excludes self-referential metadata",
+  "source_commit": "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08",
+  "files": [
+    {
+      "path": "lib/auth/auth.mli",
+      "sha256": "397fe0f10e9ef25e979b20d740ec6cc783e978c20decdeed3d1f6dba67f997b0",
+      "git_blob": "bf36e98ff4f0c2ff031bb493195aeada3f575d50"
+    },
+    {
+      "path": "lib/auth/auth_credential_token.mli",
+      "sha256": "df139ca850313a7da943dbaaac60f76fefea607505df17a6ac6a200ccc767e5c",
+      "git_blob": "e138e0533a67b63d60a523e516d77367446aae5f"
+    },
+    {
+      "path": "lib/auth/auth_credential_token.ml",
+      "sha256": "005b305241c91e49ba98de8ad8e4a524488686651c10e842db1c47ca63246ad9",
+      "git_blob": "c0c842845f99d777b3303115f4cb93d99ce29e39"
+    },
+    {
+      "path": "test/test_auth_credential_index_authority.ml",
+      "sha256": "2e5b157a0f1b8c3989b29b46ebadacef74b97bd33c1dba53c1a104acd63cf12f",
+      "git_blob": "e5410f5631c10f68585672c67703841e686142e6"
+    },
+    {
+      "path": "changelog.d/40259.md",
+      "sha256": "00c7454ea8a7c20badd7d696863e39602edcaf056ce00fb0c877434cb83f4c0f",
+      "git_blob": "481879f0354d78404cc0b5b53e86aa41be141ec2"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-credential-index-authority-source/README.md",
+      "sha256": "113669245fe9da3d1865fae4e944e40d1ea83f9f593c1d1797012e4bcf548b8d",
+      "git_blob": "bcbed443e9518f84f6b5baf2e594ed8ccd709700"
+    },
+    {
+      "path": "docs/constitution.xml",
+      "sha256": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e",
+      "git_blob": "d8886bb67b2163c3203e96e3539086571a7bcb2c"
+    },
+    {
+      "path": ".agents/skills/ocaml-coding/SKILL.md",
+      "sha256": "3040cf39e9959a55dd0d5daffd5d5f34e742c2e066bdb2791f145cb0edb6fa74",
+      "git_blob": "f8b9f482490c290a5f61e2638efc415658fe5c21"
+    }
+  ]
+}

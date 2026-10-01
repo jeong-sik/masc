@@ -1,5 +1,6 @@
 open Alcotest
 module D = Masc.Lane_addon_broadcast_delivery
+module Access = Masc.Lane_addon_sources
 let require = function Ok v -> v | Error _ -> fail "delivery ledger refused"
 let recovery_failure = function
   | Ok (recovery : D.recovery) -> (match recovery.rejected with
@@ -16,6 +17,19 @@ let operation = require (D.Request_id.of_string "evidence-request-1")
 let payload : D.payload = {sender_authority=D.External_sender;caller="operator";operation_id=operation;
   artifact_sha256=String.make 64 'a';content="Original immutable evidence pointer";
   recipients=["keeper-a";"keeper-b"]}
+let test_sender_snapshot_uses_verified_standing () =
+  let registered=["keeper-b";"keeper-a"] in
+  let select ~caller ~access = D.sender_snapshot ~caller ~access ~registered in
+  check bool "operator aliasing a Keeper is external and reaches that Keeper" true
+    (select ~caller:"keeper-a" ~access:Access.Operator_configuration
+     = Ok (D.External_sender,["keeper-a";"keeper-b"]));
+  check bool "verified Keeper alone is excluded from its own fanout" true
+    (select ~caller:"keeper-a" ~access:(Access.Keeper "keeper-a")
+     = Ok (D.Keeper_sender,["keeper-b"]));
+  check bool "another Keeper's authority cannot use this caller" true
+    (Result.is_error (select ~caller:"keeper-a" ~access:(Access.Keeper "keeper-b")));
+  check bool "unverified caller cannot admit a fleet snapshot" true
+    (Result.is_error (select ~caller:"keeper-a" ~access:Access.Unauthenticated))
 let test_restart_and_partial_fanout () = fixture (fun root ledger ->
   let accepted=require (D.admit ledger payload) in
   check bool "admission does not fabricate workspace commit" true
@@ -369,6 +383,7 @@ let test_corrupt_journal_does_not_block_other_operations () = fixture (fun root 
     (Sys.file_exists (Filename.concat (Filename.concat root "pending") bad)))
 
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "sender authority comes from verified standing" `Quick test_sender_snapshot_uses_verified_standing;
   test_case "one damaged journal cannot block healthy deliveries" `Quick test_corrupt_journal_does_not_block_other_operations;
   test_case "recovery disappearance and torn evidence" `Quick test_recovery_disappearance_and_torn_journal;
   test_case "missing and invalid pending journals preserve evidence" `Quick test_pending_journal_loss_and_invalid_identity;

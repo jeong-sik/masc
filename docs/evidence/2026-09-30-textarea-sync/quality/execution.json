@@ -1,0 +1,63 @@
+{
+  "started": "2026-09-30T14:20:06.701016+00:00",
+  "finished": "2026-09-30T14:20:07.871595+00:00",
+  "commands": [
+    {
+      "name": "ruff",
+      "command": [
+        "python3",
+        "-m",
+        "ruff",
+        "check",
+        "docs/evidence/2026-09-30-textarea-sync/verify-full.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "format",
+      "command": [
+        "python3",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "docs/evidence/2026-09-30-textarea-sync/verify-full.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "pyright",
+      "command": [
+        "python3",
+        "-m",
+        "pyright",
+        "--project",
+        "docs/evidence/2026-09-30-textarea-sync/pyrightconfig.json",
+        "--outputjson"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "eslint",
+      "command": [
+        "pnpm",
+        "--dir",
+        "dashboard",
+        "exec",
+        "eslint",
+        "src/components/common/expandable-textarea.ts",
+        "src/components/common/expandable-textarea.test.ts"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "browser-syntax",
+      "command": [
+        "node",
+        "--check",
+        "docs/evidence/2026-09-30-textarea-sync/browser.mjs"
+      ],
+      "exit": 0
+    }
+  ]
+}

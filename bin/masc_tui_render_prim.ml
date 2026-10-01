@@ -1,8 +1,6 @@
-(** Rendering primitives shared across the surfaces.
-
-    Every value here is reached by at least 10 of the screen
-    renderers, and the set is closed: nothing in it refers back to a
-    single surface's code. That is what lets it compile before them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -113,9 +111,10 @@ let clamped_scroll_now (state : state) = function
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
   | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
   | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
       System_log_detail_scroll state.system_logs_detail_scroll
-  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -162,8 +161,10 @@ let reader_after_wheel (reader : clamped_scroll)
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
   | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
-  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Planning_detail_scroll value | Planning_confirmation_scroll (value, _) ->
+      Some (Planning_detail_scroll (step value))
   | Lane_run_detail_scroll { scroll; content_height } ->
       Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
   | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
@@ -787,16 +788,16 @@ let surface_strip (state : state) ~cols =
      label and the cell each read entry [i], and a list answers that by
      walking. Ten entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_types.visible_surface_ring state) in
+  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
   let n = Array.length ring in
-  let active = Masc_tui_types.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match Masc_tui_types.approvals_surface_pending state with
+        (match Masc_tui_approvals_model.approvals_surface_pending state with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -860,7 +861,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
+      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
       | _ -> false
     in
     let entry =
@@ -1048,9 +1049,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 
 let recent_chunk_projection (state : state) =
-  let traces =
-    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
-  in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let traces = trace_reading.bindings in
   Masc_tui_acting.refresh_projection
     ~previous:state.acting_chunk_projection ~traces state.acting
 
@@ -1079,9 +1079,9 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     }
   in
   let keepers =
-    match state.local_workspace with
-    | Local_workspace_unread -> None
-    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
+    match keeper_rows_page state ~error:state.keepers_error with
+    | Page_unread -> None
+    | Page_empty | Page_failed -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with
@@ -1113,6 +1113,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; trace_unavailable = (Tui_decode.keeper_trace_projection state.keepers).unavailable
   ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
@@ -1120,19 +1121,19 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
       (* Every kind of pending approval the Approvals surface lists, read to
          the two facts the pane states: whose, and for which tool. *)
       List.map
-        (fun (row : approval_row) ->
+        (fun (row : Masc_tui_approvals_model.approval_row) ->
           match row with
-          | Keeper_tool_row held ->
+          | Masc_tui_approvals_model.Keeper_tool_row held ->
               { Pane.approval_keeper = held.kta_keeper; approval_tool = held.kta_tool }
-          | Gate_row pending ->
+          | Masc_tui_approvals_model.Gate_row pending ->
               { Pane.approval_keeper = pending.gp_keeper
               ; approval_tool = pending.gp_display_tool
               }
-          | Operator_row item ->
+          | Masc_tui_approvals_model.Operator_row item ->
               { Pane.approval_keeper = item.ap_actor
               ; approval_tool = item.ap_delegated_tool
               })
-        (Masc_tui_types.approval_items state)
+        (Masc_tui_approvals_model.approval_items state)
   ; chunks
   ; changes = acting_pane_changes state
   ; call_order = state.acting_pane_call_order
@@ -1818,17 +1819,6 @@ let keeper_lane_idle_text seconds =
   else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
-
-
-(** Render one backlog task in full, from the same load the Overview list was
-    projected from. The dispatch falls back to the Overview when the row is no
-    longer in the backlog, so the task argument always exists here. *)
-(* What a boxed surface spends on chrome before any row of content: the top
-   border, its title and rule, the closing rule and border, the selected-row
-   detail, and the key hints. Five surfaces subtracted the literal 10 from the
-   terminal height; naming it is what makes a sixth reader able to check the
-   arithmetic instead of trusting it. *)
-let boxed_surface_chrome_rows = 10
 
 
 (* Long question, choice, and reason text was cut to one line with a trailing
@@ -2783,7 +2773,8 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
     | _ ->
         (match keeper_record with
-         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | Some k -> Option.bind k.Masc.Tui_decode.k_activity
+             (fun activity -> activity.Masc.Tui_decode.k_current_task_id)
          | None -> None)
   in
   let turn =
@@ -2977,6 +2968,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -3017,7 +3009,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
+    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error with
    | None -> ()
@@ -3059,7 +3051,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       match Rows.at diff_rows_window (i + scroll) with
       | None -> box_empty buf cols
       | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+          box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above and the reading needs no row of its own. *)
@@ -3087,6 +3079,7 @@ let render_repository_changes_diff (state : state) ~path =
          | Some _ | None -> None)
     ; ds_error = state.repository_changes_diff_error
     ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
@@ -3451,17 +3444,27 @@ let help_lines ~width (state : state) =
          Masc_tui_command.catalog
     @ [ "" ]
   in
-  (* The first section is the reader's own surface, and it opens the sheet.
+  (* After any live Candle details, the first key section is the reader's
+     own surface.
      The eleven lines of slash commands used to sit above it and pushed the
      answer past the fold; they are a reference and read as one here.
 
      [help_sections] puts Global first where the surface has no section of its
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
-  match Masc_tui_keys.help_sections_for_state state with
+  let candle =
+    match Masc_tui_candle.summary_lines state.candle_observation with
+    | [] -> []
+    | lines ->
+      (Ansi.bold ^ "Candle details" ^ Ansi.reset)
+      :: (List.concat_map
+            (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
+              (Terminal_text.single_line line)) lines @ [ "" ])
+  in
+  candle @ (match Masc_tui_keys.help_sections_for_state state with
   | [] -> slash_commands
   | first :: rest ->
-      section first @ slash_commands @ List.concat_map section rest
+      section first @ slash_commands @ List.concat_map section rest)
 
 
 module Context_bars = Masc_tui_context_bars
@@ -5043,5 +5046,34 @@ let answering_lines (state : state) =
 (* The overlay ends in a fixed preview panel (divider + two lines): always
    drawn, so the list height never shifts with what the cursor is on — the
    fixed-chrome rule, applied before the panel exists rather than patched
-   after (see boxed_surface_chrome_rows for the precedent). *)
+   after. *)
 let answering_preview_rows = 3
+
+(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
+   header ("▸ /", "▸ Resources") with no row above it. Every other surface
+   opens on its name, the clock and the connection badge, and the badge is the
+   row that says the server has gone; on these two nothing did. The title row
+   sits above both panes, so each pane gives up one row to it. *)
+let pane_surface_title_rows = 1
+
+let pane_surface_title (state : state) ~name =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%s  %02d:%02d:%02d  %s"
+    (screen_title (" MASC " ^ name))
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    (connection_badge state)
+
+(* The row between the strip and the title, then the title. Every other
+   surface draws that row first -- a gap on its own, the box's top edge beside
+   a roster -- and its title under it. The two pane surfaces drew the title
+   first and left the row to the pane, so alone on the surface the gap fell
+   between the title and the pane's own heading: the title sat one row higher
+   than on every other screen, and the heading read as a second, detached
+   block. Beside the other pane the list's box draws its top edge on that row,
+   so a split frame keeps it there. The row count is the same either way. *)
+let pane_surface_header buf cols (state : state) ~name ~split =
+  if not split then box_top buf cols;
+  box_line buf cols (pane_surface_title state ~name)
+
+let pane_surface_content_height ~rows =
+  max 1 (framed_content_height ~rows - pane_surface_title_rows)

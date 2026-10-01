@@ -1325,11 +1325,32 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
         http_requests=requests, refresh=0.5, terminal_cols=300)
 
 
+def hold_observer_before_headers(fixtures):
+    """Observe completed startup initialization without caching its session.
+
+    The observer GET proves its initialize returned. Withhold response headers
+    so Observer_opened cannot run and Observer_opening cannot retry, leaving
+    the foreground operation as the only possible next A initialization.
+    """
+    requested, release = threading.Event(), threading.Event()
+
+    def observer(_headers):
+        requested.set()
+        assert release.wait(timeout=30), "baseline observer was not released"
+        return h.RawHttpResponse(503, b'{"error":"baseline observer stopped"}',
+            content_type="application/json")
+
+    fixtures["/mcp?sse_kind=observer"] = h.HeadersHttpResponse(observer)
+    return requested, release
+
+
 def resource_workspace_withdrawal(binary: str) -> None:
     for held_method in ("initialize", "resources/read"):
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         started, release, returned = (threading.Event() for _ in range(3))
+        foreground_armed = threading.Event()
+        observer_requested, observer_release = hold_observer_before_headers(fixtures)
         calls = []
         uri = "masc://same-resource.txt"
 
@@ -1338,8 +1359,11 @@ def resource_workspace_withdrawal(binary: str) -> None:
             method = request["method"]
             with wire.lock:
                 phase = wire.phase
+                held = phase == "a" and method == held_method and foreground_armed.is_set()
+                if held:
+                    foreground_armed.clear()
             calls.append((phase, method))
-            if phase == "a" and method == held_method:
+            if held:
                 started.set()
                 assert release.wait(timeout=30), "held resource request was not released"
                 returned.set()
@@ -1364,10 +1388,16 @@ def resource_workspace_withdrawal(binary: str) -> None:
 
         def interact(process, fd, _slave, output, _base):
             try:
+                assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+                    timeout=WAIT_SECONDS), "startup observer did not finish initialization"
+                assert not started.is_set(), "startup initialization satisfied the foreground barrier"
                 h.tab_until(process, fd, output, b"MASC System")
-                os.write(fd, b"s")
+                if held_method == "initialize":
+                    foreground_armed.set()
+                h.send_and_wait(process, fd, output, b"s", b"MASC System / Resources")
                 if held_method == "resources/read":
                     h.wait_for_output(process, fd, output, b"resource-a", start=0, timeout=WAIT_SECONDS)
+                    foreground_armed.set()
                     os.write(fd, b"\r")
                 assert h.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
                 wire.publish("b")
@@ -1385,6 +1415,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 os.write(fd, b"q")
             finally:
                 release.set()
+                observer_release.set()
         h.run_terminal_scenario(binary,
             description=f"Resource {held_method} ownership is withdrawn before same-URI B recovery",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
@@ -1395,14 +1426,21 @@ def task_initialization_workspace_withdrawal(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     started, release, returned = (threading.Event() for _ in range(3))
+    foreground_armed = threading.Event()
+    observer_requested, observer_release = hold_observer_before_headers(fixtures)
     tool_calls = []
 
     def mcp(body):
         request = json.loads(body)
         if request["method"] == "initialize":
-            started.set()
-            assert release.wait(timeout=30), "held task initialize was not released"
-            returned.set()
+            with wire.lock:
+                held = wire.phase == "a" and foreground_armed.is_set()
+                if held:
+                    foreground_armed.clear()
+            if held:
+                started.set()
+                assert release.wait(timeout=30), "held task initialize was not released"
+                returned.set()
             return h.RawHttpResponse(200,
                 json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
                 content_type="application/json", headers=(("Mcp-Session-Id", "old-task-session"),))
@@ -1414,12 +1452,17 @@ def task_initialization_workspace_withdrawal(binary: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         try:
+            assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+                timeout=WAIT_SECONDS), "startup observer did not finish initialization"
+            assert not started.is_set(), "startup initialization satisfied the task barrier"
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Keepers")
             h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
             h.send_and_wait(process, fd, output, b"/task original-A-task", b"original-A-task")
-            os.write(fd, b"\r")
+            foreground_armed.set()
+            h.send_and_wait(process, fd, output, b"\r",
+                b"creating a task for alpha: original-A-task")
             assert h.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
             wire.publish("b")
             assert h.wait_for_fixture_state(process, fd, output,
@@ -1434,6 +1477,7 @@ def task_initialization_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"q")
         finally:
             release.set()
+            observer_release.set()
     h.run_terminal_scenario(binary,
         description="Task dispatch initialization cannot continue after workspace withdrawal",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,

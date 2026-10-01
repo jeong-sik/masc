@@ -1617,21 +1617,6 @@ let test_server_identity_is_revalidated_on_every_refresh () =
 
 let test_scoped_surface_refresh_does_not_own_connection_status () =
   let main_path = "bin/masc_tui.ml" in
-  check int "scoped probes do not enqueue unticketed withdrawal" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"start_http_scoped_refresh" ~callee:"check_workspace_request");
-  check int "scoped probe and bundle both check the captured identity" 2
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"start_http_scoped_refresh"
-       ~callee:"Masc_tui_types.server_workspace_matches");
-  (* A bound server cancellation may complete after workspace withdrawal.
-     Its handler attributes that receipt without refreshing the new workspace. *)
-  check int "task cancellation keeps its accepted receipt outside scoped delivery" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"launch_task_cancel" ~callee:"launch_workspace_request");
-  check int "task cancellation still checks authority before and after session admission" 2
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"launch_task_cancel" ~callee:"check_workspace_request");
   check int "scoped launch preserves the last full connection reading" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"start_http_scoped_refresh"

@@ -414,6 +414,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
  (libraries
+  masc.sse_wire
   masc
   masc_tui_credential
   masc.keeper_chat_operations
@@ -442,7 +443,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc masc.masc_types masc_tui_keeper_chat_projection
-  masc_tui_sse_lines yojson))
+  masc.sse_wire yojson))
 
 (library
  (name masc_tui_keeper_chat_log)

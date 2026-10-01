@@ -1343,11 +1343,8 @@ let protocol_failure state stream_error =
       || stream_error_acceptance_observed stream_error
   }
 
-(* One framing implementation for both readers of this stream: the strict
-   whole-body decode below, and the incremental one in
-   {!Masc_tui_keeper_chat_live} that drives the live view. The event payloads
-   they extract differ on purpose — this decides what counts as an event line
-   at all, and that answer has to be the same for both. *)
+(* Line classification for journal metadata and the MCP/observer readers.
+   Keeper chat event framing itself is owned by Sse_wire. *)
 let is_decimal text =
   text <> "" && String.for_all (fun c -> c >= '0' && c <= '9') text
 
@@ -1376,36 +1373,19 @@ let classify_sse_line raw_line =
   else Sse_ignored
 
 let decode_sse_with_provenance ~request body =
-  let rec loop line_no state = function
+  let rec loop event_no state = function
     | [] -> Ok state
-    | raw_line :: rest -> (
-        match classify_sse_line raw_line with
-        (* The strict decode reads events, not their journal position: the
-           seq is the live decoder's concern. *)
-        | Sse_ignored | Sse_id _ | Sse_frame_end -> loop (line_no + 1) state rest
-        | Sse_data payload ->
-            let* json =
-              try Ok (Yojson.Safe.from_string payload)
-              with Yojson.Json_error detail ->
-                Error
-                  (protocol_failure state
-                     (Malformed_event
-                        (Printf.sprintf "line %d has invalid JSON: %s" line_no
-                           detail)))
-            in
-            let* state =
-              decode_data_event ~request state json
-              |> Result.map_error (protocol_failure state)
-            in
-            loop (line_no + 1) state rest
-        | Sse_noncanonical_data ->
-            Error
-              (protocol_failure state
-                 (Malformed_event
-                    (Printf.sprintf "line %d has a non-canonical data field"
-                       line_no))))
+    | payload :: rest ->
+        let* json =
+          try Ok (Yojson.Safe.from_string payload)
+          with Yojson.Json_error detail ->
+            Error (protocol_failure state (Malformed_event
+              (Printf.sprintf "event %d has invalid JSON: %s" event_no detail))) in
+        let* state = decode_data_event ~request state json
+          |> Result.map_error (protocol_failure state) in
+        loop (event_no + 1) state rest
   in
-  loop 1 initial_decode_state (String.split_on_char '\n' body)
+  loop 1 initial_decode_state (Sse_wire.data_payloads_of_stream body)
 
 let finalize state =
   match state.acceptance, state.terminal with

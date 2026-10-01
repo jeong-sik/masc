@@ -669,7 +669,40 @@ module Make (Payload : Payload) = struct
     get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
-  let fold_replay_entries path =
+  let completed_from_log t ~id =
+    Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
+      match t.path with
+      | None -> Ok None
+      | Some path ->
+        try
+          let (reading, _), boundary = Fs_compat.fold_appended_lines
+            ~path ~from:0 ~init:(Ok None, 1)
+            ~f:(fun (reading, line_no) line ->
+              let reading = Result.bind reading (fun current ->
+                match parse_event_line ~path ~line_no line with
+                | Error detail -> Error detail
+                | Ok (Some (Register r)) when String.equal r.id id ->
+                  Ok (Some { id; started_at=r.started_at;
+                    registration=r.registration; status=Running })
+                | Ok (Some (Complete c)) when String.equal c.id id ->
+                  (match current with
+                   | Some entry -> Ok (Some {entry with status=Completed c.completion})
+                   | None -> Error "completion has no matching registration")
+                | Ok _ -> Ok current) in
+              reading, line_no + 1) in
+          (match Fs_compat.file_size path with
+           | Some size when size = boundary ->
+             Result.map (function
+               | Some ({status=Completed _;_} as entry) -> Some entry
+               | Some {status=Running;_} | None -> None) reading
+           | Some _ -> Error "run history contains an incomplete or changing tail"
+           | None -> Error "run history is unavailable")
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn))
+  ;;
+
+  let fold_replay_entries ?(retain_completed_history = false) path =
     let unread =
       { retained_entries = []
       ; rows = Id_map.empty
@@ -694,7 +727,8 @@ module Make (Payload : Payload) = struct
               | Ok None -> entries, rows, malformed, line_no + 1
               | Ok (Some event) ->
                 let entries = apply_event entries event in
-                let rows =
+                let entries = if retain_completed_history then prune entries else entries in
+                let rows = if retain_completed_history then Id_map.empty else
                   match event with
                   | Register { id; _ } ->
                     Id_map.add id
@@ -741,9 +775,9 @@ module Make (Payload : Payload) = struct
         unread)
   ;;
 
-  let replay path =
+  let replay_with_policy ~retain_completed_history path =
     let existed = Fs_compat.file_exists path in
-    let snapshot = fold_replay_entries path in
+    let snapshot = fold_replay_entries ~retain_completed_history path in
     (match snapshot.malformed with
      | [] -> ()
      | first :: _ as errors ->
@@ -752,7 +786,7 @@ module Make (Payload : Payload) = struct
          Payload.name
          (List.length errors)
          first);
-    if snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
+    if not retain_completed_history && snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
     then (
       (* See [compact_replay_log]: it reports failure; replay still publishes the parsed state. *)
       ignore (compact_replay_log path snapshot));
@@ -769,6 +803,10 @@ module Make (Payload : Payload) = struct
           }
     }
   ;;
+
+  let replay path = replay_with_policy ~retain_completed_history:false path
+  let replay_with_retained_history path =
+    replay_with_policy ~retain_completed_history:true path
 
   (* A row the current decoder refuses can never be read again: the field it
      carries was hard cut, and production holds no compatibility reader for it.

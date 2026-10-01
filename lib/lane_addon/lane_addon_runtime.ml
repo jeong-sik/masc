@@ -805,9 +805,8 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
           (match access with
            | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
                ~source_revision:document.source_revision ->
-               (* Completed document ownership is repair authority, independent
-                  of live source retention and current TOML validity. Proposed
-                  replacement bytes still pass live authorization in save. *)
+               (* Exact admitted bytes retain repair authority after their live
+                  source is evicted. New bytes require separate admission. *)
                Ok ()
            | Keeper _ | Unauthenticated | Operator_configuration ->
                Error {Lane_addon_declaration.code=Invalid_request;
@@ -851,24 +850,26 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
       | Ok current -> let* () = authorize_document m ~access current in Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error error -> Error error in
-    let* () = match access with
-      | Lane_addon_sources.Operator_configuration -> Ok ()
+    let* candidate_owner = match access with
+      | Lane_addon_sources.Operator_configuration -> Ok None
       | Keeper _ | Unauthenticated ->
           let* declaration = offload (fun () -> Lane_addon_config.load_source
             ~source_path:(Filename.concat directory request.file_name) ~source_text:request.source_text)
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;message;current=None}) in
           let* () = Lane_addon_sources.authorize ~access declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
-          binding_visibility m ~access declaration.binding
-            |> Result.map (fun _ -> ())
+          let* visibility = binding_visibility m ~access declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+          (match access, visibility with
+           | Keeper keeper, Keeper_only owner when String.equal keeper owner -> Ok (Some keeper)
+           | (Keeper _ | Unauthenticated), Shared -> Ok None
+           | _ -> Error {Lane_addon_declaration.code=Invalid_request;
+               message="verified declaration owner required";current=None}) in
     let source_path = Filename.concat directory request.file_name in
     let ownership_error message = {Lane_addon_declaration.code=Io_error;message;current=None} in
-    let* () = match access with
-      | Lane_addon_sources.Operator_configuration -> Ok ()
-      | Unauthenticated -> Error {Lane_addon_declaration.code=Invalid_request;
-          message="verified declaration owner required";current=None}
-      | Keeper keeper ->
+    let* () = match candidate_owner with
+      | None -> Ok ()
+      | Some keeper ->
           offload (fun () ->
             Lane_addon_document_owner.prepare ~root:(Lane_addon_store.root m.store)
               ~source_path ~keeper
@@ -879,8 +880,8 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
       |> Result.map_error (fun error -> match access with
           | Lane_addon_sources.Operator_configuration -> error
           | Keeper _ | Unauthenticated -> {error with Lane_addon_declaration.current=None}) in
-    let* () = match access, receipt.durability with
-      | Lane_addon_sources.Keeper keeper, Lane_addon_declaration.Durable ->
+    let* () = match candidate_owner, receipt.durability with
+      | Some keeper, Lane_addon_declaration.Durable ->
           offload (fun () ->
             let* observed = Lane_addon_declaration.read ~directory ~source_path in
             if observed.source_revision <> receipt.document.source_revision
@@ -888,7 +889,10 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
             else Lane_addon_document_owner.complete ~root:(Lane_addon_store.root m.store)
               ~source_path ~keeper ~source_revision:observed.source_revision
               |> Result.map_error ownership_error)
-      | Keeper _, Unconfirmed _ | (Operator_configuration | Unauthenticated), _ -> Ok () in
+      | None, Durable ->
+          offload (fun () -> Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path)
+          |> Result.map_error ownership_error
+      | _, Unconfirmed _ -> Ok () in
     let* () = authorize_document m ~access receipt.document in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
@@ -1148,7 +1152,8 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
 
 let retain_configured_document_owner m (d : Lane_addon_config.declaration) visibility =
   match visibility with
-  | Shared | Operator_only -> Ok ()
+  | Shared | Operator_only -> offload (fun () ->
+      Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path:d.source_path)
   | Keeper_only keeper -> offload (fun () ->
       let root = Lane_addon_store.root m.store in
       let read () = Lane_addon_declaration.read ~directory:(Filename.dirname d.source_path)
@@ -1244,10 +1249,11 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            let admitted =
              let* visibility = retained_visibility in
              let* () = retain_configured_document_owner m d visibility in
-             validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
+             let* _ = validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
+             Ok visibility in
            match admitted with
            | Error message -> add_issue ~id:d.id d.source_path message
-           | Ok _ -> match live_for d.id with
+           | Ok visibility -> match live_for d.id with
            | [e] ->
                let owner = {id=d.id; source_path=d.source_path; revision=d.revision} in
                (match e.configuration with
@@ -1271,7 +1277,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                  | Error message -> add_issue ~id:d.id d.source_path message
                  | Ok () ->
                      let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
-                     let attached = let* visibility = desired_visibility [] d in
+                     let attached =
                        let source_access = match visibility with
                          | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
                          | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in

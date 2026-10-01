@@ -380,7 +380,9 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
       (fun () ->
         Unix.putenv "MASC_BASE_PATH" dir;
         reset ();
-        let registry = Fusion_run_registry.global () in
+        let registry = Fusion_run_registry.create ~path:(Filename.concat dir "fusion-runs.jsonl") () in
+        (match Fusion_run_registry.install_global registry with
+         | Ok () -> () | Error _ -> fail "source fixture registry already installed");
         let run_id = "fusion-capture-" ^ Store.digest dir in
         Fusion_run_registry.register_running registry ~run_id
           ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
@@ -436,6 +438,29 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         let terminal = read () in
         check string "captures terminal failure" "failed"
           (terminal |> member "detail" |> member "run" |> member "status" |> text);
+        for index = 1 to Fusion_run_registry.max_completed_retained do
+          let newer = run_id ^ "/newer/" ^ string_of_int index in
+          Fusion_run_registry.register_running registry ~run_id:newer ~keeper:"foreign"
+            ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+            ~started_at:(float_of_int index +. 10.);
+          Fusion_run_registry.mark_completed registry ~run_id:newer ~outcome:Fusion_run_registry.Succeeded
+        done;
+        check bool "delayed source target has left the recent cache" true
+          (Option.is_none (Fusion_run_registry.get registry ~run_id));
+        let delayed_terminal = read () in
+        check string "delayed observer reads durable exact terminal failure" "failed"
+          (delayed_terminal |> member "detail" |> member "run" |> member "status" |> text);
+        check string "durable fallback retains original owner" "fixture"
+          (delayed_terminal |> member "detail" |> member "run" |> member "keeper" |> text);
+        check bool "eviction does not transfer access to a foreign Keeper" true
+          (Result.is_error (authorize run_id));
+        Fusion_run_registry.register_running registry ~run_id ~keeper:"replacement-owner"
+          ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+          ~started_at:1000.;
+        check bool "reused id denies former owner's retained source access" true
+          (Result.is_error (Sources.authorize ~access:(Sources.Keeper "fixture")
+            (binding [`Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+              "run_id",`String run_id]])));
         check string "old running capture is still frozen" frozen
           (require (Store.read_blob store reference));
         check bool "observed actor is not the requested Keeper" true

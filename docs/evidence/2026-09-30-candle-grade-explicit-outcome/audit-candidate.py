@@ -20,6 +20,9 @@ def validate_result(row, runtime_id, case):
                 'successful result classification or slot mismatch')
         require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
         validate_answer(row['answer'], expected_schema(case))
+        if case['stage'] == 'weights':
+            require(any(weight > 0 for weight in row['answer']['weights'].values()),
+                    'successful weights must have positive sum')
         responses = [attempt for attempt in receipt['output']['attempts']
                      if attempt['kind'] == 'response']
         require(bool(responses) and all(attempt['slot'] == runtime_id
@@ -35,6 +38,30 @@ def validate_result(row, runtime_id, case):
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
                 and same_json(receipt['output']['result'], {'error': row['answer']}),
                 'failed answer mismatch')
+        attempts = receipt['output']['attempts']
+        require(all(attempt['kind'] in {'dispatch', 'http_failure', 'failure'}
+                    for attempt in attempts),
+                'failed receipt has response or unsupported attempt evidence')
+        failures = [attempt for attempt in attempts if attempt['kind'] == 'failure']
+        require(len(failures) == 1 and failures[0]['transport'] == 'http'
+                and failures[0]['detail'] == receipt['detail'],
+                'terminal failure attempt disagrees with receipt')
+        observations = [attempt for attempt in attempts if attempt['kind'] == 'http_failure']
+        require(len(observations) == 1, 'HTTP failure observation count disagrees with single dispatch')
+        observation = observations[0]
+        detail = observation['detail']
+        require(observation['slot'] == runtime_id
+                and type(observation['invalid_output']) is bool
+                and observation['invalid_output'] == (row['status'] == 'invalid_response')
+                and type(detail) is str,
+                'HTTP failure observations disagree with terminal failure')
+        # This frozen one-HTTP-slot bundle uses Exact's execution_failed
+        # rendering, with the same call identity in its detail and flow.
+        call, separator, _ = detail.partition(' cause=')
+        require(separator and call.startswith('call_id=') and len(call) > len('call_id=')
+                and receipt['detail'] == (f'execution_failed: slot={runtime_id} {detail}; '
+                                          f'flow=[slot={runtime_id} {call}]'),
+                'HTTP failure detail disagrees with terminal failure structure')
 
 
 def sha(raw):
@@ -89,9 +116,11 @@ def validate_runtime(raw, plan):
             'prepared runtime slots disagree with plan')
     provider_id, _ = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
-    require(lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
+    require(type(lane['max_output_tokens']) is int
+            and same_json(lane['max_output_tokens'], plan['evaluation_overrides']['max-output-tokens']),
             'prepared output limit disagrees with plan')
-    require(provider['exact-body-timeout-s'] == plan['evaluation_overrides']['exact-body-timeout-s'],
+    require(type(provider['exact-body-timeout-s']) is float
+            and same_json(provider['exact-body-timeout-s'], plan['evaluation_overrides']['exact-body-timeout-s']),
             'prepared timeout disagrees with plan')
     require(provider['credentials'] == {'type': 'env', 'key': plan['credential_env']},
             'prepared credential reference disagrees with plan')

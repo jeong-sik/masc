@@ -344,6 +344,58 @@ class CandleEvidenceAudits(unittest.TestCase):
                 self.run_audit(script, bundle, bundle, error=expected)
 
 
+    def test_candidate_failed_attempts_match_terminal_receipt(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        original = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        for mutation, error in [
+            ('response', 'response or unsupported'),
+            ('missing_terminal', 'terminal failure attempt'),
+            ('terminal_detail', 'terminal failure attempt'),
+            ('missing_http', 'HTTP failure observation count'),
+            ('http_detail', 'HTTP failure detail'),
+            ('short_http_detail', 'HTTP failure detail'),
+            ('blank_http_detail', 'HTTP failure detail'),
+            ('http_slot', 'HTTP failure observations'),
+            ('http_classification', 'HTTP failure observations'),
+        ]:
+            with self.subTest(mutation=mutation):
+                rows = copy.deepcopy(original)
+                row = next(row for row in rows if row['status'] == 'transport_unavailable')
+                output = row['receipt']['output']
+                attempts = output['attempts']
+                if mutation == 'response':
+                    attempts.append({'kind':'response', 'slot':row['receipt']['selected_slot'],
+                                     'output':{'grade':'small'}})
+                elif mutation.startswith('missing_'):
+                    kind = 'failure' if mutation == 'missing_terminal' else 'http_failure'
+                    output['attempts'] = [a for a in attempts if a['kind'] != kind]
+                elif mutation == 'terminal_detail':
+                    next(a for a in attempts if a['kind'] == 'failure')['detail'] = 'contradiction'
+                else:
+                    attempt = next(a for a in attempts if a['kind'] == 'http_failure')
+                    if mutation == 'http_detail': attempt['detail'] = 'contradiction'
+                    elif mutation == 'short_http_detail': attempt['detail'] = 'call_id='
+                    elif mutation == 'blank_http_detail': attempt['detail'] = ' '
+                    elif mutation == 'http_slot': attempt['slot'] = 'other.model'
+                    else: attempt['invalid_output'] = True
+                write_rows(bundle/'results.jsonl', rows)
+                rewrite_fixture_registry(bundle, rows)
+                self.run_audit(CANDIDATE/'audit-candidate.py', bundle, bundle, error=error)
+
+    def test_candidate_rejects_zero_sum_weights(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        rows = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        row = next(row for row in rows if row['stage'] == 'weights' and row['status'] == 'ok')
+        answer = {'weights': dict.fromkeys(row['answer']['weights'], 0)}
+        row['answer'] = row['receipt']['output']['result'] = answer
+        for attempt in row['receipt']['output']['attempts']:
+            if attempt['kind'] == 'response': attempt['output'] = answer
+        write_rows(bundle/'results.jsonl', rows)
+        rewrite_fixture_registry(bundle, rows)
+        self.run_audit(CANDIDATE/'audit-candidate.py', bundle, bundle, error='positive sum')
+
     def test_candidate_exit_and_runtime_declarations(self):
         bundle = self.root/'candidate'
         hydrate(CANDIDATE, bundle)
@@ -359,7 +411,9 @@ class CandleEvidenceAudits(unittest.TestCase):
             ('"slots" = ["glm-coding.glm-5.3-flash"]', '"slots" = ["other.model"]', 'runtime slots'),
             ('"cli_slots" = []', '"cli_slots" = ["other.model"]', 'runtime slots'),
             ('"max_output_tokens" = 4096', '"max_output_tokens" = 3', 'output limit'),
+            ('"max_output_tokens" = 4096', '"max_output_tokens" = 4096.0', 'output limit'),
             ('"exact-body-timeout-s" = 1200.0', '"exact-body-timeout-s" = 1.0', 'timeout'),
+            ('"exact-body-timeout-s" = 1200.0', '"exact-body-timeout-s" = 1200', 'timeout'),
             ('"key" = "ZAI_API_KEY_SB"', '"key" = "OTHER_KEY"', 'credential reference'),
         ]:
             with self.subTest(error=error, after=after):

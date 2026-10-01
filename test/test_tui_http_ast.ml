@@ -174,19 +174,22 @@ let test_the_categorical_guard_rejects_a_raw_hue () =
 ;;
 
 let test_tui_render_asks_the_theme_for_a_categorical_hue () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> colour_path_violations ~reserved:(fun segment ->
-         List.mem segment categorical_hue_segments)
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml names a categorical hue instead of a Theme slot:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-       |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> colour_path_violations ~reserved:(fun segment ->
+             List.mem segment categorical_hue_segments)
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s names a categorical hue instead of a Theme slot:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -196,18 +199,21 @@ let test_theme_apply_is_boot_and_the_surface () =
 ;;
 
 let test_tui_status_colors_use_theme_tokens () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> reserved_status_color_path_violations
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml bypasses semantic Theme status tokens:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-      |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> reserved_status_color_path_violations
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s bypasses semantic Theme status tokens:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -492,6 +498,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
             (Ast_grep.count_string_literals ~module_path ~needle))
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"
@@ -1337,7 +1344,7 @@ let test_tui_current_projection_wiring () =
      regressions. *)
   check int "Board renderer selects detail by post identity" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
@@ -1348,9 +1355,9 @@ let test_tui_current_projection_wiring () =
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Keeper_chat.terminal_safe_text"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Tui_decode.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -1415,8 +1422,8 @@ let test_tui_current_projection_wiring () =
        ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
        ~callee:"Metrics_tail.error_to_string"
      = 1);
   check bool "log empty copy distinguishes typed outcomes" true
@@ -1811,12 +1818,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
-  check int "surface renderers perform no direct stdout writes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
-  check int "surface renderers perform no direct flushes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " performs no direct stdout writes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"print_string");
+      check int (module_path ^ " performs no direct flushes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"flush"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -1877,15 +1885,15 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"home_decision_rows");
   check int "board read consumes one shared row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.allocate_board_read");
   check int "board body and comments share the allocation" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "body_rows"; "comment_rows" ]);
   check int "board read projects the two scroll offsets together" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.project_board_read_scroll");
   (* Position labels and the returned clamp read the same independent
@@ -1895,24 +1903,24 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (fun field ->
       check bool ("board renderer consumes projected " ^ field) true
         (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-           ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+           ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
            ~fields:[ field ] > 0))
     board_scroll_fields;
   check int "board offsets all come from the scroll projection" 0
     (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~record:"scroll"
        ~fields:board_scroll_fields);
   check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane"
        ~callees:[ "Layout.project_board_read_scroll" ]
        ~fields:[ "board_scroll"; "board_comment_scroll" ]);
   check int "side board read owns one row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.allocate_board_read_side");
   check int "side board read owns one scroll projection" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.project_board_read_scroll");
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
@@ -2601,7 +2609,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      [approvals_error] here. *)
   check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
     ~callees:sanitizer_calls [ "cause" ];
-  check_fields "render_board_list"
+  check_fields ~module_path:"bin/masc_tui_render_board.ml" "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   (* [String.equal] keeps a post out of its own related list. Comparison never
      reaches the terminal, and sanitizing first would be wrong besides: two
@@ -2609,7 +2617,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields
     ~non_rendering_calls:
       [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
-    "board_read_pane"
+    ~module_path:"bin/masc_tui_render_board.ml" "board_read_pane"
     [ "bp_id"
     ; "bp_hearth"
     ; "bp_author"
@@ -2638,7 +2646,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_tools"
     [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
-  check_identifiers ~module_path:render_path ~binding:"board_read_pane"
+  check_identifiers ~module_path:"bin/masc_tui_render_board.ml" ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
@@ -2765,8 +2773,30 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "k_created_at"
     ; "k_updated_at"
     ];
-  check_fields "render_keeper_logs"
-    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  check_fields "render_keeper_logs" [ "k_name" ];
+  check_fields ~module_path:"bin/masc_tui_types.ml"
+    ~non_rendering_calls:[ "Masc.Tui_terminal_text.clock_timestamp_for_terminal" ]
+    "keeper_log_rows" [ "le_ts" ];
+  (* The entry projector owns the full timestamp and every tool/work fact.
+     [wrap] sanitizes the final text, including values assembled in lambdas. *)
+  check_fields ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~non_rendering_calls:[ "wrap"; "List.concat_map" ]
+    "log_entry_rows" [ "le_ts"; "le_tools_used" ];
+  check int "log work-kind option is read once before its value is wrapped" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_observation_layout.ml"
+       ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows"
+    ~callees:[ "Tui_decode.sanitize_terminal_text" ] [ "text" ];
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
+  check int "logs render the shared row projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"Masc_tui_types.keeper_log_rows");
+  check int "log rows render full entry facts through the observation projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows" ~callee:"Masc_tui_observation_layout.log_entry_rows");
   (* The Info tab's Board-attention rows are drawn from wire strings -- a
      partition id, a Keeper name on a ledger error, the server's own words on
      a failed read -- so the module that builds them is held to the same
@@ -2849,9 +2879,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs" ~callee:"String.sub");
   check int "log renderer uses the safe clock projection once" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Terminal_text.clock_timestamp");
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper
@@ -2903,7 +2933,7 @@ let test_the_session_filter_reads_the_transcript () =
    spelling widths again: one layout -- the columns a narrow list keeps and
    the title's share -- asked once, and the two rows built from it. *)
 let test_the_board_header_and_rows_share_one_layout () =
-  let module_path = "bin/masc_tui_render.ml" in
+  let module_path = "bin/masc_tui_render_board.ml" in
   let in_board callee =
     Ast_grep.count_calls_in_value_binding ~module_path
       ~binding_name:"render_board_list" ~callee
@@ -2940,7 +2970,7 @@ let test_the_answering_overlay_is_the_shared_contract () =
    row the surface stops drawing cannot leave a gap behind it. *)
 let test_the_board_list_frame_is_the_shared_contract () =
   let in_board callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   check int "the frame is drawn by the contract" 1 (in_board "surface_chrome");

@@ -77,6 +77,7 @@ class CurrencyRoster:
         payload["candle"] = dict(READY)
         for row in payload["keepers"]:
             row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+            row["candle_account_revision"] = "a" * 64
         if phase == "disabled":
             payload["candle"] = {"status": "disabled", "reason": "ledger deliberately unavailable"}
             for row in payload["keepers"]:
@@ -89,6 +90,7 @@ class CurrencyRoster:
             payload["candle"] = {"status": "off"}
             for row in payload["keepers"]:
                 row["candle_balance_milli"] = None
+                row["candle_account_revision"] = None
         elif phase != "ready":
             raise AssertionError(f"unknown fixture phase {phase}")
         with self.lock:
@@ -115,6 +117,7 @@ def run(binary: str, phase: str, captures: Path | None):
         print(f"TUI_CAPTURE candle-currency {phase} {name}\n" + visible.decode(errors="replace"), flush=True)
 
     def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output, rows=38, columns=120, needle=b"MASC Dashboard")
         try:
             await_screen(process, fd, output,
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
@@ -177,7 +180,7 @@ def run(binary: str, phase: str, captures: Path | None):
 
     h.run_terminal_scenario(binary, description="Candle currency survives " + phase,
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        terminal_rows=38, terminal_cols=120)
+        terminal_cols=120)
 
 
 def short_overview_keeps_its_baseline(binary: str) -> None:
@@ -217,10 +220,12 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             roster_payload["candle"] = dict(READY)
             for row in roster_payload["keepers"]:
                 row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+                row["candle_account_revision"] = "a" * 64
         if phase != "error":
             fixtures[ROSTER_PATH] = (200, roster_payload)
 
         def interact(process, fd, _slave, output, _base):
+            h.resize_and_wait(process, fd, output, rows=38, columns=100, needle=b"MASC Dashboard")
             await_screen(process, fd, output,
                 lambda text: b"attention-2" in text and b"Goals" in text,
                 "loaded baseline task and attention rows")
@@ -268,7 +273,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
 
         h.run_terminal_scenario(binary, description="short Candle Overview keeps baseline " + phase,
             interact=interact, http_fixtures=fixtures,
-            prepare_workspace=h.seed_row_budget_workspace, terminal_rows=38, terminal_cols=100)
+            prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
 
 
 if __name__ == "__main__":

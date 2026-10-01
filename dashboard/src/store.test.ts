@@ -291,6 +291,23 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     expect(store.executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/fixture/workspace-a')
   })
 
+  it('rejects a late HTTP failure without withdrawing a newer SSE Candle observation', async () => {
+    const held = pendingResponse()
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(held.promise))
+    const store = await import('./store')
+    store.hydrateExecutionSnapshot(execution(1))
+    const requested = store.refreshExecution({ force: true })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    store.hydrateExecutionSnapshot(execution(2))
+    const currentAuthority = store.executionWorkspaceAuthority.peek()
+    const currentCandle = store.candleObservation.peek()
+    held.resolve(json({ error: 'old request failure' }, 503))
+    await expect(requested).rejects.toThrow('Execution failure was superseded by a newer observation')
+    expect(store.executionWorkspaceAuthority.peek()).toBe(currentAuthority)
+    expect(store.candleObservation.peek()).toBe(currentCandle)
+    expect(store.executionError.value).toBeNull()
+  })
+
   it('rejects a superseded held HTTP response without replacing newer accepted authority', async () => {
     const held = pendingResponse()
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(held.promise))

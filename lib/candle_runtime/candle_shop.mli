@@ -41,7 +41,8 @@ val catalog : base_path:string -> (catalog_entry list, error) result
 (** The caller supplies its trusted Keeper identity. A single cursor-checked
     ledger update recomputes funds and ownership before appending one purchase.
     A competing append reruns that decision with the new ledger. The price
-    recorded is the explicit policy observed for this request. *)
+    recorded is the explicit policy re-read within each cursor attempt; an
+    item that becomes unpriced is refused before any debit. *)
 val purchase
   :  now:(unit -> float)
   -> base_path:string

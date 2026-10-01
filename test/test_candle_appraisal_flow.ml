@@ -353,6 +353,36 @@ let test_arithmetic_alone_cannot_authorize_an_outsider () =
   (match result with Error (Candle_ledger.Refused _) -> () | _ -> fail "outsider was admitted by valid arithmetic");
   check int "no forged Paid row reaches the ledger" 0 (List.length (paid config waiting.goal_id))
 
+let test_settlement_requires_complete_snapshot_candidates () =
+  with_workspace @@ fun _env config ->
+  let waiting=prepared config "candidate-omission" in
+  let original=events config in
+  let identity : A.identity = {goal_id=waiting.goal_id;request_id=waiting.request_id;verification_run_id=waiting.verification_run_id} in
+  let payment ids weights =
+    let relations=List.map (fun task_id -> {A.task_id;relation=A.Related;trace=trace task_id}) ids in
+    Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+      ~grade_trace:(trace "grade") ~relations ~weights_trace:(trace "weights")
+      ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights |> ok in
+  let full=payment ["task-a";"task-b";"external"] ["keeper-a",1;"keeper-b",1] in
+  check bool "complete eligible Snapshot proof can settle" true
+    (Result.is_ok (Candle_payout.validate_settlement waiting original (E.Paid full)));
+  List.iter (fun (omit_observation,omit_candidate) ->
+    let modified=List.map (fun (event : E.t) -> match event.body with
+      | E.Candidates c -> {event with body=E.Candidates {c with
+          tasks=(if omit_observation then List.remove_assoc "task-b" c.tasks else c.tasks);
+          candidate_task_ids=(if omit_candidate then List.filter ((<>) "task-b") c.candidate_task_ids else c.candidate_task_ids);
+          candidate_keepers=(if omit_candidate then List.filter ((<>) "keeper-b") c.candidate_keepers else c.candidate_keepers)}}
+      | _ -> event) original in
+    let forged=if omit_candidate then payment ["task-a";"external"] ["keeper-a",1] else full in
+    check bool "omitted eligible worker cannot redirect another worker's payout" true
+      (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
+    [false,true;true,false;true,true];
+  let missing_ineligible=List.map (fun (event : E.t) -> match event.body with
+    | E.Candidates c -> {event with body=E.Candidates {c with tasks=List.remove_assoc "pending" c.tasks}}
+    | _ -> event) original in
+  check bool "Snapshot coverage also requires ineligible task observations" true
+    (Result.is_error (Candle_payout.validate_settlement waiting missing_ineligible (E.Paid full)))
+
 let test_disable_during_appraisal_preserves_the_obligation () =
   List.iter (fun remove_file ->
     with_workspace @@ fun _env config ->
@@ -514,6 +544,7 @@ let () =
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
+      ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider
       ;test_case "disable during model call preserves waiting" `Quick test_disable_during_appraisal_preserves_the_obligation
       ;test_case "cumulative overflow refuses the real settlement" `Quick test_cumulative_overflow_refuses_the_real_settlement

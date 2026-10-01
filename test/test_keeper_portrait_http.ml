@@ -30,6 +30,36 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
 open Alcotest
 open Masc
 
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper]}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
+
 module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_portrait
 module Items_api = Server_dashboard_http_keeper_items
@@ -373,6 +403,15 @@ let item_account reply =
   require_ok Fun.id
     (Masc_tui_keeper_items.decode ~keeper_name:keeper
        (Yojson.Safe.from_string reply.body))
+  |> snd
+
+let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
+
+let item_account reply =
+  check int "Item account HTTP response" 200 reply.status;
+  require_ok Fun.id
+    (Masc_tui_keeper_items.decode ~keeper_name:keeper
+       (Yojson.Safe.from_string reply.body))
 
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
@@ -589,6 +628,16 @@ beanie = %d
     let changed_json = Yojson.Safe.from_string (get ~router ~token:reader (item_path keeper)).body in
     let changed_revision = Yojson.Safe.Util.(changed_json |> member "account_revision" |> to_string) in
     check bool "price B changes actual response revision" false (original_revision = changed_revision);
+    let changed_reading = require_ok Fun.id (Masc_tui_keeper_items.decode ~keeper_name:keeper changed_json) in
+    check bool "TUI refuses price B beside the retained price A roster" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some original_revision)) changed_reading));
+    check bool "TUI accepts price B only with its matching observed roster revision" true
+      (Result.is_ok (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some changed_revision)) changed_reading));
+    check bool "an unobserved roster cannot authorize an otherwise valid Item body" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Error "roster unavailable") changed_reading));
     check (option string) "price B response uses the same current roster view identity"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some changed_revision);
@@ -611,7 +660,7 @@ beanie = %d
       | _ -> fail "Item account response is not an object" in
     (match Masc_tui_keeper_items.decode ~keeper_name:keeper
         (with_balance (`String (string_of_int max_int))) with
-     | Ok (Masc_tui_keeper_items.Ready account) ->
+     | Ok (_, Masc_tui_keeper_items.Ready account) ->
        check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
      | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
     List.iter (fun amount ->

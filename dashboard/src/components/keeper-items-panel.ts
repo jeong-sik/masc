@@ -51,7 +51,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
       && executionWorkspaceAuthority.peek() === authority
-    fetchKeeperItems(keeper.name, controller.signal)
+    fetchKeeperItems(keeper.name, authority.workspaceRoot, controller.signal)
       .then(value => {
         if (value.account_revision !== expectedRevision) throw new Error('Item 계정 관측이 변경되었습니다. 새로고침으로 Keeper 관측을 갱신해주세요.')
         if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value })

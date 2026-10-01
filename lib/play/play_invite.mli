@@ -123,7 +123,8 @@ type revoke_error =
 val revoke :
   base_path:string -> name:Name.t -> after_revoke:(revoked -> 'a) ->
   ('a, revoke_error) result
-(** Checks the current role and deletes the invite in one Auth transaction;
+(** Checks the current role and exact UUID binding before deleting the invite in
+    one Auth transaction;
     its bearer stops validating from the next request. [after_revoke] runs for
     both [Deleted] and [Already_gone], before credential writers can resume.
     A present unreadable or mismatched credential is refused, not treated as gone.

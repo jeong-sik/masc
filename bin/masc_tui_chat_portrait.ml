@@ -11,10 +11,11 @@ type t = {
    The portrait yields before that navigation capacity is reduced. *)
 let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
 
-let prepare cache ~display ~project ~name ~equipment ~rows ~cols =
-  match Portrait.band_size display with
-  | None -> None
-  | Some band ->
+let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
+  match portrait, Portrait.band_size display with
+  | Keeper_portrait_equipment.Unavailable _, _
+  | Keeper_portrait_equipment.Ready _, None -> None
+  | Keeper_portrait_equipment.Ready equipment, Some band ->
       let inner = Masc_tui_ansi.framed_inner_width cols in
       if rows < minimum_roster_rows + band.rows + 2 || inner < band.cols then None
       else
@@ -39,6 +40,6 @@ let prepare cache ~display ~project ~name ~equipment ~rows ~cols =
 
 let session_cache = Portrait.cache ()
 
-let shown ~name ~equipment ~rows ~cols =
+let shown ~name ~portrait ~rows ~cols =
   prepare session_cache ~display:(View.current_display ())
-    ~project:Masc_tui_terminal_palette.best_color ~name ~equipment ~rows ~cols
+    ~project:Masc_tui_terminal_palette.best_color ~name ~portrait ~rows ~cols

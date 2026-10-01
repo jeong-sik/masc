@@ -72,15 +72,13 @@ let catalog ~base_path =
 ;;
 
 let purchase ~now ~base_path ~keeper ~item =
-  let* pricing_policy = policy ~base_path in
-  let* amount_milli =
-    match Candle_config.price pricing_policy item with
-    | Candle_config.Unpriced -> Error (Unpriced item)
-    | Candle_config.Priced amount -> Ok amount
-  in
+  let* (_ : Candle_config.policy) = policy ~base_path in
   let keeper = Keeper_id.Keeper_name.to_string keeper in
   Candle_ledger.update ~base_path (fun view ->
     let* current_policy = policy ~base_path in
+    let* amount_milli = match Candle_config.price current_policy item with
+      | Candle_config.Unpriced -> Error (Unpriced item)
+      | Candle_config.Priced amount -> Ok amount in
     let* purchased_at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
     let* prepared = Candle_status.prepare ~at:purchased_at ~half_life:current_policy.half_life (Candle_ledger.events view)
       |> Result.map_error (fun error -> Account_invalid error) in

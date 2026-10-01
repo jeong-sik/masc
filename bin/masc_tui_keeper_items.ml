@@ -111,20 +111,20 @@ let decode ~keeper_name json =
       json
   in
   let* revision = field "account_revision" fields in
-  let* () = match status,revision with
-    | "off",`Null -> Ok ()
+  let* revision = match status,revision with
+    | "off",`Null -> Ok None
     | ("ready" | "disabled"),`String value when String.length value=64
-        && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) value -> Ok ()
+        && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) value -> Ok (Some value)
     | _ -> Error "Item account revision is missing or malformed for its status" in
   let* reported_keeper = string "keeper" fields in
   if not (String.equal keeper_name reported_keeper)
   then Error "Item account belongs to another Keeper"
   else
     match status with
-    | "off" -> Ok Off
+    | "off" -> Ok (revision, Off)
     | "disabled" ->
       let* reason = string "reason" fields in
-      Ok (Disabled reason)
+      Ok (revision, Disabled reason)
     | "ready" ->
       let* balance_milli = nonnegative_amount "balance_milli" fields in
       let* owned_json = field "owned_items" fields in
@@ -139,5 +139,10 @@ let decode ~keeper_name json =
       then Error "Item catalog is incomplete"
       else if not (List.for_all (fun item -> List.mem (Item.id item) (ids catalog_items)) owned_items)
       then Error "owned Item is absent from catalog"
-      else Ok (Ready { balance_milli; owned_items; catalog })
+      else Ok (revision, Ready { balance_milli; owned_items; catalog })
     | _ -> Error ("unknown Item account status " ^ status)
+
+let match_revision ~expected_revision (revision, account) =
+  let* expected_revision = expected_revision in
+  if revision = expected_revision then Ok account
+  else Error "Item account observation changed; refresh the Keeper roster before reading this account"

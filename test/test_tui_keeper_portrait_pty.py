@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import threading
 import json
 import re
 import sys
@@ -292,8 +293,18 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
-def item_tab_previews_accessories(binary: str) -> None:
+def item_roster_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "ready", "issued_milli": "12500", "burned_milli": "0", "circulating_milli": "12500"}
+    for row in roster["keepers"]:
+        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
+        row["candle_account_revision"] = "a" * 64
+    return fixtures
+
+
+def item_tab_previews_accessories(binary: str) -> None:
+    fixtures = item_roster_fixtures()
     items = ItemWorkspaceFixture((
         200,
         {
@@ -368,7 +379,7 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
              "owned_items": ["glasses"], "catalog": [
                  ({"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
@@ -418,7 +429,7 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
 
 
 def item_account_follows_workspace_authority(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
                  {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
@@ -513,7 +524,7 @@ def item_account_follows_workspace_authority(binary: str) -> None:
 
 
 def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": [], "catalog": [
                  {"id": item, "slot": slot, "price_status": "unpriced"}
@@ -575,6 +586,150 @@ def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
     )
 
 
+def item_account_requires_matching_roster_revision(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    fixtures["/api/v1/gate/keepers?detailed=true"] = lambda: (200, roster)
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+             "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
+                 {"id": item, "slot": slot, "price_status": "unpriced"}
+                 for item, slot in ITEM_CATALOG]}
+    items = ItemWorkspaceFixture((200, ready))
+    fixtures["/api/v1/keepers/alpha/items"] = h.PathHttpResponse(items.read)
+
+    def await_frame(process, fd, output, needle):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: needle in b"\n".join(last_frame_rows(output).values()), timeout=10.0), last_frame_rows(output)
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=40, columns=200, needle=INFO_TAB)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_frame(process, fd, output, b"Balance 12.500 Candle")
+        # The Item account changes first, while the current roster still owns
+        # revision A and its previous equipment. B cannot publish beside A.
+        items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="13000")
+        os.write(fd, b"r")
+        await_frame(process, fd, output, b"Account unavailable:")
+        assert not any(b"Balance 13.000" in line or b"Balance 12.500" in line
+                       for line in last_frame_rows(output).values()), last_frame_rows(output)
+        # A newly observed roster owns B. Its visible runtime ID is a response
+        # barrier, rather than waiting for a timer or a tab header alone.
+        for row in roster["keepers"]:
+            row["candle_account_revision"] = "b" * 64
+            if row["name"] == "alpha":
+                row["runtime_id"] = "revision-b.current"
+                row["candle_balance_milli"] = "13000"
+        # Stay on Items: accepting roster B must launch its replacement read
+        # without a second key press or leaving/re-entering the tab.
+        await_frame(process, fd, output, b"Balance 13.000 Candle")
+        assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
+        # Turning Candle off cannot leave B's ready Item account alongside an
+        # off roster. The next current reading withdraws it before a new GET.
+        roster["candle"] = {"status": "off"}
+        for row in roster["keepers"]:
+            row["candle_balance_milli"] = None
+            row["candle_account_revision"] = None
+        await_frame(process, fd, output, b"Account unavailable:")
+        assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary,
+        description="Item account publishes only beside its matching current roster revision",
+        interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=200)
+
+
+def item_account_withdraws_unread_authority(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    arm = [False]
+    balance = ["12500"]
+    account = {"account_revision": "a" * 64, "status": "ready", "keeper": "alpha", "owned_items": [],
+               "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                           for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def items():
+        value = dict(account, balance_milli=balance[0])
+        if not arm[0]:
+            return 200, value
+        arm[0] = False
+        held.set()
+        if not release.wait(timeout=30):
+            return 504, {"error": "fixture release missing"}
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = items
+
+    def frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+
+    def recover(process, fd, output):
+        probes = identity["probes"]
+        identity["unread"] = False
+        # A subsequent serial full-refresh probe starts after the previous
+        # identity answer has been applied. This is a fixture barrier, not age.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= probes + 2, timeout=10)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            identity["unread"] = True
+            frame(process, fd, output, lambda text:
+                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+            recover(process, fd, output)
+            balance[0] = "13000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
+            identity["unread"] = True
+            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            recover(process, fd, output)
+            # Release before any new Item read: otherwise the new read's
+            # generation alone would supersede this response and hide a
+            # missing authority-boundary invalidation.
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
+            probes = identity["probes"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["probes"] >= probes + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output), "late response did not settle"
+            text = b"\n".join(last_frame_rows(output).values())
+            assert b"Account unavailable:" in text
+            assert b"Balance 13.000 Candle" not in text
+            assert b"Balance 13.000 Candle" not in output[start:]
+            balance[0] = "14000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
+                            refresh=0.2)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -590,8 +745,10 @@ if __name__ == "__main__":
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
+    item_account_requires_matching_roster_revision(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
-    print("tui keeper portrait: PASS (7 scenarios)")
+    item_account_withdraws_unread_authority(binary)
+    print("tui keeper portrait: PASS (9 scenarios)")

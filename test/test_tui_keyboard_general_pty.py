@@ -10,6 +10,8 @@ import time
 import tui_keyboard_walk as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_code_results.ml",
+    "bin/masc_tui_code_results.mli",
     "bin/masc_tui_palette.ml",
     "bin/masc_tui_palette.mli",
     "lib/tui_terminal_text.ml",

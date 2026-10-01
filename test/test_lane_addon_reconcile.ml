@@ -583,44 +583,34 @@ let test_historical_never_started_leaves_no_binding () =
     let manifest = package packages "ready" in
     let path = Filename.concat directory "observer.toml" in
     let bytes = declaration ~id:"observer" ~manifest () in
+    state.startup_available := false;
     write path bytes;
     ignore (reconcile config directory);
     let old_id = declared_instance config "observer" |> text "instance_id" in
-    await_ready clock config old_id;
-    let captured = instance config old_id in
-    detach clock config old_id;
+    await clock (fun () -> phase (instance config old_id) = "failed");
+    let never_started = instance config old_id in
+    check int "failed startup has no observation history" 0
+      (number "observation_seq" never_started);
+    check bool "failed startup owns no container" true
+      (member "container_id" never_started = `Null);
+    check int "the backend never observed" 0 (List.length !(state.observations));
+    ignore (dispatch config Runtime.Detach ["instance_id", `String old_id]);
+    await clock (fun () ->
+      not (List.exists (fun value -> text "instance_id" value = old_id) (instances config)));
     Runtime.For_testing.reset ();
-    (* The completed worker retains its observation journal after Detach.
-       A never-started worker must have a different identity with no journal. *)
-    let never_started_id = old_id ^ "-never-started" in
-    let fields = Yojson.Safe.Util.to_assoc captured in
-    let never_started =
-      `Assoc
-        (("instance_id", `String never_started_id)
-         :: ("container_id", `Null) :: ("observation_seq", `Int 0)
-         :: List.remove_assoc "instance_id"
-              (List.remove_assoc "observation_seq" (List.remove_assoc "container_id" fields)))
-    in
+    state.events := [];
+    state.startup_available := true;
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-    unwrap (Store.save_binding store ~instance_id:never_started_id never_started);
-    let retained_sequence id =
-      unwrap (Store.bindings store)
-      |> List.find (fun value -> text "instance_id" value = id)
-      |> number "observation_seq"
-    in
-    check int "completed worker retains its actual observation history" 1
-      (retained_sequence old_id);
-    check int "never-started worker has no observation history" 0
-      (retained_sequence never_started_id);
+    unwrap (Store.save_binding store ~instance_id:old_id never_started);
     let has_binding () =
       unwrap (Store.bindings store)
       |> List.exists (function
-        | `Assoc binding -> List.assoc_opt "instance_id" binding = Some (`String never_started_id)
+        | `Assoc binding -> List.assoc_opt "instance_id" binding = Some (`String old_id)
         | _ -> false)
     in
     write path bytes;
     ignore (reconcile config directory);
-    await_yield (fun () -> List.mem (Recovery_completed (never_started_id, None)) !(state.events));
+    await_yield (fun () -> List.mem (Recovery_completed (old_id, None)) !(state.events));
     await_yield (fun () -> not (has_binding ()));
     check bool "a never-started binding is gone after restart recovery" false (has_binding ());
     (* Recovery nudges configuration, but this test runs no configuration

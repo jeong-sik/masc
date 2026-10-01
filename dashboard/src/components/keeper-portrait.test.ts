@@ -66,11 +66,11 @@ describe('KeeperPortrait', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(html`<${KeeperPortrait} name="wick-tester" reading=${ready} sizePx=${40} previewItem="glasses" fallback=${fallback} />`, container)
     await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80&preview=glasses')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(keeperPortraitUrl('wick-tester', 40, ready.equipment, 'glasses'))
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer portrait-preview-token')
     render(portrait('wick-tester'), container)
     await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-2'))
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(keeperPortraitUrl('wick-tester', 40, ready.equipment))
     expect(revoked).toEqual(['blob:portrait-1'])
   })
 
@@ -92,7 +92,7 @@ describe('KeeperPortrait', () => {
     await waitFor(() => expect(shown()).not.toBeNull())
 
     const [path, init] = fetchMock.mock.calls[0]!
-    expect(path).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80')
+    expect(path).toBe(keeperPortraitUrl('wick-tester', 40, ready.equipment))
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer portrait-read-token')
     expect(init?.cache).toBe('no-cache')
     const img = shown()!
@@ -115,6 +115,30 @@ describe('KeeperPortrait', () => {
     fetchMock.mockImplementation(async () => png())
     render(portrait('wick-tester'), container)
     await waitFor(() => expect(shown()).not.toBeNull())
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses a pending A image when the server read B, without memoizing B after equipment returns to A', async () => {
+    let complete!: (response: Response) => void
+    const fetchMock = vi.fn((_path: string, _init?: RequestInit) => new Promise<Response>(resolve => { complete = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const path = fetchMock.mock.calls[0]![0]
+    expect(JSON.parse(new URL(path, 'http://fixture.invalid').searchParams.get('expected_equipment')!)).toEqual(ready.equipment)
+    // Current equipment B at the route read causes conflict, even if it returns
+    // to A before the still-observed A roster renders again.
+    complete(refused(409))
+    await waitFor(() => expect(container.querySelector('[data-testid="keeper-portrait-refused"]')).not.toBeNull())
+    expect(container.querySelector('[data-testid="keeper-portrait-refused"]')?.getAttribute('title')).toContain('장비 관측이 변경')
+    render(portrait('wick-tester', { ...ready }), container)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(shown()).toBeNull()
+    expect(created).toEqual([])
+    render(null, container)
+    fetchMock.mockImplementation(async () => png())
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 

@@ -12,6 +12,7 @@ import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection
 
 const keeper = signal({
   name: 'rondo',
+  candle_account_revision: '0'.repeat(64),
   portrait: {
     state: 'ready',
     equipment: { face: 'bare_face', neck: 'bare_neck', head: 'crown', hand: 'empty_hand', base: 'no_dish' },
@@ -23,6 +24,7 @@ declare global {
   interface Window {
     refreshKeeperItemsExecutionFixture: () => Promise<void>
     updateKeeperItemsFixture: (revision: string) => void
+    updateKeeperItemsWorkspaceFixture: (workspaceRoot?: string | null) => Parameters<typeof hydrateExecutionSnapshot>[0]
   }
 }
 window.refreshKeeperItemsExecutionFixture = () => refreshExecution({ immediate: true })
@@ -30,21 +32,21 @@ window.updateKeeperItemsFixture = revision => {
   keeper.value = { ...keeper.value, candle_account_revision: revision }
 }
 
-// This isolated fixture has no production HTTP/SSE bootstrap. Admit its
-// explicitly synthetic workspace through the same store path as production.
-declare global {
-  interface Window {
-    updateKeeperItemsWorkspaceFixture: (workspaceRoot: string | null) => void
-  }
-}
+// Test-only publication sequence: this isolated browser fixture has no HTTP/SSE
+// bootstrap. Workspace transitions use the real store admission path while
+// the Keeper, wallet, outfit and project label remain unchanged.
 let fixturePublicationGeneration = 0
-window.updateKeeperItemsWorkspaceFixture = workspaceRoot => {
-  const accepted = hydrateExecutionSnapshot({
+let fixtureWorkspaceRoot: string | null = '/fixture/keeper-items'
+window.updateKeeperItemsWorkspaceFixture = (workspaceRoot = fixtureWorkspaceRoot) => {
+  fixtureWorkspaceRoot = workspaceRoot
+  const snapshot = {
     execution_publication_epoch: 'keeper-items-browser-fixture',
     execution_publication_generation: ++fixturePublicationGeneration,
-    status: { project: 'keeper-items-fixture', ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }) },
-  })
-  if (!accepted) throw new Error('Item fixture workspace observation refused')
+    status: { ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }), project: 'keeper-items-fixture' },
+  }
+  const accepted = hydrateExecutionSnapshot(snapshot)
+  if (!accepted) throw new Error('Item browser fixture workspace observation refused')
+  return snapshot
 }
 window.updateKeeperItemsWorkspaceFixture('/fixture/keeper-items')
 

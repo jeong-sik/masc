@@ -414,7 +414,7 @@ for pid in "${OLD_PIDS[@]}"; do
   wait_for_graceful_exit "$pid" || exit 1
 done
 
-start_fresh
+start_fresh "$@"
 rc=$?
 [ "$rc" -eq 0 ] || exit "$rc"
 log "restart complete"

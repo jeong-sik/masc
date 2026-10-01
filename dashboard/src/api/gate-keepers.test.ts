@@ -17,6 +17,7 @@ const currentWire = {
   keepers: [{
     runtime_class: 'keeper',
     candle_balance_milli: null,
+    candle_account_revision: null,
     portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name: 'planner',
     meta: {

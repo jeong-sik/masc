@@ -7,12 +7,17 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
-import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
+import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 type Reading =
   | { kind: 'loading'; identity: string }
   | { kind: 'loaded'; identity: string; authority: ExecutionWorkspaceAuthority; value: KeeperItemsReading }
   | { kind: 'error'; identity: string; authority: ExecutionWorkspaceAuthority; message: string }
+
+type Refresh =
+  | { kind: 'idle' }
+  | { kind: 'pending'; authority: ExecutionWorkspaceAuthority | null; observation: string }
+  | { kind: 'failed'; authority: ExecutionWorkspaceAuthority | null; observation: string; message: string }
 
 type ItemSlot = keyof KeeperEquipment
 
@@ -29,21 +34,34 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const authority = executionWorkspaceAuthority.value
   const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
+  const [refresh, setRefresh] = useState<Refresh>({ kind: 'idle' })
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
-  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision, authRevision])
+  const expectedRevision = keeper.candle_account_revision
+  const observation = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, expectedRevision, authRevision])
+  const currentRefresh = refresh.kind !== 'idle' && refresh.authority === authority
+    && refresh.observation === observation ? refresh : null
+  const refreshKind = currentRefresh?.kind ?? 'idle'
+  const identity = JSON.stringify([observation, revision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
   const [preview, setPreview] = useState<{ reading: Reading; itemId: string } | null>(null)
 
   useEffect(() => {
     setReading({ kind: 'loading', identity })
-    if (authority === null) return
+    if (authority === null || refreshKind !== 'idle') return
+    if (expectedRevision === undefined) {
+      setReading({ kind: 'error', identity, authority, message: 'Item 계정 관측을 확인할 수 없습니다. Keeper 관측을 새로고침해주세요.' })
+      return
+    }
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
       && executionWorkspaceAuthority.peek() === authority
       && currentStoredTokenRevision() === authRevision
-    fetchKeeperItems(keeper.name, controller.signal)
-      .then(value => { if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value }) })
+    fetchKeeperItems(keeper.name, authority.workspaceRoot, controller.signal)
+      .then(value => {
+        if (value.account_revision !== expectedRevision) throw new Error('Item 계정 관측이 변경되었습니다. 새로고침으로 Keeper 관측을 갱신해주세요.')
+        if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value })
+      })
       .catch(error => {
         const message = error instanceof ApiRequestError
           ? error.detail ?? '계정 요청에 실패했습니다. 다시 시도해주세요.'
@@ -51,18 +69,38 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
         if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
-  }, [identity, authority, authRevision])
+  }, [identity, authority, refreshKind, authRevision])
 
-  const current = reading.identity === identity
+  const current: Reading = currentRefresh?.kind === 'pending' ? { kind: 'loading', identity }
+    : currentRefresh?.kind === 'failed' && authority !== null
+      ? { kind: 'error', identity, authority, message: currentRefresh.message }
+    : reading.identity === identity
     && (reading.kind === 'loading' || reading.authority === authority)
     ? reading : { kind: 'loading' as const, identity }
+  const refreshAccount = async () => {
+    if (currentRefresh?.kind === 'pending') return
+    const pending: Refresh = { kind: 'pending', authority, observation }
+    setRefresh(pending)
+    setRevision(value => value + 1)
+    try {
+      await refreshExecution({ force: true })
+    } catch (error) {
+      setRefresh(current => current !== pending ? current
+        : executionWorkspaceAuthority.peek() === authority
+          ? { kind: 'failed', authority, observation,
+            message: error instanceof Error ? error.message : 'Keeper 관측을 새로고침하지 못했습니다.' }
+          : { kind: 'idle' })
+      return
+    }
+    setRefresh(current => current === pending ? { kind: 'idle' } : current)
+  }
   const account = current.kind === 'loaded' && current.value.status === 'ready' ? current.value : null
   const previewItem = account && preview?.reading === current && keeper.portrait?.state === 'ready'
     ? preview.itemId : undefined
   return html`
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-xs text-[var(--color-fg-muted)]">Keeper가 직접 구매하고 착용한 결과를 보여 줍니다.</p>
-      <button type="button" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]" onClick=${() => setRevision(value => value + 1)}>새로고침</button>
+      <button type="button" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]" disabled=${currentRefresh?.kind === 'pending'} onClick=${refreshAccount}>새로고침</button>
     </div>
     ${authority === null ? html`<p role="status">현재 작업 공간을 확인하는 중…</p>`
       : current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}

@@ -73,13 +73,25 @@ jobs:
           uname -a > evidence/environment.txt
           cat /proc/self/limits >> evidence/environment.txt
           dpkg-query -W strace poppler-utils libreoffice-impress fonts-dejavu-core >> evidence/environment.txt
-          cat /sys/fs/cgroup/memory.events > evidence/memory-before.txt
+          if [ -r /sys/fs/cgroup/memory.events ]; then
+            cat /sys/fs/cgroup/memory.events > evidence/memory-before.txt
+          else
+            printf 'unavailable: /sys/fs/cgroup/memory.events\n' > evidence/memory-before.txt
+          fi
+          cat /proc/self/cgroup > evidence/cgroup-before.txt
+          cat /proc/self/mountinfo > evidence/mountinfo-before.txt
           strace -ff -ttt -T -yy -s 256 -o evidence/media.trace -e trace=process,signal,desc,file,io_uring_setup,io_uring_enter,io_uring_register             python3 diagnostic/scripts/ci/run_pptx_case.py               --source-root source --expected-source 2dd5e16b83683e8d2a025597205cbc2dfb02f41e               --binary binary/masc-linux-x64 --presentation-base "$RUNNER_TEMP/masc-presentation-verifier"               --receipt evidence/receipt.json 2>&1 | tee evidence/test.log
       - name: Capture final memory counters
         if: always()
         run: |
           mkdir -p evidence
-          cat /sys/fs/cgroup/memory.events > evidence/memory-after.txt
+          if [ -r /sys/fs/cgroup/memory.events ]; then
+            cat /sys/fs/cgroup/memory.events > evidence/memory-after.txt
+          else
+            printf 'unavailable: /sys/fs/cgroup/memory.events\n' > evidence/memory-after.txt
+          fi
+          cat /proc/self/cgroup > evidence/cgroup-after.txt
+          cat /proc/self/mountinfo > evidence/mountinfo-after.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -87,7 +87,9 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
           | Some value -> Some value | None -> provider.temperature));
     system_prompt=(match params.system_prompt with Some prompt -> Some prompt | None -> provider.system_prompt)} in
   let* clock = Eio_context.get_clock () |> Result.map_error (fun detail -> Runtime_unavailable detail) in
-  let body_timeout_s = Runtime_inference.resolve_turn_timeout_s ~runtime_id in
+  let body_timeout_s = match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+    | None | Some 0. -> None
+    | Some seconds -> Some seconds in
   let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
     ~messages:(native_messages params) ?body_timeout_s ()
     |> Result.map_error (fun error -> Provider_error error) in

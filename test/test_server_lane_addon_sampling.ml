@@ -16,7 +16,7 @@ let params : S.create_message_params = {
   temperature=Some 0.25;max_tokens=37;stop_sequences=None;metadata=None;
   tools=None;tool_choice=None;_meta=None}
 
-let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?fixed_temperature ?(omit_temperature=false) () =
+let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -86,15 +86,19 @@ protocol="openai-compatible-http"
 endpoint="http://127.0.0.1:%d/secondary"
 [models.sample]
 api-name="sampling-fixture"
-%smax-context=200000
+%s%smax-context=200000
 tools-support=false
 streaming=false
 [primary.sample]
 is-default=true
 [secondary.sample]
 |} port port (match fixed_temperature with
-    | Some value -> Printf.sprintf "temperature=%g\n" value | None -> ""));
+    | Some value -> Printf.sprintf "temperature=%g\n" value | None -> "")
+    (match turn_timeout_s with
+     | Some seconds -> Printf.sprintf "turn-timeout-s=%g\n" seconds | None -> ""));
   require (Runtime.init_default ~config_path:runtime_path);
+  check (option (float 0.)) "declared liveness window is admitted unchanged" turn_timeout_s
+    (Runtime_inference.resolve_turn_timeout_s ~runtime_id:"primary.sample");
   let manifest = Filename.concat root "lane.toml" in
   write manifest {|id="sampling-proof"
 revision="1"
@@ -309,6 +313,10 @@ let () = run "Server Lane sampling HTTP composition" ["host boundary",[
     test_invalid_sampling_route_is_stable_until_runtime_update;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
+  test_case "declared zero liveness reaches providers and retains the answer" `Quick
+    (test_actual_http_route_and_durable_sampling ~turn_timeout_s:0.);
+  test_case "declared positive liveness reaches providers and retains the answer" `Quick
+    (test_actual_http_route_and_durable_sampling ~turn_timeout_s:30.);
   test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick
     (test_actual_http_route_and_durable_sampling ~thinking_only_primary:true ~fixed_temperature:0.75);
   test_case "fixed model temperature survives an omitted request value" `Quick

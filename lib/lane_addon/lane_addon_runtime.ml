@@ -138,7 +138,8 @@ let released_binding_fields = ["instance_id";"incarnation";"action_schema";"run_
   "addon_id";"title";"revision";"phase";"observation_seq";"rows_count";
   "observation_pending";"coalesced_wakes";"unchanged_source_refreshes";
   "binding";"package";"configuration";"container_id"]
-let validate_released_binding fields =
+type retained_package_shape = Released_package | Current_package
+let validate_released_binding ~package_shape fields =
   let* () = unique_json (`Assoc fields) in
   let* () = exact_fields released_binding_fields fields in
   let* id = text fields "instance_id" in
@@ -157,9 +158,16 @@ let validate_released_binding fields =
   let* () = match List.assoc "container_id" fields with `Null -> Ok () | _ -> text fields "container_id" |> Result.map (fun _ -> ()) in
   let* () = match List.assoc "action_schema" fields with `Null | `Assoc _ -> Ok () | _ -> Error "invalid retained action schema" in
   let* package = object_ (List.assoc "package" fields) in
-  let* () = exact_fields ["id";"revision";"title";"contributions";"image";"command";
+  let package_fields = ["id";"revision";"title";"contributions";"image";"command";
     "directory";"action_tool";"outputs";"refresh_policy";"binding_schema";
-    "presentation";"skills_directory";"resources"] package in
+    "presentation";"skills_directory";"resources"] in
+  let* () = match package_shape with
+    | Released_package -> exact_fields package_fields package
+    | Current_package ->
+        let* () = exact_fields ("model_access" :: package_fields) package in
+        (match List.assoc_opt "model_access" package with
+         | Some (`String ("disabled" | "host_sampling")) -> Ok ()
+         | _ -> Error "invalid current model access") in
   let* () = List.fold_left (fun result key -> let* () = result in text package key |> Result.map (fun _ -> ()))
     (Ok ()) ["id";"revision";"title";"image";"directory"] in
   let* () = List.fold_left (fun result (outer,inner) -> let* () = result in
@@ -203,8 +211,8 @@ let validate_released_binding fields =
     | _ -> Error "invalid retained sources" in
   Lane_addon_sources.parse binding
 let prove_released_shared ~bindings fields =
-  let rec prove visiting fields =
-    let* sources = validate_released_binding fields in
+  let rec prove package_shape visiting fields =
+    let* sources = validate_released_binding ~package_shape fields in
     let* id = text fields "instance_id" in
     let* run = text fields "run_id" in
     let* () = if List.mem id visiting then Error "retained producer cycle" else Ok () in
@@ -232,10 +240,10 @@ let prove_released_shared ~bindings fields =
                  if visibility <> Shared then Error "private retained producer"
                  else let* _ = match List.assoc_opt "source_access" producer with
                    | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in
-                   prove (id::visiting) (List.remove_assoc "visibility" (List.remove_assoc "source_access" producer))
-               else prove (id::visiting) producer
+                   prove Current_package (id::visiting) (List.remove_assoc "visibility" (List.remove_assoc "source_access" producer))
+               else prove Released_package (id::visiting) producer
            | [] -> Error "missing retained producer" | _ -> Error "ambiguous retained producer")) (Ok ()) sources
-  in prove [] fields
+  in prove Released_package [] fields
 let normalize_retained_binding ~bindings value =
   let* fields = object_ value in
   if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields

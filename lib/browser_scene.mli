@@ -20,6 +20,13 @@ type region_role =
   | Unknown of string
 val region_role_of_string : string -> region_role
 val region_role_to_string : region_role -> string
+type checked_state = Unchecked | Checked | Mixed
+type control_selection = {
+  checked : bool option;
+  indeterminate : bool option;
+  aria_checked : checked_state option;
+  aria_selected : bool option;
+}
 type kind =
   | Text
   | Raster
@@ -29,7 +36,10 @@ type kind =
       editable : bool;
       disabled : bool;
       href : string option;
+      selection : control_selection;
     }
+val unobserved_control_selection : control_selection
+val control_selection_text : kind -> string option
 type region_ref = { node_id : string; role : region_role; label : string }
 type text_role = Plain_text | Heading of int
 val text_role_of_tag : string -> text_role

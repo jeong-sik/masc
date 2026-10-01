@@ -124,6 +124,51 @@ let test_of_result_surface () =
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
+let test_progress_post_keeps_typed_continuation () =
+  let receipt = Masc.Keeper_tool_execution.Surface_post_completed
+    Masc.Keeper_surface_post.To_dashboard in
+  let finish stop_reason state =
+    Masc.Keeper_agent_run.For_testing.finalize_turn_surface
+      ~response_text:"Progress posted; remaining work is retained."
+      ~stop_reason state in
+  let posted = Masc.Keeper_tools_agent_core.Terminal_effect_completed receipt in
+  List.iter (fun stop_reason ->
+    match finish stop_reason posted with
+    | Ok (turn_outcome, retained_receipt) ->
+      check outcome "a posted progress update cannot complete a yielded operation"
+        TO.Continuation_checkpoint turn_outcome;
+      check bool "delivery evidence survives alongside continuation" true
+        (retained_receipt = Some receipt)
+    | Error error -> fail (Agent_core.Error.to_string error))
+    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 1 }
+    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 }
+    ; Runtime_agent.Yielded_after_repeated_tool_call
+        { turns_used = 1; tool_name = "probe"; repeated_count = 3 }
+    ; Runtime_agent.Yielded_after_repeated_assistant_text
+        { turns_used = 1; repeated_count = 3 }
+    ];
+  (match finish Runtime_agent.Completed posted with
+   | Ok (turn_outcome, retained_receipt) ->
+     check outcome "completed operation keeps terminal delivery" TO.Terminal_effect_settled turn_outcome;
+     check bool "terminal delivery retains receipt" true (retained_receipt = Some receipt)
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let failed = Masc.Keeper_tools_agent_core.Terminal_effect_failed
+    { failure_class = Tool_result.Runtime_failure
+    ; effect_disposition = Tool_result.Proven_post_effect
+    ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message = "disk unavailable" }
+    } in
+  match finish (Runtime_agent.Yielded_to_operation_queued { turns_used = 1 }) failed with
+  | Error error ->
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some (Keeper_internal_error.Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition = Tool_result.Proven_post_effect
+         ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message }
+         }) -> check string "terminal failure retains its cause" "disk unavailable" message
+     | Some _ | None -> fail "cooperative handoff changed terminal failure authority")
+  | Ok _ -> fail "cooperative handoff hid a terminal delivery failure"
+;;
+
 let test_external_effect_completed_has_no_direct_reply_error () =
   let payload_json =
     `Assoc
@@ -1705,6 +1750,8 @@ let () =
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
+          test_case "posted progress retains cooperative continuation" `Quick
+            test_progress_post_keeps_typed_continuation;
           test_case "completed external effect has no direct reply error" `Quick
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick

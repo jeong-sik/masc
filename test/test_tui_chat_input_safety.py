@@ -113,7 +113,10 @@ def approval_typing(binary: str, decision: str) -> None:
             assert payload["name"] == "alpha"
             assert payload["tool_call_id"] == "typing-call"
             assert payload["decision"] == decision
-            assert "expected_workspace" in payload
+            assert payload["expected_workspace"] == {
+                "base_path": "",
+                "masc_root": "",
+            }
             assert len([body for path, body in requests if path == APPROVAL]) == 1
         finally:
             show_approval.set()

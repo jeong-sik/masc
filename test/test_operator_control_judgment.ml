@@ -359,8 +359,54 @@ let test_operator_judgment_requires_stated_confidence () =
       | Error message -> Alcotest.failf "integer confidence must be accepted: %s" message)
 
 
+let test_briefing_validates_written_recommendations () =
+  let valid_action =
+    `Assoc [ "action_type", `String "namespace_pause";
+             "target_type", `String "workspace";
+             "reason", `String "Pause for operator review." ]
+  in
+  List.iter (fun (action, available) ->
+    Eio_main.run @@ fun env ->
+    ensure_fs env;
+    Eio.Switch.run @@ fun sw ->
+    let base_dir = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
+      let ctx = operator_ctx env sw config "operator" in
+      (match Operator_control.judgment_write_json ctx
+        (`Assoc [ "surface", `String "command.namespace";
+                  "target_type", `String "workspace";
+                  "summary", `String "Operator review required.";
+                  "confidence", `Float 0.9;
+                  "fresh_ttl_sec", `Int 90;
+                  "recommended_action", action ]) with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let digest = match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error detail -> Alcotest.fail detail in
+      let actions = Yojson.Safe.Util.member "recommended_actions" digest in
+      Alcotest.(check bool) "writer action reaches digest unchanged" true
+        (actions = `List [action]);
+      let summary = Briefing_compactors.compact_briefing_summary_json
+        (`Assoc [ "attention_read_error", `Null;
+                  "summary", `Assoc [ "workspace_health", `String "ok" ];
+                  "incidents", `List [];
+                  "recommended_actions", actions ]) in
+      match summary, available with
+      | Error _, false -> ()
+      | Ok json, true -> Alcotest.(check int) "valid action counted" 1
+          Yojson.Safe.Util.(json |> member "recommended_action_count" |> to_int)
+      | Error detail, true -> Alcotest.fail detail
+      | Ok _, false -> Alcotest.fail "empty written recommendation fabricated attention"))
+    [ `Assoc [], false; valid_action, true ]
+
 let tests =
   [
+    Alcotest.test_case "briefing validates real written recommendations" `Quick
+      test_briefing_validates_written_recommendations;
     Alcotest.test_case "digest prefers fresh operator judgment" `Quick
       test_digest_workspace_prefers_fresh_operator_judgment;
     Alcotest.test_case "digest ignores stale operator judgment" `Quick

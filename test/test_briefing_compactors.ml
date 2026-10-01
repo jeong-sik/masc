@@ -264,6 +264,10 @@ let test_attention_read_failure_is_not_empty () =
       replace "incidents" `Null;
       List.remove_assoc "recommended_actions" fields;
       replace "recommended_actions" (`Assoc []);
+      replace "recommended_actions" (`List [`Assoc []]);
+      replace "recommended_actions" (`List [`String "pause"]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "pause";
+        "target_type", `String "workspace"; "reason", `String " " ]]);
       replace "summary" (`Assoc []);
       replace "incidents" (`List [`Assoc []]) ]
 

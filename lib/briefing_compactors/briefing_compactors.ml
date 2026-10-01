@@ -61,6 +61,24 @@ let compact_briefing_summary_json briefing =
   in
   let* incidents = list "incidents" in
   let* actions = list "recommended_actions" in
+  let* () =
+    List.fold_left
+      (fun result action ->
+        let* () = result in
+        match action with
+        | `Assoc fields ->
+            List.fold_left
+              (fun result name ->
+                let* () = result in
+                match List.assoc_opt name fields with
+                | Some (`String value) when String.trim value <> "" -> Ok ()
+                | _ ->
+                    Error ("briefing recommended action." ^ name
+                           ^ " must be a nonempty string"))
+              (Ok ()) [ "action_type"; "target_type"; "reason" ]
+        | _ -> Error "briefing recommended action must be an object")
+      (Ok ()) actions
+  in
   let* summary = field "summary" in
   let* health =
     match member_assoc "workspace_health" summary with

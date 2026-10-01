@@ -3293,20 +3293,10 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         if Server_utils.bool_query_param req "force" ~default:false then
-           Http.Response.json_value ~compress:true ~request:req
-             (Domain_pool_ref.submit_io_or_inline (fun () ->
-                dashboard_briefing_sections_http_json ~state ~sw ~clock req))
-             reqd
-         else
-           let cache_key =
-             Server_dashboard_http_core_cache.dashboard_query_cache_key
-               (Mcp_server.workspace_config state)
-               "mission_briefing"
-               [ ("actor", dashboard_actor_cache_segment state req) ]
-           in
-           respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
-             (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req)
+         Http.Response.json_value ~compress:true ~request:req
+           (Domain_pool_ref.submit_io_or_inline (fun () ->
+              dashboard_briefing_sections_http_json ~state ~sw ~clock req))
+           reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->

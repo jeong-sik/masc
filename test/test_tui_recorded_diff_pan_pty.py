@@ -8,7 +8,8 @@ import urllib.parse
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_render.ml",
-                  "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml")
+                  "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml",
+                  "bin/masc_tui_code_results.ml", "bin/masc_tui_code_results.mli")
 RIGHT = b"\x1b[1;2C"
 LEFT = b"\x1b[1;2D"
 REMOVED = "REMOVEHEAD " + "r" * 140 + " REMOVETAILZ"

@@ -17,6 +17,8 @@ SOURCE_MODULES = (
     "lib/ide_memo/ide_memo.ml",
     "bin/masc_tui_render_code.ml",
     "bin/masc_tui_render_code.mli",
+    "bin/masc_tui_code_results.ml",
+    "bin/masc_tui_code_results.mli",
 )
 AUTHOR = "author-" + "a" * 120 + "AUTHORTAIL"
 BODY = "MEMOHEAD " + "한글 memo evidence " * 80 + "MEMOTAIL"

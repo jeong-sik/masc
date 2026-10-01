@@ -21,12 +21,13 @@ let reading_for_keeper ~keeper_name = function
   | Empty | Reading _ -> None
 
 let resolve_with ~project (keeper : Decode.keeper) =
-  let json =
-    project ~keeper_name:keeper.k_name ~current_trace_id:keeper.k_trace_id
-    |> fun fields -> `Assoc fields
-  in
   match
-    Decode.decode_context_observation ~expected_trace_id:keeper.k_trace_id json
+    Result.bind keeper.k_identity (fun identity ->
+      let json =
+        project ~keeper_name:keeper.k_name ~current_trace_id:identity.k_trace_id
+        |> fun fields -> `Assoc fields
+      in
+      Decode.decode_context_observation ~expected_trace_id:identity.k_trace_id json)
   with
   | Ok observation ->
       Reading

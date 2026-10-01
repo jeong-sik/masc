@@ -51,8 +51,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_configs import (  # noqa: E402
     ARMS,
     PROVIDERS,
+    REPO_ROOT,
     effective_runtime_id,
     render_arm,
+)
+from masc_config_provenance import (  # noqa: E402
+    ConfigProvenance,
+    config_provenance,
+    provenance_metadata,
 )
 from masc_dist import (  # noqa: E402
     DistIdentity,
@@ -132,6 +138,7 @@ class MascSidecar:
     keeper_effort: str
     skills_dir: str | None
     _dist_identity: DistIdentity | None
+    _config_provenance: ConfigProvenance | None
 
     if TYPE_CHECKING:
         # Supplied by the harbor agent this is mixed into. Declared so the
@@ -188,6 +195,10 @@ class MascSidecar:
                     await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
             await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
             try:
+                # Taken from the directory about to be uploaded, so it names the
+                # config the container gets and not one rendered again later.
+                self._config_provenance = await asyncio.to_thread(
+                    config_provenance, config_dir, REPO_ROOT, self.keeper_effort)
                 await environment.upload_dir(config_dir, f"{REMOTE}/config")
             finally:
                 # render_arm hands back a directory of its own so that concurrent
@@ -202,12 +213,14 @@ class MascSidecar:
         )
         await preflight_task_skill_catalog(self, environment, task_skills)
 
-    def record_dist_identity(self, context: AgentContext) -> None:
-        """Preserve the validated binary identity even when the parent run fails."""
+    def record_install_identity(self, context: AgentContext) -> None:
+        """Preserve what was installed (binary identity, config provenance) even when the parent run fails."""
         if context.metadata is None:
             context.metadata = {}
         context.metadata.update(
             identity_metadata(getattr(self, "_dist_identity", None)))
+        context.metadata.update(
+            provenance_metadata(getattr(self, "_config_provenance", None)))
 
 
 async def merge_keeper_usage(

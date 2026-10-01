@@ -809,7 +809,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              | Tui_decode.Declared_keeper requirements ->
                "아직 시작하지 않음 · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
-             | Persisted_keeper -> status ^ " · —"
+             | Persisted_keeper | Remote_keeper -> status ^ " · —"
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->

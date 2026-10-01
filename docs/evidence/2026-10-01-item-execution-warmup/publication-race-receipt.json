@@ -1,0 +1,12 @@
+{
+  "scope": "Focused Vitest source checks for delayed warm-up after accepted publication; no browser/native/CI rerun",
+  "tests_passed": 24,
+  "test_files_passed": 2,
+  "command": "pnpm --dir dashboard exec vitest run src/components/keeper-items-panel.test.ts src/components/candle-economy.test.ts",
+  "source_sha256": {
+    "dashboard/src/store.ts": "2a562914a413ddfdc1c996085847cb5e5c4d37b30d66c2cd7d9fcc2cab45e72b",
+    "dashboard/src/components/keeper-items-panel.test.ts": "6e67748b31b111f541cd41d42c478052cfbb47d8fe5de8fdf04da8333d0665b8",
+    "dashboard/src/components/candle-economy.test.ts": "0f0e4a1657c8adc3f0cdace127996b989481609ec4b44839177a421a6bf31237"
+  },
+  "log_sha256": "03403536844a3f7695e0a19dfa235b18031c7fcae2833af72e7bb0677469b68e"
+}

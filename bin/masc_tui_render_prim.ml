@@ -114,7 +114,7 @@ let clamped_scroll_now (state : state) = function
   | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
       System_log_detail_scroll state.system_logs_detail_scroll
-  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -163,7 +163,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
   | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
-  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Planning_detail_scroll value | Planning_confirmation_scroll (value, _) ->
+      Some (Planning_detail_scroll (step value))
   | Lane_run_detail_scroll { scroll; content_height } ->
       Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
   | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
@@ -787,16 +788,16 @@ let surface_strip (state : state) ~cols =
      label and the cell each read entry [i], and a list answers that by
      walking. Ten entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_types.visible_surface_ring state) in
+  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
   let n = Array.length ring in
-  let active = Masc_tui_types.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match Masc_tui_types.approvals_surface_pending state with
+        (match Masc_tui_approvals_model.approvals_surface_pending state with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -860,7 +861,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
+      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
       | _ -> false
     in
     let entry =
@@ -1048,9 +1049,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 
 let recent_chunk_projection (state : state) =
-  let traces =
-    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
-  in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let traces = trace_reading.bindings in
   Masc_tui_acting.refresh_projection
     ~previous:state.acting_chunk_projection ~traces state.acting
 
@@ -1079,9 +1079,9 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     }
   in
   let keepers =
-    match state.local_workspace with
-    | Local_workspace_unread -> None
-    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
+    match keeper_rows_page state ~error:state.keepers_error with
+    | Page_unread -> None
+    | Page_empty | Page_failed -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with
@@ -1113,6 +1113,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; trace_unavailable = (Tui_decode.keeper_trace_projection state.keepers).unavailable
   ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
@@ -1120,19 +1121,19 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
       (* Every kind of pending approval the Approvals surface lists, read to
          the two facts the pane states: whose, and for which tool. *)
       List.map
-        (fun (row : approval_row) ->
+        (fun (row : Masc_tui_approvals_model.approval_row) ->
           match row with
-          | Keeper_tool_row held ->
+          | Masc_tui_approvals_model.Keeper_tool_row held ->
               { Pane.approval_keeper = held.kta_keeper; approval_tool = held.kta_tool }
-          | Gate_row pending ->
+          | Masc_tui_approvals_model.Gate_row pending ->
               { Pane.approval_keeper = pending.gp_keeper
               ; approval_tool = pending.gp_display_tool
               }
-          | Operator_row item ->
+          | Masc_tui_approvals_model.Operator_row item ->
               { Pane.approval_keeper = item.ap_actor
               ; approval_tool = item.ap_delegated_tool
               })
-        (Masc_tui_types.approval_items state)
+        (Masc_tui_approvals_model.approval_items state)
   ; chunks
   ; changes = acting_pane_changes state
   ; call_order = state.acting_pane_call_order
@@ -2772,7 +2773,8 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
     | _ ->
         (match keeper_record with
-         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | Some k -> Option.bind k.Masc.Tui_decode.k_activity
+             (fun activity -> activity.Masc.Tui_decode.k_current_task_id)
          | None -> None)
   in
   let turn =

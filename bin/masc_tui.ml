@@ -9706,6 +9706,7 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  withdraw_voice_capture state;
   state.task_detail_id <- None;
   state.task_detail_scroll <- 0;
   state.task_history <- None;
@@ -11975,6 +11976,7 @@ let launch_voice_capture state ~mailbox ~keeper =
       (Voice_failed { keeper; error = "Eio switch is unavailable" })
   | Some sw ->
     state.voice_capture <- Some keeper;
+    state.voice_capture_withdrawn <- false;
     state.voice_level_db <- None;
     state.voice_stop_requested <- None;
     Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
@@ -12046,6 +12048,14 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _, _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+       | None, Composer.Ready _ when Option.is_some state.voice_capture ->
+           (* A manual or withdrawn capture still owns the microphone. The
+              noise-floor probe must wait for its completion too. *)
+           let notice =
+             if state.voice_capture_withdrawn
+             then "voice: discarding previous capture"
+             else "voice: recording in progress" in
+           state.last_action <- Some (notice, Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            (* The floor is measured once here rather than per capture, which is
               what makes the gap between utterances short enough to speak
@@ -12598,9 +12608,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard
       then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
-      (match settle_voice_transcript state ~keeper with
-       | None -> ()
-       | Some disposition ->
+      (match settle_voice_capture state ~keeper with
+       | None | Some Voice_withdrawn -> ()
+       | Some (Voice_current disposition) ->
         rearm_continuous_capture state ~mailbox ~keeper;
         match disposition with
         | Masc.Voice_bridge.Discard -> ()
@@ -12647,9 +12657,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             in
             ())))
   | Voice_silent { keeper; reason } ->
-      if state.voice_capture = Some keeper then (
-        state.voice_capture <- None;
-        state.voice_level_db <- None;
+      (match settle_voice_capture state ~keeper with
+       | None | Some Voice_withdrawn -> ()
+       | Some (Voice_current _) ->
         (* Silence re-arms too: an operator who paused longer than the
            trailing-silence window has not left the mode. *)
         rearm_continuous_capture state ~mailbox ~keeper;
@@ -12664,9 +12674,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_discarded { keeper; reason } ->
-      if state.voice_capture = Some keeper then (
-        state.voice_capture <- None;
-        state.voice_level_db <- None;
+      (match settle_voice_capture state ~keeper with
+       | None | Some Voice_withdrawn -> ()
+       | Some (Voice_current _) ->
         (* Esc abandons the recording, not the mode: the capture is the
            innermost thing it cancels, and the toggle is the way out of
            continuous mode. So this re-arms like a silence does. *)
@@ -12678,9 +12688,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_failed { keeper; error } ->
-      if state.voice_capture = Some keeper then (
-        state.voice_capture <- None;
-        state.voice_level_db <- None;
+      (match settle_voice_capture state ~keeper with
+       | None | Some Voice_withdrawn -> ()
+       | Some (Voice_current _) ->
         (* A failure ends the mode rather than re-arming into it. Whatever
            stopped the recorder — no input device, a missing binary — will stop
            it again, and a loop that re-arms on failure spins. *)
@@ -21726,6 +21736,13 @@ and is loaded on demand through keeper_skill.
                          state.voice_floor <- None;
                          state.last_action <-
                            Some ("voice: continuous off", Unix.gettimeofday ())
+                     | None, Some _ when Option.is_some state.voice_capture ->
+                         let notice =
+                           if state.voice_capture_withdrawn
+                           then "voice: discarding previous capture"
+                           else "voice: recording in progress" in
+                         state.last_action <-
+                           Some (notice, Unix.gettimeofday ())
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <-

@@ -83,6 +83,25 @@ describe('Keeper Item tab', () => {
     expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a newer accepted snapshot when an older warm-up reply arrives', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    let finish!: (value: unknown) => void
+    fetchDashboardExecution.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const pending = refreshExecution({ immediate: true })
+    await waitFor(() => expect(fetchDashboardExecution).toHaveBeenCalledTimes(1))
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    const accepted = executionWorkspaceAuthority.peek()
+    await act(async () => {
+      finish({ status: { project: 'initializing' } })
+      await pending
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(accepted)
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+    expect(screen.queryByText('현재 작업 공간을 확인하는 중…')).toBeNull()
+  })
+
   it('rejects held Item replies through execution warm-up, then reads the recovered workspace', async () => {
     const held = pendingAccount()
     fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))

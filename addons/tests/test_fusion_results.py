@@ -5,6 +5,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -361,6 +362,43 @@ class FusionResults(unittest.TestCase):
         second = module.snapshot(changed, "fusion")
         self.assertNotEqual(first["cursor"], second["cursor"])
         self.assertEqual(first["incarnation"], second["incarnation"])
+
+    def test_nested_nonfinite_input_is_refused_without_stopping_worker(self):
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            for location in ("post", "roster"):
+                with self.subTest(bad=bad, location=location):
+                    value = detail()
+                    if location == "post":
+                        value["evidence"]["post"]["created_at"] = bad
+                    else:
+                        value["run"]["roster"] = {"panel": [bad]}
+                    responses = exchange("fusion-results", [
+                        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                            "name": "lane_observe", "arguments": {"binding": {}, "sources": [source(value)]}}},
+                        {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                    ])
+                    self.assertTrue(responses[0]["result"]["isError"])
+                    self.assertNotIn("structuredContent", responses[0]["result"])
+                    self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_export_is_private_and_never_replaces_an_existing_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            detail_path, output = root / "detail.json", root / "capture.json"
+            detail_path.write_text(json.dumps(detail()))
+            command = [sys.executable, str(ADDONS / "fusion-results/export_snapshot.py"),
+                       str(detail_path), str(output), "--source-id", "fusion"]
+            previous = os.umask(0o022)
+            try:
+                first = subprocess.run(command, capture_output=True, text=True)
+            finally:
+                os.umask(previous)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            original = output.read_bytes()
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertEqual(output.read_bytes(), original)
 
 
 if __name__ == "__main__":

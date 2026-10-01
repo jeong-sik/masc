@@ -22,6 +22,18 @@ class UnknownMethod(ValueError):
     pass
 
 
+def finite_json(value: Any) -> None:
+    """Refuse non-JSON numeric values before projection or reply encoding."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise InvalidInput("JSON data must contain only finite numbers")
+    if isinstance(value, dict):
+        for item in value.values():
+            finite_json(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            finite_json(item)
+
+
 def object_value(value: Any, field: str) -> dict:
     if not isinstance(value, dict):
         raise InvalidInput(f"{field} must be an object")
@@ -193,8 +205,10 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                     raise InvalidInput("unknown tool")
                 arguments = object_value(params.get("arguments"), "arguments")
                 try:
+                    finite_json(arguments)
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
+                    finite_json(output)
                     encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
                                if text_summary is None else string(text_summary(output), "output summary"))
                     result = {"content": [{"type": "text", "text": encoded}],

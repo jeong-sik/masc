@@ -1357,7 +1357,7 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_log_rows"
-       ~callee:"Tui_decode.sanitize_terminal_text"
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -1860,11 +1860,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  (* The Dashboard is a fixed set of summary sections over one body height;
-     it holds no Team block, task panel or attention window whose rows a
-     shared allocation would split (RFC-tui-measured-operator-home). That
-     height is the shared chrome's budget, which also says how many rows a
-     short terminal could not hold. *)
+  (* The Dashboard is a fixed set of summary sections over one body height, so
+     no shared allocation splits their rows (RFC-tui-measured-operator-home).
+     That height is the shared chrome's budget, which also says how many rows
+     a short terminal could not hold. *)
   check int "Dashboard draws through the shared chrome once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"surface_chrome");
@@ -2775,7 +2774,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_keeper_logs" [ "k_name" ];
   check_fields ~module_path:"bin/masc_tui_types.ml"
-    ~non_rendering_calls:[ "Tui_decode.clock_timestamp_for_terminal" ]
+    ~non_rendering_calls:[ "Masc.Tui_terminal_text.clock_timestamp_for_terminal" ]
     "keeper_log_rows" [ "le_ts" ];
   (* The entry projector owns the full timestamp and every tool/work fact.
      [wrap] sanitizes the final text, including values assembled in lambdas. *)
@@ -2788,7 +2787,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
        ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
   check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
     ~binding:"log_entry_rows"
-    ~callees:[ "Tui_decode.sanitize_terminal_text" ] [ "text" ];
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "text" ];
   check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
     ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
   check int "logs render the shared row projection" 1
@@ -2881,7 +2880,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "log renderer uses the safe clock projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_log_rows"
-       ~callee:"Tui_decode.clock_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper

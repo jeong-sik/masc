@@ -1309,7 +1309,7 @@ let test_tui_current_projection_wiring () =
        ~callee:"load_selected_keeper_logs");
   check int "Board list success uses shared post replacement" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_list_load"
        ~callee:"replace_board_posts");
   (* Detail success deliberately does *not* go through the shared replacement.
      That helper reranks the list, and reranking on a detail response made rapid
@@ -1318,11 +1318,11 @@ let test_tui_current_projection_wiring () =
      that putting the call back has to come with a new answer for that. *)
   check int "Board detail success does not rerank the list" 0
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_post_load"
        ~callee:"replace_board_posts");
   check int "Board post replacement reconciles selection once" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"replace_board_posts"
        ~callee:"Board_selection.reconcile_cursor");
   check int "Board detail starts through the generation-aware projection" 1
     (Ast_grep.count_calls_in_value_binding
@@ -1336,11 +1336,11 @@ let test_tui_current_projection_wiring () =
      either one goes. *)
   check int "Board detail success compares the post identity twice" 2
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_post_load"
        ~callee:"String.equal");
   check int "Board detail completion remains valid away from the Board tab" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
+       ~module_path:"bin/masc_tui_board_updates.ml"
        ~binding_name:"board_detail_request_still_current" ~callees:[]
        ~fields:[ "view" ]);
   (* [board_read_pane], not [render_board_read]: #30255 split the surface the

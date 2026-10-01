@@ -394,11 +394,11 @@ origin = f'http://127.0.0.1:{port}'
 with (root / 'server.log').open('ab') as log:
     try:
         start_ready(log)
-        status, persisted_body = request(path)
+        status, persisted_body, _ = request(path)
         persisted = json.loads(persisted_body)
         require(status == 200 and persisted == account_after, ('restart lost Item account', persisted))
         (root / 'account-restarted.json').write_bytes(persisted_body)
-        status, persisted_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        status, persisted_png, _ = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         require(status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment')
         (root / 'portrait-restarted.png').write_bytes(persisted_png)
         # Sessions belong to a process; authenticate and initialize a fresh MCP session.
@@ -413,7 +413,7 @@ with (root / 'server.log').open('ab') as log:
         require(unchanged['changed'] is False and unchanged['equipment'] == equipped['equipment'], unchanged)
         restored_after_restart = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
         require(restored_after_restart['equipment'] == starting, restored_after_restart)
-        status, default_after_restart = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        status, default_after_restart, _ = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         require(status == 200 and default_after_restart == png, 'default restore after restart differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),

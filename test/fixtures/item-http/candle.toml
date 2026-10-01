@@ -1,9 +1,11 @@
+half_life = "off"
+
 [payout]
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
 [payout.grades_milli]
-trivial = 1000
+trivial = 100
 small = 1000
 medium = 1000
 large = 1000

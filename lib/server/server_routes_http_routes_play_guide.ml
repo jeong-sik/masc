@@ -10,8 +10,6 @@ module Http = Http_server_eio
 
 let markdown_content_type = "text/markdown; charset=utf-8"
 
-let error_json code message = `Assoc [ ("error", `String code); ("message", `String message) ]
-
 (* The schema the move route checks the body against
    ([Server_routes_http_routes_dos.moves]), not a copy of it. *)
 let move_section ~base (path, (schema : Masc_domain.tool_schema)) =
@@ -32,11 +30,13 @@ let guide_response () =
   | None ->
     Error
       ( `Conflict
-      , error_json "not_ready" "MASC_HTTP_BASE_URL is not set, so there is no address to join at" )
+      , Server_refusal.json ~code:"not_ready"
+          "MASC_HTTP_BASE_URL is not set, so there is no address to join at" )
   | Some base ->
     (match guide ~base with
      | Ok text -> Ok text
-     | Error message -> Error (`Internal_server_error, error_json "guide_unrendered" message))
+     | Error message ->
+       Error (`Internal_server_error, Server_refusal.json ~code:"guide_unrendered" message))
 
 let add_routes router =
   router
@@ -46,4 +46,5 @@ let add_routes router =
          Http.Response.bytes
            ~headers:[ ("cache-control", "no-store"); ("x-content-type-options", "nosniff") ]
            ~content_type:markdown_content_type text reqd
-       | Error (status, json) -> respond_json_value_with_cors ~status request reqd json)
+       | Error (status, json) ->
+         respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)

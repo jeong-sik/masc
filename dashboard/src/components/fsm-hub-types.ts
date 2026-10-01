@@ -99,7 +99,6 @@ export const MAX_OBSERVATIONS = 30
 export const MAX_TRANSITION_HISTORY = 20
 
 const ZERO_VIOLATIONS: InvariantViolationCounts = {
-  no_runtime_before_measurement: 0,
   event_priority_monotone: 0,
   phase_derivation_agreement: 0,
 }
@@ -120,8 +119,7 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
-  no_runtime_before_measurement: 'Runtime 순서',
-  event_priority_monotone: '이벤트 우선순위',
+  event_priority_monotone: 'Measurement 소유권',
   phase_derivation_agreement: 'Phase 유도 일치',
 }
 

@@ -1,0 +1,150 @@
+{
+  "schema": "masc.skill-activations/v5",
+  "workspace_key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "session_id": "trace-one",
+  "revision": "5580d85b869fbce3e0829d387d3e33c9d253a862c1740c44065d5c89904667ed",
+  "activations": [
+    {
+      "identity": {
+        "source_id": "workspace",
+        "package_id": "review",
+        "name": "review"
+      },
+      "content_revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "snapshot_revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "turn_ref": "trace-one#7",
+      "runtime_id": "runtime-one",
+      "skill_tool_use_id": "call-a",
+      "agent_core_turn": 7,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 12,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      },
+      "delivery": {
+        "boundary": {
+          "kind": "model_response",
+          "agent_core_turn": 8
+        },
+        "runtime_id": "runtime-one",
+        "delivered_at": "2026-08-27T00:00:02Z",
+        "content_bytes": 12,
+        "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "actions": [
+        {
+          "identity": {
+            "kind": "call_id",
+            "call_id": "action-one"
+          },
+          "tool_name": "keeper_status",
+          "runtime_id": "runtime-one",
+          "agent_core_turn": 8,
+          "observed_at": "2026-08-27T00:00:03Z"
+        },
+        {
+          "identity": {
+            "kind": "provider_step",
+            "conversation_id": "conversation",
+            "step_index": 0
+          },
+          "tool_name": "keeper_status",
+          "runtime_id": "runtime-one",
+          "agent_core_turn": 9,
+          "observed_at": "2026-08-27T00:00:03Z"
+        }
+      ],
+      "activated_at": "2026-08-27T00:00:01Z"
+    },
+    {
+      "identity": {
+        "source_id": "workspace",
+        "package_id": "review",
+        "name": "review"
+      },
+      "content_revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "snapshot_revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "turn_ref": "trace-one#9",
+      "runtime_id": "runtime-one",
+      "skill_tool_use_id": "call-b",
+      "agent_core_turn": 9,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 12,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      },
+      "delivery": {
+        "boundary": {
+          "kind": "official_client_result_handoff",
+          "agent_core_turn": 9
+        },
+        "runtime_id": "runtime-one",
+        "delivered_at": "2026-08-27T00:00:02Z",
+        "content_bytes": 12,
+        "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "actions": [
+        {
+          "identity": {
+            "kind": "call_id",
+            "call_id": "action-one"
+          },
+          "tool_name": "keeper_status",
+          "runtime_id": "runtime-one",
+          "agent_core_turn": 9,
+          "observed_at": "2026-08-27T00:00:03Z"
+        }
+      ],
+      "activated_at": "2026-08-27T00:00:01Z"
+    },
+    {
+      "identity": {
+        "source_id": "workspace",
+        "package_id": "review",
+        "name": "review"
+      },
+      "content_revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "snapshot_revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "turn_ref": "trace-one#10",
+      "runtime_id": "runtime-one",
+      "skill_tool_use_id": "call-c",
+      "agent_core_turn": 10,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 12,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      },
+      "delivery": null,
+      "actions": [],
+      "activated_at": "2026-08-27T00:00:01Z"
+    }
+  ],
+  "transition_rejections": [
+    {
+      "kind": "delivery_conflict",
+      "skill_tool_use_id": "call-a",
+      "activation_turn_ref": "trace-one#7",
+      "observed_turn_ref": "trace-one#8",
+      "observed_agent_core_turn": 8,
+      "observed_at": "2026-08-27T00:00:04Z"
+    }
+  ]
+}

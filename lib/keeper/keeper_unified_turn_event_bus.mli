@@ -15,9 +15,13 @@ val create :
   ?event_bus:Agent_core.Event_bus.t
   -> ?on_pending_count_change:(int -> unit)
   -> keeper_name:string
-  -> turn_id:int
+  -> scope:Keeper_turn_scope.t
   -> unit
   -> t
+
+(** The exact bus captured at subscription creation, for the turn's producer.
+    This prevents a fallback slot change from separating producer and consumer. *)
+val publishing_bus : t -> Agent_core.Event_bus.t option
 
 val drain
   :  ?site:string

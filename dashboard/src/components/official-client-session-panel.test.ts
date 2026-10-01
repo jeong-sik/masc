@@ -91,6 +91,12 @@ describe('OfficialClientSessionPanel', () => {
   })
 
   it('offers retry without accepting caller-supplied settlement identities', async () => {
+    apiMocks.fetchOfficialClientSession.mockResolvedValue({
+      ...recoveryResponse,
+      session: { ...recoveryResponse.session,
+        phase: { ...recoveryResponse.session.phase,
+          previous_settlement: { session_id: 'previous-session', turn_id: 'previous-turn' } } },
+    })
     const view = render(html`<${OfficialClientSessionPanel} />`)
 
     await waitFor(() => {
@@ -107,6 +113,43 @@ describe('OfficialClientSessionPanel', () => {
       expect(view.getByTestId('official-client-session-last-resolution').textContent).toContain('dashboard')
     })
   })
+
+  it.each(['owner_stopped_turn', 'input_rejected_bootstrap_floor_exceeded', 'input_rejected_effect_fenced'])(
+    'shows %s and submits recovery for its exact fence', async (failure) => {
+      apiMocks.fetchOfficialClientSession.mockResolvedValue({
+        ...recoveryResponse,
+        session: { ...recoveryResponse.session,
+          phase: { ...recoveryResponse.session.phase, failure,
+            previous_settlement: { session_id: 'previous-session', turn_id: 'previous-turn' } } },
+      })
+      const view = render(html`<${OfficialClientSessionPanel} />`)
+      await waitFor(() => {
+        expect(view.getByTestId('official-client-session-recovery-required').textContent).toContain(failure)
+      })
+      fireEvent.click(view.getByTestId('official-client-session-retry-previous'))
+      await waitFor(() => {
+        expect(apiMocks.resolveOfficialClientSession).toHaveBeenCalledWith(
+          'sangsu', recoveryResponse.session.phase.recovery_id, { resolution: 'retry_previous' },
+        )
+      })
+    },
+  )
+
+  it.each(['owner_stopped_turn', 'input_rejected_bootstrap_floor_exceeded', 'input_rejected_effect_fenced'])(
+    'offers only fresh recovery for %s without a previous settlement', async (failure) => {
+      apiMocks.fetchOfficialClientSession.mockResolvedValue({
+        ...recoveryResponse,
+        session: { ...recoveryResponse.session, phase: { ...recoveryResponse.session.phase, failure } },
+      })
+      const view = render(html`<${OfficialClientSessionPanel} />`)
+      await waitFor(() => {
+        expect(view.getByTestId('official-client-session-recovery-required').textContent).toContain(failure)
+      })
+      expect(view.queryByTestId('official-client-session-retry-previous')).toBeNull()
+      expect(view.getByTestId('official-client-session-restart-fresh')).toBeTruthy()
+      expect(apiMocks.resolveOfficialClientSession).not.toHaveBeenCalled()
+    },
+  )
 
   it('does not offer retry for a full vendor session', async () => {
     apiMocks.fetchOfficialClientSession.mockReset().mockResolvedValue({

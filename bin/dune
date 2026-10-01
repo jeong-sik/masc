@@ -414,7 +414,10 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
  (libraries
+  masc.sse_wire
   masc
+  masc.string_util
+  masc_tui_message_layout
   masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
@@ -442,7 +445,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc masc.masc_types masc_tui_keeper_chat_projection
-  masc_tui_sse_lines yojson))
+  masc.sse_wire yojson))
 
 (library
  (name masc_tui_keeper_chat_log)
@@ -1376,6 +1379,8 @@
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
+  ;; [task_goal_reading] derives Task Goal ids from the goal-link registry.
+  masc_workspace
   masc_tui_answering
   masc.masc_tool_blob_store
   masc_tui_lane_addons
@@ -2179,6 +2184,7 @@
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
+  masc
   masc.keeper_portrait
   masc_tui_keeper_portrait
   masc_tui_graphics

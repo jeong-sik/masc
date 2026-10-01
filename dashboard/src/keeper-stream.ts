@@ -260,7 +260,7 @@ function enqueueThinkingDelta(
   delta: string,
   meta: { agentCoreBlockIndex?: number } = {},
 ): void {
-  if (!delta.trim()) return
+  if (delta.length === 0) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
   if (pending && !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)) {
@@ -268,7 +268,7 @@ function enqueueThinkingDelta(
     pending = undefined
   }
   if (!pending) {
-    const text = delta.trimStart()
+    const text = delta
     pending = {
       chunks: [text],
       preview: text,

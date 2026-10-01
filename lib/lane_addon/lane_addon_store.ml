@@ -141,14 +141,6 @@ let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_action t ~instance_id ~request_id json =
   write t (action_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
-let load_action t ~instance_id ~request_id = protect (fun () ->
-  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
-  match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_missing -> Ok None
-  | _ ->
-      let stat = Unix.stat path in
-      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
-      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
@@ -174,14 +166,14 @@ let record_bytes fd size =
   let rec read offset =
     if offset=size then Ok () else
     match Unix.read fd buffer offset (size-offset) with
-    | 0 -> Error "retained observation shrank during read"
+    | 0 -> Error "retained file shrank during read"
     | count -> read (offset+count)
     | exception Unix.Unix_error (Unix.EINTR,_,_) -> read offset in
   let* ()=read 0 in
   let rec end_of_record () =
     match Unix.read fd (Bytes.create 1) 0 1 with
     | 0 -> Ok (Bytes.to_string buffer)
-    | _ -> Error "retained observation grew during read"
+    | _ -> Error "retained file grew during read"
     | exception Unix.Unix_error (Unix.EINTR,_,_) -> end_of_record () in
   end_of_record ()
 let with_record_fd path fn =
@@ -195,29 +187,44 @@ let with_record_fd path fn =
 let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
   with_record_fd path (fun fd ->
     let stat = Unix.fstat fd in
-    if stat.Unix.st_kind <> Unix.S_REG then Error "retained observation is not a regular file"
-    else if stat.Unix.st_size > max_bytes then Error "retained observation exceeds query byte envelope"
+    if stat.Unix.st_kind <> Unix.S_REG then Error "retained file is not a regular file"
+    else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
     else
       let* bytes=record_bytes fd stat.Unix.st_size in
       let verify_bytes () =
         let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
         let* verified=record_bytes fd stat.Unix.st_size in
-        if verified<>bytes then Error "retained observation changed during sync"
+        if verified<>bytes then Error "retained file changed during sync"
         else if same_file stat (Unix.stat path) then Ok bytes
-        else Error "retained observation changed during verification" in
+        else Error "retained file changed during verification" in
       match verification with
       | Visible -> verify_bytes ()
       | Durable ->
         let parent=Filename.dirname path in
         with_record_fd parent (fun parent_fd ->
           let parent_stat=Unix.fstat parent_fd in
-          if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained observation parent is not a directory"
+          if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
           else (
             sync_file fd;sync_parent parent_fd;
             let* bytes=verify_bytes () in
             if same_file parent_stat (Unix.stat parent) then Ok bytes
-            else Error "retained observation parent changed during sync"))))
+            else Error "retained file parent changed during sync"))))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
+let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
+      else
+        (* No new receipt-size policy: use the observed file size to reject
+           growth between the path read and the exact descriptor verification. *)
+        let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
+          ~max_bytes:stat.Unix.st_size path in
+        Ok (Some (Yojson.Safe.from_string bytes)))
+let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -557,6 +564,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let load_action = load_action_with
   let append_observation = append_observation_with
   let read_observation = read_observation_with
 end

@@ -21,6 +21,11 @@ val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Missing receipts return [None]. Existing receipts are accepted only after
+    strictly syncing the exact opened file and parent directory, verifying the
+    bytes and both path identities again. A visible rename alone is not durable
+    confirmation. Sync/read/identity failures return [Error] without replay or
+    changing the result. Reads keep the existing full-receipt allocation policy. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 type observation_write_error =
   | Observation_rejected of string
@@ -65,6 +70,8 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
+    t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
   val append_observation :
     replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     t -> instance_id:string -> seq:int -> sources:Yojson.Safe.t ->

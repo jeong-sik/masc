@@ -235,16 +235,26 @@ let finalize_actions m e =
   let finish (receipt : Lane_addon_action.receipt) state detail =
     let detail = match receipt.detail with None -> detail | Some previous -> previous ^ "; " ^ detail in
     let receipt = {receipt with Lane_addon_action.state; detail = Some detail} in
-    match save_action m receipt with Ok () -> ()
-    | Error message -> Log.Misc.error "Lane action finalization persistence: %s" message in
-  Option.iter (fun (receipt : Lane_addon_action.receipt) ->
-    match receipt.state with
-    | Queued -> finish receipt Lane_addon_action.Failed_before_effect "worker lifetime ended before dispatch"
-    | _ -> finish receipt Lane_addon_action.Outcome_unknown
-        "worker lifetime ended before a durable action result; no automatic retry") e.current_action;
-  e.current_action <- None;
-  Queue.iter (fun receipt -> finish receipt Lane_addon_action.Failed_before_effect
-    "worker lifetime ended while request was queued") e.action_queue;
+    match save_action m receipt with
+    | Ok () -> None
+    | Error message ->
+        Log.Misc.error "Lane action finalization persistence: %s" message;
+        Some receipt in
+  (match e.current_action with
+   | None -> ()
+   | Some receipt ->
+       let state, detail = match receipt.state with
+         | Lane_addon_action.Queued -> Lane_addon_action.Failed_before_effect,
+             "worker lifetime ended before dispatch"
+         | Lane_addon_action.Running | Lane_addon_action.Confirmed
+         | Lane_addon_action.Failed_before_effect | Lane_addon_action.Outcome_unknown ->
+             Lane_addon_action.Outcome_unknown,
+             "worker lifetime ended before a durable action result; no automatic retry" in
+       (* A failed fallback cannot erase knowledge of an unconfirmed terminal
+          rename. Keep the exact received result until repair is durable. *)
+       e.current_action <- finish receipt state detail);
+  Queue.iter (fun receipt -> ignore (finish receipt Lane_addon_action.Failed_before_effect
+    "worker lifetime ended while request was queued")) e.action_queue;
   Queue.clear e.action_queue
 type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> output -> (unit, Lane_addon_store.observation_write_error) result

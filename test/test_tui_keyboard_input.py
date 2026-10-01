@@ -1890,9 +1890,21 @@ def board_detail_page(
     first = max(0, total - limit) if offset is None else offset
     page = comments[first:first + limit]
     next_offset = first + len(page) if first + len(page) < total else None
+    by_id = {comment["id"]: comment for comment in comments}
+    context_ids = set()
+    for comment in page:
+        current = comment
+        while current["id"] not in context_ids:
+            context_ids.add(current["id"])
+            parent = by_id.get(current.get("parent_id"))
+            if parent is None:
+                break
+            current = parent
     return {
         "post": {**post, "comment_count": total},
         "comments": page,
+        "comment_context": [comment for comment in comments if comment["id"] in context_ids],
+        "comment_revision": hashlib.sha256(json.dumps(comments, ensure_ascii=False).encode()).hexdigest(),
         "comment_page": {
             "offset": first,
             "returned": len(page),

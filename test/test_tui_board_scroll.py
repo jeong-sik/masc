@@ -14,6 +14,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_layout.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_loader.ml",
 )
 
 
@@ -40,11 +42,19 @@ def run(executable: str) -> None:
         fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
             200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
+    first_page_path = f"{detail_path}&comment_offset=0&comment_limit=100"
+    fixtures[first_page_path] = h.SequencedHttpResponse([
+        (503, {"error": "full history temporarily unavailable"}),
+        (200, h.board_detail_page(post, comments, offset=0, limit=100)),
+    ])
+
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"full history temporarily unavailable")
+        h.send_and_wait(process, fd, output, b"o", b"Showing 20 of 128 comments")
         h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)
@@ -332,7 +342,41 @@ def run_full_width_comments(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_snapshot_context(executable: str) -> None:
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("context", "Snapshot context", "One captured thread")
+    comments = [h.board_detail_comment(f"context-{i}", f"Context row {i}") for i in range(121)]
+    comments[0]["content"] = "Older ancestor retained in newest context"
+    comments[-1]["parent_id"] = comments[0]["id"]
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    path = "/api/v1/board/post-context?format=flat"
+    fixtures[path] = (200, h.board_detail_page(post, comments))
+    fixtures[f"{path}&comment_offset=0&comment_limit=100"] = (
+        200, h.board_detail_page(post, comments, offset=0, limit=100))
+    changed = [dict(comment) for comment in comments]
+    changed[-1]["content"] = "Changed generation must not enter history"
+    fixtures[f"{path}&comment_offset=100&comment_limit=100"] = (
+        200, h.board_detail_page(post, changed, offset=100, limit=100))
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+        # This old root is absent from comments but present in comment_context.
+        h.send_and_wait(process, fd, output, b"\r", b"Older ancestor retained in newest context")
+        refused = h.send_and_wait(process, fd, output, b"o", b"Board comment thread changed")
+        if b"Changed generation must not enter history" in h.screen_text(refused):
+            raise AssertionError("mixed snapshot history was published despite refusal")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Board")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Board context ancestors and mixed revision refusal",
+        interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
+    run_snapshot_context(os.path.abspath(sys.argv[1]))
+    print("Board context ancestors and mixed revision refusal: PASS")
     run_full_width_comments(os.path.abspath(sys.argv[1]))
     print("Board full width comments: PASS")
     run_independent_windows(os.path.abspath(sys.argv[1]))

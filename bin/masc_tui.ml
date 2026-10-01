@@ -23313,7 +23313,8 @@ and is loaded on demand through keeper_skill.
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id
-              when Board_detail.is_ready state.board_detail ~post_id ->
+              when Board_detail.is_ready state.board_detail ~post_id
+                   || state.board_history_post_id = Some post_id ->
                 state.board_history_post_id <-
                   (if state.board_history_post_id = Some post_id then None
                    else Some post_id);

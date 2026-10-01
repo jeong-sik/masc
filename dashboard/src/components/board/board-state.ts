@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { mergeCommentPages } from './comment-context'
 import { showToast } from '../common/toast'
 import {
   boardPosts,
@@ -65,6 +66,7 @@ export const detailLoading = signal(false)
 export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
 let detailRequestId = 0
+let detailFocusedCommentId: string | null = null
 
 // ── Signals: hearth filters ───────────────────────────────────────
 export const boardHearths = signal<BoardHearth[]>([])
@@ -332,7 +334,17 @@ export function visibilityBadgeColor(vis: string): string {
 }
 
 // ── Data operations ────────────────────────────────────────────────
-export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
+function sameCommentSnapshot(left: BoardCommentPage, right: BoardCommentPage): boolean {
+  return left.total === right.total && left.revision === right.revision
+}
+
+export async function loadPostDetail(postId: string, focusedCommentId?: string | null, oldestOffset?: number) {
+  const samePost = detailPostId.value === postId
+  const hasLoadedRange = samePost && !detailLoading.value && detailPost.value !== null
+  const clearingFocus = focusedCommentId === null && detailFocusedCommentId !== null
+  const retainedOffset = oldestOffset ?? (hasLoadedRange && !clearingFocus ? detailCommentPage.value.offset : undefined)
+  const focus = focusedCommentId === undefined && samePost ? detailFocusedCommentId : focusedCommentId ?? null
+  detailFocusedCommentId = focus
   const requestId = ++detailRequestId
   detailPostId.value = postId
   detailPost.value = null
@@ -341,7 +353,9 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   detailLoadingOlder.value = false
   detailLoading.value = true
   try {
-    const data = await fetchBoardPost(postId)
+    const data = focus
+      ? await fetchBoardPost(postId, undefined, undefined, focus)
+      : await fetchBoardPost(postId)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
     detailPost.value = {
       id: data.id,
@@ -372,12 +386,17 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     }
     let comments = data.comments
     let page = data.commentPage
-    while (focusedCommentId && page.offset > 0
-      && !comments.some(comment => comment.id === focusedCommentId)) {
-      const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
+    // Refresh only the range the operator already loaded. Focus resolution
+    // and ancestor lookup are part of the server's single thread read.
+    while (retainedOffset !== undefined && page.offset > retainedOffset) {
+      const offset = Math.max(retainedOffset, page.offset - COMMENT_PAGE_SIZE)
       const older = await fetchBoardPost(postId, offset, page.offset - offset)
       if (detailPostId.value !== postId || detailRequestId !== requestId) return
-      comments = [...older.comments, ...comments]
+      if (!sameCommentSnapshot(data.commentPage, older.commentPage)) {
+        throw new Error('Comment thread changed during refresh; retry to read one snapshot')
+      }
+      if (older.commentPage.offset >= page.offset) throw new Error('Older comment page did not advance')
+      comments = mergeCommentPages(older.comments, comments)
       page = older.commentPage
     }
     detailComments.value = comments
@@ -406,11 +425,13 @@ export async function loadOlderPostComments(postId: string) {
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
-    const seen = new Set(detailComments.value.map(comment => comment.id))
-    detailComments.value = [
-      ...data.comments.filter(comment => !seen.has(comment.id)),
-      ...detailComments.value,
-    ]
+    if (!sameCommentSnapshot(page, data.commentPage)) {
+      // Rebuild the requested range from the new tail rather than publishing
+      // its count beside an old tail that lacks appended/deleted comments.
+      await loadPostDetail(postId, undefined, Math.min(offset, data.commentPage.offset))
+      return
+    }
+    detailComments.value = mergeCommentPages(data.comments, detailComments.value)
     detailCommentPage.value = data.commentPage
   } catch (err) {
     console.warn('[Board] failed to load older comments:', postId, err)

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { focusedCommentNeedsAncestors } from './comment-context'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { SectionCard, SurfaceCard } from '../common/card'
@@ -494,7 +495,7 @@ function CommentRouteFocusPanel({
               COMMENT ${commentId}
             </span>
             <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">
-              ${comment ? `author ${authorLabel}` : 'comment not loaded'}
+              ${comment ? `author ${authorLabel}` : detailLoading.value ? 'loading comment' : 'comment not found in this thread snapshot'}
             </span>
           </div>
         </div>
@@ -542,9 +543,12 @@ export function CommentForm({ postId }: { postId: string }) {
 // ── Post detail view ───────────────────────────────────────────────
 export function PostDetail({ post }: { post: BoardPost }) {
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
+  const previousFocus = useRef(focusedCommentId)
   useEffect(() => {
-    if (detailPostId.value !== post.id
-      || (focusedCommentId && !detailComments.value.some(comment => comment.id === focusedCommentId))) {
+    const focusChanged = previousFocus.current !== focusedCommentId
+    previousFocus.current = focusedCommentId
+    if (detailPostId.value !== post.id || focusChanged
+      || (focusedCommentId && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)
     }
   }, [post.id, focusedCommentId])

@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import type { TurnAnchor } from '../keeper-turn-inspector'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -122,7 +122,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, loadPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
@@ -131,6 +131,7 @@ afterEach(() => {
   vi.clearAllMocks()
   routerMock.route.value = { params: {} }
   detailComments.value = []
+  detailPostId.value = null
   detailCommentPage.value = { offset: 0, total: 0 }
 })
 
@@ -802,6 +803,21 @@ describe('PostDetail', () => {
       post: 'post-1',
       focus: 'curation',
     })
+  })
+
+  it('reloads the ordinary page when an existing focused detail route is cleared', async () => {
+    const post = { id: 'clear-post', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 1, created_at: '', updated_at: '' } as any
+    detailPostId.value = post.id
+    detailComments.value = [{ id: 'reply', post_id: post.id, parent_id: null,
+      author: 'keeper', content: 'Focused reply', created_at: '' }] as any
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    const mounted = render(h(PostDetail, { post }))
+    await act(async () => {})
+    vi.mocked(loadPostDetail).mockClear()
+    routerMock.route.value = { params: { post: post.id } }
+    mounted.rerender(h(PostDetail, { post: { ...post } }))
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null))
   })
 
   it('shows a turn affordance and opens the inspector at the post origin turn_ref', () => {

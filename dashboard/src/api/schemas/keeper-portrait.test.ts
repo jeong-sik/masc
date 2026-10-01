@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Either, Schema } from 'effect'
-import { KeeperPortraitSchema, EQUIPMENT_IDS, keeperEquipmentKey, readKeeperPortrait } from './keeper-portrait'
+import { KeeperPortraitSchema, EQUIPMENT_IDS, isKeeperPortraitReading, keeperEquipmentKey, readKeeperPortrait } from './keeper-portrait'
 
 const equipment = { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } as const
 
@@ -53,4 +53,31 @@ describe('server portrait snapshots', () => {
       expect([...ids].sort()).toEqual([bare, ...values].sort())
     }
   })
+
+  it('distinguishes producer unavailability from malformed or excess wire data', () => {
+    const unavailable = { state: 'unavailable', reason: 'ledger unreadable: permission denied' }
+    expect(isKeeperPortraitReading(unavailable)).toBe(true)
+    expect(readKeeperPortrait(unavailable)).toEqual(unavailable)
+    for (const raw of [{ state: 'ready', equipment, extra: true }, { ...unavailable, extra: true },
+      { state: 'unavailable' }, { state: 'unavailable', reason: 0 }, { state: 'unknown', equipment }]) {
+      expect(isKeeperPortraitReading(raw)).toBe(false)
+      expect(readKeeperPortrait(raw)).toEqual({ state: 'unavailable', reason: 'Portrait observation missing or malformed' })
+    }
+    for (const slot of Object.keys(EQUIPMENT_IDS)) {
+      const incomplete: Record<string, unknown> = { ...equipment }
+      delete incomplete[slot]
+      expect(isKeeperPortraitReading({ state: 'ready', equipment: incomplete })).toBe(false)
+    }
+  })
+
+  it('keeps the observed outfit immutable and detached from later raw mutations', () => {
+    const wireEquipment = { ...equipment, head: 'crown' }
+    const reading = readKeeperPortrait({ state: 'ready', equipment: wireEquipment })
+    wireEquipment.head = 'beanie'
+    expect(reading).toEqual({ state: 'ready', equipment: { ...equipment, head: 'crown' } })
+    if (reading.state !== 'ready') throw new Error('Expected a valid observed outfit')
+    expect(Object.isFrozen(reading)).toBe(true)
+    expect(Object.isFrozen(reading.equipment)).toBe(true)
+  })
+
 })

@@ -1178,17 +1178,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.required_list_field json
+          (if full_history then "comments" else "comment_context") in
         let* comments = decode_board_comments comments_json in
+        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+        let* () = if String.length revision=64 && String.for_all
+            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+          then Ok () else Error "board detail comment revision is malformed" in
         let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
         let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
         let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total))
+        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
   in
-  let* (first_json, first_comments, first_offset, total) =
+  let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
   in
   let post_json =
@@ -1203,7 +1208,9 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   let rec read_remaining offset total reversed =
     if offset >= total then Ok (post, List.rev reversed)
     else
-      let* (_, comments, _, total) = read_page (Some offset) in
+      let* (_, comments, _, page_total, page_revision) = read_page (Some offset) in
+      let* () = if page_revision=revision && page_total=total then Ok ()
+        else Error "Board comment thread changed during full history read; refresh to read one snapshot" in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"

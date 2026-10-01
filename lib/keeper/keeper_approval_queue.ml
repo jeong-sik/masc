@@ -516,6 +516,7 @@ type log_read =
    other unreadable row fails closed, as an unreadable snapshot does. *)
 let read_pending_log_unlocked
       ~base_path
+      ~snapshot_format
       ~snapshot_generation
       ~pending_map
       ~delivery_map
@@ -571,27 +572,22 @@ let read_pending_log_unlocked
                match Yojson.Safe.from_string line with
                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
                | json ->
-                 (match log_row_of_yojson ~base_path json with
+                 (match log_row_generation_of_yojson json with
                   | Error _ as error -> error
-                  | Ok decoded ->
-                    if decoded.row_generation < snapshot_generation
-                    then Ok (pending_map, delivery_map, next_sequence, rows)
-                    else if decoded.row_generation > snapshot_generation
-                    then
-                      Error
-                        (Printf.sprintf
-                           "row generation %d is ahead of snapshot generation %d"
-                           decoded.row_generation
-                           snapshot_generation)
-                    else (
-                      let pending_map, delivery_map =
-                        apply_log_row (pending_map, delivery_map) decoded.row
-                      in
-                      Ok
-                        ( pending_map
-                        , delivery_map
-                        , max next_sequence decoded.row_next_sequence
-                        , rows + 1 )))))
+                  | Ok row_generation when row_generation < snapshot_generation ->
+                    Ok (pending_map, delivery_map, next_sequence, rows)
+                  | Ok row_generation when row_generation > snapshot_generation ->
+                    Error (Printf.sprintf
+                      "row generation %d is ahead of snapshot generation %d"
+                      row_generation snapshot_generation)
+                  | Ok _ ->
+                    (match log_row_of_yojson ~snapshot_format ~base_path json with
+                     | Error _ as error -> error
+                     | Ok decoded ->
+                       let pending_map, delivery_map =
+                         apply_log_row (pending_map, delivery_map) decoded.row in
+                       Ok (pending_map, delivery_map,
+                         max next_sequence decoded.row_next_sequence, rows + 1)))))
         (Ok (pending_map, delivery_map, next_sequence, 0))
         lines
     in
@@ -618,12 +614,14 @@ let read_durable_unlocked ~base_path =
     match Safe_ops.read_json_file_safe path with
     | Error reason -> Error { path; reason }
     | Ok json ->
-      (match snapshot_of_yojson ~base_path json with
+      (match Result.bind (pending_snapshot_format_of_yojson json) (fun format ->
+        Result.map (fun decoded -> format, decoded) (snapshot_of_yojson ~base_path json)) with
        | Error reason -> Error { path; reason }
-       | Ok (pending_map, delivery_map, next_sequence, generation, entry_errors) ->
+       | Ok (snapshot_format, (pending_map, delivery_map, next_sequence, generation, entry_errors)) ->
          (match
             read_pending_log_unlocked
               ~base_path
+              ~snapshot_format
               ~snapshot_generation:generation
               ~pending_map
               ~delivery_map
@@ -665,6 +663,7 @@ let load_snapshot_unlocked ~base_path :
         Error { path; reason }
       | Ok json ->
         (match
+           Result.bind (pending_snapshot_format_of_yojson json) (fun snapshot_format ->
            Result.bind (snapshot_of_yojson ~base_path json) (fun decoded ->
              let ( pending_map
                  , delivery_map
@@ -677,13 +676,14 @@ let load_snapshot_unlocked ~base_path :
              match
                read_pending_log_unlocked
                  ~base_path
+                 ~snapshot_format
                  ~snapshot_generation:generation
                  ~pending_map
                  ~delivery_map
                  ~next_sequence
              with
              | Error error -> Error (storage_error_to_string error)
-             | Ok log -> Ok (log, generation, pending_entry_errors))
+             | Ok log -> Ok (log, generation, pending_entry_errors)))
          with
          | Ok (log, loaded_generation, pending_entry_errors) ->
            let loaded_pending = log.log_pending in
@@ -2658,7 +2658,10 @@ let project_resolution_chat delivery =
       ("chat projection: " ^ reason)
 ;;
 
-let complete_delivery ~(occasion : delivery_occasion) delivery =
+let complete_delivery ?reconciled_rule ~(occasion : delivery_occasion) delivery =
+  let reconcile_rule () = match reconciled_rule with
+    | Some outcome -> outcome
+    | None -> reconcile_delivery_rule delivery in
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
   (match occasion with
@@ -2675,7 +2678,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
     if delivery.grant_consumed
     then (
       (* Consumption suppresses the wake, not the journaled rule mutation. *)
-      match reconcile_delivery_rule delivery with
+      match reconcile_rule () with
       | Error storage_error -> Error (Persistence_failed { approval_id = id; storage_error })
       | Ok (remembered_rule, remembered_rule_status, audit_receipts) ->
         (match remembered_rule_status with
@@ -2707,7 +2710,12 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
-         (match reconcile_delivery_rule delivery with
+         (* The one-shot wake and its notification do not depend on the
+            optional rule store. Keep any failed rule intent for recovery. *)
+         project_resolution_chat delivery;
+         signal_resolution_after_commit
+           ~base_path ~keeper_name:delivery.entry.keeper_name ~approval_id:id;
+         (match reconcile_rule () with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
           | Ok (remembered_rule, remembered_rule_status, rule_audit_receipts) ->
@@ -2715,11 +2723,6 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
                A waiting direct operation must re-read the exact rejection as
                well as an approval; the wake alone is not the request store.
                A retained rejection is never a consumable approval grant. *)
-            project_resolution_chat delivery;
-            signal_resolution_after_commit
-              ~base_path
-              ~keeper_name:delivery.entry.keeper_name
-              ~approval_id:id;
             Ok { remembered_rule; remembered_rule_status; audit_receipts = rule_audit_receipts }))
 ;;
 
@@ -3069,20 +3072,28 @@ let install_persistence_internal ~after_load ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
+    (* A boot reconciles each optional rule once, before retirement. Replay
+       reuses both success and failure instead of appending duplicate audits. *)
+    let reconciled_rules = Hashtbl.create (List.length loaded_deliveries) in
+    let reconciliation_failures = Hashtbl.create (List.length loaded_deliveries) in
     let rule_failures =
       List.filter_map (fun delivery ->
         let result =
           match resolve_store_readiness_error ~base_path ~approval_id:delivery.entry.id with
           | Error _ as error -> error
           | Ok () ->
-            (match reconcile_delivery_rule delivery with
+            let outcome = reconcile_delivery_rule delivery in
+            Hashtbl.replace reconciled_rules delivery.entry.id outcome;
+            (match outcome with
              | Ok _ -> Ok ()
              | Error storage_error ->
                Error (Persistence_failed { approval_id = delivery.entry.id; storage_error })) in
         match result with
         | Ok () -> None
-        | Error error -> Some { approval_id = delivery.entry.id;
-                                reason = resolve_error_to_string error })
+        | Error error ->
+          Hashtbl.replace reconciliation_failures delivery.entry.id error;
+          Some { approval_id = delivery.entry.id;
+                 reason = resolve_error_to_string error })
         loaded_deliveries in
     let rule_failed id =
       List.exists (fun failure -> String.equal failure.approval_id id) rule_failures in
@@ -3110,15 +3121,19 @@ let install_persistence_internal ~after_load ~base_path =
           ; delivery_retirement_error
           }
       | delivery :: rest ->
-        if rule_failed delivery.entry.id
-        then replay count failures rest
-        else if delivery.grant_consumed
+        if delivery.grant_consumed
         then replay count failures rest
         else if delivery_wake_was_observed delivery
         then replay count failures rest
         else
-          (match complete_delivery ~occasion:Boot_replay delivery with
+          (match complete_delivery
+                   ?reconciled_rule:(Hashtbl.find_opt reconciled_rules delivery.entry.id)
+                   ~occasion:Boot_replay delivery with
            | Ok _ -> replay (count + 1) failures rest
+           | Error error when
+               Hashtbl.find_opt reconciliation_failures delivery.entry.id = Some error ->
+             (* The prepass already retained this exact failure. *)
+             replay count failures rest
            | Error error ->
              let failure =
                { approval_id = delivery.entry.id

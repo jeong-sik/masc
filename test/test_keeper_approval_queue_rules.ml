@@ -264,6 +264,59 @@ let persisted_rule_json (rule : Rule_types.approval_rule) =
   | Ok intent -> Keeper_rule_revision.state_to_yojson intent.next
 ;;
 
+let test_released_bare_rule_survives_revision_upgrade () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let input = `Assoc ["request", `String "released-rule"] in
+    let original, _ = upsert_exn ~base_path ~input in
+    let bare = Rule_types.approval_rule_to_yojson original in
+    write_rules ~base_path (`List [bare]);
+    let path = AQ.For_testing.always_allowed_store_path ~base_path in
+    let bytes = In_channel.with_open_bin path In_channel.input_all in
+    (match Rules.list_rules ~base_path () with
+     | Ok [rule] -> check string "released rule identity retained" original.id rule.id
+     | _ -> fail "released bare rule must list");
+    check bool "released exact rule still authorizes" true
+      (Option.is_some (find_active_opt ~base_path ~input));
+    check string "read does not convert the security file" bytes
+      (In_channel.with_open_bin path In_channel.input_all);
+    let prepare () = match Rules.prepare_rule_intent ~base_path ~keeper_name:"keeper"
+      ~tool_name:"external-effect" ~input ~operation_id:"upgrade-renewal" ~expires_at:2000.0 () with
+      | Ok intent -> intent | Error e -> fail (Rule_types.rule_store_error_to_string e) in
+    let intent = prepare () in
+    (match bare with
+     | `Assoc fields -> write_rules ~base_path (`List [`Assoc (List.rev fields)])
+     | _ -> fail "bare rule must be object");
+    check (option string) "canonical derived revision survives field ordering"
+      intent.expected_revision (prepare ()).expected_revision;
+    let apply () = match Rules.apply_rule_intent ~base_path intent with
+      | Ok result -> result | Error e -> fail (Rule_types.rule_store_error_to_string e) in
+    let renewed = match apply () with Rules.Rule_applied rule -> rule
+      | _ -> fail "renewal must apply" in
+    (match Yojson.Safe.from_file path with
+     | `List [json] ->
+       (match Keeper_rule_revision.state_of_yojson json with
+        | Ok _ -> () | Error e -> fail e)
+     | _ -> fail "new write must use a revision envelope");
+    (match apply () with Rules.Rule_already_applied _ -> () | _ -> fail "renewal replay must be idempotent");
+    (match Rules.delete_rule ~base_path ~id:renewed.id () with
+     | Ok _ -> () | Error e -> fail (Rule_types.rule_store_error_to_string e));
+    (match apply () with Rules.Rule_conflict _ -> () | _ -> fail "old renewal must not resurrect a tombstone");
+    (match Rules.list_rules ~base_path () with Ok [] -> () | _ -> fail "deleted rule must not list");
+    match bare with
+    | `Assoc fields ->
+      List.iter (fun malformed ->
+        write_rules ~base_path (`List [malformed]);
+        check bool "malformed bare rule cannot authorize" true
+          (Result.is_error (Rules.list_rules ~base_path ())))
+        [ `Assoc (("created_by", `Bool true) :: List.remove_assoc "created_by" fields)
+        ; `Assoc (("expires_at", `String "forever") :: List.remove_assoc "expires_at" fields)
+        ; `Assoc (("future_authority", `Bool true) :: fields)
+        ; `Assoc (("keeper_name", `String "keeper") :: fields)
+        ; `Assoc (List.remove_assoc "request_fingerprint" fields) ]
+    | _ -> fail "bare rule must be object")
+;;
+
 let test_durable_rule_renewal_and_stale_replay () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
@@ -928,6 +981,8 @@ let () =
             "Gate consumes exact persisted rule"
             `Quick
             test_gate_allows_only_the_exact_persisted_rule
+        ; test_case "released bare rule revision upgrade" `Quick
+            test_released_bare_rule_survives_revision_upgrade
         ; test_case "durable renewal and stale replay" `Quick
             test_durable_rule_renewal_and_stale_replay
         ; test_case "cross-identity operation collision preserves store" `Quick

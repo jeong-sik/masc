@@ -116,6 +116,37 @@ let validate_unique_rule_states states =
       in loop [] states
 ;;
 
+(* The preceding release stored bare approval rules. Reading that exact
+   security state must not revoke it or rewrite it. New mutations serialize
+   revision envelopes; the current intent/state decoder remains strict. *)
+let persisted_rule_state_of_yojson json =
+  match Revision.state_of_yojson json with
+  | Ok state -> Ok state
+  | Error _ ->
+    let ( let* ) = Result.bind in
+    let* rule = approval_rule_of_yojson_with_error json in
+    let* () = match json with
+      | `Assoc fields ->
+        List.fold_left (fun result key ->
+          let* () = result in
+          match List.assoc_opt key fields with
+          | None | Some `Null | Some (`String _) -> Ok ()
+          | Some _ -> Error (key ^ " must be a string or null")) (Ok ())
+          ["created_by"; "source_approval_id"]
+      | _ -> Error "approval rule must be an object" in
+    if not (Float.is_finite rule.created_at
+      && Option.fold ~none:true ~some:Float.is_finite rule.expires_at)
+    then Error "approval rule timestamps must be finite"
+    else
+      let digest = approval_rule_to_yojson rule |> Yojson.Safe.to_string
+        |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+      Revision.prepare ~current:None
+        ~revision:("released-rule-revision:" ^ digest)
+        ~operation_id:("released-rule-operation:" ^ digest)
+        ~presence:Revision.Active rule
+      |> Result.map (fun (intent : Revision.intent) -> intent.next)
+;;
+
 let load_rule_states_unlocked ~base_path () =
   let path = rules_path ~base_path () in
   let rec parse_entries index acc = function
@@ -130,7 +161,7 @@ let load_rule_states_unlocked ~base_path () =
            ~detail:reason;
          Error { path; reason })
     | entry :: rest ->
-      (match Revision.state_of_yojson entry with
+      (match persisted_rule_state_of_yojson entry with
        | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
        | Error reason ->
          let detail =

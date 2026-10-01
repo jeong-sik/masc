@@ -3689,7 +3689,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_fusion_model masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc.fusion_core

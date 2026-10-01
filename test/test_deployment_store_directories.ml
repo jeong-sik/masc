@@ -57,6 +57,30 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+let test_transcript_inventory_failure_stops_preflight exe () =
+  with_workspace (fun root _keepers _traces ->
+    let dir = Keeper_chat_store.chat_dir root in
+    write dir "not a directory";
+    let status, output = invoke exe root in
+    check bool ("a file cannot pass as an empty transcript store: " ^ output) true
+      (status <> Unix.WEXITED 0);
+    check bool ("the scan failure names the store: " ^ output) true
+      (String_util.contains_substring output "keeper chat transcripts scan_failed=");
+    check bool ("the scan failure names the path and reason: " ^ output) true
+      (String_util.contains_substring (diagnostic_words output)
+         (diagnostic_words (dir ^ ": not a directory")));
+    check string "failed inventory is untouched" "not a directory" (read dir);
+    Unix.unlink dir;
+    Unix.mkdir dir 0o700;
+    Fun.protect ~finally:(fun () -> Unix.chmod dir 0o700) (fun () ->
+      Unix.chmod dir 0o000;
+      if Unix.geteuid () <> 0 then (
+        let status, output = invoke exe root in
+        check bool ("unreadable transcript inventory must stop deployment: " ^ output)
+          true (status <> Unix.WEXITED 0);
+        check bool ("unreadable directory is named: " ^ output) true
+          (String_util.contains_substring output (dir ^ ":")))))
+
 (* Every Memory write for a keeper reconciles its range receipt ledger before
    it builds, so a ledger this build cannot decode must stop the rollout here,
    not every Memory write after it. *)
@@ -118,6 +142,43 @@ let test_named_cluster_stores exe () = with_workspace (fun root _keepers _traces
         (String_util.contains_substring output line))
       (expected "rows=0 refused=0")))
 
+let assert_transcript_scan_failed dir (status, output) =
+  check bool ("transcript inventory failure refuses deployment: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  List.iter (fun expected ->
+    check bool ("reports " ^ expected ^ ": " ^ output) true
+      (String_util.contains_substring output expected))
+    ["keeper chat transcripts scan_failed="; dir];
+  check bool "unread inventory is not reported as an empty success" false
+    (String_util.contains_substring output "keeper chat transcripts rows=0 refused=0")
+
+let test_transcript_directory_kind exe () = with_workspace (fun root _keepers _traces ->
+  let dir = Keeper_chat_store.chat_dir root in
+  let status, output = invoke exe root in
+  check bool ("an absent transcript directory is valid: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool "the absent inventory is reported" true
+    (String_util.contains_substring output "keeper chat transcripts rows=0 refused=0");
+  write dir "not a transcript directory\n";
+  assert_transcript_scan_failed dir (invoke exe root);
+  check string "invalid inventory is not rewritten" "not a transcript directory\n" (read dir))
+
+let test_unreadable_transcript_directory exe () = with_workspace (fun root _keepers _traces ->
+  let dir = Keeper_chat_store.chat_dir root in
+  Fs_compat.mkdir_p dir;
+  let transcript = Filename.concat dir "keeper.jsonl" in
+  let contents = {|{"id":"row","role":"user","content":"hello","ts":1.0}|} ^ "\n" in
+  write transcript contents;
+  Unix.chmod dir 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod dir 0o700) (fun () ->
+    (* Ensure this process actually cannot list the fixture; a privileged
+       runner must not silently turn this into an empty-store test. *)
+    (match Sys.readdir dir with
+     | _ -> fail "permission fixture unexpectedly readable"
+     | exception Sys_error _ -> ());
+    assert_transcript_scan_failed dir (invoke exe root));
+  check string "unread transcript remains intact" contents (read transcript))
+
 let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers _traces ->
   let tasks = Filename.concat root ".masc/tasks" in
   Fs_compat.mkdir_p tasks;
@@ -145,13 +206,24 @@ let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers 
 
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
+  let permission_tests =
+    if Unix.geteuid () = 0 then (
+      prerr_endline "SKIP unreadable transcript directory: root bypasses directory permissions";
+      [])
+    else [test_case "unreadable transcript inventory refuses deployment" `Quick
+            (test_unreadable_transcript_directory exe)]
+  in
   run "deployment store directories"
-    ["live layout", [test_case "regular journals and locks are not stores" `Quick (test_regular_siblings exe);
+    ["live layout", ([test_case "regular journals and locks are not stores" `Quick (test_regular_siblings exe);
       test_case "real decoder failures remain visible" `Quick (test_real_store_refusals exe);
+      test_case "transcript inventory failure stops deployment" `Quick
+        (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
       test_case "range receipt ledger is read before rollout" `Quick
         (test_range_receipt_ledger exe);
       test_case "task backlog bytes retain duplicate intent fields" `Quick
         (test_task_backlog_original_bytes exe);
       test_case "a named cluster's keeper stores are read" `Quick
-        (test_named_cluster_stores exe)]]
+        (test_named_cluster_stores exe);
+      test_case "transcript directory absence differs from a wrong-kind path" `Quick
+        (test_transcript_directory_kind exe)] @ permission_tests)]

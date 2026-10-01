@@ -43,7 +43,7 @@ type t =
   ; on_pending_count_change : int -> unit
   }
 
-let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~scope () =
   let event_bus =
     match event_bus with
     | Some _ as bus -> bus
@@ -59,13 +59,14 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
               ~capacity:256
               ~overflow:Agent_core.Event_bus.Drop_oldest
               ~purpose:"keeper_turn"
-              ~filter:(Agent_core.Event_bus.filter_agent keeper_name)
+              ~filter:(Agent_core.Event_bus.filter_all
+                [Agent_core.Event_bus.filter_agent keeper_name; Keeper_turn_scope.filter scope])
               event_bus
         }
     | None -> No_event_bus
   in
   { keeper_name
-  ; turn_id
+  ; turn_id = Keeper_turn_scope.turn_id scope
   ; event_bus_subscription = Atomic.make event_bus_subscription
   ; drain_cancel = Atomic.make Inactive
   ; state =
@@ -76,6 +77,12 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
         }
   ; on_pending_count_change
   }
+;;
+
+let publishing_bus t =
+  match Atomic.get t.event_bus_subscription with
+  | No_event_bus -> None
+  | Subscribed { event_bus; _ } -> Some event_bus
 ;;
 
 type fsm_transition =

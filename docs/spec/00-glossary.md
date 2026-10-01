@@ -613,10 +613,12 @@ status: reference
     `Awaiting_receipt`(서버로 POST 전송을 시작했으나 수신 영수증을 아직 받지 못한 상태),
     `Keeper_queued`(서버 진입이 승인되어 Keeper 큐에 안착했으나 턴 실행이 시작되지 않은 상태),
     `Rechecking_delivery`(재연결이나 전달 상태를 재확인 중인 상태, 과거 Queued 영수증이 있더라도 확인 중엔 재확인으로 표시).
-  - 상태별 건수와 뷰포트 예산: 단일 합산 숫자로 뭉개지 않고 `queued at Keeper`·`awaiting receipt`·
-    `rechecking delivery` 건수를 분리 표시한다. 80열 좁은 터미널 환경에서도 총 대기 건수,
-    상태별 세부 근거, 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를 별도 행으로 배치하며,
-    단축키 가이드(`Ctrl-T:queue`)를 보존한다.
+  - 상태별 건수와 뷰포트 예산: 기본 compact/results 화면은 총 대기 건수와 전달·우선 순서
+    확인 상태를 한 요약 행에 표시한다. 실패와 재확인 상태는 요약에서 숨기지 않는다.
+    `Tools_full`(`Ctrl-D` 두 번 또는 `/tools full`)은 `queued at Keeper`·`awaiting receipt`·
+    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를
+    별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
+    큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
     작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
   - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기

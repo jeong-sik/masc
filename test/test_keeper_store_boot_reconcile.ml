@@ -412,6 +412,78 @@ let test_preflight_refuses_what_boot_names () =
      | D.Refuse_boot _ | D.Preflight_only _ -> false)
 ;;
 
+(* 2026-09-30: a transcript row whose delivery identity kind a later build no
+   longer reads made every append-once delivery to that keeper fail with
+   transcript_persist_failed, and no deploy check read the transcripts. The
+   preflight now runs the same read and names the file and the line. *)
+let test_preflight_names_the_transcript_line_appends_refuse () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path keeper_name = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  let plain_row = {|{"id":"row-1","role":"user","content":"hello","ts":1.0}|} in
+  let unknown_identity_row =
+    {|{"id":"row-2","role":"user","content":"held","ts":2.0,"delivery_key":{"kind":"kind-this-build-does-not-read"},"transcript_slot":{"kind":"accepted_user"}}|}
+  in
+  write_bytes (path "readable") (plain_row ^ "\n");
+  write_bytes (path "unreadable") (plain_row ^ "\n" ^ unknown_identity_row ^ "\n");
+  let scan =
+    match D.reader D.Id.Keeper_chat_transcripts with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "transcripts are read by the preflight only"
+  in
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+     check bool "the refusal names the file" true
+       (String.starts_with ~prefix:(path "unreadable" ^ ": ") detail);
+     check bool "the refusal names the line" true
+       (String_util.contains_substring detail "at line 2: ")
+   | Ok report -> failf "rows %d refused %d" report.D.rows report.D.refused
+   | Error detail -> failf "scan failed: %s" detail);
+  write_bytes (path "unreadable") (plain_row ^ "\n");
+  (match D.run scan ~base_path with
+   | Ok { D.refused = 0; _ } -> ()
+   | Ok report -> failf "still refused %d after the row was removed" report.D.refused
+   | Error detail -> failf "scan failed: %s" detail)
+;;
+
+let test_transcript_inventory_failure_is_not_empty () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let dir = Keeper_chat_store.chat_dir base_path in
+  let scan =
+    match D.reader D.Id.Keeper_chat_transcripts with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "transcripts require preflight"
+  in
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 0; refused = 0; _ } -> ()
+   | Ok report -> failf "absent transcripts returned %d rows" report.D.rows
+   | Error detail -> failf "absent transcripts failed inventory: %s" detail);
+  write_bytes dir "this path is a file";
+  (match D.run scan ~base_path with
+   | Error detail ->
+     check bool "non-directory inventory error names the chat path" true
+       (String.starts_with ~prefix:(dir ^ ": ") detail);
+     check bool "non-directory inventory error gives its reason" true
+       (String_util.contains_substring detail "not a directory")
+   | Ok _ -> fail "a transcript path that is a file passed as an empty store");
+  Unix.unlink dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod dir 0o700)
+    (fun () ->
+       Unix.chmod dir 0o000;
+       if Unix.geteuid () <> 0
+       then
+         match D.run scan ~base_path with
+         | Error detail ->
+           check bool "unreadable directory error names the chat path" true
+             (String.starts_with ~prefix:(dir ^ ": ") detail)
+         | Ok _ -> fail "unreadable transcript directory passed as an empty store")
+;;
+
 (* [Id.all] is derived. Each store boot refuses on or reports must be
    reached from exactly one id, or boot would read it twice or never. *)
 let test_every_boot_store_has_exactly_one_id () =
@@ -1067,6 +1139,10 @@ let () =
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick
             test_preflight_refuses_what_boot_names
+        ; test_case "the preflight names the transcript line appends refuse" `Quick
+            test_preflight_names_the_transcript_line_appends_refuse
+        ; test_case "transcript inventory failures cannot pass as empty" `Quick
+            test_transcript_inventory_failure_is_not_empty
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )

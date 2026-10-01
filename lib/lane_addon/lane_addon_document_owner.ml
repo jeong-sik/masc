@@ -89,7 +89,8 @@ let prepare ~root ~source_path ~keeper:caller ~prior_revision ~proposed_revision
   protect (fun () ->
   Fs_compat.mkdir_p (Filename.dirname source_path);
   update ~root ~source_path (function
-    | Some (Owned owner) when String.equal owner.keeper caller && prior_revision = Some owner.revision ->
+    | Some (Owned owner) when String.equal owner.keeper caller
+        && (prior_revision = None || prior_revision = Some owner.revision) ->
         Ok (Some (Pending {keeper=caller;prior=prior_revision;proposed=proposed_revision}))
     | None | Some Revoked -> Ok (Some (Pending {keeper=caller;prior=prior_revision;proposed=proposed_revision}))
     | Some (Pending p) when String.equal p.keeper caller

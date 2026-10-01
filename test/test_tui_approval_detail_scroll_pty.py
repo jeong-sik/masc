@@ -12,6 +12,7 @@ import test_tui_keyboard_input as h
 # the window line the other reading panes carry when the field list outgrows
 # the frame. See issue #38385.
 SOURCE_MODULES = (
+    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
     "bin/masc_tui_render.ml",
 )
 

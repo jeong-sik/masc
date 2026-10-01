@@ -142,10 +142,10 @@ let test_the_editor_opens_saves_and_abandons () =
 let test_leaving_the_mode_closes_the_editor () =
   Alcotest.(check int) "leaving delegates to the shared answering cleanup" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:executable
-       ~binding_name:"leave_ask_answering" ~callee:"clear_ask_answering");
+       ~binding_name:"leave_ask_answering" ~callee:"Masc_tui_home.clear_ask_answering");
   List.iter (fun field_name ->
     Alcotest.(check int) (field_name ^ " is cleared by that cleanup") 1
-      (Ast_grep.count_field_clears_to_none ~module_path:"bin/masc_tui_types.ml"
+      (Ast_grep.count_field_clears_to_none ~module_path:"bin/masc_tui_home.ml"
          ~binding_name:"clear_ask_answering" ~field_name))
     ["ask_text_entry"; "ask_draft"; "pending_ask_submit"]
 ;;

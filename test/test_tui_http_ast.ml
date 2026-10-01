@@ -978,7 +978,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"answer_presented_approval"
-       ~callee:"approval_items");
+       ~callee:"Masc_tui_approvals_model.approval_items");
   check int "approval effects never reselect by mutable cursor" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
@@ -1013,7 +1013,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render"
-       ~callee:"approval_items");
+       ~callee:"Masc_tui_approvals_model.approval_items");
   check int "approval refresh preserves selected token identity" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
@@ -1884,7 +1884,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      The old attention page's emptiness says nothing about human decisions. *)
   check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"home_decision_rows");
+       ~binding_name:"render_overview" ~callee:"Masc_tui_home.home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
@@ -2606,7 +2606,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_target_type"
     ];
   (* A list that was not read reaches the empty queue as the loader's cause,
-     carried by [Masc_tui_types.approvals_reading] rather than read off
+     carried by [Masc_tui_approvals_model.approvals_reading] rather than read off
      [approvals_error] here. *)
   check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
     ~callees:sanitizer_calls [ "cause" ];

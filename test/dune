@@ -3751,7 +3751,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries
+ (libraries masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -4278,7 +4278,7 @@
 (test
  (name test_tui_approval_authority)
  (modules test_tui_approval_authority)
- (libraries alcotest masc_tui_approval_authority masc_tui_types))
+ (libraries masc_tui_approvals_model alcotest masc_tui_approval_authority masc_tui_types))
 
 (test
  (name test_tui_terminal_profile)

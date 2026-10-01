@@ -245,9 +245,9 @@ let overview_header (state : state) =
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let all_decisions = home_decision_rows state in
-  let continuation = home_continue_rows state in
-  let selected = home_selected_action state in
+  let all_decisions = Masc_tui_home.home_decision_rows state in
+  let continuation = Masc_tui_home.home_continue_rows state in
+  let selected = Masc_tui_home.home_selected_action state in
   let health =
     match Terminal_text.optional_single_line state.overview_error, state.overview with
     | Some error, _ -> " Health: unavailable · " ^ error
@@ -308,7 +308,7 @@ let render_overview (state : state) =
       let warning_rows = if selection_changed then 1 else 0 in
       (* Keep continuation and new work visible while the request window
          follows the selected identity. All rows remain reachable with j/k. *)
-      let first, capacity = home_decision_window state ~budget in
+      let first, capacity = Masc_tui_home.home_decision_window state ~budget in
       let decisions = List.drop first all_decisions |> List.take capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history
@@ -701,7 +701,7 @@ let render_work_tasks (state : state) =
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
-let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_row) buf =
+let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
   let width = max 8 (cols - 6) in
   (* The fields are handed to [Approval_detail.of_fields] as they are built,
      not bound first: it is where every value is made terminal-safe, and the
@@ -710,14 +710,14 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   let lines =
     Approval_detail.of_fields ~width
       (match row with
-    | Keeper_tool_row held ->
+    | Masc_tui_approvals_model.Keeper_tool_row held ->
       [ "keeper", held.Tui_decode.kta_keeper
       ; "tool", held.Tui_decode.kta_tool
       ; "call", held.Tui_decode.kta_tool_call_id
       ; "question", held.Tui_decode.kta_question
       ; "args", held.Tui_decode.kta_args
       ]
-    | Gate_row pending ->
+    | Masc_tui_approvals_model.Gate_row pending ->
       let phase =
         match pending.Tui_decode.gp_phase with
         | Gate_queued -> "queued"
@@ -766,7 +766,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
              , Terminal_text.single_line_or
                  ~default:"(the server recorded no input preview)" preview )
            ])
-    | Operator_row a ->
+    | Masc_tui_approvals_model.Operator_row a ->
       [ "actor", a.Masc_tui_operator_projection.ap_actor
       ; "action", a.Masc_tui_operator_projection.ap_action_type
       ; "target", a.Masc_tui_operator_projection.ap_target_type
@@ -840,18 +840,18 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
 
    The asker goes after the tool because the pane folds a label from the
    middle and keeps its tail (Render_schedule.sidebar_row_label). *)
-let approval_sidebar_label (row : approval_row) =
+let approval_sidebar_label (row : Masc_tui_approvals_model.approval_row) =
   let about, apart =
     match row with
-    | Keeper_tool_row held ->
+    | Masc_tui_approvals_model.Keeper_tool_row held ->
       held.Tui_decode.kta_tool, held.Tui_decode.kta_keeper
-    | Gate_row pending ->
+    | Masc_tui_approvals_model.Gate_row pending ->
       pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
-    | Operator_row item -> item.ap_action_type, item.ap_actor
+    | Masc_tui_approvals_model.Operator_row item -> item.ap_action_type, item.ap_actor
   in
   Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
-let render_approval_detail (state : state) (row : approval_row) =
+let render_approval_detail (state : state) (row : Masc_tui_approvals_model.approval_row) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -870,7 +870,7 @@ let render_approval_detail (state : state) (row : approval_row) =
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
         ~holding:None
         ~focused:false
-        ~labels:(List.map approval_sidebar_label (approval_items state))
+        ~labels:(List.map approval_sidebar_label (Masc_tui_approvals_model.approval_items state))
         ~selected:state.approval_cursor;
       let hint =
         approval_detail_pane state ~clamped:scroll ~rows
@@ -929,13 +929,13 @@ let draw_ask_questions buf cols (state : state) ~budget =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  match Masc_tui_types.approvals_open_questions state with
+  match Masc_tui_approvals_model.approvals_open_questions state with
   | None -> ()
   | Some open_rows -> (
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
-           (Masc_tui_types.approvals_open_question_count state) Ansi.reset);
+           (Masc_tui_approvals_model.approvals_open_question_count state) Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
@@ -1033,7 +1033,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
    would have drawn a row nobody counted. *)
 let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
     match List.nth_opt approvals state.approval_cursor with
-    | Some (Operator_row a) -> (
+    | Some (Masc_tui_approvals_model.Operator_row a) -> (
         if action_inflight then
           Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
             Ansi.reset
@@ -1056,7 +1056,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
               Printf.sprintf "  %s%s%s  %s[y] Approve  [n] Reject%s"
                 Ansi.dim summary Ansi.reset
                 (Theme.info ()) Ansi.reset)
-    | Some (Keeper_tool_row held) ->
+    | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
         (* One press answers a held call, matching the chat pane's [y]. The
            question is the whole ask, so it is the row the eye lands on;
            the because is why this call was held at all — an operator
@@ -1078,7 +1078,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                 held.kta_because)
              (max 8 (cols - 12)))
           Ansi.reset
-    | Some (Gate_row pending) ->
+    | Some (Masc_tui_approvals_model.Gate_row pending) ->
         (* A durable Gate ask: it keeps until answered, and the answer goes
            through the dashboard resolve route. What the eye needs is who
            wants to touch what, and that the decision spends here. *)
@@ -1149,7 +1149,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
   let clauses, payload_line =
     match List.nth_opt approvals state.approval_cursor with
     | None -> [], ""
-    | Some (Operator_row approval) ->
+    | Some (Masc_tui_approvals_model.Operator_row approval) ->
         (* The same clock as [created] beside it. This one kept the server's
            RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
            the local reading next to it -- so a row could show a decision
@@ -1175,7 +1175,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
             (fit_width payload (max 8 (cols - 12)))
             Ansi.reset )
-    | Some (Keeper_tool_row held) ->
+    | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
         ( [ Printf.sprintf "keeper=%s"
               (Terminal_text.single_line held.kta_keeper)
           ; Printf.sprintf "call=%s"
@@ -1185,7 +1185,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
                (Terminal_text.preview_line held.kta_args)
                (max 8 (cols - 9)))
             Ansi.reset )
-    | Some (Gate_row pending) ->
+    | Some (Masc_tui_approvals_model.Gate_row pending) ->
         (* The keeper name is not repeated here: the line directly above is
            "<keeper> -> <what it wants>", so this line spends its width on
            what that line cannot say. Where the command would run comes first
@@ -1248,7 +1248,7 @@ let render_approvals (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let approvals = approval_items state in
+  let approvals = Masc_tui_approvals_model.approval_items state in
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
@@ -1267,7 +1267,7 @@ let render_approvals (state : state) =
      rows alone, so an operator who came here from a badge of 1 was met with
      "(0)" and had to find the question block further down to learn what the
      badge had been counting. *)
-  let count = Masc_tui_types.approvals_surface_pending state in
+  let count = Masc_tui_approvals_model.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
@@ -1289,8 +1289,8 @@ let render_approvals (state : state) =
      same readings that keep the strip entry and put "?" on the Overview
      count. A stale list still draws its earlier rows, and those are the rows
      an operator decides against. *)
-  let reading = Masc_tui_types.approvals_reading state in
-  let reading_notes = Masc_tui_types.approvals_title_notes reading in
+  let reading = Masc_tui_approvals_model.approvals_reading state in
+  let reading_notes = Masc_tui_approvals_model.approvals_title_notes reading in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   (* The count and where it came from, naming only the lists that have a row
      on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
@@ -1300,12 +1300,12 @@ let render_approvals (state : state) =
   (* The questions a Keeper is waiting on are the fourth kind this surface
      answers, and the only one whose word takes a plural, so it is built
      beside the three rather than inside their format. *)
-  let question_count = Masc_tui_types.approvals_open_question_count state in
+  let question_count = Masc_tui_approvals_model.approvals_open_question_count state in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
       ; (Theme.bad (), List.length state.gate_pending, "gate")
-      ; (Theme.info (), List.length (operator_approval_items state), "op")
+      ; (Theme.info (), List.length (Masc_tui_approvals_model.operator_approval_items state), "op")
       ]
       |> List.filter_map (fun (style, kind_count, word) ->
              if kind_count = 0 then None
@@ -1443,22 +1443,22 @@ let render_approvals (state : state) =
      list that was not read says so here instead. *)
   if approvals = [] then begin
     let lines =
-      match Masc_tui_types.approvals_empty_queue reading with
-      | Masc_tui_types.Nothing_pending ->
+      match Masc_tui_approvals_model.approvals_empty_queue reading with
+      | Masc_tui_approvals_model.Nothing_pending ->
           [ Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset ]
-      | Masc_tui_types.Lists_not_read not_read ->
+      | Masc_tui_approvals_model.Lists_not_read not_read ->
           List.map
-            (fun (name, (not_read : Masc_tui_types.approval_not_read)) ->
+            (fun (name, (not_read : Masc_tui_approvals_model.approval_not_read)) ->
               match not_read with
-              | Masc_tui_types.Approval_unread ->
+              | Masc_tui_approvals_model.Approval_unread ->
                   Printf.sprintf "%s  (%s not read yet \xe2\x80\x94 press 'r' to refresh)%s"
                     Ansi.dim name Ansi.reset
               (* The loader's message already names what failed ("... load
                  failed: ..."), so the row carries it as it came. *)
-              | Masc_tui_types.Approval_failed cause
-              | Masc_tui_types.Approval_stale cause ->
+              | Masc_tui_approvals_model.Approval_failed cause
+              | Masc_tui_approvals_model.Approval_stale cause ->
                   data_unreliable_row ~cols (Terminal_text.single_line cause)
-              | Masc_tui_types.Approval_unavailable detail ->
+              | Masc_tui_approvals_model.Approval_unavailable detail ->
                   data_unreliable_row ~cols
                     (Printf.sprintf "%s unavailable: %s" name
                        (Terminal_text.single_line detail)))
@@ -1491,10 +1491,10 @@ let render_approvals (state : state) =
        a path like any other, and a measurement taken off the raw field would
        size the column to control characters the screen never draws. *)
     let approval_row_name = function
-      | Operator_row a -> Terminal_text.single_line a.ap_actor
-      | Keeper_tool_row held ->
+      | Masc_tui_approvals_model.Operator_row a -> Terminal_text.single_line a.ap_actor
+      | Masc_tui_approvals_model.Keeper_tool_row held ->
         Terminal_text.single_line held.Tui_decode.kta_keeper
-      | Gate_row pending ->
+      | Masc_tui_approvals_model.Gate_row pending ->
         Terminal_text.single_line pending.Tui_decode.gp_keeper
     in
     let name_width =
@@ -1511,7 +1511,7 @@ let render_approvals (state : state) =
         let line =
           match Rows.at approvals_window idx with
           | None -> ""
-          | Some (Operator_row a) ->
+          | Some (Masc_tui_approvals_model.Operator_row a) ->
               let target_id =
                 Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value a.ap_target_id
               in
@@ -1520,7 +1520,7 @@ let render_approvals (state : state) =
                 (fit_width (Terminal_text.single_line a.ap_action_type) 20)
                 (fit_width (Terminal_text.single_line a.ap_target_type) 16)
                 target_id
-          | Some (Keeper_tool_row held) ->
+          | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
               (* The remaining wait, not the age: this row disappears on its
                  own when it runs out, and what an operator weighs is how
                  long they still have. *)
@@ -1539,7 +1539,7 @@ let render_approvals (state : state) =
                 (Terminal_text.single_line held.kta_question ^ " — "
                 ^ Terminal_text.single_line_or ~default:"(not provided)"
                     held.kta_because)
-          | Some (Gate_row pending) ->
+          | Some (Masc_tui_approvals_model.Gate_row pending) ->
               (* The age is not worker duration. A durable row survives after
                  Auto Judge hands off to a human or fails, so pair age with
                  the canonical phase instead of calling every row waiting. *)
@@ -1605,7 +1605,7 @@ let render_question_reader (state : state) =
   box_top buf cols;
   box_line buf cols (screen_title
     (" MASC Approvals / Questions"
-     ^ approval_list_note ~name:"questions" (approvals_questions_reading state)));
+     ^ Masc_tui_approvals_model.approval_list_note ~name:"questions" (Masc_tui_approvals_model.approvals_questions_reading state)));
   box_line buf cols
     (match selected with
      | None -> "  No questions waiting"
@@ -14488,7 +14488,7 @@ let render_surface (state : state) =
          something the queue no longer holds. *)
       (match
          if state.approval_detail_open then
-           List.nth_opt (approval_items state) state.approval_cursor
+           List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor
          else None
        with
        | Some row -> render_approval_detail state row
@@ -15502,7 +15502,7 @@ let render (state : state) =
     let presented_approval =
       match state.view with
       | Approvals ->
-          List.nth_opt (approval_items state) state.approval_cursor
+          List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor
       | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
       | Planning
       | Schedules | Verification | Harness | Fusion | Repositories | Changes

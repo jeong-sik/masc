@@ -3162,178 +3162,8 @@ let launch_resource_read state ~mailbox ~uri =
    selection. *)
 (* The scope, as the two optional query axes the fetchers take. The match
    is exhaustive: a fourth scope must decide its axis here. *)
-let code_scope_axes_of = function
-  | Code_scope_project -> (None, None)
-  | Code_scope_keeper keeper -> (Some keeper, None)
-  | Code_scope_repo repo -> (None, Some repo)
-
-let code_scope_axes state = code_scope_axes_of state.code_scope
-
-let launch_code_entries_load state ~mailbox =
-  let enqueue_async = workspace_enqueue state in
-  (* Read here, not inside the daemon. The daemon runs later, and the scope it
-     read then was whichever one was current by then -- so a request made in
-     one scope could be sent under another. *)
-  let scope = state.code_scope in
-  let dir = state.code_dir in
-  (* One listing per key. A request for the key already loading is not sent
-     twice; a request for any other key is, and the answer to the one it
-     replaced is dropped when it lands. *)
-  match
-    Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_listing
-      ~key:(scope, dir)
-  with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (listing, request) -> (
-      state.code_listing <- listing;
-      let host = server_peer_host in
-      let port = state.port in
-      Masc_tui_async_read.launch
-        ~deliver:(fun result ->
-          enqueue_async mailbox (Code_entries_loaded (request, result)))
-        (fun () ->
-          let keeper, repo = code_scope_axes_of scope in
-          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-            ~path:dir ()))
-
-let launch_code_file_load state ~mailbox ~path =
-  let enqueue_async = workspace_enqueue state in
-  match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-  state.code_file <- next;
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Code_file_loaded (request, result)))
-    (fun () ->
-      let keeper, repo = code_scope_axes state in
-      Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
-
-(* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
-let code_history_limit = 50
-
-(* What the working tree is compared against, everywhere a tree diff is
-   read. *)
 let tree_diff_base_ref = "HEAD"
 
-let code_file_activity_address scope path =
-  match scope with
-  | Code_scope_repo repo_id -> Ok (Some repo_id, path)
-  | Code_scope_keeper _ -> (
-      match Playground_paths.parse_bundle_relative_repo_path path with
-      | Some (repo_id, relative_path) -> Ok (Some repo_id, relative_path)
-      | None ->
-        Error
-          "this Keeper file is outside a registered repository clone, so it has no shared repository address")
-  | Code_scope_project -> Ok (None, path)
-
-let code_history_entry_at_ms = function
-  | Hist_commit (row : Masc.Tui_decode.git_log_row) -> row.gl_at_ms
-  | Hist_keeper_change (change : Masc.Tui_decode.file_change) ->
-    change.fc_at *. 1000.
-
-let launch_code_history_load state ~mailbox ~path =
-  let enqueue_async = workspace_enqueue state in
-  let scope = state.code_scope in
-  match
-    Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_history
-      ~key:(scope, path)
-  with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-  state.code_history <- next;
-  let host = server_peer_host in
-  let port = state.port in
-  let activity_address = code_file_activity_address scope path in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Code_history_loaded (request, result)))
-    (fun () ->
-      let keeper, repo = code_scope_axes_of scope in
-      match
-        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
-          ~limit:code_history_limit ()
-      with
-      | Error detail -> Error detail
-      | Ok commits ->
-          let changes, chl_activity_note =
-            match activity_address with
-            | Error detail -> [], "Keeper activity unavailable: " ^ detail
-            | Ok (repo_id, file_path) -> (
-                match
-                  Masc_tui_http.fetch_ide_file_activity
-                    ~host ~port ~repo_id ~file_path
-                with
-                | Error detail ->
-                  [], "Keeper activity unavailable: " ^ detail
-                | Ok snapshot ->
-                  let incomplete =
-                    snapshot.fas_incomplete_over_budget
-                    + snapshot.fas_incomplete_malformed
-                  in
-                  let unattributed =
-                    snapshot.fas_unattributed_over_budget
-                    + snapshot.fas_unattributed_malformed
-                  in
-                  let missing_note =
-                    [ (if incomplete = 0
-                       then None
-                       else
-                         Some
-                           (Printf.sprintf
-                              "%d exact-address row%s incomplete"
-                              incomplete (if incomplete = 1 then "" else "s")))
-                    ; (if unattributed = 0
-                       then None
-                       else
-                         Some
-                           (Printf.sprintf
-                              "%d fleet row%s had no readable address"
-                              unattributed (if unattributed = 1 then "" else "s")))
-                    ]
-                    |> List.filter_map Fun.id
-                    |> function
-                    | [] -> ""
-                    | notes -> "; " ^ String.concat "; " notes
-                  in
-                  ( snapshot.fas_changes
-                  , Printf.sprintf
-                      "Keeper activity: %.0fh durable window, %d exact change%s%s"
-                      snapshot.fas_window_hours
-                      (List.length snapshot.fas_changes)
-                      (if List.length snapshot.fas_changes = 1 then "" else "s")
-                      missing_note ))
-          in
-          let chl_entries =
-            List.stable_sort
-              (fun a b ->
-                Float.compare (code_history_entry_at_ms b)
-                  (code_history_entry_at_ms a))
-              (List.map (fun c -> Hist_commit c) commits
-               @ List.map (fun change -> Hist_keeper_change change) changes)
-          in
-          Ok { chl_entries; chl_activity_note })
-
-let launch_code_diff_load state ~mailbox ~path =
-  let enqueue_async = workspace_enqueue state in
-  match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-  state.code_diff <- next;
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Code_diff_loaded (request, result)))
-    (fun () ->
-      let keeper, repo = code_scope_axes state in
-      Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
-        ~base_ref:tree_diff_base_ref ())
-
-(* The squash-merge convention leaves the PR number as the subject's last
-   "(#N)"; a subject without one truthfully has no PR to point at. *)
 let pr_number_of_subject subject =
   let n = String.length subject in
   let rec scan i best =
@@ -3362,59 +3192,6 @@ let pr_number_of_subject subject =
    keeper / repo axes the file itself was read through, so the margin
    describes the checkout on screen rather than whichever one the server
    would default to. *)
-let launch_code_blame_load state ~mailbox ~path =
-  let enqueue_async = workspace_enqueue state in
-  match Masc_tui_fetched.start ~equal:String.equal state.code_blame ~key:path with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-  state.code_blame <- next;
-  let host = server_peer_host in
-  let port = state.port in
-  let keeper, repo = code_scope_axes state in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Code_blame_loaded (request, result)))
-    (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
-
-(* Ask the language server about [symbol] on the pane's cursor line. The
-   question rides the surface's workspace axes, so a keeper checkout and a
-   repository ask about their own bytes. *)
-let start_code_lsp_question state ~mailbox ~(question : string)
-    ~(symbol : string) =
-  match Masc_tui_fetched.current_key state.code_file with
-  | None -> report_action state "error" "no file is open on the Code surface"
-  | Some path ->
-      (match Code_results.start_lsp_question state ~question ~symbol with
-       | None -> ()
-       | Some request ->
-          let query = Masc_tui_fetched.request_key request in
-          state.code_lsp_note <-
-            Some (Printf.sprintf "asking %s about %S" question symbol);
-          let host = server_peer_host in
-          let port = state.port in
-          let line = query.clq_line in
-          let keeper, repo = code_scope_axes state in
-          let run () =
-            let result =
-              try
-                Masc_tui_http.fetch_lsp_question ?keeper ?repo ~host ~port ~path
-                  ~line ~symbol ~question ()
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error (Printexc.to_string exn)
-            in
-            enqueue_async mailbox (Code_lsp_answered (request, result))
-          in
-          (match Eio_context.get_switch_opt () with
-           | Some sw ->
-               Eio.Fiber.fork_daemon ~sw (fun () ->
-                   run ();
-                   `Stop_daemon)
-           | None ->
-               enqueue_async mailbox
-                 (Code_lsp_answered
-                    (request, Error "Eio switch is unavailable"))))
-
 let account_login_resume_path state =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-account-login.json"
 
@@ -4892,8 +4669,8 @@ let open_repository_change_in_code state ~mailbox ~scope
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
   state.view <- Code;
-  launch_code_entries_load state ~mailbox;
-  launch_code_file_load state ~mailbox ~path:change.rc_path
+  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox);
+  Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) ~path:change.rc_path
 
 (* Where the change is on this machine.
 
@@ -6095,7 +5872,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
-   | Code -> launch_code_entries_load state ~mailbox
+   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
    | Metrics ->
        (* Usage is the top-level account reading. Explicit telemetry entry
           opts into diagnostics after navigation, rather than inheriting it. *)
@@ -14275,7 +14052,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
                ~height:(Masc_tui_render_code.code_pane_content_height state)
                state.code_file_scroll
-       | Code_results.Load_file path -> launch_code_file_load state ~mailbox ~path)
+       | Code_results.Load_file path -> Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) ~path)
   | Code_diff_loaded (request, result) ->
       Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
@@ -20950,8 +20727,7 @@ and is loaded on demand through keeper_skill.
                   (match chosen with
                   | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
-                      start_code_lsp_question state
-                        ~mailbox:async_messages ~question ~symbol
+                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state) ~question ~symbol
                   | Some _ | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
@@ -20964,7 +20740,7 @@ and is loaded on demand through keeper_skill.
                       "hover, def and refs ask about the file open on the \
                        Code surface"
                   else
-                    start_code_lsp_question state ~mailbox:async_messages
+                    Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
                       ~question ~symbol)
             | "\r" ->
                 let matches = Masc_tui_palette.palette_matches state in
@@ -21053,7 +20829,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                    ->
-                     start_code_lsp_question state ~mailbox:async_messages
+                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
                        ~question ~symbol
                  | None -> ())
             | "down" | "\014" -> move_palette 1
@@ -21932,8 +21708,8 @@ and is loaded on demand through keeper_skill.
             | Some repo_id, Some (change, relative_path) ->
                 let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
                 enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
-                launch_code_entries_load state ~mailbox:async_messages;
-                launch_code_file_load state ~mailbox:async_messages ~path
+                Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
+                Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path
             | None, _ | _, None -> ())
        | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
@@ -22917,7 +22693,7 @@ and is loaded on demand through keeper_skill.
                 if scope_changed || dir_changed then begin
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  launch_code_entries_load state ~mailbox:async_messages
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end;
                 (match file with
                  | None ->
@@ -22934,8 +22710,7 @@ and is loaded on demand through keeper_skill.
                         [start] collapses a repeat of the read in flight. *)
                      | Some _ | None ->
                          state.code_target_line <- Some (cursor + 1);
-                         launch_code_file_load state
-                           ~mailbox:async_messages ~path)))
+                         Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)))
        | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some (Masc_tui_fetched.current_key state.code_file)
@@ -22958,7 +22733,7 @@ and is loaded on demand through keeper_skill.
                 state.code_lsp_note <-
                   Some "the cursor line has no name to ask about"
             | [ symbol ] ->
-                start_code_lsp_question state ~mailbox:async_messages
+                Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
                   ~question ~symbol
             | _ :: _ :: _ ->
                 state.palette_open <- true;
@@ -22988,7 +22763,7 @@ and is loaded on demand through keeper_skill.
                    operator makes when a slow blame is taking too long. *)
                 if Option.is_some (Masc_tui_fetched.current state.code_blame)
                 then state.code_blame <- Masc_tui_fetched.clear state.code_blame
-                else launch_code_blame_load state ~mailbox:async_messages ~path)
+                else Masc_tui_code_requests.launch_blame_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open && not state.repository_changes_open ->
@@ -23033,7 +22808,7 @@ and is loaded on demand through keeper_skill.
                    | Some (loaded_path, _)
                      when String.equal loaded_path path -> ()
                    | Some _ | None ->
-                       launch_code_diff_load state ~mailbox:async_messages
+                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~base_ref:tree_diff_base_ref
                          ~path)
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
@@ -23070,8 +22845,7 @@ and is loaded on demand through keeper_skill.
                    | Some key when code_scope_path_equal key (state.code_scope, path)
                      -> ()
                    | Some _ | None ->
-                       launch_code_history_load state
-                         ~mailbox:async_messages ~path)
+                       Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
                 end)
        | Some "o" when state.view = Board ->
            (match state.board_mode with
@@ -23716,7 +23490,7 @@ and is loaded on demand through keeper_skill.
              refresh_repository_changes state ~mailbox:async_messages
            else
            (match state.view with
-            | Code -> launch_code_entries_load state ~mailbox:async_messages
+            | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
             | Keepers Keeper_list ->
                 launch_keeper_lanes_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
@@ -23878,7 +23652,7 @@ and is loaded on demand through keeper_skill.
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  launch_code_entries_load state ~mailbox:async_messages
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   (* Above a keeper's or a repository's root sits the
@@ -23886,7 +23660,7 @@ and is loaded on demand through keeper_skill.
                   set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  launch_code_entries_load state ~mailbox:async_messages
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end
                 else
                   (* Off-ring child: the way out of the project root is the
@@ -24094,13 +23868,13 @@ and is loaded on demand through keeper_skill.
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  launch_code_entries_load state ~mailbox:async_messages
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  launch_code_entries_load state ~mailbox:async_messages
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
@@ -25049,11 +24823,10 @@ and is loaded on demand through keeper_skill.
                         state.code_dir <- node.Masc.Tui_decode.wt_path;
                         state.code_cursor <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                        launch_code_entries_load state
-                          ~mailbox:async_messages
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                       end
                       else
-                        launch_code_file_load state ~mailbox:async_messages
+                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
             (* The picker's own arm takes Enter. *)
@@ -25228,8 +25001,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
-                        launch_code_entries_load state
-                          ~mailbox:async_messages))
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)))
             | Runtime -> Masc_tui_types.open_runtime_row_detail state
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
@@ -25591,9 +25363,8 @@ and is loaded on demand through keeper_skill.
                         state.code_target_line <-
                           Some (Masc.Tui_decode.file_change_target_line change);
                         state.view <- Code;
-                        launch_code_entries_load state
-                          ~mailbox:async_messages;
-                        launch_code_file_load state ~mailbox:async_messages
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
+                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                           ~path)))
        | Some "o" | Some "O" | Some "A" when state.view = Lanes ->
            launch_lane_addons state ~mailbox:async_messages

@@ -14,6 +14,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_code.mli",
     "bin/masc_tui_code_results.ml",
     "bin/masc_tui_code_results.mli",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
 )
 FILE = "notes/[draft](final).lua"
 AUTHOR = "AUTHORHEAD-`literal`-" + "a" * 110 + "-AUTHORTAIL"

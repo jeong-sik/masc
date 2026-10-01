@@ -3,7 +3,8 @@ import re
 import sys
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_code_results.ml", "bin/masc_tui_code_results.mli",
+SOURCE_MODULES = ("bin/masc_tui_code_requests.ml", "bin/masc_tui_code_requests.mli",
+                  "bin/masc_tui_code_results.ml", "bin/masc_tui_code_results.mli",
                   "bin/masc_tui.ml", "bin/masc_tui_render.ml",
                   "bin/masc_tui_types.ml", "bin/masc_tui_keys.ml")
 FILE_START = "가".encode()

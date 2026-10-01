@@ -10790,7 +10790,7 @@ let revoke_detail_readings state =
   state.connector_unbind_offer <- None;
   state.connector_unbind_armed <- None;
   state.connector_unbind_all_armed <- None;
-  state.identity_login_requests <- [];
+  Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs

@@ -6448,6 +6448,18 @@ let reconcile_detail_intent_origins (state : state) reading =
       end
 
 
+(* Keeper/provider keys do not include a workspace. Authority withdrawal must
+   retire both queued responses and consent already presented by that origin. *)
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)

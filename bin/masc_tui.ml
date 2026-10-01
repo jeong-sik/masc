@@ -3548,9 +3548,8 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
 let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Goal_timeline_loaded (goal_id, result)))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Goal_timeline_loaded (goal_id, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
 
 let launch_task_history_load state ~mailbox task_id =
@@ -4899,13 +4898,10 @@ let launch_lane_package_preview state ~mailbox path =
     | Ok installer ->
     state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
     let host=server_peer_host and port=state.port in
-    match Eio_context.get_switch_opt () with
-    | None -> enqueue_async mailbox (Lane_package_preview_loaded (generation,path,Error "Eio switch unavailable"))
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-        let result = try Masc_tui_http.get_json ~host ~port
-            ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)
-          with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_package_preview_loaded (generation,path,result)); `Stop_daemon))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Lane_package_preview_loaded (generation,path,result))
+      (fun () -> Masc_tui_http.get_json ~host ~port
+        ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
 
 let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
@@ -4927,13 +4923,9 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~headers:(Masc_tui_http.auth_headers ()) ~path:"/api/v1/lane-addons/declaration"
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
-    match Eio_context.get_switch_opt () with
-    | None -> map_lane_addons state (fun view -> {view with loading=false;error=(match request with Document.Read _ -> lane_addons_detail_failure "Eio switch unavailable" | Document.Save _ -> lane_addons_request_failure "Eio switch unavailable")})
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-        let result = try perform () with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, result))
+      perform)
 
 let launch_lane_subscriptions state ~mailbox request =
   let module Subs = Masc_tui_lane_subscriptions in
@@ -4945,17 +4937,11 @@ let launch_lane_subscriptions state ~mailbox request =
       let generation=state.lane_addons_generation in
       state.lane_addons <- Some {view with generation;loading=true;error=None};
       let host=server_peer_host and port=state.port in
-      let run () =
-        let result = try
-          Result.bind (Masc_tui_http.post_json ~host ~port
-            ~path:"/api/v1/lane-addons/subscriptions"
-            ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
-        with Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_subscriptions_loaded (generation,result)) in
-      (match Eio_context.get_switch_opt () with
-       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-       | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Lane_subscriptions_loaded (generation,result))
+        (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
+          ~path:"/api/v1/lane-addons/subscriptions"
+          ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
 
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
@@ -4977,6 +4963,14 @@ let launch_lane_addons state ~mailbox request =
     draft = None;action_menu=None;last_action;action_receipt;presentation } in
   state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let get_json ~path =
+    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+      (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
+  let post_json ~path ~body =
+    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+      (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let perform () =
     let ( let* ) = Result.bind in
     let inventory_result result = Result.map_error (fun detail -> `Inventory detail) result in
@@ -4987,7 +4981,7 @@ let launch_lane_addons state ~mailbox request =
        lar_diagnostic=diagnostic;lar_inventory_read=inventory_read} in
     let inspect () =
       try
-        let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
+        let* json = get_json ~path:"/api/v1/lane-addons" in
         Addons.decode json
       with Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Printexc.to_string exn) in
@@ -4996,13 +4990,13 @@ let launch_lane_addons state ~mailbox request =
         let* snapshot = inventory_result (inspect ()) in
         Ok (reply ~snapshot ~inventory_read:`Read ())
     | Addons.Subscriptions args ->
-        let* json=request_result (Masc_tui_http.post_json ~host ~port
+        let* json=request_result (post_json
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string args)) in
         Ok (reply ~receipt:json ())
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
-        let* json = detail_result (Masc_tui_http.get_json ~host ~port
+        let* json = detail_result (get_json
           ~path:("/api/v1/lane-addons/slice?" ^ query)) in
         let* previous, source = match view.snapshot with
           | Some snapshot -> Ok (snapshot, Cached_snapshot)
@@ -5020,10 +5014,10 @@ let launch_lane_addons state ~mailbox request =
               | Cached_snapshot -> Error (`Detail detail)))
     | Addons.Act action | Addons.Action_status action ->
         let* json = match request with
-          | Addons.Act _ -> request_result (Masc_tui_http.post_json ~host ~port
+          | Addons.Act _ -> request_result (post_json
               ~path:"/api/v1/lane-addons/actions"
               ~body:(Yojson.Safe.to_string (Addons.action_json action)))
-          | _ -> detail_result (Masc_tui_http.get_json ~host ~port
+          | _ -> detail_result (get_json
               ~path:("/api/v1/lane-addons/actions?instance_id="
               ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
               ^ Masc_tui_http.percent_encode_query_value action.request_id)) in
@@ -5038,25 +5032,17 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
           | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
-        let* receipt = request_result (Masc_tui_http.post_json ~host ~port
+        let* receipt = request_result (post_json
           ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body)) in
         (match inspect () with
          | Ok snapshot -> Ok (reply ~snapshot ~receipt ~inventory_read:`Read ())
          | Error detail -> Ok (reply ~receipt ~inventory_read:(`Failed detail) ()))
   in
-  match Eio_context.get_switch_opt () with
-  | None ->
-      let detail = "Eio switch unavailable" in
-      state.lane_addons <- Some (match lane_addons_request_failure_kind request with
-        | `Inventory -> {pending_view with loading=false;error=None;snapshot_read_error=Some detail}
-        | `Detail -> {pending_view with loading=false;error=lane_addons_detail_failure detail}
-        | `Request -> {pending_view with loading=false;error=lane_addons_request_failure detail})
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-      let result = try perform () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (lane_addons_failure_for_request request (Printexc.to_string exn)) in
-      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon))
+  launch_workspace_request state ~mailbox
+    ~boundary_error:(lane_addons_failure_for_request request)
+    ~deliver:(fun result -> Lane_addons_loaded (generation, result))
+    perform)
 
 let launch_browser_history state ~mailbox ~reload =
   match state.browser_history with
@@ -5227,23 +5213,9 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_inflight <- Some generation;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_runtime_surface ~host ~port ~force with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Runtime_surface_loaded (generation, result))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Runtime_surface_loaded
-                (generation, Error "Eio switch is unavailable")))
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Runtime_surface_loaded (generation, result))
+        (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force)
 
 let launch_repositories_load state ~mailbox =
   if state.repositories_inflight then ()
@@ -5869,12 +5841,9 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    Masc_tui_async_read.launch
-      ~source:Masc_tui_async_read.Standalone_lanes
-      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
-      ~deliver:(fun result ->
-        enqueue_async mailbox
-          (Standalone_lanes_loaded (standalone_generation, result)))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Standalone_lanes_loaded (standalone_generation,
+        Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result))
       (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
@@ -7500,22 +7469,10 @@ let launch_runtime_lane_write state ~mailbox ~written write =
   let host = server_peer_host in
   let port = state.port in
   state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
-  let run () =
-    let result =
-      try write ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_lane_slots_written (written, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_lane_slots_written (written, Error "Eio switch is unavailable"))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Runtime_lane_slots_written (written, result))
+    (fun () -> write ~host ~port)
+
 ;;
 
 (* [e] opens the runtime picker on the Runtime lanes reading, and the same
@@ -10534,14 +10491,9 @@ let launch_system_logs_load state ~mailbox =
     Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level
   in
-  let run_load () =
-    enqueue_async mailbox
-      (System_logs_loaded
-         (load_system_logs ~host ~port ?level ~limit:system_log_page ()))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_load
-  | None -> run_load ()
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> System_logs_loaded result)
+    (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
 
 let apply_fleet_safety_load state = function
   | Ok reading ->
@@ -11003,6 +10955,49 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  state.board_vote_armed <- None;
+  state.board_compose_armed <- false;
+  state.board_compose_reply_to <- None;
+  state.board_post_inflight <- false;
+  state.board_posts <- [];
+  state.board_detail <- Board_detail.clear state.board_detail;
+  state.board_list_reading <- Board_list_unread;
+  state.board_list_error <- None;
+  state.board_mode <- Board_list;
+  state.goal_action_armed <- None;
+  state.goal_action_error <- None;
+  state.planning <- None;
+  state.planning_baseline <- None;
+  state.planning_mode <- Planning_list;
+  state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
+  state.goals_to_confirm <- Masc_tui_agenda.Not_read;
+  state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
+  state.standalone_lanes <- None;
+  state.standalone_lanes_error <- None;
+  state.standalone_lanes_inflight <- false;
+  state.standalone_lanes_reread_pending <- false;
+  state.runtime_surface_generation <- state.runtime_surface_generation + 1;
+  state.runtime_surface_inflight <- None;
+  state.runtime_surface_force_pending <- false;
+  state.runtime_surface <- None;
+  state.runtime_surface_error <- None;
+  state.runtime_detail_target <- None;
+  state.runtime_lane_pick <- None;
+  state.runtime_lane_name_draft <- None;
+  state.runtime_lane_remove_armed <- None;
+  state.runtime_lane_cursor_after_write <- None;
+  state.runtime_lane_notice <- None;
+  state.runtime_lane_write <- Lane_write_idle;
+  state.slot_editor <- None;
+  state.system_logs <- None;
+  state.system_logs_error <- None;
+  state.system_logs_cursor <- 0;
+  state.system_logs_scroll <- 0;
+  state.system_logs_detail_seq <- None;
+  state.system_logs_detail_scroll <- 0;
+  state.lane_addons_generation <- state.lane_addons_generation + 1;
+  state.lane_addons <- None;
+  state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -12044,24 +12039,9 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
   | Board_detail.Started (detail, request) ->
     state.board_detail <- detail;
     let full_history = state.board_history_post_id = Some post_id in
-    let load_result () =
-      try load_board_post ~full_history ~host ~port ~post_id () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    let run_refresh () =
-      try
-        enqueue_async mailbox (Board_post_refresh_done (request, load_result ()))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-          enqueue_async mailbox
-            (Board_post_refresh_done
-               (request, Error (Printexc.to_string exn)))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork ~sw run_refresh
-    | None -> apply_board_post_load state request (load_result ())
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Board_post_refresh_done (request, result))
+      (fun () -> load_board_post ~full_history ~host ~port ~post_id ())
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
@@ -12629,18 +12609,12 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth (
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
-  let run_post () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; result })
+    (fun () ->
       match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox
-      (Board_new_post_done { reply_to = None; sent_draft; result })
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_post
-  | None -> run_post ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 
@@ -12655,20 +12629,15 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
        (Goal_phase.Public_action.to_string action));
   let host = server_peer_host in
   let port = state.port in
-  let run_transition () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Goal_transition_done result)
+    (fun () ->
       match
         Masc_tui_http.post_goal_transition ~host ~port ~goal_id ~action
           ~note:None
       with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox (Goal_transition_done result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_transition
-  | None -> run_transition ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)
@@ -12676,7 +12645,6 @@ let handle_goal_confirmation_key state ~mailbox =
   match state.planning_mode with
   | Planning_list -> ()
   | Planning_detail goal_id ->
-      with_async_switch state ~action:"Goal confirmation" @@ fun sw ->
       let host = server_peer_host and port = state.port in
       state.goal_action_armed <- None;
       (match state.goal_confirmation with
@@ -12686,8 +12654,9 @@ let handle_goal_confirmation_key state ~mailbox =
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
-           Eio.Fiber.fork ~sw (fun () ->
-             let result =
+           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+             ~deliver:(fun result -> Goal_confirmation_submitted result)
+             (fun () ->
                let ( let* ) = Result.bind in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
                let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
@@ -12696,8 +12665,7 @@ let handle_goal_confirmation_key state ~mailbox =
                  when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
                    Ok "completion confirmed"
                | _ -> Error "goal confirmation: server did not confirm completion"
-             in
-             enqueue_async mailbox (Goal_confirmation_submitted result))
+             )
        | Loading -> ()
        (* A confirmation read before a failed re-read is not the goal's
           current state; confirming it would act on what the server no longer
@@ -12710,16 +12678,16 @@ let handle_goal_confirmation_key state ~mailbox =
                 state.goal_confirmation <- Goal_confirmation.Inspecting loading;
                 state.goal_action_error <- None;
                 state.planning_scroll <- 0;
-                Eio.Fiber.fork ~sw (fun () ->
-                  let result =
+                launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+                  ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
+                  (fun () ->
                     let ( let* ) = Result.bind in
                     let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
                     let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
                     match confirmation.phase with
                     | Goal_phase.Awaiting_confirmation -> Ok confirmation
                     | _ -> Error "goal is not awaiting confirmation"
-                  in
-                  enqueue_async mailbox (Goal_confirmation_loaded (request, result)))))
+                  )))
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
    same press again submits it, and any other key disarms. *)
@@ -12766,18 +12734,12 @@ let start_board_comment state ~mailbox ~(post_id : string)
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
-  let run_comment () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; result })
+    (fun () ->
       match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox
-      (Board_new_post_done { reply_to = Some post_id; sent_draft; result })
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_comment
-  | None -> run_comment ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 (* Send a vote through the tools route. The voter is stamped by the route,
@@ -12792,17 +12754,12 @@ let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let host = server_peer_host in
   let port = state.port in
-  let run_vote () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_vote_done result)
+    (fun () ->
       match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox (Board_vote_done result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_vote
-  | None -> run_vote ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 (* The vote keys on the list row under the cursor. Two presses: the first
@@ -19430,6 +19387,9 @@ and is loaded on demand through keeper_skill.
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~action ~stem ~post =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -19446,7 +19406,9 @@ and is loaded on demand through keeper_skill.
             report_action state "error"
               (action ^ ": body is not JSON: " ^ message)
           | `Assoc _ ->
-            (match post declaration with
+            (match Result.bind
+               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (fun () -> post declaration) with
              | Error detail -> report_action state "error" (action ^ ": " ^ detail)
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with

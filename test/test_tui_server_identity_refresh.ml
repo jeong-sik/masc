@@ -36,13 +36,18 @@ let test_workspace_identity_matches_canonical_paths () =
   let dir = Filename.temp_file "tui-workspace-identity-" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
+  Unix.mkdir (Filename.concat dir ".masc") 0o755;
   let alias = dir ^ "-alias" in
   Fun.protect
     ~finally:(fun () ->
       (try Sys.remove alias with Sys_error _ -> ());
+      Unix.rmdir (Filename.concat dir ".masc");
       Unix.rmdir dir)
     (fun () ->
        Unix.symlink dir alias;
+       Alcotest.(check bool) "same canonical base and runtime root retain request authority" true
+         (Masc_tui_types.server_workspace_matches ~expected:(Some (identity alias))
+            (Ok (identity dir)));
        match
          Masc_tui_types.workspace_identity_of_refresh
            ~local_base_path:alias

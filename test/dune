@@ -3749,6 +3749,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_voice_wizard_session
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
@@ -3998,7 +3999,7 @@
 (test
  (name test_tui_workspace_entries)
  (modules test_tui_workspace_entries)
- (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types))
+ (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types masc_tui_code_results))
 
 (test
  (name test_tui_acting)
@@ -7840,6 +7841,14 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(alias
+ (name runtest-test_tui_voice_wizard_pty)
+ (deps (alias runtest-test_tui_keyboard_input-voice-wizard)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_voice_wizard_pty)))
 
 (include stanzas/test_candle_appraisal_flow.inc)
 

@@ -13816,7 +13816,7 @@ let voice_body_line_styled buf cols ~style content =
   List.iter (box_line_styled buf cols ~style) (voice_body_rows cols content)
 ;;
 
-let render_voice_wizard (state : state) (session : voice_wizard_session) =
+let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
@@ -13881,7 +13881,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
      box_line head cols
        (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
              (Terminal_text.single_line session.vws_input)) Ansi.reset
-          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
   (match session.vws_step with
    | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
    | Voice_wizard.Model | Voice_wizard.Voice ->

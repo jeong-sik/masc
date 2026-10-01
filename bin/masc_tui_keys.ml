@@ -1276,9 +1276,9 @@ let code_notes_bindings =
 let code_history_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Act "H" "close"
   ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]

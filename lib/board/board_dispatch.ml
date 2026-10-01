@@ -274,6 +274,26 @@ let emit_board_sse_event event =
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
+(* A write that raises no [board_sse_event] -- an edit, a thread change, a pin,
+   a close, a reopen, a delete -- still changes what a projection of the store
+   answers. The composition root hangs the dropping of those projections here. *)
+let board_write_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
+let set_board_write_hook hook =
+  Atomic.set board_write_hook (Some hook)
+
+let emit_board_write () =
+  match Atomic.get board_write_hook with
+  | Some hook -> Safe_ops.protect ~default:() hook
+  | None -> ()
+
+(* The hook runs for a write the store took, not for one it refused. *)
+let after_write = function
+  | Ok _ as written ->
+    emit_board_write ();
+    written
+  | Error _ as refused -> refused
+
 (* The non-positive MASC_BOARD_COMMENT_COUNT_CAP opt-out stays allowed, but
    it must not stay silent (wool-nova FAIL issuecomment-5860167607, P2):
    emit [Limits.cap_warning_message] once at JSONL backend load -- from
@@ -304,7 +324,8 @@ let reset_for_test () =
   Atomic.set backend_state Uninitialized;
   Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
   Atomic.set board_signal_hook None;
-  Atomic.set board_sse_hook None
+  Atomic.set board_sse_hook None;
+  Atomic.set board_write_hook None
 
 let backend () =
   match Atomic.get backend_state with
@@ -446,8 +467,11 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
       match Board.update_post_with_outcome store ~post_id ~editor ~content ?title
         ?body ?new_author () with
       | Error _ as error -> error
-      | Ok (post, false) -> Ok post
+      | Ok (post, false) ->
+        emit_board_write ();
+        Ok post
       | Ok (post, true) ->
+        emit_board_write ();
         match Board.audience_for_post ~visibility:post.visibility
             ~title:post.title ~content:post.body with
         | Error error -> Error error
@@ -822,23 +846,24 @@ let list_hearths ?(exclude_system = false) ?(exclude_automation = false) () =
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with
-  | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
+  | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id |> after_write
 
 let set_pinned ~post_id ~pinned =
   match backend () with
-  | Jsonl store -> Board.set_pinned store ~post_id ~pinned
+  | Jsonl store -> Board.set_pinned store ~post_id ~pinned |> after_write
 
 let set_closed ~post_id ~closed_by ~successor ~summary () =
   match backend () with
-  | Jsonl store -> Board.set_closed store ~post_id ~closed_by ~successor ~summary ()
+  | Jsonl store ->
+    Board.set_closed store ~post_id ~closed_by ~successor ~summary () |> after_write
 
 let reopen ~post_id =
   match backend () with
-  | Jsonl store -> Board.reopen store ~post_id
+  | Jsonl store -> Board.reopen store ~post_id |> after_write
 
 let delete_post ~post_id =
   match backend () with
-  | Jsonl store -> Board.delete_post store ~post_id
+  | Jsonl store -> Board.delete_post store ~post_id |> after_write
 
 let search ~query ~limit =
   match backend () with

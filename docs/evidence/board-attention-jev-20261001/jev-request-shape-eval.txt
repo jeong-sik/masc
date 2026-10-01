@@ -1,0 +1,46 @@
+Jev request shape evaluation, 2026-10-01 (KST). Board text is not included; the repo is public.
+
+1. Probe (jev_fanout_probe.py): 3 events x 24 keepers.
+   fan-out: http=200 0.28s request_bytes=24913 usage={'input_tokens': 6384, 'output_tokens': 1152} answers=24
+   fan-out: http=200 0.31s request_bytes=23313 usage={'input_tokens': 5861, 'output_tokens': 1149} answers=24
+   fan-out: http=200 0.55s request_bytes=23074 usage={'input_tokens': 5769, 'output_tokens': 1154} answers=24
+   TOTAL {"fan_s": 1.1416704654693604, "single_s": 19.412955284118652, "fan_in": 18014, "single_in": 83780, "agree": 59, "pairs": 72, "fan_calls": 3, "single_calls": 72}
+   fan-out = one request, state {signal}, one question per keeper naming its interests;
+   single = production shape, state {keeper_role, items[0]}, one question.
+
+2. Variants on the first event (jev_fanout_variants.py): agreement with the single shape
+   variant B http=200 0.33s bytes=26931 usage={'input_tokens': 7680, 'output_tokens': 1153}
+   agreement with single: C 16/24  B 14/24
+   C = one question per request in the fan-out wording; B = many questions, single-like wording.
+   C matched the fan-out answers on 23 of 24 keepers, so the difference comes from the state shape, not the question count.
+
+3. Blind evaluation (jev_fanout_eval.py): 10 more events, 228 keeper pairs, 26 disagreements
+   between production and the fan-out shape. A separate Claude subagent judged the 26 cases blind,
+   with the production rule (config/prompts/judge.md) and without either method's answer.
+   agrees with the judge: fan-out 23/26, production 3/26; on the 20 confident verdicts: fan-out 19, production 1.
+   code-reviewer          prod=not_relevant/exact_attempt:None fan=relevant:0.2 judge=not_relevant confident=True
+   context-reviewer       prod=relevant/vendor_system_one:0.31 fan=not_relevant:0.26 judge=not_relevant confident=True
+   context-reviewer       prod=relevant/vendor_system_one:0.42 fan=not_relevant:0.45 judge=not_relevant confident=True
+   context-reviewer       prod=relevant/vendor_system_one:0.47 fan=not_relevant:0.22 judge=not_relevant confident=True
+   e-masc-the-leader      prod=relevant/vendor_system_one:0.66 fan=not_relevant:0.1 judge=not_relevant confident=False
+   e-masc-the-leader      prod=relevant/vendor_system_one:0.76 fan=not_relevant:0.44 judge=relevant confident=False
+   goo-yang-bong          prod=relevant/vendor_system_one:0.44 fan=not_relevant:0.35 judge=not_relevant confident=True
+   hole-finder            prod=relevant/exact_attempt:None fan=not_relevant:0.48 judge=not_relevant confident=True
+   hole-finder            prod=relevant/exact_attempt:None fan=not_relevant:0.67 judge=not_relevant confident=False
+   hole-finder            prod=relevant/vendor_system_one:0.53 fan=not_relevant:0.24 judge=not_relevant confident=True
+   jazz-developer         prod=relevant/vendor_system_one:0.69 fan=not_relevant:0.27 judge=not_relevant confident=True
+   masc-pro-builder       prod=relevant/vendor_system_one:0.38 fan=not_relevant:0.66 judge=not_relevant confident=True
+   masc-pro-builder       prod=relevant/vendor_system_one:0.41 fan=not_relevant:0.6 judge=not_relevant confident=True
+   masc-pro-builder       prod=relevant/vendor_system_one:0.42 fan=not_relevant:0.43 judge=not_relevant confident=True
+   masc-pro-builder       prod=relevant/vendor_system_one:0.78 fan=not_relevant:0.31 judge=not_relevant confident=True
+   ocaml-agent-ic         prod=relevant/vendor_system_one:0.33 fan=not_relevant:0.86 judge=not_relevant confident=False
+   ocaml-agent-ic         prod=relevant/vendor_system_one:0.72 fan=not_relevant:0.79 judge=not_relevant confident=True
+   ocaml-agent-ic         prod=relevant/vendor_system_one:0.75 fan=not_relevant:0.66 judge=not_relevant confident=True
+   ocaml-refactor-woman   prod=relevant/vendor_system_one:0.69 fan=not_relevant:0.85 judge=not_relevant confident=True
+   pr-updater             prod=relevant/vendor_system_one:0.38 fan=not_relevant:0.24 judge=not_relevant confident=True
+   rondo                  prod=relevant/vendor_system_one:0.38 fan=not_relevant:0.81 judge=not_relevant confident=True
+   rondo                  prod=relevant/vendor_system_one:0.48 fan=not_relevant:0.6 judge=not_relevant confident=True
+   rondo                  prod=relevant/vendor_system_one:0.7 fan=not_relevant:0.25 judge=not_relevant confident=True
+   rondo                  prod=relevant/vendor_system_one:0.9 fan=not_relevant:0.15 judge=not_relevant confident=False
+   rondo                  prod=relevant/vendor_system_one:0.93 fan=not_relevant:0.36 judge=not_relevant confident=True
+   tui-developer          prod=not_relevant/vendor_system_one:0.69 fan=relevant:0.42 judge=not_relevant confident=False

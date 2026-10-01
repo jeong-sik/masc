@@ -41,6 +41,9 @@ val plain_log_header : string
 val plain_log_row : time:string -> Tui_decode.log_entry -> string
 (** One observed turn. The tools that ran follow the last named column,
     unbounded, so nothing after it can be pushed. *)
+val log_entry_rows : width:int -> time:string -> Tui_decode.log_entry -> string list
+(** Full observed facts, wrapped in display cells. Entries retain their own
+    field order; callers order entries newest first before slicing rows. *)
 val context_summary : Tui_decode.context_observation -> context_summary
 val context_header_item :
   max_cells:int -> inspect_key:string -> Tui_decode.context_observation -> string option

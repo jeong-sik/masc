@@ -1699,9 +1699,10 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) :
+let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
     (int * string, string) result =
-  http_get ~host ~port ~path:"/api/v1/gate/keepers?detailed=true"
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+    ^ percent_encode_path_segment expected_workspace)
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -2069,8 +2070,17 @@ let post_dashboard_gate_resolve ~(host : string) ~(port : int)
     every field again, so this never turns a refresh race into a retry of a
     different external effect. *)
 let post_dashboard_gate_retry ~(host : string) ~(port : int)
-    ~(request : Yojson.Safe.t) : (unit, string) result =
-  let body = Yojson.Safe.to_string request in
+    ~(request : Yojson.Safe.t) ~(expected_workspace : Tui_decode.server_identity)
+    : (unit, string) result =
+  let ( let* ) = Result.bind in
+  let* fields = match request with
+    | `Assoc fields when not (List.mem_assoc "expected_workspace" fields) -> Ok fields
+    | _ -> Error "gate retry request must be an unbound object"
+  in
+  let body = Yojson.Safe.to_string (`Assoc
+    (("expected_workspace", `Assoc
+      [ "base_path", `String expected_workspace.sid_base_path
+      ; "masc_root", `String expected_workspace.sid_masc_root ]) :: fields)) in
   match post_json ~host ~port ~path:"/api/v1/dashboard/gate/retry" ~body with
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate retry" json

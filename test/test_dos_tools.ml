@@ -701,9 +701,15 @@ let test_a_removed_keeper_lets_its_controller_go () =
      | Error e -> fail (Masc_domain.masc_error_to_string e));
     with_holder ~base_path Not_a_keeper "cao-cao" (fun () ->
       boot ~agent:"cao-cao" ~base_path "hello.com";
+      let departure =
+        match Auth.with_credential_transaction base_path (fun transaction ->
+          Keeper_dos_controller.holder_left ~transaction ~config
+            ~now:(Unix.gettimeofday ()) "cao-cao") with
+        | Ok departure -> departure
+        | Error error -> fail (Masc_domain.masc_error_to_string error)
+      in
       check bool "the next move cannot see that a removed Keeper left" true
-        (Option.is_none
-           (Keeper_dos_controller.holder_left ~config ~now:(Unix.gettimeofday ()) "cao-cao"));
+        (Option.is_none departure);
       check (result unit string) "removing a Keeper that holds nothing" (Ok ())
         (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
       check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
@@ -720,7 +726,12 @@ let test_a_removed_keeper_lets_its_controller_go () =
 let test_a_holder_departs_with_its_credential () =
   with_workspace (fun base_path ->
     let config = Workspace.default_config base_path in
-    let departure name at = Keeper_dos_controller.holder_left ~config ~now:at name in
+    let departure name at =
+      match Auth.with_credential_transaction base_path (fun transaction ->
+        Keeper_dos_controller.holder_left ~transaction ~config ~now:at name) with
+      | Ok departure -> departure
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
     let reason = function
       | None -> "still here"
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
@@ -774,13 +785,14 @@ let test_a_holder_departs_with_its_credential () =
       (reason (departure "visiting-operator" later));
     let config = Workspace.default_config base_path in
     (match
-       Keeper_dos_controller.before_call ~config ~who:"minsu" ~name:"masc_dos_pass"
+       Keeper_dos_controller.execute ~config ~who:"minsu" ~name:"masc_dos_pass"
          ~args:(`Assoc [ ("to", `String "operator") ])
+         ~run:(fun () -> fail "unreadable auth must refuse before the supplied operation")
      with
      | Error (Keeper_dos_controller.Seats_unknown _) -> ()
      | Error (Keeper_dos_controller.Refused message) ->
        failf "an unreadable auth config is not the caller's fault: %s" message
-     | Ok () -> fail "a pass went through with the auth config unreadable"))
+     | Ok _ -> fail "a pass went through with the auth config unreadable"))
 ;;
 
 (* A credential listing that fails is not an empty list: nobody can say who
@@ -793,13 +805,14 @@ let test_a_pass_is_refused_when_the_credentials_do_not_list () =
     Fs_compat.mkdir_p (Filename.dirname agents);
     Out_channel.with_open_bin agents (fun oc -> output_string oc "not a directory");
     match
-      Keeper_dos_controller.before_call ~config:(Workspace.default_config base_path)
+      Keeper_dos_controller.execute ~config:(Workspace.default_config base_path)
         ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
+        ~run:(fun () -> fail "unlisted credentials must refuse before the supplied operation")
     with
     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
     | Error (Keeper_dos_controller.Refused message) ->
       failf "a listing that failed is not the caller's fault: %s" message
-    | Ok () -> fail "a pass went through with the credentials unlisted")
+    | Ok _ -> fail "a pass went through with the credentials unlisted")
 ;;
 
 let keeper_pass ~base_path who target =

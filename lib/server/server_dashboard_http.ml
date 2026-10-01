@@ -462,8 +462,16 @@ let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(
           Error (Gone err)))
 ;;
 
-let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
+let dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by ~(args : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
+  let* args =
+    match Workspace.validate_expected_workspace ~config:workspace_config args with
+    | Ok args -> Ok args
+    | Error Workspace.Invalid_workspace_precondition ->
+        Error "invalid expected_workspace precondition"
+    | Error Workspace.Workspace_precondition_failed ->
+        Error "workspace precondition failed"
+  in
   let* fields =
     match args with
     | `Assoc fields -> Ok fields

@@ -2585,6 +2585,12 @@
 (include stanzas/test_sandbox_image_version.inc)
 (include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
+(include stanzas/test_credential_expiry.inc)
+(include stanzas/test_auth_token_prune_transaction.inc)
+(include stanzas/test_auth_token_rotation_transaction.inc)
+(include stanzas/test_auth_file_backed_transaction.inc)
+(include stanzas/test_auth_regular_read_boundary.inc)
+(include stanzas/test_auth_credential_index_authority.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_builtin_skill_judgement.inc)
@@ -6062,6 +6068,7 @@
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_chat_portrait.inc)
+
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -6378,7 +6385,7 @@
 (test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc masc.masc_schedule masc_tui_types))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -7973,6 +7980,18 @@
 (alias (name runtest) (deps (alias runtest-test_tui_agenda_navigation_pty)))
 
 (rule
+ (alias runtest-test_tui_work_rows_pty)
+ (deps test_tui_work_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_work_rows_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias (name runtest) (deps (alias runtest-test_tui_work_rows_pty)))
+
+(rule
+ (alias runtest-test_tui_usage_rows_pty)
+ (deps test_tui_usage_rows_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_usage_rows_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias (name runtest) (deps (alias runtest-test_tui_usage_rows_pty)))
+
+(rule
  (alias runtest-test_tui_client_connector_layout_pty)
  (deps test_tui_client_connector_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_client_connector_layout_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -8053,3 +8072,4 @@
  (libraries alcotest masc.sse_wire))
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+(include stanzas/test_play_current_credential_authority.inc)

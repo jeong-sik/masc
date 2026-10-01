@@ -3578,11 +3578,21 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
       let portrait =
-        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-        | Keeper_control.Present runtime ->
-            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
-              ~rows:pane_rows ~cols:keeper_roster_pane_cols
-        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+        match List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers with
+        | None -> None
+        | Some keeper ->
+          (match (keeper_reading state keeper).Keeper_control.liveness with
+           | Keeper_control.Present runtime ->
+             (match runtime.kr_portrait with
+              | Tui_decode.Ready equipment ->
+                Masc_tui_chat_portrait.shown ~name:keeper_name
+                  ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
+              | Tui_decode.Unavailable _ -> None)
+           | Keeper_control.Unobserved | Keeper_control.Absent
+           | Keeper_control.Invalid _ -> None)
       in
       let roster_rows = match portrait with
         | None -> pane_rows

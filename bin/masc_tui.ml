@@ -5463,6 +5463,7 @@ let enter_theme_filter state filter =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
@@ -6524,6 +6525,7 @@ let keeper_runtime_picker_action (list : Masc_tui_pick_list.t) key =
 let close_keeper_runtime_pick state =
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.detail_focus_recovery <- None;
   state.view <- Keepers Keeper_list
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
@@ -10053,7 +10055,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
    | _ -> ())
 
 let apply_server_identity_reading state reading =
-  Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -10069,9 +10070,11 @@ let apply_server_identity_reading state reading =
     | None, _ | Some _, Error _ -> false
   in
   if not same_item_authority then begin
+    Masc_tui_types.remember_keeper_detail_focus state;
     withdraw_keeper_items state;
     revoke_detail_readings state
   end;
+  Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous = state.workspace_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
@@ -10278,7 +10281,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
 (* Authority loss revokes every detail ticket. Resume the pane's current
    reading once authority returns; ordinary roster ticks retain its request. *)
 let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority =
-  if previous_authority != state.detail_read_authority && server_authority_ready state then begin
+  let restored_focus = Masc_tui_types.restore_keeper_detail_focus state in
+  if (restored_focus || previous_authority != state.detail_read_authority)
+     && server_authority_ready state then begin
     if state.connector_unbind_offer_pending <> [] then launch_connectors_load state ~mailbox;
     match state.view, state.detail_tab, selected_keeper state with
     | Keepers Keeper_detail, Detail_items, _ -> ()
@@ -22308,6 +22313,7 @@ and is loaded on demand through keeper_skill.
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
+           state.detail_focus_recovery <- None;
            state.view <- Keepers Keeper_list
        (* Ctrl-] follows the reference under the cursor, and Esc on the surface
           it lands on comes back. vim's tag key for the going; for the coming
@@ -23020,6 +23026,7 @@ and is loaded on demand through keeper_skill.
                      ring parent, loaded, same as Connectors and Lanes. *)
                   goto_surface state ~mailbox:async_messages Repositories
             | Keepers Keeper_detail ->
+                state.detail_focus_recovery <- None;
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
             (* The picker's own arm takes Esc. *)
@@ -23230,6 +23237,7 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
                 end
             | Keepers Keeper_detail ->
+                state.detail_focus_recovery <- None;
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
             | Keepers Keeper_logs | Keepers Keeper_calls ->

@@ -5188,6 +5188,8 @@ type state = {
   mutable detail_read_generation: int;
   (* Opaque workspace epoch shared by non-ticket detail loaders. *)
   mutable detail_read_authority: unit ref;
+  (* Navigation intent only: never a retained Keeper row or read authority. *)
+  mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -6214,6 +6216,9 @@ let reconcile_detail_intent_origins (state : state) reading =
                    && String.equal (canonical_path origin.sid_masc_root)
                         (canonical_path current.sid_masc_root))
         in
+        (match state.detail_focus_recovery with
+         | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
+         | Some _ | None -> ());
         if foreign state.connector_unbind_offer_origin then begin
           state.connector_unbind_offer_pending <- [];
           state.connector_unbind_offer_origin <- None
@@ -7422,6 +7427,35 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let remember_keeper_detail_focus state =
+  match state.detail_focus_recovery, state.view, state.workspace_identity,
+        state.server_identity, selected_keeper state with
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper ->
+      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+  | _ -> ()
+
+let restore_keeper_detail_focus state =
+  match state.detail_focus_recovery with
+  | None -> false
+  | Some (_, _, tab) when state.detail_tab <> tab ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (origin, name, tab)
+    when state.workspace_identity = Workspace_identity_match
+      && state.local_workspace = Local_workspace_read
+      && Option.is_none state.keepers_error
+      && server_workspace_matches ~expected:(Some origin)
+           (match state.server_identity with Some value -> Ok value | None -> Error "unread") ->
+      state.detail_focus_recovery <- None;
+      (match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers with
+       | None -> false
+       | Some cursor ->
+           state.keeper_cursor <- cursor;
+           state.detail_tab <- tab;
+           state.view <- Keepers Keeper_detail;
+           true)
+  | Some _ -> false
+
 let keeper_detail_target_matches state keeper_name =
   match selected_keeper state with
   | Some keeper -> String.equal keeper.k_name keeper_name
@@ -7953,6 +7987,7 @@ let create_state
   detail_reads = [];
   detail_read_generation = 0;
   detail_read_authority = ref ();
+  detail_focus_recovery = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

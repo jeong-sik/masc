@@ -159,10 +159,64 @@ let test_request_authority_requires_complete_current_identity () =
     (let incomplete = { before with sid_masc_root = "" } in
      Masc_tui_types.server_workspace_matches ~expected:(Some incomplete) (Ok incomplete))
 
+let test_detail_focus_waits_for_authoritative_roster () =
+  let open Masc_tui_types in
+  let origin = identity "/workspace/a" in
+  let keeper name : keeper = { k_origin = Tui_decode.Persisted_keeper; k_name = name;
+    k_paused = false; k_identity = Error "not needed for navigation"; k_activity = None } in
+  let suspended () =
+    let state = create_state ~workspace:"local" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+    state.workspace_identity <- Workspace_identity_match;
+    state.server_identity <- Some origin;
+    state.local_workspace <- Local_workspace_read;
+    state.keepers <- [keeper "other"; keeper "focused"];
+    state.keeper_cursor <- 1;
+    state.view <- Keepers Keeper_detail;
+    state.detail_tab <- Detail_instructions;
+    remember_keeper_detail_focus state;
+    state.keepers <- [];
+    state.keeper_cursor <- 0;
+    state.server_identity <- None;
+    state.workspace_identity <- Workspace_identity_unread;
+    state.local_workspace <- Local_workspace_unread;
+    state
+  in
+  let ready state keepers =
+    state.server_identity <- Some origin;
+    state.workspace_identity <- Workspace_identity_match;
+    state.local_workspace <- Local_workspace_read;
+    state.keepers <- keepers;
+    (* Model the loader's list fallback after untrusted rows were cleared. *)
+    state.view <- Keepers Keeper_list
+  in
+  let state = suspended () in
+  reconcile_detail_intent_origins state (Ok {origin with sid_masc_root=""});
+  Alcotest.(check bool) "incomplete identity cannot restore" false (restore_keeper_detail_focus state);
+  Alcotest.(check int) "navigation retains no untrusted rows" 0 (List.length state.keepers);
+  ready state [keeper "focused";keeper "other"];
+  state.keepers_error <- Some "roster unavailable";
+  Alcotest.(check bool) "failed roster cannot restore" false (restore_keeper_detail_focus state);
+  state.keepers_error <- None;
+  Alcotest.(check bool) "matching complete roster restores focus" true (restore_keeper_detail_focus state);
+  Alcotest.(check bool) "name and tab survive reorder" true
+    (state.view=Keepers Keeper_detail && state.keeper_cursor=0 && state.detail_tab=Detail_instructions);
+  Alcotest.(check bool) "restoration is consumed once" false (restore_keeper_detail_focus state);
+  let missing = suspended () in
+  ready missing [keeper "other"];
+  Alcotest.(check bool) "missing name cannot reopen another Keeper" false (restore_keeper_detail_focus missing);
+  Alcotest.(check bool) "trusted absence retires intent" true (missing.detail_focus_recovery=None);
+  let foreign = suspended () in
+  reconcile_detail_intent_origins foreign (Ok {origin with sid_masc_root="/workspace/a/foreign"});
+  ready foreign [keeper "focused"];
+  Alcotest.(check bool) "foreign store retires intent even after returning" false (restore_keeper_detail_focus foreign)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
+      , [ Alcotest.test_case "detail focus waits for authoritative roster" `Quick
+            test_detail_focus_waits_for_authoritative_roster
+        ; Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
             test_same_base_with_different_masc_root_cannot_restore_inputs
         ; Alcotest.test_case "request authority requires complete current identity" `Quick
             test_request_authority_requires_complete_current_identity

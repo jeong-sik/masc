@@ -12,6 +12,25 @@ the panel/judge computation into a package.
 
 ## Capture and install
 
+### Native host binding
+
+On hosts containing the native Fusion source, use
+[fusion-live-results.toml](../../docs/examples/lane-addons/fusion-live-results.toml).
+The source names the exact canonical Fusion run ID and reads its process-wide
+registry plus exact-origin Board evidence. No HTTP call or manually copied
+snapshot is needed. A registered Fusion state change nudges only matching
+installed sources; attach/explicit observe also captures the current run.
+
+Every observation is a frozen snapshot retained by the host. Source completeness
+describes that one capture, not all historical Fusion stages. Initially missing or unreadable runs reject Attach or configured reconciliation before a worker starts. If an admitted instance later loses authoritative run history, its next capture reports unavailable coverage with no fabricated rows.
+
+This subscription follows Fusion status publications, not later arbitrary edits
+or deletion of the Board card. Such mutations require explicit observe to
+capture a changed card; old snapshot evidence remains readable. A last completed
+output means last captured, not a continuously synchronized copy of the Board.
+
+### Explicit file capture
+
 1. Explicitly acquire one authorized
    `GET /api/v1/dashboard/fusion-runs/<exact-run-id>` response and save the JSON.
    Use the configured server address and its normal authentication.
@@ -73,3 +92,11 @@ partial input, failure and generic downstream composition.
 They do not establish Docker isolation, host installation, model execution,
 current-head PR CI success or production deployment. The CI image workflow
 discovers this package through lane.toml + Dockerfile.
+
+Native Fusion bindings attached by a Keeper are private to that authenticated
+Keeper. Inspect, retained slices, evidence export and instance operations keep
+that owner boundary after restart. Configured native Fusion sources retain the authoritative registry Keeper as
+their read owner, including when the operator performs reconciliation. A verified
+Keeper may save its own run declaration or use `masc_lane_attach`; neither path
+promotes the source into shared read authority. Downstream output consumers inherit
+that visibility, and HTTP local attribution alone cannot grant private access.

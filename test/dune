@@ -7334,12 +7334,12 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -7430,14 +7430,14 @@
 (test
  (name test_lane_addon_declaration)
  (modules test_lane_addon_declaration)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
  (deps ../addons/protocol.py ../addons/output-statistics/server.py
        ../addons/msx-observer/server.py ../addons/tests/test_packages.py)
- (libraries masc_test_deps masc.msx_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
 

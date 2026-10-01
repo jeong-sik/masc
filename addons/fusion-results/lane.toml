@@ -1,8 +1,8 @@
 id = "fusion-results"
-revision = "0.1.0"
+revision = "0.1.1"
 title = "Fusion results and retained evidence"
 contributions = ["observe", "derive"]
-image = "masc-lane-fusion-results:0.1.0"
+image = "masc-lane-fusion-results:0.1.1"
 command = ["python3", "server.py"]
 
 [world.outputs.status]
@@ -19,23 +19,48 @@ max_reply_bytes = 4194304
 
 [interface]
 refresh_policy = "source_changes"
-binding_schema = '''{
+# The typed source decoder requires path for snapshot_file and run_id for fusion_run.
+binding_schema = '''
+{
   "type": "object",
-  "required": ["sources"],
+  "required": [
+    "sources"
+  ],
   "additionalProperties": false,
   "properties": {
     "sources": {
-      "type": "array", "minItems": 1,
+      "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["source_id", "kind", "path"],
+        "required": [
+          "source_id",
+          "kind"
+        ],
         "additionalProperties": false,
         "properties": {
-          "source_id": {"type": "string", "minLength": 1},
-          "kind": {"type": "string", "const": "snapshot_file"},
-          "path": {"type": "string", "minLength": 1}
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "snapshot_file",
+              "fusion_run"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     }
   }
-}'''
+}
+'''

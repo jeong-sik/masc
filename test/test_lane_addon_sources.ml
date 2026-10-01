@@ -3,6 +3,7 @@ open Alcotest
 module Sources = Masc.Lane_addon_sources
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
+external unsetenv : string -> unit = "masc_test_unsetenv"
 let require = function Ok value -> value | Error error -> fail error
 let member = Yojson.Safe.Util.member
 let text json = Yojson.Safe.Util.to_string json
@@ -43,7 +44,7 @@ let test_file_rotation_keeps_exact_original_bytes () = with_store (fun dir store
     "evidence", `List [`Assoc ["uri", `String external_uri; "sha256", `Null]]]] in
   let bytes = "  \n" ^ Yojson.Safe.pretty_to_string input ^ "\n\n" in
   write path bytes;
-  let result = require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
+  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
     ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
   let reference = own_reference (member "snapshot_evidence" result) in
   check string "raw whitespace bytes retained" bytes (require (Store.read_blob store reference));
@@ -87,7 +88,7 @@ let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store -
     write path (Yojson.Safe.to_string value);
     file_source id path) in
   let cap = 2048 in
-  let result = require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
+  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
   check bool "whole source array fits ingress envelope" true (String.length (Yojson.Safe.to_string result) <= cap);
   let rows = list result in
   check int "both source coverage entries survive" 2 (List.length rows);
@@ -113,7 +114,7 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
     Browser_lane.install_automation_document_observer (Some (fun ~tab_id ->
       check int "explicit existing tab requested" 4 tab_id; Browser_lane.Answered !response));
     Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_document_observer previous);
-    let read () = require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
+    let read () = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
       ~binding:(binding [browser_source])) |> list |> List.hd in
     let source = read () in
     let observation = member "observations" source |> list |> List.hd in
@@ -148,7 +149,7 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
     run_id="run";configuration_revision="configuration";package_revision="package";
     outputs=["frames",Types.Selected_lanes ["msx/frame"];"empty",Types.Selected_lanes ["absent"];
       "all",Types.All_lanes];observation_seq=7;output;status={coverage with complete=true;detail=None}} in
-  let read ?(complete=false) selector = require (Sources.acquire ~store ~package:(package dir 16384)
+  let read ?(complete=false) selector = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
     ~resolve_lane_output:(fun ~installation_id ->
       check string "stable declaration requested" "producer" installation_id;
       Ok {captured with output={output with coverage=[{coverage with complete}]}})
@@ -190,7 +191,7 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
   ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
   Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
     let capture () =
-      require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 16384)
         ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "native"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
@@ -247,7 +248,7 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
   load ();
   Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
     let capture () =
-      require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 2_000_000)
         ~binding:(binding [`Assoc ["kind",`String "dos_capture";"source_id",`String "dos"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
@@ -306,6 +307,7 @@ let test_misc_tools_name_the_source_they_move () =
     | Sources.Machine_changed Masc.Machine_lane.Msx -> "msx"
     | Sources.Machine_changed Masc.Machine_lane.Dos -> "dos"
     | Sources.Browser_changed -> "browser"
+    | Sources.Fusion_changed _ -> "fusion"
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
   check string "stepping the MSX moves its capture" "msx"
@@ -365,7 +367,163 @@ let test_built_in_lanes_offer_what_parse_accepts () =
   check bool "an automation document source is accepted" true
     (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Automation)))
 
+let test_fusion_capture_retains_exact_state_across_terminal_change () =
+  with_store (fun dir store ->
+    let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    let reset () =
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test () in
+    Fun.protect ~finally:(fun () ->
+      reset ();
+      match old_base with Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> unsetenv "MASC_BASE_PATH")
+      (fun () ->
+        Unix.putenv "MASC_BASE_PATH" dir;
+        reset ();
+        let registry = Fusion_run_registry.create ~path:(Filename.concat dir "fusion-runs.jsonl") () in
+        (match Fusion_run_registry.install_global registry with
+         | Ok () -> () | Error _ -> fail "source fixture registry already installed");
+        let run_id = "fusion-capture-" ^ Store.digest dir in
+        Fusion_run_registry.register_running registry ~run_id
+          ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+          ~topology:Fusion_types.Simple ~started_at:1.;
+        let read () = require (Sources.acquire ~access:(Sources.Keeper "fixture") ~store ~package:(package dir 16384)
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]]))
+          |> list |> List.hd |> member "observations" |> list |> List.hd in
+        List.iter (fun access ->
+        let denied = require (Sources.acquire ~access
+          ~store ~package:(package dir 16384)
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]]))
+          |> list |> List.hd in
+        check bool "another Keeper cannot capture a Fusion run" false
+          (member "complete" denied |> Yojson.Safe.Util.to_bool);
+        check int "denied source exposes no run or Board evidence" 0
+          (member "observations" denied |> list |> List.length))
+          [Sources.Keeper "another-keeper"; Sources.Unauthenticated];
+        let authorize run_id = Sources.authorize ~access:(Sources.Keeper "another-keeper")
+          (binding [`Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+            "run_id",`String run_id]]) in
+        check (result unit string) "foreign and unknown Fusion IDs have one denial"
+          (authorize run_id) (authorize (run_id ^ "-missing"));
+        let first = read () in
+        let rejected_store = Store.create ~root:(Filename.concat dir "rejected-envelope") in
+        let detail_bytes = String.length (Yojson.Safe.to_string (member "detail" first)) in
+        check int "array serialization reserves exactly the detail plus brackets"
+          (detail_bytes + String.length "[]")
+          (String.length (Yojson.Safe.to_string (`List [member "detail" first])));
+        let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          ~store:rejected_store ~package:(package dir
+            (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]]))
+          |> list |> List.hd in
+        check bool "whole envelope that cannot fit remains incomplete" false
+          (member "complete" rejected |> Yojson.Safe.Util.to_bool);
+        check string "detail fits but its enclosing observation is refused"
+          "Fusion observation exceeds the available source ingress envelope"
+          (member "detail" rejected |> text);
+        check bool "rejected envelope writes no orphan capture blob" false
+          (Sys.file_exists (Filename.concat (Store.root rejected_store) "evidence"));
+        let reference = member "evidence" first |> list |> List.hd |> own_reference in
+        let frozen = require (Store.read_blob store reference) in
+        check string "captures exact registered run" run_id
+          (first |> member "detail" |> member "run" |> member "run_id" |> text);
+        Fusion_run_registry.mark_completed registry ~run_id
+          ~outcome:(Fusion_run_registry.Failed {reason="fixture failure";code="fixture"});
+        let terminal = read () in
+        check string "captures terminal failure" "failed"
+          (terminal |> member "detail" |> member "run" |> member "status" |> text);
+        for index = 1 to Fusion_run_registry.max_completed_retained do
+          let newer = run_id ^ "/newer/" ^ string_of_int index in
+          Fusion_run_registry.register_running registry ~run_id:newer ~keeper:"foreign"
+            ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+            ~started_at:(float_of_int index +. 10.);
+          Fusion_run_registry.mark_completed registry ~run_id:newer ~outcome:Fusion_run_registry.Succeeded
+        done;
+        check bool "delayed source target has left the recent cache" true
+          (Option.is_none (Fusion_run_registry.get registry ~run_id));
+        let delayed_terminal = read () in
+        check string "delayed observer reads durable exact terminal failure" "failed"
+          (delayed_terminal |> member "detail" |> member "run" |> member "status" |> text);
+        check string "durable fallback retains original owner" "fixture"
+          (delayed_terminal |> member "detail" |> member "run" |> member "keeper" |> text);
+        check bool "eviction does not transfer access to a foreign Keeper" true
+          (Result.is_error (authorize run_id));
+        Fusion_run_registry.register_running registry ~run_id ~keeper:"replacement-owner"
+          ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+          ~started_at:1000.;
+        check bool "reused id denies former owner's retained source access" true
+          (Result.is_error (Sources.authorize ~access:(Sources.Keeper "fixture")
+            (binding [`Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+              "run_id",`String run_id]])));
+        check string "old running capture is still frozen" frozen
+          (require (Store.read_blob store reference));
+        check bool "observed actor is not the requested Keeper" true
+          (member "actor" terminal=`Null);
+        List.iteri (fun index (producer,author) ->
+          let reused_run = run_id ^ "/reused/" ^ string_of_int index in
+          let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
+            fusion_run_id=Some reused_run;fusion_producer=producer} in
+          (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
+            ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
+            ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+            ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+           | Ok _ -> () | Error _ -> fail "fixture Board post creation failed");
+          Fusion_run_registry.register_running registry ~run_id:reused_run
+            ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+            ~topology:Fusion_types.Simple ~started_at:2.;
+          let captured = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+            ~store ~package:(package dir 16384)
+            ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+            ~binding:(binding [`Assoc ["source_id",`String "fusion";
+              "kind",`String "fusion_run";"run_id",`String reused_run]])) |> list |> List.hd in
+          check bool "foreign Board provenance refuses host capture" false
+            (member "complete" captured |> Yojson.Safe.Util.to_bool);
+          check int "no foreign prompt or transcript crosses package boundary" 0
+            (member "observations" captured |> list |> List.length))
+          [Some "foreign", "fixture"; Some "fixture", "foreign"; None, "fixture"] ))
+
+let test_fusion_binding_targets_only_exact_run () =
+  let source run_id = `Assoc ["source_id",`String "fusion";
+    "kind",`String "fusion_run";"run_id",`String run_id] in
+  let interest = require (Sources.refresh_interest (binding [source "run-one"])) in
+  check bool "exact update wakes this source" true
+    (Sources.interested interest (Sources.Fusion_changed "run-one"));
+  check bool "another run does not wake this source" false
+    (Sources.interested interest (Sources.Fusion_changed "run-two"));
+  check bool "tool completions do not wake Fusion" false
+    (Sources.interested interest Sources.Tool_completed);
+  let file_interest = require (Sources.refresh_interest (binding [`Assoc [
+    "source_id",`String "file";"kind",`String "snapshot_file";
+    "path",`String "/retained/snapshot.json"]])) in
+  check bool "Fusion updates do not wake unrelated file watchers" false
+    (Sources.interested file_interest (Sources.Fusion_changed "run-one"));
+  check bool "generic tool activity still refreshes files" true
+    (Sources.interested file_interest Sources.Tool_completed);
+  let bad = `Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+    "run_id",`String "run-one";"path",`String "/guessed"] in
+  check bool "unknown fields rejected" true
+    (Result.is_error (Sources.parse (binding [bad])));
+  check bool "unknown run is unavailable, not fabricated" true
+    (with_store (fun dir store ->
+       let sources = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+         ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+         ~binding:(binding [source "definitely-unregistered-fusion-run"])) in
+       match list sources with
+       | [captured] -> member "complete" captured = `Bool false
+           && member "observations" captured = `List []
+       | _ -> false))
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "Fusion captures retain earlier state across terminal updates" `Quick
+    test_fusion_capture_retains_exact_state_across_terminal_change;
+  test_case "Fusion bindings target exact run updates and preserve unavailable coverage" `Quick
+    test_fusion_binding_targets_only_exact_run;
   test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
   test_case "DOS capture retains the machine's history" `Quick test_dos_capture_retains_the_machines_history;

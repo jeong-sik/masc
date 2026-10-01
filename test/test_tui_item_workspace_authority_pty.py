@@ -50,9 +50,12 @@ class ItemWire(authority.WorkspaceWire):
         self.malformed_revision = False
         self.missing_revision = False
         self.booting = False
+        self.ready_after_boot = False
 
     def set_booting(self, booting):
         with self.lock:
+            if self.booting and not booting:
+                self.ready_after_boot = True
             self.booting = booting
 
     def health(self):
@@ -81,6 +84,7 @@ class ItemWire(authority.WorkspaceWire):
             malformed = self.malformed_revision
             missing = self.missing_revision
             state, phase = self.account_state, self.phase
+            ready_after_boot = self.ready_after_boot
         if unavailable:
             return 503, {"error": "current roster unavailable"}
         status, payload = super().roster()
@@ -91,6 +95,8 @@ class ItemWire(authority.WorkspaceWire):
             row["candle_account_revision"] = None if state == "off" else revision * 64
             row["candle_balance_milli"] = None if state == "off" else "12500"
             if row["name"] == "alpha":
+                if ready_after_boot:
+                    row["runtime_id"] = "a.boot.ready"
                 if missing:
                     row.pop("candle_account_revision")
                 elif malformed:
@@ -250,11 +256,16 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
-            wait(lambda text: b"Item account revision" in text,
-                 "booting same-workspace server retained Item facts")
+            wait(lambda text: b"MASC Keepers" in text and b"server booting" in text
+                 and "▸Items".encode() not in text,
+                 "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
+            wait(lambda text: b"a.boot.ready" in text and b"server booting" not in text
+                 and "▸Items".encode() not in text,
+                 "ready roster did not follow the booting authority withdrawal")
+            open_items()
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "ready server did not re-read Item account after boot")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \

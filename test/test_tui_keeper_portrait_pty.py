@@ -493,7 +493,7 @@ def item_account_follows_roster_revision(binary: str) -> None:
 
 def item_account_withdraws_unread_authority(binary: str) -> None:
     fixtures = item_ready_fixtures()
-    identity = {"base": "", "unread": False, "probes": 0}
+    identity = {"base": "", "unread": False, "probes": 0, "generation": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
     arm = [False]
     balance = ["12500"]
@@ -523,6 +523,17 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             served.set()
         return h.StreamingHttpResponse(chunks)
 
+    roster_path = "/api/v1/gate/keepers?detailed=true"
+    roster_template = copy.deepcopy(fixtures[roster_path][1])
+
+    def roster():
+        payload = copy.deepcopy(roster_template)
+        for row in payload["keepers"]:
+            if row["name"] == "alpha":
+                row["runtime_id"] = f"authority.{identity['generation']}"
+        return 200, payload
+
+    fixtures[roster_path] = roster
     fixtures["/health"] = health
     fixtures["/api/v1/keepers/alpha/items"] = items
 
@@ -532,34 +543,49 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
 
     def recover(process, fd, output):
         probes = identity["probes"]
+        identity["generation"] += 1
         identity["unread"] = False
         # A subsequent serial full-refresh probe starts after the previous
         # identity answer has been applied. This is a fixture barrier, not age.
         assert h.wait_for_fixture_state(process, fd, output,
             lambda: identity["probes"] >= probes + 2, timeout=10)
 
+        marker = f"authority.{identity['generation']}".encode()
+        frame(process, fd, output, lambda text: marker in text
+              and "▸Items".encode() not in text)
+
+    def reopen_items(process, fd, output):
+        h.select_keeper_row(process, fd, output, b"alpha")
+        # Workspace withdrawal closes the detail but retains its selected tab.
+        h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
+
+    def withdrawn(process, fd, output):
+        frame(process, fd, output, lambda text: b"MASC Keepers" in text
+              and "▸Items".encode() not in text and b"Balance " not in text
+              and b"owned" not in text)
+
     def interact(process, fd, _slave, output, _base):
         try:
             open_alpha_detail(process, fd, output)
-            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=h.KEEPER_RUNTIME_COLUMN_COLUMNS, needle=INFO_TAB)
             h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
-            frame(process, fd, output, lambda text:
-                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
-            recover(process, fd, output)
+            withdrawn(process, fd, output)
             balance[0] = "13000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            recover(process, fd, output)
+            reopen_items(process, fd, output)
+            frame(process, fd, output, lambda text: b"Balance 13.000 Candle" in text)
             arm[0] = True
             os.write(fd, b"r")
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
-            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            withdrawn(process, fd, output)
             balance[0] = "14000"
             recover(process, fd, output)
-            # Revision-aware Items automatically resumes the account read on
-            # ordinary roster cadence after authority recovers. Observe the
-            # successor before releasing the older held response; neither the
-            # retained screen nor a later frame may return to that old wallet.
+            # Reopen after the ready roster is observed. Its successor read
+            # must settle before the older held response is released; neither
+            # the retained screen nor a later frame may return to that wallet.
+            reopen_items(process, fd, output)
             frame(process, fd, output, lambda text: b"Balance 14.000 Candle" in text)
             start = len(output)
             release.set()
@@ -580,7 +606,7 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             release.set()
 
     h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
-                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            interact=interact, http_fixtures=fixtures, terminal_cols=h.KEEPER_RUNTIME_COLUMN_COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
 

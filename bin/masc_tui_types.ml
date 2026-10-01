@@ -2759,6 +2759,12 @@ type identity_login_started = {
   ils_url: string;
 }
 
+type identity_login_request = {
+  ilr_keeper: string;
+  ilr_provider: string;
+  ilr_generation: int;
+}
+
 (** Whether the login [login] started has landed: the service it was for now
     reports tools for this Keeper.
 
@@ -2918,10 +2924,12 @@ let nothing =
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
  *)
-let rec surface_needs ~keeper_pane_drawn surface =
+let rec surface_needs ~keeper_pane_drawn ~about_open surface =
   let needs = surface_needs_of_surface surface in
   let needs =
-    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    (* About hides the ordinary Keeper pane but draws current outfits. Its
+       opening delta and refresh cadence must keep reading that same roster. *)
+    if keeper_pane_drawn || about_open then { needs with needs_keeper_roster = true }
     else needs
   in
   needs
@@ -3009,9 +3017,9 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~about_open surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~about_open surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5408,7 +5416,7 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
-  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
@@ -5447,7 +5455,11 @@ type state = {
      out of one list -- see [identity_connectable]. *)
   mutable identity_view: (string * identity_provider list) option;
   mutable identity_view_error: string option;
-  mutable identity_login: identity_login_started option;
+  (* Consent URLs belong to a Keeper and provider. Opening another Keeper
+     or starting another provider must leave outstanding logins available. *)
+  mutable identity_logins: identity_login_started list;
+  mutable identity_login_requests: identity_login_request list;
+  mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
      screen that renumbered under a moving cursor would start the wrong
      service; [identity_cursor_clamped] is what keeps it inside the list. *)
@@ -5810,7 +5822,6 @@ type state = {
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
   mutable keeper_schedules_error: (string * string) option;
-  mutable keeper_schedules_inflight: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -6400,6 +6411,62 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let identity_logins_for_keeper (state : state) keeper_name =
+  List.filter
+    (fun login -> String.equal login.ils_keeper keeper_name)
+    state.identity_logins
+
+(* A restart supersedes the outstanding response for this exact key, while
+   the previous consent URL remains available until a replacement arrives. *)
+let start_identity_login_request (state : state) ~keeper_name ~provider_id =
+  state.identity_login_generation <- state.identity_login_generation + 1;
+  let request =
+    { ilr_keeper = keeper_name;
+      ilr_provider = provider_id;
+      ilr_generation = state.identity_login_generation }
+  in
+  state.identity_login_requests <-
+    request :: List.filter
+      (fun pending ->
+        not (String.equal pending.ilr_keeper keeper_name
+             && String.equal pending.ilr_provider provider_id))
+      state.identity_login_requests;
+  request
+
+let finish_identity_login_request (state : state) request =
+  let is_current pending =
+    String.equal pending.ilr_keeper request.ilr_keeper
+    && String.equal pending.ilr_provider request.ilr_provider
+    && pending.ilr_generation = request.ilr_generation
+  in
+  if List.exists is_current state.identity_login_requests then (
+    state.identity_login_requests <-
+      List.filter (fun pending -> not (is_current pending))
+        state.identity_login_requests;
+    true)
+  else false
+
+let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_logins <-
+    List.filter
+      (fun login ->
+        not (String.equal login.ils_keeper keeper_name
+             && String.equal login.ils_provider provider_id))
+      state.identity_logins
+
+let remember_identity_login (state : state) login =
+  forget_identity_login state ~keeper_name:login.ils_keeper
+    ~provider_id:login.ils_provider;
+  state.identity_logins <- state.identity_logins @ [login]
+
+let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_logins <-
+    List.filter
+      (fun login ->
+        not (String.equal login.ils_keeper keeper_name
+             && identity_login_landed ~providers ~login))
+      state.identity_logins
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -7476,6 +7543,23 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let keeper_detail_target_matches state keeper_name =
+  match selected_keeper state with
+  | Some keeper -> String.equal keeper.k_name keeper_name
+  | None -> false
+
+(* Retirement belongs to the request even off screen; presentation belongs
+   only to the currently selected Keeper and the newest request generation. *)
+let apply_keeper_schedules_read state request result =
+  let current = finish_detail_read state request in
+  if current && keeper_detail_target_matches state request.drr_keeper then
+    match result with
+    | Ok snapshot ->
+        state.keeper_schedules <- Some (request.drr_keeper, snapshot);
+        state.keeper_schedules_error <- None
+    | Error err ->
+        state.keeper_schedules_error <- Some (request.drr_keeper, err)
+
 let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
   List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
   @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
@@ -8046,7 +8130,9 @@ let create_state
   github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
-  identity_login = None;
+  identity_logins = [];
+  identity_login_requests = [];
+  identity_login_generation = 0;
   identity_cursor = 0;
   identity_attempt_error = None;
   identity_filter = None;
@@ -8214,7 +8300,6 @@ let create_state
   schedule_wake_history_inflight = None;
   keeper_schedules = None;
   keeper_schedules_error = None;
-  keeper_schedules_inflight = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;

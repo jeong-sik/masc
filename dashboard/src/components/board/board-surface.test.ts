@@ -11,10 +11,10 @@ import {
 } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
-import { createPost } from '../../api'
+import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, loadPostDetail } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -257,6 +257,12 @@ describe('BoardSurface Component', () => {
     boardFlairsError.value = false
     resetBoardLatencyMetrics()
     selectedBoardPostId.value = null
+    detailPostId.value = null
+    detailPost.value = null
+    detailFocusedCommentId.value = null
+    detailComments.value = []
+    detailCommentPage.value = { offset: 0, total: 0 }
+    detailLoading.value = false
     boardComposerMode.value = 'post'
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'sangsu', status: 'active' },
@@ -265,6 +271,28 @@ describe('BoardSurface Component', () => {
     messages.value = []
     shellAuthSummary.value = null
     route.value = { params: {} } as any
+  })
+
+  it('clears retained full-view focus when returning to the same compact thread', async () => {
+    const post = makePost({ id: 'focused-back', title: 'Retained selected thread', author: 'keeper' })
+    const latest = { ...post, comments: [], commentPage: { offset: 20, total: 20 } }
+    vi.mocked(fetchBoardPost).mockResolvedValue(latest)
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    detailPostId.value = post.id
+    detailPost.value = post
+    detailFocusedCommentId.value = 'old-focused-comment'
+    detailCommentPage.value = { offset: 20, total: 21 }
+    // Back navigation retains selection/detail signals without a PostCard click.
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(detailFocusedCommentId.value).toBeNull())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id)
+    // Compact vote/reply refreshes omit focus and must retain the null context.
+    await loadPostDetail(post.id)
+    expect(detailFocusedCommentId.value).toBeNull()
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(fetchBoardPost).mock.calls.every(args => args.length === 1)).toBe(true)
   })
 
   it('renders empty state when there are no posts', () => {

@@ -79,6 +79,7 @@ import {
   detailLoading,
   detailLoadingOlder,
   detailPostId,
+  detailFocusedCommentId,
   detailComments,
   detailCommentPage,
   loadOlderPostComments,
@@ -661,8 +662,8 @@ function BdThreadDetail({
   onClose: () => void
 }) {
   useEffect(() => {
-    if (detailPostId.value !== post.id) {
-      void loadPostDetail(post.id)
+    if (detailPostId.value !== post.id || detailFocusedCommentId.value !== null) {
+      void loadPostDetail(post.id, null)
     }
   }, [post.id])
 

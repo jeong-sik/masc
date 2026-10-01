@@ -8463,6 +8463,21 @@ let test_runtime_rate_limit_requires_an_observation () =
     [ None; Some `Null; Some (`String "false") ]
 
 let test_decode_runtime_resolved () =
+  List.iter (fun source ->
+    let row = picker_default_runtime
+      |> replace_assoc_field "max_context_source" (`String source) in
+    let json = runtime_resolved_json
+      |> replace_assoc_field "default_runtime" row
+      |> replace_assoc_field "runtimes" (`List [row]) in
+    match Tui_decode.decode_runtime_resolved json with
+    | Ok ([runtime], _) ->
+      Alcotest.(check string) "scoped context keeps runtime picker usable" source
+        (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
+    | Ok _ -> Alcotest.fail "scoped runtime missing from picker"
+    | Error detail -> Alcotest.fail detail)
+    ["provider_override"; "binding_override";
+     "provider_override_clamped_by_capability";
+     "binding_override_clamped_by_capability"];
   match Tui_decode.decode_runtime_resolved runtime_resolved_json with
   | Error err -> Alcotest.fail err
   | Ok (runtimes, assignments) ->

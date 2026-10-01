@@ -435,6 +435,21 @@ let context_flow_uses_declared_connections () =
   let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
     configuration_cursor=0;instance_cursor=1} in
   let configured_lines = UI.lines ~width:160 configured in
+  let flow = UI.toggle_flow {configured with presentation=UI.Technical} in
+  check bool "entering Flow moves hidden configuration focus to visible instances" true
+    (flow.focus=UI.Instances && flow.presentation=UI.Flow);
+  check int "entering Flow preserves the visible instance selection" 1 flow.instance_cursor;
+  check (option string) "Flow actions target the visible selected worker" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance flow));
+  let moved_flow = {flow with instance_cursor=0} in
+  check (option string) "Flow navigation changes its action target" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance moved_flow));
+  check bool "leaving Flow keeps overview navigation on visible instances" true
+    (let summary = UI.toggle_flow flow in
+     summary.focus=UI.Instances && summary.presentation=UI.Summary);
+  check bool "detail Flow preserves its own focus" true
+    (let detail = UI.toggle_flow {flow with screen=UI.Detail (producer.id,producer.incarnation);
+      focus=UI.Connections} in detail.focus=UI.Connections);
   check (option string) "summary actions target the visibly selected worker despite hidden configuration focus" (Some consumer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
   check (option string) "technical installation actions target their selected declaration" (Some producer.id)

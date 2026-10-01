@@ -79,6 +79,8 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val toggle_flow : t -> t
+(** Toggle Flow and Summary, keeping overview navigation on visible instances. *)
 val open_selected_instance : t -> t
 (** Enter the selected worker or unresolved installation. A worker pins its
     incarnation; an installation opens its existing TOML detail section. *)

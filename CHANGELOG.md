@@ -332,8 +332,8 @@
 - Remove the nonexistent `keeper_status` tool, the retired `generation` field, older proposals and two pointers to tools a Keeper cannot call from the text Keepers read (#40510).
 - State the exact three verdict keys in the Board attention judge prompt so explanations stay inside rationale instead of adding fields the parser rejects (#39970).
 - Accept empty optional shop tables as unpriced without ledger writes, and supply valid arguments for the three Candle tools in the Keeper matrix (#40313).
-- Preserve judgement scroll positions in narrow readers independently of footer action keys, and retain rejection-reason guidance (#40313).
-- Keep Lane actions on the visibly selected worker and show that worker before earlier long descriptions (#40313).
+- Give Task Verdicts a dedicated position row that stays visible at narrow widths (#40313).
+- Keep Lane actions on the visibly selected worker, move overview navigation to that visible list when switching to Flow, and show that worker before earlier long descriptions (#40313).
 - Align palette, queue and history fixtures with current behavior, persist Goal criteria through the store contract, and finish the Code diff scenario through its real quit path (#40313).
 - Expose Config detail edge navigation through one binding shared by prompts and presets (#40313).
 

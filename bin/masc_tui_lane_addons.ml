@@ -308,7 +308,8 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
         String.equal instance.id id && String.equal instance.incarnation incarnation) snapshot.instances
   | Overview ->
       (match view.focus, view.presentation with
-       | Configurations, Technical -> Option.bind (selected_declaration view) (fun declaration ->
+       | Configurations, presentation when presentation=Technical || Option.is_some view.document_key ->
+           Option.bind (selected_declaration view) (fun declaration ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
        | _, _ ->
@@ -320,6 +321,10 @@ let ordered_rows view snapshot =
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
+let toggle_flow view =
+  {view with presentation=(if view.presentation=Flow then Summary else Flow);
+    focus=(if view.screen=Overview then Instances else view.focus);
+    document_key=None; scroll=0}
 let open_selected_instance view =
   match view.snapshot with
   | None -> view

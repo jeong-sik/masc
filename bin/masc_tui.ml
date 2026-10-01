@@ -19959,7 +19959,7 @@ and is loaded on demand through keeper_skill.
                      | "D" -> update {view with
                          presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
-                     | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
+                     | "f" -> update (Addons.toggle_flow view)
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
                          then update {view with error=lane_addons_input_failure "An action or read is pending; t checks its status."}

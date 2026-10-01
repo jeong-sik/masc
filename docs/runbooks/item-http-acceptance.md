@@ -5,13 +5,13 @@ Run the **Manual probe artifacts** workflow on the desired Item branch with
 and production dashboard from that checkout, then starts its own loopback
 server in a fresh temporary workspace. No installed MASC process is contacted.
 
-The `item-http-<sha>` artifact contains HTTP and browser receipts, desktop/mobile
+The `item-http-<sha>-attempt-<run_attempt>` artifact contains HTTP and browser receipts, desktop/mobile
 screenshots, the Item account JSON,
 a portrait PNG and the isolated server log. The receipt records source SHA,
 binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
-reads, an authenticated 100-milli wallet with empty ownership and its catalog, PNG delivery, and delivery
+reads, a Worker-authenticated 100-milli wallet with empty ownership and its catalog, PNG delivery, and delivery
 of the exact production dashboard index. It then authenticates as the synthetic
 Keeper over MCP, buys a free face item, rejects repeat/insufficient purchases
 and unowned equipment, equips the item, and verifies ledger-backed account
@@ -36,10 +36,10 @@ Inputs are two synthetic paused Keepers in the current metadata schema, two
 canonical synthetic Paid rows granting 100 milli to the free-test Keeper and
 700 milli to the paid-test Keeper, and explicit test prices/payout policy.
 Buying the zero-price face item preserves the free-test Keeper’s 100 milli.
-The paid Keeper buys crown for200 milli and must retain500 milli. Duplicate
+The paid Keeper buys crown for 200 milli and must retain 500 milli. Duplicate
 and insufficient purchases must leave the ledger byte-identical. After a
 process restart, paid ownership, balance and equipped PNG must remain; only
-one200-milli purchase event may exist. Both original synthetic Paid rows must
+one 200-milli purchase event may exist. Both original synthetic Paid rows must
 remain unchanged. Seed and before/after ledger hashes are retained. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
 purchase/equipment decisions, a real earned payout, or production rollout.
@@ -65,3 +65,8 @@ log before interpreting the artifact.
 The transaction stage also rejects an owned face item in the head slot and checks that duplicate, insufficient and wrong-slot refusals leave the ledger unchanged. Both the original and equipped PNG must have valid dimensions, chunks and decoded image data.
 
 Browser validation failures retain a separate failed receipt with the current stage, request paths/statuses and available screenshot hashes. Credentials, storage, headers, request bodies, DOM dumps and raw error text are excluded. A successful receipt is written only after browser cleanup succeeds.
+
+Authenticated probe HTTP requests reject redirects before following another URL. The route receipt cannot substitute a redirected endpoint for the isolated server.
+The standalone `python3 -I test/test_item_http_redirects.py scripts/item-http-acceptance.py --mcp` regression exercises real loopback GET and MCP redirects without a native binary. Its scope is the actual extracted helper and redirect refusal, rather than a complete native acceptance run.
+
+The harness and all source fixtures, including the paid credit and browser script when used, must match the binary source SHA before the isolated server starts. Browser access uses the synthetic admin bearer required by its surrounding dashboard reads; purchases use each synthetic Keeper’s own Worker bearer.

@@ -5,13 +5,7 @@
     [Filename.concat base_path repo.local_path]. So the default the HTTP
     repository constructor writes into that field has to be relative too —
     handing it {!Config_dir_resolver.repos_dir}, which is absolute, would
-    resolve the base path twice.
-
-    The constructor used to build ".masc/repos/<id>" inline. The RFC-0121
-    audit did not report it: .ci/path-ssot-allowlist.txt carried the pattern
-    as an entry with no file anchor, and the audit matches allowlist lines as
-    substrings of the whole rg output line, so that one suppressed the pattern
-    everywhere it appeared. *)
+    resolve the base path twice. *)
 
 open Alcotest
 

@@ -908,7 +908,7 @@ let test_runtime_transitions_append_then_startup_compacts () =
   with_temp_base "board-attention-partition-append-index" @@ fun base_path ->
   let pending = candidate ~id:"candidate-append" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let ledger_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let proof = provenance () in
@@ -961,7 +961,7 @@ let test_ready_confirmations_survive_requeue_deferral_and_restart () =
   with_temp_base "board-attention-ready-confirmations" @@ fun base_path ->
   let pending = candidate ~id:"candidate-confirmation" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let ledger_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   let owner = P.Worker_epoch.generate () in
   let first_claim = claim ~base_path ~worker_epoch:owner ~now:2.0 in
   let blocked =
@@ -1147,7 +1147,7 @@ let test_ready_confirmations_identify_distinct_process_boots () =
   in
   run_child "--ready-confirm-child";
   run_child "--ready-confirm-child";
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let ledger_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   Alcotest.(check int)
     "two boots confirmed the same Ready generation"
     2
@@ -1362,7 +1362,7 @@ let test_strict_current_schema_rejects_old_json () =
     "retired judgment failure JSON is rejected"
     (P.of_yojson (replace_field "state" retired_blocked encoded));
   let malformed = replace_field "partition_id" (`String "forged-root") encoded in
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let ledger_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   ok
     "inject malformed durable row"
     (Fs_compat.save_file_atomic ledger_path (Yojson.Safe.to_string malformed ^ "\n"));
@@ -1379,7 +1379,7 @@ let test_torn_tail_recovery_preserves_current_hard_cut () =
   with_temp_base "board-attention-partition-torn-tail" @@ fun base_path ->
   let pending = candidate ~id:"candidate-torn" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let ledger_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   let durable = Fs_compat.load_file ledger_path in
   inject_torn_tail ledger_path;
   expect_error
@@ -1625,7 +1625,7 @@ let test_a_still_pending_candidate_reopens_its_abandoned_root () =
     | P.Blocked _ -> "blocked"
   in
   let states =
-    ledger_lines (P.For_testing.path ~base_path ~keeper_name:"alpha")
+    ledger_lines (P.ledger_path ~base_path ~keeper_name:"alpha")
     |> List.map (fun line ->
            match P.of_yojson (Yojson.Safe.from_string line) with
            | Ok partition -> state_kind partition

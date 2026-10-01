@@ -301,12 +301,13 @@ describe('CommentThread', () => {
       },
     ] as any
 
-    render(h(CommentThread, { comments, postId: 'post-1' }))
+    render(h(CommentThread, { comments, postId: 'post-1', focusedCommentId: 'c1' }))
 
     fireEvent.click(screen.getByRole('button', { name: '댓글 추천' }))
     await Promise.resolve()
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
+    expect(loadPostDetail).toHaveBeenCalledWith('post-1', 'c1')
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
@@ -617,6 +618,7 @@ describe('PostDetail', () => {
       comments: [],
     } as any
 
+    routerMock.route.value = { params: { post: 'post-1', comment: 'older-focused' } }
     render(h(PostDetail, { post }))
 
     const downvote = screen.getByRole('button', { name: '▼ 비추천' })
@@ -624,9 +626,11 @@ describe('PostDetail', () => {
     expect(downvote).toBeDisabled()
     expect(screen.getByRole('button', { name: '▲ 추천' })).toHaveAttribute('aria-pressed', 'false')
 
+    vi.mocked(loadPostDetail).mockClear()
     fireEvent.click(screen.getByRole('button', { name: '▲ 추천' }))
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
+      expect(loadPostDetail).toHaveBeenCalledWith('post-1', 'older-focused')
     })
   })
 

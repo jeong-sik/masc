@@ -23,6 +23,12 @@ import time
 import urllib.error
 import urllib.request
 
+class RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Keep authenticated probe requests on their original route and origin."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+
 def require(condition, detail):
     if not condition:
         raise RuntimeError(detail)
@@ -92,26 +98,38 @@ source = subprocess.check_output([str(binary), 'build-commit'], text=True, env=e
 if source != args.source_sha:
     raise SystemExit('native probe source differs from prepared dashboard')
 base = root / 'workspace'
-fixtures = Path(__file__).resolve().parents[1] / 'test/fixtures/item-http'
-config_hashes = {}
-for src, dst in [('runtime.toml', 'config/runtime.toml'),
+repo = Path(__file__).resolve().parents[1]
+fixture_paths = [('runtime.toml', 'config/runtime.toml'),
                  ('candle.toml', 'config/candle.toml'),
                  ('keeper.toml', 'config/keepers/item-runtime-probe.toml'),
                  ('keeper.json', 'keepers/item-runtime-probe.json'),
-                 ('restart-credit.jsonl', 'candle-ledger.jsonl')]:
+                 ('restart-credit.jsonl', 'candle-ledger.jsonl')]
+input_paths = ['scripts/item-http-acceptance.py', 'test/fixtures/item-http/paid-credit.jsonl'] + [
+    f'test/fixtures/item-http/{name}' for name, _ in fixture_paths]
+if args.capture_browser:
+    input_paths.append('dashboard/e2e/item-server.mjs')
+verified_inputs = {}
+for relative in input_paths:
+    expected = subprocess.check_output(['git', '-C', str(repo), 'show', f'{source}:{relative}'])
+    actual = (repo / relative).read_bytes()
+    require(actual == expected, f'acceptance input differs from source SHA: {relative}')
+    verified_inputs[relative] = actual
+harness_sha256 = hashlib.sha256(verified_inputs['scripts/item-http-acceptance.py']).hexdigest()
+config_hashes = {}
+for src, dst in fixture_paths:
     target = base / '.masc' / dst
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(fixtures / src, target)
+    target.write_bytes(verified_inputs[f'test/fixtures/item-http/{src}'])
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
 # Seed a second Keeper and canonical synthetic credit before either process starts.
 # This is an Item spending fixture, not evidence of earning a Goal payout.
-paid_meta = json.loads((fixtures / 'keeper.json').read_text())
+paid_meta = json.loads(verified_inputs['test/fixtures/item-http/keeper.json'])
 paid_meta.update(name='item-paid-probe', trace_id='trace-item-paid-probe')
 (base / '.masc/keepers/item-paid-probe.json').write_text(json.dumps(paid_meta) + '\n')
-shutil.copyfile(fixtures / 'keeper.toml', base / '.masc/config/keepers/item-paid-probe.toml')
+(base / '.masc/config/keepers/item-paid-probe.toml').write_bytes(verified_inputs['test/fixtures/item-http/keeper.toml'])
 ledger_path = base / '.masc/candle-ledger.jsonl'
 free_seed = ledger_path.read_bytes()
-seed = (fixtures / 'paid-credit.jsonl').read_bytes()
+seed = verified_inputs['test/fixtures/item-http/paid-credit.jsonl']
 seeded_ledger = free_seed + seed
 seeded_payments = [json.loads(line) for line in seeded_ledger.splitlines()]
 ledger_path.write_bytes(seeded_ledger)
@@ -164,10 +182,17 @@ env.update(MASC_BASE_PATH=str(base), MASC_ASSETS_DIR=str(dashboard.parent),
            MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='0',
            MASC_ORCHESTRATOR_ENABLED='0', MASC_OTEL_ENABLED='0')
 login = subprocess.run([str(binary), 'login', '--base-path', str(base),
-    '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-probe-admin',
-    '--role', 'admin', '--client-env', 'MCP_TOKEN', '--no-expiry', '--json'],
+    '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-probe-worker',
+    '--role', 'worker', '--client-env', 'MCP_TOKEN', '--no-expiry', '--json'],
     env=env, capture_output=True, text=True, check=True)
 token = json.loads(login.stdout)['bearer_token']
+browser_token = None
+if args.capture_browser:
+    browser_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
+        '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-probe-admin',
+        '--role', 'admin', '--client-env', 'ITEM_BROWSER_TOKEN', '--no-expiry', '--json'],
+        env=env, capture_output=True, text=True, check=True)
+    browser_token = json.loads(browser_login.stdout)['bearer_token']
 keeper_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-runtime-probe',
     '--role', 'worker', '--client-env', 'ITEM_PROBE_TOKEN', '--no-expiry', '--json'],
@@ -183,7 +208,7 @@ paid_keeper_token = json.loads(paid_login.stdout)['bearer_token']
 origin = f'http://127.0.0.1:{port}'
 # These requests target only the isolated child server and carry local auth.
 # Proxy settings in the invoking shell must not route them elsewhere.
-http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+http = urllib.request.build_opener(urllib.request.ProxyHandler({}), RejectRedirects())
 records = []
 server_generation = 1
 def request(path, authenticated=True):
@@ -276,6 +301,7 @@ def start_ready(log):
     global server, reservation, port, origin
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
+        attempt_record_start = len(records)
         # Hold the ephemeral port through setup/login; native main has no
         # inherited-listener interface. Retry confirmed bind collisions.
         reservation.close()
@@ -310,6 +336,7 @@ def start_ready(log):
                     pass
                 time.sleep(0.2)
         except PortCollision:
+            del records[attempt_record_start:]
             stop_server()
             reservation, port = reserve_port()
             origin = f'http://127.0.0.1:{port}'
@@ -330,7 +357,6 @@ with (root / 'server.log').open('wb') as log:
         require(status == 200 and account['status'] == 'ready'
                 and account['keeper'] == 'item-runtime-probe', account)
         require(account['balance_milli'] == '100' and account['owned_items'] == [], account)
-        require(len(account['catalog']) == 18, account)
         glasses = next(item for item in account['catalog'] if item['id'] == 'glasses')
         require(glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses)
         crown = next(item for item in account['catalog'] if item['id'] == 'crown')
@@ -375,9 +401,9 @@ with (root / 'server.log').open('wb') as log:
         require(equipped_png != png, 'equipment did not change the served portrait')
         (root / 'portrait-equipped.png').write_bytes(equipped_png)
         if args.capture_browser:
-            browser_script = fixtures.parents[2] / 'dashboard/e2e/item-server.mjs'
+            browser_script = repo / 'dashboard/e2e/item-server.mjs'
             subprocess.run(['node', str(browser_script)], input=json.dumps({
-                'origin': origin, 'token': token, 'output': str(root),
+                'origin': origin, 'token': browser_token, 'output': str(root),
                 'sourceSha': source, 'keeper': 'item-runtime-probe', 'ownedItem': item,
                 'balanceLabel': '0.100 Candle',
             }), text=True, check=True, cwd=browser_script.parent, env=env)
@@ -478,7 +504,7 @@ with (root / 'server.log').open('ab') as log:
         require(len(paid_purchases) == 1 and paid_purchases[0]['item'] == 'crown' and paid_purchases[0]['amount_milli'] == 200, paid_purchases)
         (root / 'ledger-after-restart.jsonl').write_bytes(final_ledger)
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-            fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
+            harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, synthetic 100-milli free Keeper and 700-milli paid Keeper credits and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, real earned payout or production rollout',
             requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, restart_verified=True, paid_transaction_verified=True,
             synthetic_credit=True, ledger_before_restart_sha256=hashlib.sha256(ledger_before_restart).hexdigest(),

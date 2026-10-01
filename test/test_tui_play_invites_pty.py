@@ -102,12 +102,15 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master, output, b" guest1 24", h.composer_showing(b"/play invite guest1 24"))
         os.write(master, b"\r")
         try:
-            h.wait_for_http_request(process, master, output, requests,
-                                    path="/api/v1/play/invites")
+            assert h.wait_for_fixture_event(process, master, output,
+                first_invite.requested, timeout=3.0), "held invite POST did not arrive"
+            assert not first_invite.completed.is_set(), "invite response completed before the quit race"
             h.escape_to_keeper_detail(process, master, output, name=b"alpha")
             h.send_and_wait(process, master, output, b"q", b"q: press again to quit")
         finally:
             first_invite.release.set()
+        h.wait_for_http_request(process, master, output, requests,
+                                path="/api/v1/play/invites")
         h.wait_for_output(process, master, output, LINK.encode(), start=0, timeout=10)
         h.send_and_wait(process, master, output, b"q", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master, output, b"q", b"q: press again to quit")

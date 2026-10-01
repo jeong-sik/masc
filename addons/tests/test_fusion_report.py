@@ -92,10 +92,16 @@ class FusionReport(unittest.TestCase):
                       {"status": "failed", "failure_code": "provider_error"}):
             value = detail()
             value["evidence"]["post"]["meta"]["judge"] = judge
-            self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+            self.assertTrue(call("fusion-results", [source(value)])["isError"])
+            output = project(detail())
+            output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+            self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
         value = detail()
         del value["evidence"]["post"]["meta"]
-        self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+        self.assertTrue(call("fusion-results", [source(value)])["isError"])
+        output = project(detail())
+        output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
 
 
     def test_empty_and_whitespace_answers_preserve_canonical_bytes_and_raw_synthesis(self):
@@ -122,7 +128,10 @@ class FusionReport(unittest.TestCase):
         value = detail()
         value["evidence"]["post"]["meta"]["judge"] = {
             "status": "failed", "failure_code": "invalid_judge", "error": "Judge reply invalid"}
-        self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+        self.assertTrue(call("fusion-results", [source(value)])["isError"])
+        output = project(detail())
+        output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
 
 
     def test_rejects_stale_rows_and_incomplete_coverage_scope(self):

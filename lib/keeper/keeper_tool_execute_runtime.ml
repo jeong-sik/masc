@@ -171,7 +171,7 @@ let redact_execute_output redaction ~stdout ~stderr =
    stdout back at a narrower global bound would spill output the lane had
    declared (maxResultSizeChars) it would take inline. *)
 let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~output =
-  if String.length output <= inline_ceiling_bytes
+  if String.length output <= inline_ceiling_bytes && String_util.is_valid_utf8 output
   then Ok [ "output", `String output ]
   else
     try
@@ -1045,7 +1045,7 @@ let handle_tool_execute_typed
                          ([ "typed", `Bool true
                           ; "code", `String (Keeper_execute_output_files.error_code detail)
                           ; "status", status_json
-                          ; "output", `String output
+                          ; "output", `String (String_util.sanitize_utf8 output)
                           ; "execution_time_ms", `Int elapsed_ms
                           ]
                           @ dispatched_model_location_fields ())
@@ -1125,7 +1125,7 @@ let handle_tool_execute_typed
                            ([ "typed", `Bool true
                             ; "code", `String "execute_result_manifest_failed"
                             ; "status", status_json
-                            ; "output", `String output
+                            ; "output", `String (String_util.sanitize_utf8 output)
                             ; "execution_time_ms", `Int elapsed_ms
                             ]
                             @ dispatched_model_location_fields ())

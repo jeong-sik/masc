@@ -5,7 +5,7 @@
 // when the full-screen modal is confirmed.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useLayoutEffect, useState } from 'preact/hooks'
 
 export const EXPANDABLE_TEXTAREA_STYLE =
   'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-mono focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset resize-y custom-scrollbar'
@@ -36,8 +36,9 @@ export function ExpandableTextarea({
   const [local, setLocal] = useState(value)
   const [expanded, setExpanded] = useState(false)
 
-  // Sync when the parent resets the draft (e.g. entering/exiting edit mode).
-  useEffect(() => {
+  // Apply parent resets before the editor accepts input. A delayed effect
+  // can overwrite text entered immediately after mounting or a parent reset.
+  useLayoutEffect(() => {
     setLocal(value)
   }, [value])
 

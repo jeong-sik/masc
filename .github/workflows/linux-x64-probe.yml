@@ -85,6 +85,14 @@ jobs:
           shasum -a 256 deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
           shasum -a 256 --check SHA256SUMS
 
+      - name: Upload runtime probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.target }}-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.PROBE_OUT }}/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Exercise Item TUI with the matching compiled binary
         if: inputs.capture_item_http
         shell: bash
@@ -148,14 +156,6 @@ jobs:
             ${{ runner.temp }}/item-http-evidence/server.log
           if-no-files-found: error
           retention-days: 14
-
-      - name: Upload runtime probe
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ inputs.target }}-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ env.PROBE_OUT }}/
-          if-no-files-found: error
-          retention-days: 7
 
   stagehand-model-probe:
     if: inputs.target == 'stagehand-model-macos-arm64'

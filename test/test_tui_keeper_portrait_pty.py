@@ -662,6 +662,87 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
 
+
+def instructions_read_recovers_workspace_authority(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    reads = []
+    old = b"instructions-obsolete-runtime"
+    current = b"instructions-current-runtime"
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def config():
+        reads.append(True)
+        marker = old if len(reads) == 1 else current
+        # The actual config-view projection reads this nested runtime field.
+        value = {"name": "alpha", "execution": {"selected_runtime_id": marker.decode()},
+                 "prompt": {"instructions": "Synthetic Instructions recovery fixture"}}
+        if len(reads) != 1:
+            return 200, value
+        held.set()
+        assert release.wait(timeout=30), "held Instructions response was not released"
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/config"] = config
+
+    def wait_refreshes(process, fd, output):
+        before = identity["probes"]
+        # Full refreshes are serial: the following probe starts after applying
+        # the preceding identity response, so this crosses the state boundary.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= before + 2, timeout=10)
+
+    def frame(output):
+        return b"\n".join(last_frame_rows(output).values())
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=45, columns=COLUMNS, needle=INFO_TAB)
+            # Info -> Items -> Sandbox -> Instructions. The config endpoint
+            # arrival, rather than a tab-strip label, confirms pane entry.
+            os.write(fd, b"]]]")
+            assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
+            identity["unread"] = True
+            wait_refreshes(process, fd, output)
+            assert reads == [True], "unread authority restarted the held detail read"
+            assert old not in frame(output)
+            identity["unread"] = False
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: current in frame(output), timeout=10), "Instructions did not recover automatically"
+            assert len(reads) == 2, "authority recovery duplicated its detail read"
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_event(process, fd, output, served, timeout=3)
+            wait_refreshes(process, fd, output)
+            assert h.drain_until_quiet(process, fd, output), "late Instructions response did not settle"
+            assert current in frame(output) and old not in frame(output)
+            assert old not in output[start:], "obsolete Instructions callback replaced the recovery"
+            assert len(reads) == 2, "ordinary full/scoped refresh relaunched the settled detail"
+            capture_item_screen(output, "instructions-authority-recovery")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary,
+        description="Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery",
+        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+        prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())), refresh=0.2)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -669,7 +750,7 @@ if __name__ == "__main__":
         captures = Path(artifact_root) / "keeper-items-tui"
         captures.mkdir(parents=True, exist_ok=True)
         (captures / "manifest.json").write_text(json.dumps({
-            "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+            "scope": "synthetic Item account and Instructions authority-recovery HTTP responses through the real TUI in a PTY",
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "source_sha": os.environ.get("GITHUB_SHA"),
             "columns": COLUMNS, "item_rows": SHORT_ROWS,
@@ -682,4 +763,5 @@ if __name__ == "__main__":
     item_account_follows_roster_revision(binary)
     item_account_withdraws_unread_authority(binary)
     item_account_is_withdrawn_at_workspace_boundary(binary)
-    print("tui keeper portrait: PASS (8 scenarios)")
+    instructions_read_recovers_workspace_authority(binary)
+    print("tui keeper portrait: PASS (9 scenarios)")

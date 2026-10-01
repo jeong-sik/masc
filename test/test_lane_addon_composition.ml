@@ -85,9 +85,9 @@ let with_fixture ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=r
                 await clock (fun () -> inspect config |> list "instances" |> List.for_all (fun json ->
                   text "kind" (member "phase" json) = "detached"));
                 result))))))))
-let manifest ?(name="package") ?(outputs="") root =
+let manifest ?(name="package") ?(outputs="") ?(max_reply_bytes=16384) root =
   let path = Filename.concat root (name ^ ".toml") in
-  write path ({|id="generic-package"
+  write path (Printf.sprintf {|id="generic-package"
 revision="1"
 title="Generic output"
 image="not-executed"
@@ -97,8 +97,8 @@ contributions=["observe"]
 cpus=0.5
 memory_bytes=67108864
 pids=16
-max_reply_bytes=16384
-|} ^ outputs); path
+max_reply_bytes=%d
+|} max_reply_bytes ^ outputs); path
 let declare ?(run="world") ?(value="initial") directory manifest id sources =
   let path = Filename.concat directory (id ^ ".toml") in
   write path (Printf.sprintf {|id=%S
@@ -116,6 +116,37 @@ let source received id = match Hashtbl.find_opt received id with
 let require_some label = function Some value -> value | None -> fail label
 let completed received id = Option.bind (source received id) (fun source ->
   match list "observations" source with [observation] -> Some observation | _ -> None)
+
+let test_namespace_overhead_does_not_consume_package_capacity () =
+  let original = List.hd output.rows in
+  let related_ids = List.init 1024 string_of_int in
+  let local_row = {original with Types.related_ids;
+    fields=["body", `String (String.make 4096 'x')]} in
+  let supplied = ref {output with rows=[local_row]} in
+  let cap = String.length (Yojson.Safe.to_string (Types.output_to_json !supplied)) in
+  with_fixture ~produce:(fun ~binding:_ ~sources:_ -> !supplied)
+    (fun clock config root directory _received _stopped ->
+      let manifest = manifest ~max_reply_bytes:cap root in
+      let _path = declare directory manifest "near-limit" "[]" in
+      reconcile config directory;
+      let id = active config "near-limit" |> text "instance_id" in
+      await clock (fun () -> member "observation_seq" (instance config id) = `Int 1);
+      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+      let observed = unwrap (Store.read_observation ~instance_id:id ~seq:1 ~max_bytes:cap store)
+        |> Types.output_to_json in
+      check bool "host prefixes exceed package wire cap" true
+        (String.length (Yojson.Safe.to_string observed) > 2 * cap);
+      let row = List.hd (list "rows" observed) in
+      check string "row remains namespaced" (id ^ "/1/row") (text "id" row);
+      check string "lane remains namespaced" (id ^ "/arbitrary-domain") (text "lane_id" row);
+      check (Alcotest.list string) "all relations remain namespaced"
+        (List.map (fun related -> id ^ "/1/" ^ related) related_ids)
+        (list "related_ids" row |> List.map Yojson.Safe.Util.to_string);
+      supplied := {output with rows=[{local_row with fields=["body", `String (String.make (cap + 1) 'x')]}]};
+      ignore (dispatch config Runtime.Observe ["instance_id", `String id]);
+      await clock (fun () -> text "kind" (member "phase" (instance config id)) = "failed");
+      check bool "oversized package data was not committed" true
+        (member "observation_seq" (instance config id) = `Int 1))
 
 let test_toml_output_connection_and_retained_provenance () = with_fixture (fun clock config root directory received stopped ->
   let manifest = manifest root in
@@ -484,6 +515,8 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
         expected (reconstruct before.input_count reference [])))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "host namespace overhead preserves package reply capacity" `Quick
+    test_namespace_overhead_does_not_consume_package_capacity;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;
   test_case "named output feeds statistics and preserves mapping revisions" `Quick

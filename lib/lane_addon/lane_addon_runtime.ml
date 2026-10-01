@@ -218,6 +218,21 @@ let namespace e seq output =
   { output with rows = List.map (fun (row : row) -> { row with
       id = prefix row.id; lane_id = e.instance_id ^ "/" ^ row.lane_id;
       related_ids = List.map prefix row.related_ids }) output.rows }
+let add_output_bytes left right =
+  if left > Int64.sub Int64.max_int right
+  then Error "namespaced observation size overflow"
+  else Ok (Int64.add left right)
+let namespace_allowance e seq output =
+  let escaped_bytes value =
+    Int64.of_int (String.length (Yojson.Safe.to_string (`String value)) - 2) in
+  let lane_prefix = escaped_bytes (e.instance_id ^ "/") in
+  let row_prefix = escaped_bytes (e.instance_id ^ "/" ^ string_of_int seq ^ "/") in
+  List.fold_left (fun total (row : row) ->
+    let* total = total in
+    let* total = add_output_bytes total lane_prefix in
+    let* total = add_output_bytes total row_prefix in
+    List.fold_left (fun total _ -> let* total = total in add_output_bytes total row_prefix)
+      (Ok total) row.related_ids) (Ok 0L) output.rows
 type action_writer = store:Lane_addon_store.t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 let action_writer_key : action_writer Eio.Fiber.key = Eio.Fiber.create_key ()
@@ -248,9 +263,18 @@ let finalize_actions m e =
   Queue.clear e.action_queue
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
-  let output = namespace e seq output in
+  (* The package limit bounds its reply, before host-owned identity prefixes.
+     Keep a separate persisted bound with exactly those prefixes as allowance;
+     no package-controlled field receives additional capacity. *)
   let* () =
     if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
+    then Ok () else Error "observation exceeds the package output envelope" in
+  let* allowance = namespace_allowance e seq output in
+  let* max_namespaced_bytes = add_output_bytes
+    (Int64.of_int e.package.resources.max_reply_bytes) allowance in
+  let output = namespace e seq output in
+  let* () =
+    if Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output))) <= max_namespaced_bytes
     then Ok () else Error "namespaced observation exceeds the package output envelope" in
   let* () = offload (fun () -> Lane_addon_store.append_observation m.store
     ~instance_id:e.instance_id ~seq ~sources output) in

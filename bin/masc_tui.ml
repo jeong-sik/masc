@@ -33,6 +33,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
     report_action state "error"
       (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
 
+module Code_results = Masc_tui_code_results
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
@@ -901,12 +902,12 @@ let consume_dispatched_message_draft state request =
    so the jump is a screenful on every window; a page smaller than the pane
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
-  let rows, _cols = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_rows = keeper_message_status_rows state in
+  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
      possible row on both sides of the transition: using only the rows drawn
      right now made a 46-row pane move 38 up, then only 37 down, leaving the
@@ -1111,7 +1112,7 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_rows = keeper_message_status_rows state in
+  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
     ~terminal_cols:cols
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)
@@ -1623,9 +1624,9 @@ type async_msg =
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
   (* The wizard's replies carry the save they answer, and
-     [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
+     [Masc_tui_voice_wizard_session.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
-  | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
   (* The keeper-voice screen: the voices its endpoint answers to, and what
      the setup route said about the one line it writes. *)
   | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
@@ -2700,12 +2701,12 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 ;;
 
 let launch_voice_wizard_save state ~mailbox
-    (session : Masc_tui_types.voice_wizard_session) =
+    (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
   match
-    ( Masc_tui_types.voice_wizard_save_held session
+    ( Masc_tui_voice_wizard_session.voice_wizard_save_held session
     , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
         ~alongside )
   with
@@ -2723,7 +2724,7 @@ let launch_voice_wizard_save state ~mailbox
   | None, Ok body ->
     state.voice_wizard_requests <- state.voice_wizard_requests + 1;
     let request = state.voice_wizard_requests in
-    state.voice_wizard <- Some (Masc_tui_types.voice_wizard_sending session ~request);
+    state.voice_wizard <- Some (Masc_tui_voice_wizard_session.voice_wizard_sending session ~request);
     let host = server_peer_host in
     let port = state.port in
     let payload = Yojson.Safe.to_string body in
@@ -2735,15 +2736,15 @@ let launch_voice_wizard_save state ~mailbox
         with
         | Masc_tui_http.Post_answered json ->
           (match voice_setup_revision json with
-           | Some revision -> Masc_tui_types.Save_written revision
+           | Some revision -> Masc_tui_voice_wizard_session.Save_written revision
            (* Written, by the status, but with no revision to keep editing
               against: what the session holds is now stale, and whether it is
               this write's is exactly what the reread decides. *)
            | None ->
-             Masc_tui_types.Save_unanswered_reply "the answer named no revision")
-        | Masc_tui_http.Post_refused message -> Masc_tui_types.Save_refused message
+             Masc_tui_voice_wizard_session.Save_unanswered_reply "the answer named no revision")
+        | Masc_tui_http.Post_refused message -> Masc_tui_voice_wizard_session.Save_refused message
         | Masc_tui_http.Post_unanswered detail ->
-          Masc_tui_types.Save_unanswered_reply detail
+          Masc_tui_voice_wizard_session.Save_unanswered_reply detail
       in
       enqueue_async mailbox (Voice_wizard_saved (request, reply))
     in
@@ -2752,7 +2753,7 @@ let launch_voice_wizard_save state ~mailbox
      | None ->
        enqueue_async mailbox
          (Voice_wizard_saved
-            (request, Masc_tui_types.Save_refused "Eio switch is unavailable"))
+            (request, Masc_tui_voice_wizard_session.Save_refused "Eio switch is unavailable"))
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
 ;;
 
@@ -3806,27 +3807,6 @@ let launch_code_blame_load state ~mailbox ~path =
     ~deliver:(fun result ->
       enqueue_async mailbox (Code_blame_loaded (request, result)))
     (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
-
-(* Remember where a jump is about to leave from, so B can walk back.
-   Bounded: the oldest entry falls off past twenty. *)
-let code_jump_back_limit = 20
-
-let push_code_jump state =
-  let file = Masc_tui_fetched.current_key state.code_file in
-  let entry =
-    ( state.code_scope,
-      state.code_dir,
-      file,
-      state.code_file_cursor,
-      state.code_file_scroll )
-  in
-  state.code_jump_back <-
-    entry
-    :: (if List.length state.code_jump_back >= code_jump_back_limit then
-          List.filteri
-            (fun i _ -> i < code_jump_back_limit - 1)
-            state.code_jump_back
-        else state.code_jump_back)
 
 (* Ask the language server about [symbol] on the pane's cursor line. The
    question rides the surface's workspace axes, so a keeper checkout and a
@@ -6009,7 +5989,7 @@ let row_list (state : state) : row_list option =
                      state.code_file_cursor <- index;
                      state.code_file_scroll <-
                        Masc_tui_scroll.ensure_visible ~cursor:index
-                         ~height:(Masc_tui_render.code_pane_content_height state)
+                         ~height:(Masc_tui_render_code.code_pane_content_height state)
                          state.code_file_scroll)
                }
          (* Nothing to move through while the file is still being read, and
@@ -6253,6 +6233,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_params -> pane (fun v -> Runtime_params_scroll v)
   | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
@@ -13219,24 +13200,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Option.iter
         (fun session ->
           Option.iter
-            (fun (updated : Masc_tui_types.voice_wizard_session) ->
+            (fun (updated : Masc_tui_voice_wizard_session.voice_wizard_session) ->
               state.voice_wizard <- Some updated;
               (match reply with
                (* The pane is one revision behind a write, and possibly behind
                   one that got no answer. *)
-               | Masc_tui_types.Save_written _ | Masc_tui_types.Save_unanswered_reply _ ->
+               | Masc_tui_voice_wizard_session.Save_written _ | Masc_tui_voice_wizard_session.Save_unanswered_reply _ ->
                    launch_voice_config_load state ~mailbox
-               | Masc_tui_types.Save_refused _ -> ());
+               | Masc_tui_voice_wizard_session.Save_refused _ -> ());
               match updated.vws_save with
-              | Masc_tui_types.Save_probing request ->
+              | Masc_tui_voice_wizard_session.Save_probing request ->
                   launch_voice_wizard_probe state ~mailbox ~request
                     voice_wizard_probe_sentence
-              | Masc_tui_types.Save_unanswered { request; _ } ->
+              | Masc_tui_voice_wizard_session.Save_unanswered { request; _ } ->
                   launch_voice_wizard_reread state ~mailbox ~request
-              | Masc_tui_types.Save_not_sent | Masc_tui_types.Save_sending _
-              | Masc_tui_types.Save_settled | Masc_tui_types.Save_needs_reopen _ ->
+              | Masc_tui_voice_wizard_session.Save_not_sent | Masc_tui_voice_wizard_session.Save_sending _
+              | Masc_tui_voice_wizard_session.Save_settled | Masc_tui_voice_wizard_session.Save_needs_reopen _ ->
                   ())
-            (Masc_tui_types.voice_wizard_after_save session ~request reply))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_save session ~request reply))
         state.voice_wizard
   | Voice_agent_voices_loaded result ->
       (match state.voice_agent_voices, result with
@@ -13291,7 +13272,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_probe session ~request
+            (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
                (Result.map voice_wizard_probe_lines result)))
         state.voice_wizard
   | Voice_wizard_reread (request, result) ->
@@ -13299,7 +13280,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_reread session ~request result))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_reread session ~request result))
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
@@ -14357,9 +14338,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.runtime_params_loading <- false;
       match result with
       | Ok rows ->
+          let selected_key =
+            List.nth_opt state.runtime_params state.runtime_params_cursor
+            |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
+          in
+          let cursor =
+            Option.bind selected_key (fun key ->
+              List.find_mapi (fun index (row : Tui_decode.runtime_param_row) ->
+                if String.equal row.rpr_key key then Some index else None) rows)
+            |> Option.value
+                 ~default:(max 0 (min state.runtime_params_cursor (List.length rows - 1)))
+          in
+          let next_key =
+            List.nth_opt rows cursor
+            |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
+          in
+          if not (Option.equal String.equal selected_key next_key)
+          then state.config_scroll <- 0;
           state.runtime_params <- rows;
-          state.runtime_params_cursor <-
-            max 0 (min state.runtime_params_cursor (List.length rows - 1));
+          state.runtime_params_cursor <- cursor;
           state.runtime_params_error <- None
       | Error detail ->
           (* Reported, not swallowed into an empty list: empty means nothing is
@@ -14403,186 +14400,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (request, result) ->
-      state.code_listing <-
-        Masc_tui_fetched.complete ~equal:code_scope_path_equal
-          state.code_listing request result;
-      (match result with
-       | Ok _
-         when code_scope_path_equal
-                (Masc_tui_fetched.request_key request)
-                (code_listing_key state) ->
-           state.code_cursor <-
-             max 0
-               (min state.code_cursor (List.length (code_entries state) - 1))
-       | Ok _ | Error _ -> ())
-  | Code_file_loaded (request, result) -> (
-      let path = Masc_tui_fetched.request_key request in
-      (* An answer for a file the operator has moved past describes bytes
-         that are no longer on screen, and everything below resets the
-         scroll, the cursor and the sibling panes to match it. The sibling
-         loads already guarded on the open path; this one never did. *)
-      if not (Masc_tui_fetched.is_current ~equal:String.equal state.code_file request)
-      then ()
-      else
-      match result with
-      | Ok content ->
-          (* Lex once at load: comment and string state crosses rows, so a
-             window could not answer. Past the budget the file draws plain
-             rather than slowly. *)
-          let language =
-            if String.length content > 500_000 then None
-            else Masc_tui_code_lexer.language_of_path path
-          in
-          let rows =
-            Masc_tui_code_lexer.rows_of_source ~language content
-            |> List.map
-                 (List.map (fun (text, kind) ->
-                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
-          in
-          (* [rows] stays a list for the memo scan and the width fold just
-             below, both of which read it once front to back. The pane keeps
-             the array. *)
-          state.code_file <-
-            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok (Array.of_list rows));
-          (* The jump that asked for this file may have named a line; the
-             reset and the jump live together so neither overwrites the
-             other. Consumed once -- the next plain open starts at the top. *)
-          state.code_file_scroll <-
-            (match state.code_target_line with
-             | Some line -> max 0 (line - 1)
-             | None -> 0);
-          state.code_file_cursor <- state.code_file_scroll;
-          state.code_lsp_note <- None;
-          state.code_target_line <- None;
-          state.code_file_hscroll <- 0;
-          (* The widest row is the horizontal clamp; measured here, once,
-             not on every l press over ten thousand rows. *)
-          state.code_file_max_width <-
-            List.fold_left
-              (fun widest segments ->
-                let row_width =
-                  List.fold_left
-                    (fun acc (text, _) ->
-                      acc + Message_layout.display_width text)
-                    0 segments
-                in
-                max widest row_width)
-              0 rows;
-          state.code_memos <- Masc_tui_memo.of_file ~path rows;
-          state.code_focus_file <- Right_pane;
-          (* A new file starts on its content; the old file's history or
-             diff would caption the wrong bytes. *)
-          state.code_history <- Masc_tui_fetched.clear state.code_history;
-          state.code_history_open <- false;
-          state.code_history_scroll <- 0;
-          state.code_diff <- Masc_tui_fetched.clear state.code_diff;
-          state.code_diff_open <- false;
-          state.code_diff_scroll <- 0;
-          state.code_diff_hscroll <- 0;
-          state.code_diff_max_width <- 0;
-          state.code_notes_open <- false;
-          state.code_notes_scroll <- 0;
-          state.code_blame <- Masc_tui_fetched.clear state.code_blame
-      | Error detail ->
-          state.code_memos <- [];
-          state.code_file <-
-            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Error detail))
+      Code_results.apply_entries state request result
+  | Code_file_loaded (request, result) ->
+      Code_results.apply_file state request result
   | Code_blame_loaded (request, result) ->
-      (* An answer that arrives after the operator moved on describes bytes
-         that are no longer on screen, and a margin naming the wrong authors
-         is worse than no margin. Opening a file clears the blame, so a
-         request from before that is no longer the one being waited on and
-         [complete] drops it -- the hand-written path comparison this arm
-         used to carry said the same thing in more places. *)
-      state.code_blame <-
-        Masc_tui_fetched.complete ~equal:String.equal state.code_blame request result
+      Code_results.apply_blame state request result
   | Code_lsp_answered (question, symbol, result) ->
-      (match result with
-       | Error detail ->
-           state.code_lsp_note <- Some (symbol ^ ": " ^ detail)
-       | Ok (Masc.Tui_decode.Lsp_hover text) ->
-           state.code_lsp_note <-
-             Some
-               (match text with
-                | Some t ->
-                    symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
-                | None -> symbol ^ ": the server has nothing to say here")
-       | Ok (Masc.Tui_decode.Lsp_locations []) ->
-           state.code_lsp_note <-
-             Some (Printf.sprintf "no %s found for %S" question symbol)
-       | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
-           let open Masc.Tui_decode in
-           if location.ll_inside then begin
-             (* Jump there: same file just moves the cursor, another file
-                opens with the line as its target. Either way the place the
-                jump left from goes on the back stack first. *)
-             push_code_jump state;
-             state.code_lsp_note <-
-               Some
-                 (Printf.sprintf "%s: %s:%d" symbol location.ll_path
-                    location.ll_line);
-             match Masc_tui_fetched.current state.code_file with
-             | Some (open_path, Masc_tui_fetched.Ready rows)
-               when String.equal open_path location.ll_path ->
-                 let cursor =
-                   max 0
-                     (min (location.ll_line - 1) (Array.length rows - 1))
-                 in
-                 state.code_file_cursor <- cursor;
-                 (* Follow the jump: a definition past the fold is a cursor
-                    the operator cannot see otherwise. *)
-                 state.code_file_scroll <-
-                   Masc_tui_scroll.ensure_visible ~cursor
-                     ~height:(Masc_tui_render.code_pane_content_height state)
-                     state.code_file_scroll
-             (* A different file, or this one not readable yet: ask for it.
-                [start] answers Already_loading if that is the read already in
-                flight, so a jump into the file being read does not double it. *)
-             | Some _ | None ->
-                 state.code_target_line <- Some location.ll_line;
-                 launch_code_file_load state ~mailbox
-                   ~path:location.ll_path
-           end
-           else
-             (* Outside the workspace (stdlib, a package): say where rather
-                than open a path the surface cannot serve. *)
-             state.code_lsp_note <-
-               Some
-                 (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
-                    location.ll_path location.ll_line))
+      (match Code_results.apply_lsp_answer state ~question ~symbol result with
+       | Code_results.No_followup -> ()
+       | Code_results.Reveal_cursor ->
+           state.code_file_scroll <-
+             Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
+               ~height:(Masc_tui_render_code.code_pane_content_height state)
+               state.code_file_scroll
+       | Code_results.Load_file path -> launch_code_file_load state ~mailbox ~path)
   | Code_diff_loaded (request, result) ->
-      let landed =
-        Masc_tui_fetched.is_current ~equal:String.equal state.code_diff request
-        && Result.is_ok result
-      in
-      state.code_diff <-
-        Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
-      if landed then begin
-        state.code_diff_scroll <- 0;
-        state.code_diff_hscroll <- 0;
-        state.code_diff_max_width <-
-          match result with
-          | Error _ -> 0
-          | Ok diff ->
-              List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
-                max widest (Message_layout.display_width
-                  (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
-      end
+      Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
-      (* The scope travels in the key, so a slow answer from a repository the
-         operator has left cannot caption the file now open at the same
-         relative path. *)
-      let landed =
-        Masc_tui_fetched.is_current ~equal:code_scope_path_equal state.code_history
-          request
-        && Result.is_ok result
-      in
-      state.code_history <-
-        Masc_tui_fetched.complete ~equal:code_scope_path_equal state.code_history
-          request result;
-      if landed then state.code_history_scroll <- 0
+      Code_results.apply_history state request result
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -19443,7 +19278,7 @@ and is loaded on demand through keeper_skill.
                 Option.iter
                   (fun session ->
                     state.voice_wizard <-
-                      Some (Masc_tui_types.voice_wizard_append session text))
+                      Some (Masc_tui_voice_wizard_session.voice_wizard_append session text))
                   state.voice_wizard
             | Some Text_palette ->
                 state.palette_query <- state.palette_query ^ text;
@@ -20246,6 +20081,18 @@ and is loaded on demand through keeper_skill.
                  state.runtime_param_edit <- None;
                  state.runtime_params_notice <-
                    Some (true, edit.rpe_key ^ ": edit cancelled")
+               | "home" | "end" ->
+                 state.config_scroll <-
+                   (if String.equal k "home" then 0 else Masc_tui_types.clamped_scroll_end)
+               | "pageup" | "pagedown" ->
+                 let terminal_rows, _ = get_terminal_size () in
+                 let _, detail_height =
+                   Masc_tui_types.runtime_params_viewport state ~terminal_rows in
+                 let page = max 1 (detail_height - 1) in
+                 state.config_scroll <-
+                   (if String.equal k "pagedown" then
+                      Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                    else max 0 (state.config_scroll - page))
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);
@@ -20292,7 +20139,7 @@ and is loaded on demand through keeper_skill.
               let set value = state.voice_wizard <- Some value in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
-              if Masc_tui_types.voice_wizard_is_sending session && not (String.equal k "esc")
+              if Masc_tui_voice_wizard_session.voice_wizard_is_sending session && not (String.equal k "esc")
               then ()
               else (
                 match k with
@@ -20314,32 +20161,32 @@ and is loaded on demand through keeper_skill.
                   (match session.vws_step with
                    | Voice_wizard.Review ->
                      launch_voice_wizard_save state ~mailbox:async_messages
-                       (Masc_tui_types.voice_wizard_commit session)
+                       (Masc_tui_voice_wizard_session.voice_wizard_commit session)
                    | Voice_wizard.Section
                    | Voice_wizard.Provider
                    | Voice_wizard.Name
                    | Voice_wizard.Address
                    | Voice_wizard.Credential
                    | Voice_wizard.Model
-                   | Voice_wizard.Voice -> set (Masc_tui_types.voice_wizard_next session))
-                | "up" -> set (Masc_tui_types.voice_wizard_previous session)
-                | "down" -> set (Masc_tui_types.voice_wizard_next session)
+                   | Voice_wizard.Voice -> set (Masc_tui_voice_wizard_session.voice_wizard_next session))
+                | "up" -> set (Masc_tui_voice_wizard_session.voice_wizard_previous session)
+                | "down" -> set (Masc_tui_voice_wizard_session.voice_wizard_next session)
                 (* The provider is a closed set, so it walks under the same keys
                    a bool toggles under elsewhere in this pane. *)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Section ->
-                  set (Masc_tui_types.voice_wizard_cycle_section session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_section session)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Provider ->
-                  set (Masc_tui_types.voice_wizard_cycle_provider session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_provider session)
                 | "\127" | "\b" | "backspace" ->
-                  set (Masc_tui_types.voice_wizard_backspace session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_backspace session)
                 | s when String.length s = 1 && Char.code s.[0] = 21 ->
-                  set (Masc_tui_types.voice_wizard_clear session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_clear session)
                 | s
                   when (String.length s = 1 && Char.code s.[0] >= 32)
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                  set (Masc_tui_types.voice_wizard_append session s)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_append session s)
                 | _ -> ()))
        (* The launch form owns every key while it is up, above the quit key
           the way the Lane Add-ons form is: a prompt with a q in it is a
@@ -21844,16 +21691,19 @@ and is loaded on demand through keeper_skill.
                  | "c" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Stagehand view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "j" | "down" | "k" | "up" ->
+                 | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (browser_choices view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt (listed_clients view) cursor with
+                     (match List.nth_opt (browser_choices view) cursor with
                       | None -> ()
-                      | Some client ->
-                          state.browser_lane <- Some (choose_client client view);
-                          launch_browser_lane state ~mailbox:async_messages Read)
+                      | Some choice ->
+                          state.browser_lane <- Some (choose_browser choice view);
+                          if not (browser_choice_selected view choice) then
+                            (match choice with
+                             | Connected_browser _ -> launch_browser_lane state ~mailbox:async_messages Read
+                             | Stagehand_browser | Automation_browser -> refresh_browser_lane state ~mailbox:async_messages))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_none (browser_history_on_screen state)
@@ -21978,7 +21828,7 @@ and is loaded on demand through keeper_skill.
                  | "l" -> switch_to Live
                  | "a" -> switch_to Automation
                  | "c" -> switch_to Stagehand
-                 | "b" when view.source = Live && not (busy view) ->
+                 | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
@@ -23324,7 +23174,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_notes_viewport state in
+           let count, height = Masc_tui_render_code.code_notes_viewport state in
            let maximum = max 0 (count - height) in
            let current = max 0 (min state.code_notes_scroll maximum) in
            let page = Masc_tui_scroll.page_step ~height in
@@ -23371,7 +23221,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_history_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_history_viewport state in
+           let count, height = Masc_tui_render_code.code_history_viewport state in
            let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
            let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
            let page = Masc_tui_scroll.page_step ~height in
@@ -23822,6 +23672,17 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
+            | Config when state.config_pane = Config_params ->
+                let terminal_rows, _ = get_terminal_size () in
+                let _, detail_height =
+                  Masc_tui_types.runtime_params_viewport state ~terminal_rows in
+                (* One repeated row anchors consecutive pages. The key uses
+                   the same detail height as the renderer, including forms. *)
+                let page = max 1 (detail_height - 1) in
+                state.config_scroll <-
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                   else max 0 (state.config_scroll + (direction * page)))
             | Config when state.config_pane = Config_voice ->
                 state.config_scroll <-
                   (if direction > 0 then
@@ -24515,7 +24376,7 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
@@ -24528,7 +24389,7 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
@@ -24542,7 +24403,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -24619,11 +24480,15 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
+                let next_cursor =
                   min
                     (max 0 (List.length state.runtime_params - 1))
-                    (state.runtime_params_cursor + 1);
-                state.runtime_params_notice <- None
+                    (state.runtime_params_cursor + 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 (* End writes a row past the end and the frame reports the
                    real one back. A j pressed before that frame carries the
@@ -24894,14 +24759,14 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
@@ -24915,7 +24780,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -24993,9 +24858,12 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
-                  max 0 (state.runtime_params_cursor - 1);
-                state.runtime_params_notice <- None
+                let next_cursor = max 0 (state.runtime_params_cursor - 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -25275,13 +25143,13 @@ and is loaded on demand through keeper_skill.
                   match Masc_tui_fetched.current state.code_history with
                   | Some (_, Masc_tui_fetched.Ready _) -> (
                       match
-                        Masc_tui_render.code_history_selected state
+                        Masc_tui_render_code.code_history_selected state
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
                           match Masc_tui_fetched.current state.code_file with
                           | Some (_, Masc_tui_fetched.Ready rows) ->
-                            push_code_jump state;
+                            Code_results.push_code_jump state;
                             state.code_history_open <- false;
                             let cursor =
                               max 0
@@ -25294,7 +25162,7 @@ and is loaded on demand through keeper_skill.
                             state.code_file_scroll <-
                               Masc_tui_scroll.ensure_visible ~cursor
                                 ~height:
-                                  (Masc_tui_render.code_pane_content_height state)
+                                  (Masc_tui_render_code.code_pane_content_height state)
                                 state.code_file_scroll
                           (* No rows on screen to jump within. *)
                           | Some (_, _) | None -> ())
@@ -26514,7 +26382,7 @@ and is loaded on demand through keeper_skill.
                          state.config_scroll <- 0;
                          state.voice_wizard
                            <- Some
-                                (Masc_tui_types.voice_wizard_open
+                                (Masc_tui_voice_wizard_session.voice_wizard_open
                                    ~section:Voice_setup.Tts
                                    ~provider:Voice_wizard.Elevenlabs ~revision)
                        | (Some _ | None), _ -> ())

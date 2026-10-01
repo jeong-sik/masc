@@ -290,10 +290,10 @@ def operator_task_survives_supplemental_failure(executable):
                 recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
 
         def interact(process, fd, _slave, output, base):
-            h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
+            h.wait_for_output(process, fd, output, b"Operator task \xc2\xb7 task-777", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
-            select_home(process, fd, output, b"Operator task", destinations=4)
+            select_home(process, fd, output, b"Operator task \xc2\xb7 task-777", destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
@@ -319,7 +319,7 @@ def operator_task_survives_supplemental_failure(executable):
                 assert b"membership unknown" not in drawn, drawn
             home.assert_no_decision_posts(requests)
             h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
-            assert_selected(output, b"Operator task")
+            assert_selected(output, b"Operator task \xc2\xb7 task-777")
             os.write(fd, b"q")
 
         backup_kind = "no-backup" if recovery_links is None else "empty-backup" if not recovery_links else "linked-backup"

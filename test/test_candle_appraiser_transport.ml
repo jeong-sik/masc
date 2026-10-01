@@ -258,10 +258,10 @@ let test_all_transport_failures_remain_retryable () =
 ;;
 
 let test_http_bad_request_waits_for_change () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
+  List.iter (fun status -> with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture bad request","type":"invalid_request_error"}}|} in
     let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> `Bad_request, body)) in
+      (F.Reply_with (fun _ _ -> status, body)) in
     let slot = "candle-request-refused" in
     publish ~base_path ~cli_slots:[] [{F.id=slot;base_url=server.base_url}];
     let never_cli : Keeper_lane_cli_oneshot.runner =
@@ -277,7 +277,7 @@ let test_http_bad_request_waits_for_change () =
       (recorded_run ~base_path) in
     check (option string) "receipt identifies refusing binding" (Some slot) selected;
     check (list string) "actual HTTP dispatch survives" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)
+    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request; `Payment_required]
 ;;
 
 let test_rate_limit_without_cli_remains_retryable () =
@@ -340,6 +340,54 @@ let test_cli_setup_failure_is_not_binding_rest () =
       (recorded_run ~base_path) in
     check (option string) "setup failure names the actual CLI" (Some F.cli_primary_runtime) selected;
     check (list string) "setup dispatch remains observable" [F.cli_primary_runtime] (dispatched output))
+;;
+
+let test_hard_quota_requires_recovery_window () =
+  let module Exact = Agent_core.Exact_output in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  List.iter (fun (retry_after, expected) ->
+    let cause = Exact.Completion_failed
+      {error=Http.ProviderFailure {kind=Http.Hard_quota {retry_after};message="quota"};
+       dispatch=Exact.Generation_dispatch_started} in
+    check bool "hard quota retries only a usable provider window" expected
+      (Server_candle_appraiser.For_testing.retryable_execution cause))
+    [None,false; Some 0.,false; Some (-1.),false; Some nan,false;
+     Some infinity,false; Some 60.,true]
+;;
+
+let test_codex_rpc_refusal_disposition () =
+  List.iter (fun (code, retryable) ->
+    with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+      publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
+      let runner : Keeper_lane_cli_oneshot.runner =
+        fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        Error (Fusion_official_client.Codex_failure (Runtime_codex_app_server.Rpc_error
+          {method_="turn/start";code=Some code;message="fixture RPC refusal";data=None})) in
+      (match run_declared ~base_path runner, retryable with
+       | Error (A.Execution_rejected _), false | Error (A.Transport_unavailable _), true -> ()
+       | _ -> fail "RPC refusal lost its typed retry disposition");
+      let code = if retryable then "candle_appraisal_unavailable" else "candle_appraisal_execution_rejected" in
+      ignore (check_failure code (recorded_run ~base_path))))
+    [-32700,false; -32600,false; -32601,false; -32602,false; -32603,true]
+;;
+
+let test_candidate_admission_refusal_waits_for_change () =
+  with_case (fun ~sw ~net ~clock ~base_path ->
+    let server = F.start_server ~sw ~net ~clock (F.Reply (openai_text (Yojson.Safe.to_string valid_answer))) in
+    let id = "candle-missing-credential" in
+    let snapshot = F.resolver_snapshot ~api_key_env:"MASC_TEST_CANDLE_MISSING_KEY"
+      ~source:base_path [{F.id; base_url=server.base_url}] in
+    ignore (F.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[id] ~cli_slot_ids:[] snapshot
+      : Runtime_exact_output_registry.t);
+    let never_cli : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ -> fail "no CLI declared" in
+    (match run_declared ~base_path never_cli with
+     | Error (A.Execution_rejected _) -> ()
+     | _ -> fail "permanent admission rejection became maintenance retry");
+    check int "missing frozen credential prevents generation" 0 (F.post_count server);
+    let output, selected = check_failure "candle_appraisal_execution_rejected" (recorded_run ~base_path) in
+    check (option string) "no candidate dispatched" None selected;
+    check (list string) "no dispatch invented" [] (dispatched output))
 ;;
 
 let test_cli_timeout_remains_retryable () =
@@ -569,7 +617,10 @@ let () =
   run
     "candle_appraiser_transport"
     [ ( "declared transports"
-      , [ test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
+      , [ test_case "hard quota requires a recovery window" `Quick test_hard_quota_requires_recovery_window
+        ; test_case "RPC refusals retain typed retry disposition" `Quick test_codex_rpc_refusal_disposition
+        ; test_case "permanent admission refusal waits for change" `Quick test_candidate_admission_refusal_waits_for_change
+        ; test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
         ; test_case
             "HTTP bad request waits for a change"
             `Quick test_http_bad_request_waits_for_change

@@ -40,16 +40,18 @@ type http_error = No_http_slot | Advanceable of A.error | Terminal of A.error
 let retryable_execution = function
   | Exact.Provider_response_refused {refusal;_} ->
     (match refusal with
-     | Exact.Rate_limited | Exact.Overloaded | Exact.Payment_required
+     | Exact.Rate_limited | Exact.Overloaded
      | Exact.Server_error | Exact.Network_error | Exact.Timeout
      | Exact.Refusal_body_not_received -> true
-     | Exact.Request_body_refused | Exact.Auth_failed | Exact.Authorization_refused
+     | Exact.Payment_required | Exact.Request_body_refused | Exact.Auth_failed | Exact.Authorization_refused
      | Exact.Invalid_request | Exact.Not_found | Exact.Context_overflow | Exact.Input_capacity -> false)
   | Exact.Completion_failed {error;_} ->
     (match error with
      | Agent_core.Llm_provider.Http_client.ProviderFailure
-         {kind=(Agent_core.Llm_provider.Http_client.Hard_quota _
-               | Agent_core.Llm_provider.Http_client.Capacity_exhausted _
+         {kind=Agent_core.Llm_provider.Http_client.Hard_quota {retry_after};_} ->
+       (match retry_after with Some seconds -> Float.is_finite seconds && seconds > 0. | None -> false)
+     | Agent_core.Llm_provider.Http_client.ProviderFailure
+         {kind=(Agent_core.Llm_provider.Http_client.Capacity_exhausted _
                | Agent_core.Llm_provider.Http_client.Provider_interrupted);_} -> true
      | (Agent_core.Llm_provider.Http_client.HttpError _
        | Agent_core.Llm_provider.Http_client.NetworkError _
@@ -61,6 +63,12 @@ let retryable_execution = function
   | Exact.Response_body_deadline_exceeded -> true
   | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> false
+let retryable_candidate rejection =
+  match Exact.candidate_rejection_disposition rejection with
+  | Exact.Request_preparation_failed -> true
+  | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected
+  | Exact.Input_contract_rejected | Exact.Output_requirement_rejected
+  | Exact.Input_capacity _ -> false
 let terminal_error ~rejected ~retryable cause =
   let detail = flow_failure cause in
   match cause with
@@ -71,7 +79,11 @@ let terminal_error ~rejected ~retryable cause =
       (* Stopping this flow does not prove that a later payout attempt will
          fail. Do not turn bookkeeping failures into permanent refusals. *)
       A.Transport_unavailable detail
-  | Exact.Flow_exact_execution_failed _ | Exact.Flow_candidates_exhausted _ ->
+  | Exact.Flow_candidates_exhausted {rejection;_} ->
+      if rejected then A.Invalid_response detail
+      else if retryable && retryable_candidate rejection then A.Transport_unavailable detail
+      else A.Execution_rejected detail
+  | Exact.Flow_exact_execution_failed _ ->
       if rejected then A.Invalid_response detail
       else if retryable then A.Transport_unavailable detail
       else A.Execution_rejected detail
@@ -111,7 +123,8 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
         ~before_measurement_dispatch:(fun _ -> Ok ()) ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_dispatch:(fun (attempt : Exact.flow_attempt_receipt) -> observe (Dispatch attempt.visit.identity.candidate_id); Ok ()) ~before_advance:(fun ~failed:failure ~next:_ ->
           (match failure with Exact.Flow_candidate_execution_failed f -> failed f.candidate f.cause
-           | Exact.Flow_candidate_rejected _ -> ()); Ok ()) ~validate attempt in
+           | Exact.Flow_candidate_rejected rejection ->
+             if not (retryable_candidate rejection) then retryable := false); Ok ()) ~validate attempt in
       Runtime_exact_lane_backpressure.observe flow;
       (match flow with
        | Ok success -> Ok (success.accepted, (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id)
@@ -137,6 +150,7 @@ let retryable_codex_error = function
   | Runtime_codex_app_server.Subscription_required _
   | Runtime_codex_app_server.Unsupported_server_request _
   | Runtime_codex_app_server.Context_window_exceeded _ -> false
+  | Runtime_codex_app_server.Rpc_error {code=Some (-32700 | -32600 | -32601 | -32602);_} -> false
   | Runtime_codex_app_server.Rpc_error _ as error ->
     (match Runtime_codex_app_server.input_capacity_refusal error with
      | Some _ -> false | None -> true)
@@ -332,6 +346,7 @@ let run_with ~base_path ~execute ~identity request =
   | exn -> fail (A.Transport_unavailable (Printexc.to_string exn))
 let run ~base_path = run_with ~base_path ~execute:(execute ~cli_runner:None ~base_path)
 module For_testing = struct
+  let retryable_execution = retryable_execution
   let terminal_error = terminal_error
   let run_declared ~base_path ~cli_runner = run_with ~base_path ~execute:(execute ~cli_runner:(Some cli_runner) ~base_path)
   let run ~base_path ~execute = run_with ~base_path

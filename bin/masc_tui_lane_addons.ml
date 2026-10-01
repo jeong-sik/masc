@@ -1088,6 +1088,7 @@ let detail_lines ~width view =
                 | S.Lane_output {installation_id;output_id;_} ->
                     "Input: " ^ installation_id ^ "/" ^ Option.value ~default:"*" output_id
                 | S.Snapshot_file {id;path} -> "Input: " ^ id ^ " · " ^ path
+                | S.Fusion_run {id;run_id} -> "Input: " ^ id ^ " · Fusion " ^ run_id
                 | S.Msx_capture {id} | S.Dos_capture {id}
                 | S.Browser_document {id;_} -> "Input: " ^ id) sources in
           sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs
@@ -1142,7 +1143,7 @@ let flow_inputs binding =
   let* sources = S.parse binding in
   Ok (List.filter_map (function
     | S.Lane_output {id;installation_id;output_id} -> Some {source_id=id;installation_id;output_id}
-    | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _ -> None) sources)
+    | S.Fusion_run _ | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _ -> None) sources)
 
 let installation_identity (instance : instance) = instance.installation_id
 

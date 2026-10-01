@@ -94,7 +94,7 @@ let make_backend () =
         on_created connection;
         Ok connection
       end);
-    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->

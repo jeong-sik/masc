@@ -134,7 +134,7 @@ let select_subscription ~caller args subscriptions =
   match List.find_opt (fun s -> s.keeper_name=caller && s.run_id=run_id
     && s.installation_id=installation_id && s.output_id=output_id) subscriptions with
   | Some s -> Ok s | None -> Error "caller has no matching subscription"
-let producer bindings s =
+let producer ~access bindings s =
   let matches value = match get "run_id" text value,field "configuration" value with
     | Ok run,Ok owner when run=s.run_id -> get "id" text owner=Ok s.installation_id
     | _ -> false in
@@ -147,9 +147,13 @@ let producer bindings s =
         match phase with
         | Types.Attached | Types.Observing | Types.Failed _ -> Ok (value::rest)
         | Types.Detached | Types.Detaching -> Ok rest in
-  let* candidates = live (List.filter matches bindings) in
+  (* Do not parse hidden producer metadata or count it as an ambiguous owner. *)
+  let readable = List.filter (fun value ->
+    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~bindings ~access value)) bindings in
+  let* candidates = live (List.filter matches readable) in
   match candidates with
   | [value] ->
+      let* () = Lane_addon_runtime.authorize_retained_read ~bindings ~access value in
       let* instance = get "instance_id" text value in
       let* sequence = get "observation_seq" integer value in
       let* package = field "package" value in
@@ -165,8 +169,8 @@ let producer bindings s =
       Ok (instance,sequence,lanes,max_bytes)
   | [] -> Error "subscribed installation unavailable"
   | _ -> Error "subscribed installation has multiple owners"
-let notice ~io config bindings s =
-  match producer bindings s,protect (fun () -> cursor ~io ~verification:Durable config s) with
+let notice ~io ~access config bindings s =
+  match producer ~access bindings s,protect (fun () -> cursor ~io ~verification:Durable config s) with
   | Ok (instance,latest,_,_),Ok prior ->
       let after,replaced = match prior with
         | None -> 0,false | Some prior when prior.instance_id=instance -> prior.sequence,false
@@ -185,7 +189,7 @@ let observe_with ~io ~config ~keeper_name =
     | [] -> Ok []
     | _ -> Store.bindings (Store.create ~root:(root config)) in
   let rec loop = function [] -> Ok [] | s::rest ->
-    let* value=notice ~io config bindings s in let* rest=loop rest in Ok(value::rest) in
+    let* value=notice ~io ~access:(Lane_addon_sources.Keeper keeper_name) config bindings s in let* rest=loop rest in Ok(value::rest) in
   let* notices=loop subscriptions in
   Ok (`List (List.filter (fun json -> match json with
     | `Assoc fields -> List.mem_assoc "unavailable" fields || List.assoc_opt "new_observations" fields=Some (`Bool true)
@@ -197,24 +201,29 @@ let render = function
       "Use masc_lane_updates with operation=read for the next retained observation; " ^
       "acknowledge its receipt only after reading. No source bodies are included here.\n" ^ Yojson.Safe.to_string json)
   | Ok _ -> Some "Lane subscription discovery returned an invalid envelope."
-let configuration_snapshot ~io config subscriptions revision =
+let configuration_snapshot ~io ~access ~caller config subscriptions revision =
+  let subscriptions = match access with
+    | Lane_addon_sources.Operator_configuration -> subscriptions
+    | Keeper keeper when String.equal keeper caller -> List.filter (fun s -> String.equal s.keeper_name keeper) subscriptions
+    | Keeper _ | Unauthenticated -> [] in
   let bindings = match subscriptions with [] -> Ok []
     | _ -> Store.bindings (Store.create ~root:(root config)) in
   let reader_states = List.map (fun s ->
-    match protect (fun () -> let* bindings=bindings in notice ~io config bindings s) with
+    match protect (fun () -> let* bindings=bindings in notice ~io ~access config bindings s) with
     | Ok value -> value
     | Error detail -> `Assoc ["subscription",json s;"unavailable",`String detail]) subscriptions in
   `Assoc ["source_path",`String (config_path config);
     "source_revision",(match revision with None->`Null|Some value->`String value);
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
-let dispatch_with ~io ~config ~caller ~operation args =
+let dispatch_with ~io ?access ~config ~caller ~operation args =
+  let access = match access with Some value -> value | None -> Lane_addon_sources.Keeper caller in
   Eio_guard.run_in_systhread ~label:"lane-subscription-dispatch" (fun () ->
   protect (fun () -> Mutex.protect mutex (fun () ->
   let* subscriptions,revision = load config in
   match operation with
   | Inspect -> let* ()=exact [] args in
-      Ok (configuration_snapshot ~io config subscriptions revision)
+      Ok (configuration_snapshot ~io ~access ~caller config subscriptions revision)
   | Save ->
       let* ()=exact ["expected_source_revision";"subscriptions"] args in
       let* fields=object_ args in
@@ -223,20 +232,27 @@ let dispatch_with ~io ~config ~caller ~operation args =
       if expected<>actual then Error "subscription configuration revision conflict" else
       let* rows=get "subscriptions" (array decode) args in
       if List.length rows<>List.length (List.sort_uniq Stdlib.compare rows) then Error "duplicate subscription" else
+      let* rows = match access with
+        | Lane_addon_sources.Operator_configuration -> Ok rows
+        | Keeper keeper when String.equal keeper caller ->
+            if List.for_all (fun s -> String.equal s.keeper_name keeper) rows then
+              Ok (List.filter (fun s -> not (String.equal s.keeper_name keeper)) subscriptions @ rows)
+            else Error "Keeper saves may contain only the caller's subscriptions"
+        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
       let string s=Otoml.Printer.to_string (Otoml.TomlString s) in
       let bytes=if rows=[] then "subscriptions = []\n" else String.concat "\n" (List.map (fun s ->
         String.concat "\n" ["[[subscriptions]]";"keeper_name = " ^ string s.keeper_name;
           "run_id = " ^ string s.run_id;"installation_id = " ^ string s.installation_id;
           "output_id = " ^ string s.output_id;""]) rows) in
       let* ()=write (config_path config) bytes in
-      Ok (configuration_snapshot ~io config rows (Some (Store.digest bytes)))
+      Ok (configuration_snapshot ~io ~access ~caller config rows (Some (Store.digest bytes)))
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in
       let* s=select_subscription ~caller args subscriptions in
       let store=Store.create ~root:(root config) in
       let* bindings=Store.bindings store in
-      let* instance,latest,lanes,max_bytes=producer bindings s in
+      let* instance,latest,lanes,max_bytes=producer ~access bindings s in
       let* prior=cursor ~io ~verification:Durable config s in
       let after=match prior with Some prior when prior.instance_id=instance -> prior.sequence | _ -> 0 in
       let supplied=match operation with Acknowledge -> field "receipt" args |> Result.map Option.some
@@ -292,7 +308,7 @@ let dispatch_with ~io ~config ~caller ~operation args =
       | Read,Some _ | Acknowledge,None | (Inspect | Save),_ -> assert false)))
 let dispatch = dispatch_with ~io:real_cursor_io
 let observe = observe_with ~io:real_cursor_io
-let handle_with ~io ~config ~caller args =
+let handle_with ~io ?access ~config ~caller args =
   let* operation = get "operation" (function
     | `String "inspect" -> Ok Inspect | `String "save" -> Ok Save
     | `String "read" -> Ok Read | `String "acknowledge" -> Ok Acknowledge
@@ -300,7 +316,7 @@ let handle_with ~io ~config ~caller args =
   let* fields = object_ args in
   if List.length fields<>List.length (List.sort_uniq String.compare (List.map fst fields))
   then Error "duplicate subscription request field"
-  else dispatch_with ~io ~config ~caller ~operation (`Assoc (List.remove_assoc "operation" fields))
+  else dispatch_with ~io ?access ~config ~caller ~operation (`Assoc (List.remove_assoc "operation" fields))
 
 let handle = handle_with ~io:real_cursor_io
 module For_testing = struct

@@ -1135,11 +1135,15 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
           |> Yojson.Safe.from_string in
         let body = match Masc.Tool_output.normalized_artifact_ref_of_json reference with
           | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
-            (match Masc.Tool_blob_store.fetch
-                (Masc.Tool_blob_store.create ~base_path) ~sha256:artifact.sha256 with
-             | Ok (Some body) -> body
-             | Ok None -> Alcotest.fail "recall artifact missing"
-             | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error))
+            let execution, page = Masc.Keeper_artifact_read.handle_with_page
+                ~base_path ~args:(`Assoc ["sha256", `String artifact.sha256]) in
+            (match page with
+             | Some page ->
+               Alcotest.(check bool) "reader returns the whole small fixture" true page.eof;
+               Alcotest.(check bool) "reader returns text" true
+                 (page.encoding = Masc.Keeper_artifact_read.Utf_8);
+               page.content
+             | None -> Alcotest.fail execution.Masc.Keeper_tool_execution.raw_output)
           | _ -> Alcotest.fail "expected recall artifact" in
         Alcotest.(check bool) "unreadable claim is absent from the complete artifact" false
           (contains ~needle:("claim about " ^ unreadable) body);

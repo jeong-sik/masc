@@ -10,9 +10,9 @@ The isolated local clone imports the exact c46 Item schema, public parser tests,
 
 ## Preserved source
 
-The existing `src/api/keeper-items.test.ts` public parser regressions are byte identical to the supplied c46 API file, including line separators, explicit zero and large exact amounts. No additional tests were added. The historical Item README and its three original source receipt files remain unchanged. Their older source/build provenance remains historical; this new receipt does not rewrite those claims.
+The existing `src/api/keeper-items.test.ts` public parser regressions are byte identical to the supplied c46 API file, including line separators, explicit zero and large exact amounts. No additional tests were added. The historical Item README was corrected after initial composition; its three original JSON source receipts remain unchanged. Their older source/build provenance remains historical. The refreshed composition records the corrected README bytes separately from the initial receipt.
 
-The seven domain code/test files are byte identical to the parent code commit. [composition.json](composition.json) records their Git blob and SHA-256 identities, the unchanged parser/receipt hashes and the one-line schema change.
+The seven domain code/test files are byte identical to the parent code commit. [composition.json](composition.json) records Git blob, SHA-256 and byte counts frozen at `0502d6c0b2bfde8c33f86c17766a55f59eedc4df`. Original partial-composition metadata remains under `initial_composition`; its earlier unchanged-README assertion does not describe the corrected published README. The refresh verifies source bytes only and adds no runtime result.
 
 ## Verification limit
 

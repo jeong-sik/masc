@@ -1451,8 +1451,9 @@ export function BoardSurface() {
     : null
 
   useEffect(() => {
-    if (postId && !post && !detailLoading.value
-      && (detailPostId.value !== postId || detailReadPhase.value === 'failed')) {
+    if (postId && !post
+      && (detailPostId.value !== postId
+        || (!detailLoading.value && detailReadPhase.value === 'failed'))) {
       void loadPostDetail(postId, route.value.params.comment ?? null)
     }
   }, [postId, post?.id, route.value.params.comment])

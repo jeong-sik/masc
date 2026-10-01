@@ -692,6 +692,48 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardPost).toHaveBeenCalledTimes(1)
   })
 
+  it.each([true, false])('replaces an off-feed pending read on a new post route (old reply first: %s)', async (oldReplyFirst) => {
+    const postA = makePost({ id: 'off-feed-a', title: 'Previous off-feed post', author: 'keeper' })
+    const postB = makePost({ id: 'off-feed-b', title: 'Current off-feed post', author: 'keeper' })
+    type Detail = Awaited<ReturnType<typeof fetchBoardPost>>
+    let resolveA!: (value: Detail) => void
+    let resolveB!: (value: Detail) => void
+    const readA = new Promise<Detail>(resolve => { resolveA = resolve })
+    const readB = new Promise<Detail>(resolve => { resolveB = resolve })
+    vi.mocked(fetchBoardPost).mockReset().mockReturnValueOnce(readA).mockReturnValueOnce(readB)
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: postA.id } } as any
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postA.id))
+    expect(detailLoading.value).toBe(true)
+
+    route.value = { tab: 'board', params: { post: postB.id } } as any
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postB.id))
+    expect(detailPostId.value).toBe(postB.id)
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    const resultA = { ...postA, comments: [], commentPage: { offset: 0, total: 0 } } as Detail
+    const resultB = { ...postB, comments: [], commentPage: { offset: 0, total: 0 } } as Detail
+    if (oldReplyFirst) {
+      resolveA(resultA)
+      await readA
+      expect(detailPostId.value).toBe(postB.id)
+      expect(detailLoading.value).toBe(true)
+      expect(detailPost.value).toBeNull()
+    }
+    resolveB(resultB)
+    await waitFor(() => expect(screen.getByText(postB.title)).toBeInTheDocument())
+    if (!oldReplyFirst) {
+      resolveA(resultA)
+      await readA
+    }
+    expect(detailPostId.value).toBe(postB.id)
+    expect(detailPost.value?.id).toBe(postB.id)
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(detailLoading.value).toBe(false)
+    expect(screen.queryByText(postA.title)).not.toBeInTheDocument()
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
   it('clears focused-route ancestry when returning to a retained compact thread', async () => {
     const post = makePost({ id: 'retained-thread', title: 'Retained thread', author: 'keeper', post_kind: 'direct' })
     const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at }

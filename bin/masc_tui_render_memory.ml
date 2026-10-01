@@ -694,7 +694,23 @@ let detail_label label =
        (max 1 (detail_label_cells - Message_layout.display_width label))
        ' ')
 
-let detail_field label value = "    " ^ detail_label label ^ value
+let detail_field ~width label value =
+  let indent = String.make (min 4 (max 0 (width - 1))) ' ' in
+  let prefix = indent ^ detail_label label in
+  let prefix_cells = Message_layout.display_width prefix in
+  if prefix_cells < width then
+    Message_layout.wrap_words ~max_cells:(width - prefix_cells) value
+    |> List.mapi (fun index line ->
+         (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
+  else
+    (* When the label leaves no value cell, it owns a row and the value
+       uses the whole remaining width under the indentation. *)
+    (Message_layout.wrap_words
+       ~max_cells:(max 1 (width - Message_layout.display_width indent)) label
+     |> List.map (fun line -> indent ^ Theme.recede () ^ line ^ Ansi.reset))
+    @ (Message_layout.wrap_words
+         ~max_cells:(max 1 (width - Message_layout.display_width indent)) value
+       |> List.map (fun line -> indent ^ line))
 
 (* A claim is prose a Keeper wrote, often paragraphs and a numbered list. The
    list rows fold it to one line because a row has one line to give it; the
@@ -706,9 +722,11 @@ let detail_field label value = "    " ^ detail_label label ^ value
 let detail_claim_lines ?state ~inner_width claim =
   let wrap () =
     let lines =
-      Message_layout.wrap_body ~max_cells:inner_width
+      let indent = String.make (min 4 (max 0 (inner_width - 1))) ' ' in
+      Message_layout.wrap_body
+        ~max_cells:(max 1 (inner_width - Message_layout.display_width indent))
         ~sanitize:Terminal_text.single_line claim
-      |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+      |> List.map (fun line -> if String.equal line "" then "" else indent ^ line)
     in
     let count = List.length lines in
     Option.iter
@@ -733,11 +751,12 @@ type fact_detail_parts = {
 }
 
 let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
-  let inner_width = max 30 (cols - 6) in
+  let width = max 1 (framed_inner_width cols) in
+  let field = detail_field ~width in
   match row with
   | Memory_row_fact fact ->
       let claim_lines, claim_line_count =
-        detail_claim_lines ?state ~inner_width fact.mf_claim
+        detail_claim_lines ?state ~inner_width:width fact.mf_claim
       in
       let history =
         (* The retrieval count, its day count and its last clock are one
@@ -760,23 +779,16 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in
-      let history_prefix = detail_field "History:" "" in
-      let prefix_width = Message_layout.display_width history_prefix in
-      let history_lines =
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - prefix_width)) history
-        |> List.mapi (fun index line ->
-             (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
-      in
+      let history_lines = field "History:" history in
       { heading =
           Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        [ (* The word comes from [Keeper_memory_os_types.category], a closed
+        (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
-          detail_field "Category:"
-            (Memory_category.category_to_string fact.mf_category)
+        field "Category:" (Memory_category.category_to_string fact.mf_category)
           (* Two labelled readings used to share this row, the first in a
              hand-sized slot of fifteen cells. Every other field in this pane
              owns a row, and the slot was a guess: in the fleet reading the
@@ -784,18 +796,17 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
              fleet already makes it seventeen bytes, so "Timeline:" lost the
              space before it on every row. Printf's width counts bytes as
              well, which the middle dot in that reading is three of. *)
-        ; detail_field "Origin:" (Terminal_text.single_line fact.mf_origin)
-        ; detail_field "Timeline:"
+        @ field "Origin:" (Terminal_text.single_line fact.mf_origin)
+        @ field "Timeline:"
             (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
-        ]
         @ history_lines
-        @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+        @ field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id)
       }
   | Memory_row_source_fact fact ->
       let claim_lines, claim_line_count =
-        detail_claim_lines ?state ~inner_width fact.msf_claim
+        detail_claim_lines ?state ~inner_width:width fact.msf_claim
       in
       { heading =
           Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold
@@ -803,13 +814,12 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
-        ; detail_field "File SHA:"
+        field "Bound Path:" (Terminal_text.single_line fact.msf_path)
+        @ field "File SHA:"
             (Printf.sprintf "%s · %sFirst Seen:%s %s" 
                (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
-        ]
       }
   | Memory_row_invalidation row ->
       { heading =
@@ -818,11 +828,10 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines = []
       ; claim_line_count = 0
       ; other_lines =
-        [ detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
-        ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
-        ; detail_field "Dropped At:"
+        field "Reason:" (Terminal_text.single_line row.mi_reason)
+        @ field "Source Path:" (Terminal_text.single_line row.mi_source_path)
+        @ field "Dropped At:"
             (memory_fact_age_label row.mi_invalidated_at ^ " ago")
-        ]
       }
 
 let fact_detail_line_count parts =

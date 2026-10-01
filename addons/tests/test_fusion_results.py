@@ -5,6 +5,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -40,6 +41,7 @@ def detail(status="completed", evidence_state="recorded"):
     return {"generated_at": "2026-09-30T00:00:00Z", "run": run,
             "evidence": {"status": evidence_state,
                          "post": post if evidence_state == "recorded" else None}}
+
 
 
 def source(value, complete=True):
@@ -84,6 +86,24 @@ def exchange(package, requests, sizes=None):
 
 
 class FusionResults(unittest.TestCase):
+    def test_oversized_integer_timestamps_do_not_terminate_worker(self):
+        requests = []
+        for index, field in enumerate(("started_at", "finished_at"), 1):
+            value = detail()
+            value["run"][field] = 10 ** 400
+            requests.append({"jsonrpc": "2.0", "id": index, "method": "tools/call",
+                "params": {"name": "lane_observe", "arguments": {
+                    "binding": {"sources": []}, "sources": [source(value)]}}})
+        requests.append({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "lane_observe", "arguments": {
+                "binding": {"sources": []}, "sources": [source(detail())]}}})
+        responses = exchange("fusion-results", requests)
+        self.assertEqual([item["id"] for item in responses], [1, 2, 3])
+        self.assertTrue(responses[0]["result"]["isError"])
+        self.assertTrue(responses[1]["result"]["isError"])
+        self.assertFalse(responses[2]["result"]["isError"])
+        self.assertEqual(len(responses[2]["result"]["structuredContent"]["rows"]), 2)
+
     def test_retained_result_composes_with_generic_downstream(self):
         result = call("fusion-results", [source(detail())])
         self.assertFalse(result["isError"])
@@ -341,6 +361,7 @@ class FusionResults(unittest.TestCase):
     def test_export_identity_changes_with_evidence_and_keeps_run(self):
         sys.path.insert(0, str(ADDONS / "fusion-results"))
         spec = importlib.util.spec_from_file_location("fusion_export", ADDONS / "fusion-results/export_snapshot.py")
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         first = module.snapshot(detail(), "fusion")
@@ -350,6 +371,213 @@ class FusionResults(unittest.TestCase):
         second = module.snapshot(changed, "fusion")
         self.assertNotEqual(first["cursor"], second["cursor"])
         self.assertEqual(first["incarnation"], second["incarnation"])
+
+    def test_nested_nonfinite_input_is_refused_without_stopping_worker(self):
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            for location in ("post", "roster"):
+                with self.subTest(bad=bad, location=location):
+                    value = detail()
+                    if location == "post":
+                        value["evidence"]["post"]["created_at"] = bad
+                    else:
+                        value["run"]["roster"] = {"panel": [bad]}
+                    responses = exchange("fusion-results", [
+                        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                            "name": "lane_observe", "arguments": {"binding": {}, "sources": [source(value)]}}},
+                        {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                    ])
+                    self.assertEqual(responses[0]["id"], 1)
+                    self.assertTrue(responses[0]["result"]["isError"])
+                    self.assertNotIn("structuredContent", responses[0]["result"])
+                    self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_deep_json_request_keeps_worker_available(self):
+        for depth in (20, 1000, 2000):
+            with self.subTest(depth=depth):
+                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {"copied": "__deep__"}, "sources": [{}]}}}
+                request_wire = json.dumps(request).replace('"__deep__"', "[" * depth + "0" + "]" * depth)
+                # The stdio child uses this interpreter. Older Python decoders
+                # refuse this nesting before the protocol can read its ID;
+                # newer decoders admit it and reach tool validation instead.
+                try:
+                    json.loads(request_wire)
+                except RecursionError:
+                    decoded = False
+                else:
+                    decoded = True
+                wire = request_wire + "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+                worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
+                                        input=wire, capture_output=True, text=True)
+                self.assertEqual(worker.returncode, 0, worker.stderr)
+                responses = [json.loads(line) for line in worker.stdout.splitlines()]
+                self.assertEqual(len(responses), 2)
+                if decoded:
+                    self.assertEqual(responses[0]["id"], 1)
+                    self.assertTrue(responses[0]["result"]["isError"])
+                else:
+                    self.assertIsNone(responses[0]["id"])
+                    self.assertEqual(responses[0]["error"], {
+                        "code": -32602, "message": "JSON nesting exceeds the decoder limit"})
+                self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_oversized_integer_decode_refuses_without_losing_next_ping(self):
+        limit = sys.int_info.default_max_str_digits
+        for location in ("binding", "id"):
+            with self.subTest(location=location):
+                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {}, "sources": []}}}
+                if location == "binding":
+                    request["params"]["arguments"]["binding"]["integer"] = "__integer__"
+                else:
+                    request["id"] = "__integer__"
+                wire = json.dumps(request).replace('"__integer__"', "9" * (limit + 1))
+                wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+                worker = subprocess.run([sys.executable, "-X", f"int_max_str_digits={limit}",
+                                         str(ADDONS / "fusion-results/server.py")],
+                                        input=wire, capture_output=True, text=True)
+                self.assertEqual(worker.returncode, 0, worker.stderr)
+                self.assertEqual(worker.stderr, "")
+                self.assertEqual([json.loads(line) for line in worker.stdout.splitlines()], [
+                    {"jsonrpc": "2.0", "id": None, "error": {
+                        "code": -32602, "message": "JSON value exceeds the decoder limits"}},
+                    {"jsonrpc": "2.0", "id": 2, "result": {}},
+                ])
+
+    def test_decoder_recursion_refuses_before_id_and_keeps_next_request(self):
+        # Exercise the decoder failure even on interpreters whose JSON parser
+        # accepts the deep wire used above. The worker and protocol are real;
+        # only the first decoder call is fault-injected.
+        bootstrap = """
+import json, runpy, sys
+from unittest.mock import patch
+loads = json.loads
+calls = 0
+def decode(line):
+    global calls
+    calls += 1
+    if calls == 1:
+        raise RecursionError("injected decoder exhaustion")
+    return loads(line)
+sys.path.insert(0, sys.argv[1])
+with patch.object(json, "loads", side_effect=decode):
+    runpy.run_path(sys.argv[2], run_name="__main__")
+"""
+        requests = [{"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                    {"jsonrpc": "2.0", "id": 2, "method": "ping"}]
+        worker = subprocess.run([sys.executable, "-c", bootstrap, str(ADDONS),
+                                 str(ADDONS / "fusion-results/server.py")],
+                                input="".join(json.dumps(item) + "\n" for item in requests),
+                                capture_output=True, text=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        self.assertEqual(worker.stderr, "")
+        self.assertEqual([json.loads(line) for line in worker.stdout.splitlines()], [
+            {"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32602, "message": "JSON nesting exceeds the decoder limit"}},
+            {"jsonrpc": "2.0", "id": 2, "result": {}},
+        ])
+
+    def test_deep_array_id_is_refused_without_echo_or_worker_exit(self):
+        request = {"jsonrpc": "2.0", "id": "__deep__", "method": "ping"}
+        wire = json.dumps(request).replace('"__deep__"', "[" * 900 + "0" + "]" * 900)
+        wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+        worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
+                                input=wire, capture_output=True, text=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        responses = [json.loads(line) for line in worker.stdout.splitlines()]
+        self.assertEqual(responses[0]["id"], None)
+        self.assertEqual(responses[0]["error"]["code"], -32602)
+        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_surrogate_values_and_keys_are_refused_and_unicode_is_retained(self):
+        requests = []
+        for bad in ("\ud800", "\udfff"):
+            for location in ("body", "nested value", "nested key"):
+                value = detail()
+                if location == "body":
+                    value["evidence"]["post"]["body"] = "retained " + bad
+                elif location == "nested value":
+                    value["run"]["roster"] = {"panel": [{"value": bad}]}
+                else:
+                    value["run"]["roster"] = {"panel": [{bad: "value"}]}
+                requests.append({"jsonrpc": "2.0", "id": len(requests) + 1,
+                    "method": "tools/call", "params": {"name": "lane_observe",
+                    "arguments": {"binding": {}, "sources": [source(value)]}}})
+        valid = detail()
+        valid["evidence"]["post"]["body"] = "한글 café 🌱 e\u0301"
+        requests.append({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "lane_observe", "arguments": {
+                "binding": {}, "sources": [source(valid)]}}})
+        requests.append({"jsonrpc": "2.0", "id": 8, "method": "ping"})
+        responses = exchange("fusion-results", requests)
+        self.assertEqual([response["id"] for response in responses], list(range(1, 9)))
+        for response in responses[:6]:
+            self.assertTrue(response["result"]["isError"])
+            self.assertNotIn("structuredContent", response["result"])
+            self.assertIn("UTF-8", response["result"]["content"][0]["text"])
+        result = responses[6]["result"]
+        self.assertFalse(result["isError"])
+        evidence_row = result["structuredContent"]["rows"][1]
+        self.assertEqual(evidence_row["fields"]["board_post"]["body"], valid["evidence"]["post"]["body"])
+        self.assertEqual(responses[7], {"jsonrpc": "2.0", "id": 8, "result": {}})
+
+    def test_surrogate_request_id_has_safe_error_and_next_request_succeeds(self):
+        responses = exchange("fusion-results", [
+            {"jsonrpc": "2.0", "id": "\ud800", "method": "ping"},
+            {"jsonrpc": "2.0", "id": "한글 🌱", "method": "ping"},
+        ])
+        self.assertIsNone(responses[0]["id"])
+        self.assertEqual(responses[0]["error"]["code"], -32602)
+        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": "한글 🌱", "result": {}})
+
+    def test_export_is_private_and_never_replaces_an_existing_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            detail_path, output = root / "detail.json", root / "capture.json"
+            detail_path.write_text(json.dumps(detail()))
+            command = [sys.executable, str(ADDONS / "fusion-results/export_snapshot.py"),
+                       str(detail_path), str(output), "--source-id", "fusion"]
+            previous = os.umask(0o022)
+            try:
+                first = subprocess.run(command, capture_output=True, text=True)
+            finally:
+                os.umask(previous)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            original = output.read_bytes()
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertEqual(output.read_bytes(), original)
+
+    def test_unencodable_export_does_not_claim_capture_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            detail_path, output = root / "detail.json", root / "capture.json"
+            command = [sys.executable, str(ADDONS / "fusion-results/export_snapshot.py"),
+                       str(detail_path), str(output), "--source-id", "fusion"]
+            malformed = detail()
+            malformed["evidence"]["post"]["body"] = "invalid\ud800"
+            detail_path.write_text(json.dumps(malformed))
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertFalse(output.exists(), "failed serialization must not claim the capture path")
+            detail_path.write_text(json.dumps(detail()))
+            accepted = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(json.loads(output.read_bytes())["incarnation"], RUN)
+
+    def test_unencodable_capture_strings_do_not_terminate_worker(self):
+        for malformed in ("body\ud800", "body\udfff"):
+            value = detail()
+            value["evidence"]["post"]["body"] = malformed
+            responses = exchange("fusion-results", [
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {}, "sources": [source(value)]}}},
+                {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            ])
+            self.assertTrue(responses[0]["result"]["isError"])
+            self.assertIn("valid UTF-8", responses[0]["result"]["content"][0]["text"])
+            self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
 
 if __name__ == "__main__":

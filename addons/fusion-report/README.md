@@ -45,6 +45,11 @@ judge metadata is refused. Structured synthesis remains in the retained original
 source, reachable through the report context's immutable output digest. Run failure,
 judge failure, incomplete input and delivery remain separate observations.
 
+A complete report requires both status and result rows from the same source
+coordinates and immutable snapshot. The declared producer output selection must
+include those rows; a result-only projection remains incomplete. Source aliases
+are distinct, and one Board post cannot identify two Fusion runs.
+
 The worker emits `delivery_status = "not_attempted"`. Use the existing host
 Evidence operation to freeze selected report rows and optionally send them to
 a Keeper. The resulting accepted receipt proves handoff acceptance; agent

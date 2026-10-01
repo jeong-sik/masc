@@ -460,6 +460,13 @@ let terminal_of_delivery_failure failure ~content =
    abort the fusion sink, so every non-cancel exception is swallowed + logged
    (mirrors Keeper_chat_broadcast). An unknown run_id is a no-op. *)
 let broadcast_run_status ~registry ~run_id =
+  (try
+     if registry == Fusion_run_registry.global () then
+       Lane_addon_runtime.notify_fusion_run ~run_id
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn -> Log.Keeper.warn "fusion addon hint run_id=%s failed: %s"
+       run_id (Printexc.to_string exn));
   try
     match Fusion_run_registry.get registry ~run_id with
     | None -> ()

@@ -249,9 +249,9 @@ let has_native_fusion binding =
     | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> false) sources)
 
 let authorized_fusion_run ~access ~run_id =
-  match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-  | None -> Error "Fusion run is unavailable to this caller"
-  | Some run ->
+  match Fusion_run_registry.get_for_observer (Fusion_run_registry.global ()) ~run_id with
+  | Error _ | Ok None -> Error "Fusion run is unavailable to this caller"
+  | Ok (Some run) ->
       let* () = match access with
         | Operator_configuration -> Ok ()
         | Keeper keeper when String.equal keeper run.Fusion_run_registry.keeper -> Ok ()
@@ -270,13 +270,15 @@ let authorize ~access binding =
     (Ok ()) sources
 let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* run = authorized_fusion_run ~access ~run_id in
-      let post = match Board_dispatch.find_post_by_run_id ~run_id with
+      let* post = match Board_dispatch.find_post_by_run_id ~run_id with
         | Some post ->
             (match post.Board.origin with
-             | Some {source=Some source;fusion_run_id=Some origin_id;_}
-               when String.equal source "fusion" && String.equal origin_id run_id -> Some post
-             | Some _ | None -> None)
-        | None -> None in
+             | Some {source=Some source;fusion_run_id=Some origin_id;fusion_producer=Some producer;_}
+               when String.equal source "fusion" && String.equal origin_id run_id
+                 && String.equal producer run.keeper
+                 && String.equal (Board.Agent_id.to_string post.author) run.keeper -> Ok (Some post)
+             | Some _ | None -> Error "Fusion evidence is unavailable to this caller")
+        | None -> Ok None in
       let status = match post,run.Fusion_run_registry.status with
         | Some _, _ -> "recorded"
         | None,Fusion_run_registry.Running -> "pending"
@@ -305,7 +307,7 @@ let fusion_run ~access ~store ~max_bytes ~id ~run_id =
           [observation] in
         captured, String.length (Yojson.Safe.to_string captured)) in
       let* () = if size > max_bytes then
-        Error "Fusion capture exceeds the available source ingress envelope"
+        Error "Fusion observation exceeds the available source ingress envelope"
         else Ok () in
       let* _ = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
       Ok captured

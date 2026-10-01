@@ -267,8 +267,27 @@ class ValueDifference(unittest.TestCase):
         for reference in fields["last_input_gap"]["output_evidence"]:
             self.assertIn(reference, result["evidence"])
 
+    def test_nonfinite_json_is_refused_without_changing_accepted_baseline(self):
+        for bad in (float("inf"), float("-inf"), float("nan")):
+            with self.subTest(bad=bad):
+                baseline, refused, recovered = exchange("value-difference", [
+                    [supplied(1, 2)], [supplied(2, bad)], [supplied(3, 7)]])[2:]
+                self.assertFalse(baseline["isError"])
+                self.assertTrue(refused["isError"])
+                self.assertNotIn("structuredContent", refused)
+                self.assertIn("finite numbers", refused["content"][0]["text"])
+                self.assertFalse(recovered["isError"])
+                output = recovered["structuredContent"]
+                self.assertEqual(output, json.loads(recovered["content"][0]["text"]))
+                fields = output["rows"][0]["fields"]
+                self.assertEqual(fields["state"], "measured")
+                self.assertEqual(fields["value"], 5)
+                self.assertEqual(fields["previous"]["producer"]["observation_seq"], 1)
+                self.assertEqual(fields["current"]["producer"]["observation_seq"], 3)
+                self.assertTrue(output["coverage"][0]["complete"])
+
     def test_non_numeric_or_ambiguous_input_cannot_produce_a_difference(self):
-        for bad in (True, "7", None, float("inf"), float("nan")):
+        for bad in (True, "7", None):
             with self.subTest(bad=bad):
                 outputs = self.outputs([[supplied(1, 2)], [supplied(2, bad)], [supplied(3, 7)]])
                 self.assertEqual(outputs[1]["rows"], [])

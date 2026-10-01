@@ -12,11 +12,82 @@ on:
           - linux-x64
           - macos-arm64
           - stagehand-model-macos-arm64
+          - rc-pptx-trace
 
 permissions:
   contents: read
 
 jobs:
+  rc-pptx-trace:
+    if: inputs.target == 'rc-pptx-trace'
+    name: Trace the original RC PPTX case
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: diagnostic
+      - uses: actions/checkout@v7
+        with:
+          ref: 2dd5e16b83683e8d2a025597205cbc2dfb02f41e
+          path: source
+      - name: Install original media tools and tracer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace poppler-utils libreoffice-impress python3-venv libpq5 fonts-dejavu-core
+      - name: Download and verify the original RC artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence binary
+          gh api repos/"$GH_REPO"/actions/artifacts/11155901156 > evidence/artifact.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a = json.loads(Path("evidence/artifact.json").read_text())
+          assert a["workflow_run"]["head_sha"] == "2dd5e16b83683e8d2a025597205cbc2dfb02f41e"
+          assert a["workflow_run"]["id"] == 36847714318 and not a["expired"]
+          PY
+          gh api repos/"$GH_REPO"/actions/artifacts/11155901156/zip > artifact.zip
+          echo "e124444f7389bed13d447fdf0e3c61d405db27edb0ba3dc99a69af30d746cfe3  artifact.zip" | sha256sum --check
+          unzip -q artifact.zip -d binary
+          chmod +x binary/masc-linux-x64
+          sha256sum binary/masc-linux-x64 > evidence/binary.sha256
+          binary/masc-linux-x64 build-commit | tee evidence/binary-commit.txt
+          test "$(cat evidence/binary-commit.txt)" = 2dd5e16b83683e8d2a025597205cbc2dfb02f41e
+      - name: Regenerate the exact-source fixture
+        run: |
+          set -euo pipefail
+          python3 source/scripts/ci/prepare-presentation-verifier.py 2>&1 | tee evidence/prepare.log
+          cp "$RUNNER_TEMP/masc-presentation-verifier/inputs/"* evidence/
+          "$RUNNER_TEMP/masc-presentation-verifier/.masc/runtime-tools/presentation/bin/python3" -m pip freeze > evidence/python-packages.txt
+          printf 'Fixture regenerated from exact source; original RC fixture bytes unavailable.\n' > evidence/fixture-provenance.txt
+      - name: Trace one original test without changing its assertions or time limits
+        run: |
+          set -euo pipefail
+          uname -a > evidence/environment.txt
+          cat /proc/self/limits >> evidence/environment.txt
+          dpkg-query -W strace poppler-utils libreoffice-impress fonts-dejavu-core >> evidence/environment.txt
+          cat /sys/fs/cgroup/memory.events > evidence/memory-before.txt
+          strace -ff -ttt -T -yy -s 256 -o evidence/media.trace -e trace=process,signal,desc,file,io_uring_setup,io_uring_enter,io_uring_register             python3 diagnostic/scripts/ci/run_pptx_case.py               --source-root source --expected-source 2dd5e16b83683e8d2a025597205cbc2dfb02f41e               --binary binary/masc-linux-x64 --presentation-base "$RUNNER_TEMP/masc-presentation-verifier"               --receipt evidence/receipt.json 2>&1 | tee evidence/test.log
+      - name: Capture final memory counters
+        if: always()
+        run: |
+          mkdir -p evidence
+          cat /sys/fs/cgroup/memory.events > evidence/memory-after.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rc-pptx-trace-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
   linux-x64-probe:
     if: inputs.target == 'linux-x64'
     name: Build Linux x64 probe

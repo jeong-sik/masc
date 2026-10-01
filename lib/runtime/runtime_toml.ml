@@ -2967,7 +2967,15 @@ let validate_ollama_only_binding_fields
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
-  [ "enabled"; "destinations"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
+  [ "enabled"
+  ; "destinations"
+  ; "board_attention"
+  ; "board_attention_confidence_floor"
+  ; "absorb_gate"
+  ; "context_review"
+  ; "skill_applicability"
+  ; "excluded_keepers"
+  ]
 ;;
 
 let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
@@ -3107,6 +3115,22 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
   | Some _ -> Error (error key_path "destinations must be an array of tables")
 ;;
 
+(* [board_attention_confidence_floor] is a confidence Jev reports, so it is a
+   number from 0 to 1. A value outside that range would settle every answer or
+   none while looking like a floor. *)
+let parse_typesafeai_confidence_floor ~(path : string) (tbl : Otoml.t) ~default =
+  let key = "board_attention_confidence_floor" in
+  match typed_find_or "a float" path tbl key Otoml.get_float ~default with
+  | Error _ as refused -> refused
+  | Ok floor
+    when Float.is_nan floor || Float.compare floor 0.0 < 0 || Float.compare floor 1.0 > 0 ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "must be a number from 0 to 1, got %g" floor))
+  | Ok floor -> Ok floor
+;;
+
 (* [\[typesafeai\]] -- the TypeSafe AI lane; the key is not here. An absent
    table is {!Runtime_schema.default_typesafeai}; a present one is read
    strictly, so a misspelt key is a load error rather than a switch that
@@ -3125,6 +3149,12 @@ let parse_typesafeai (toml : Otoml.t)
     let board_attention =
       typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
     in
+    let board_attention_confidence_floor =
+      parse_typesafeai_confidence_floor
+        ~path
+        tbl
+        ~default:d.board_attention_confidence_floor
+    in
     let absorb_gate =
       typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
     in
@@ -3135,11 +3165,22 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    (match unknown, enabled, destinations, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
+    (match
+       ( unknown
+       , enabled
+       , destinations
+       , board_attention
+       , board_attention_confidence_floor
+       , absorb_gate
+       , context_review
+       , skill_applicability
+       , excluded_keepers )
+     with
      | ( []
        , Ok lane_enabled
        , Ok destinations
        , Ok board_attention
+       , Ok board_attention_confidence_floor
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
@@ -3148,6 +3189,7 @@ let parse_typesafeai (toml : Otoml.t)
          { Runtime_schema.lane_enabled
          ; destinations
          ; board_attention
+         ; board_attention_confidence_floor
          ; absorb_gate
          ; context_review
          ; skill_applicability
@@ -3159,6 +3201,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors enabled
           @ result_errors destinations
           @ result_errors board_attention
+          @ result_errors board_attention_confidence_floor
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability

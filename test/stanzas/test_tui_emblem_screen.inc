@@ -5,6 +5,7 @@
   alcotest
   masc.keeper_portrait
   masc_tui_emblem_screen
+  masc_tui_frame_presenter
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_portrait_view

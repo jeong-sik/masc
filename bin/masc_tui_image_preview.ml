@@ -45,3 +45,18 @@ let decode_payload data =
   in
   Result.bind payload (fun payload ->
     Result.map_error (fun (`Msg detail) -> detail) (Base64.decode payload))
+
+let decode_artifact (reference : Tool_output.artifact_ref) = function
+  | `Assoc fields ->
+      (match List.assoc_opt "sha256" fields, List.assoc_opt "bytes" fields,
+             List.assoc_opt "content" fields with
+       | Some (`String sha256), Some (`Int bytes), Some (`String content) ->
+           if not (String.equal sha256 reference.sha256)
+              || bytes <> reference.bytes || String.length content <> bytes then
+             Error "sent image response does not match its recorded artifact"
+           else if not (String.equal
+               Digestif.SHA256.(to_hex (digest_string content)) reference.sha256) then
+             Error "sent image content does not match its recorded digest"
+           else decode_payload content
+       | _ -> Error "sent image response requires sha256, bytes, and content")
+  | _ -> Error "invalid sent image response"

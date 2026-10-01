@@ -1,0 +1,24 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   Keepers ▸ alpha  Info  ▸Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  2›        
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+             ▄▄▄▄▄▄           Items 1/18 · j/k to preview                                           
+         ▄▀▀▀▀▀▀▀▀▀▀▀▀▄       Balance 12.500 Candle · preview only                                  
+       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     > 1  face  glasses               1.000 owned                          
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      2  face  shades                1.000                                
+     ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     3  face  eye_patch             1.000                                
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     4  face  plaster               1.000                                
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     5  face  freckles              1.000                                
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     6  face  beard                 1.000                                
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      7  neck  scarf                 1.000                                
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       8  neck  bow_tie               1.000                                
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀         9  neck  medal                 1.000                                
+             ▀▀▀▀▀▀             10 head  bow                   1.000                                
+    Selected: 1.000 owned                                                                           
+    Preview changes this picture only.                                                              
+                                                                                                    
+                                                                                                    
+                                                                                                    
+
+  [ ]:tab  j/k:preview  PgUp/PgDn:page  Home/End:first/last  p:pause  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                          

@@ -4,11 +4,13 @@ import { html } from 'htm/preact'
 import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
+const portraitFailure = vi.hoisted(() => ({ value: false }))
 const fetchDashboardExecution = vi.hoisted(() => vi.fn())
 vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
-vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
+vi.mock('./keeper-portrait', () => ({ KeeperPortrait: ({ previewItem, fallback }: { previewItem?: string; fallback: unknown }) => portraitFailure.value && previewItem
+  ? fallback : html`<div data-testid="portrait" data-preview=${previewItem ?? ''} />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 const refreshExecution = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('../store', async importOriginal => ({ ...await importOriginal<typeof import('../store')>(), refreshExecution }))
@@ -19,6 +21,9 @@ import {
   executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration,
   resetExecutionSnapshotGeneration, serverStatus,
 } from '../store'
+let refreshExecutionActual: typeof import('../store')['refreshExecution']
+beforeEach(async () => { refreshExecutionActual = (await vi.importActual<typeof import('../store')>('../store')).refreshExecution })
+
 import { ApiRequestError, setStoredToken, clearStoredToken } from '../api/core'
 import { parseKeeperItems, type KeeperItemsReading } from '../api/schemas/keeper-items'
 
@@ -65,9 +70,127 @@ beforeEach(() => {
   observeWorkspace('/fixture/workspace-a')
 })
 
-afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers(); portraitFailure.value = false })
 
 describe('Keeper Item tab', () => {
+  it('withdraws the visible account and preview when execution begins warming up', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByText('미리보기 · beanie')).toBeTruthy()
+    vi.useFakeTimers()
+    fetchDashboardExecution.mockResolvedValue({ status: { project: 'initializing' } })
+    await act(async () => { await expect(refreshExecutionActual({ immediate: true })).rejects.toThrow('Execution projection is initializing') })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('status').textContent).toBe('현재 작업 공간을 확인하는 중…')
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    expect(screen.queryByText('미리보기 · beanie')).toBeNull()
+    expect(screen.queryByTestId('portrait')).toBeNull()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a newer accepted snapshot when an older warm-up reply arrives', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    let finish!: (value: unknown) => void
+    fetchDashboardExecution.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const pending = refreshExecutionActual({ immediate: true })
+    await waitFor(() => expect(fetchDashboardExecution).toHaveBeenCalledTimes(1))
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    const accepted = executionWorkspaceAuthority.peek()
+    await act(async () => {
+      finish({ status: { project: 'initializing' } })
+      await expect(pending).rejects.toThrow('superseded by a newer observation')
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(accepted)
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+    expect(screen.queryByText('현재 작업 공간을 확인하는 중…')).toBeNull()
+  })
+
+  it('rejects held Item replies through execution warm-up, then reads the recovered workspace', async () => {
+    const held = pendingAccount()
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValueOnce(account(['crown', 'beanie'], '300'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByText('미리보기 · beanie')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    vi.useFakeTimers()
+    fetchDashboardExecution.mockResolvedValue({ status: { project: 'initializing' } })
+    await act(async () => { await expect(refreshExecutionActual({ immediate: true })).rejects.toThrow('Execution projection is initializing') })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('현재 작업 공간을 확인하는 중…')
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    await act(async () => { held.resolve(account(['crown', 'beanie', 'book'], '900')) })
+    expect(screen.queryByText(/보유/)).toBeNull()
+    vi.useRealTimers()
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
+    expect(screen.queryByText('미리보기 · beanie')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(3)
+  })
+
+  it('reports a failed preview and lets the operator restore the observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    portraitFailure.value = true
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByRole('alert').textContent).toContain('미리보기 그림을 불러오지 못했습니다')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+  })
+
+  it('previews an unowned item and restores the observed outfit without refetching the wallet', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const observed = keeper('rondo')
+    render(html`<${KeeperItemsPanel} keeper=${observed} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('beanie')
+    expect(screen.getByText('미리보기 · beanie')).toBeTruthy()
+    expect(screen.getByText('착용 중')).toBeTruthy()
+    expect(observed.portrait?.state === 'ready' && observed.portrait.equipment.head).toBe('crown')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws a preview when the workspace account changes and requires an observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    await act(async () => { observeWorkspace('/fixture/workspace-b') })
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.queryByText('미리보기 · beanie')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    view.rerender(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), portrait: { state: 'unavailable', reason: 'ledger unavailable' } }} />`)
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.getByRole('button', { name: 'beanie 미리보기' })).toHaveProperty('disabled', true)
+  })
+
+  it('shows the server request reason without an internal endpoint and supports missing detail', async () => {
+    fetchKeeperItems.mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503, detail: 'ledger unreadable' }))
+      .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503 }))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Item 계정을 읽지 못했습니다: ledger unreadable')
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await screen.findByText('Item 계정을 읽지 못했습니다: 계정 요청에 실패했습니다. 다시 시도해주세요.')
+    expect(screen.queryByText(/\/api\//)).toBeNull()
+  })
+
   it('withdraws the visible account through execution warm-up and reads the recovered workspace', async () => {
     const { refreshExecution: actualRefreshExecution } = await vi.importActual<typeof import('../store')>('../store')
     fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))

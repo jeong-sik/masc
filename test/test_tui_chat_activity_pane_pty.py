@@ -116,7 +116,7 @@ def output_handoff_scenario(executable):
 
     h.run_terminal_scenario(executable, description="Autonomous output stays in the conversation beside queued input",
                             interact=interact, http_fixtures=fixture.fixtures, refresh=0.5,
-                            terminal_cols=100, terminal_rows=30)
+                            terminal_cols=100)
 
 
 if __name__ == "__main__":

@@ -1498,7 +1498,8 @@ let footer_hints_git_changes =
 
 let footer_hints_git_diff =
   hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
      ; b Act "p" "open PR"
      ; b Act "t/g" "task / goal"
@@ -1868,7 +1869,7 @@ let help_sections_for_state (state : state) =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "b" "browser"
+    [ b Navigate "b" "choose browser"
     ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"

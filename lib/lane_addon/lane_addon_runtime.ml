@@ -235,16 +235,26 @@ let finalize_actions m e =
   let finish (receipt : Lane_addon_action.receipt) state detail =
     let detail = match receipt.detail with None -> detail | Some previous -> previous ^ "; " ^ detail in
     let receipt = {receipt with Lane_addon_action.state; detail = Some detail} in
-    match save_action m receipt with Ok () -> ()
-    | Error message -> Log.Misc.error "Lane action finalization persistence: %s" message in
-  Option.iter (fun (receipt : Lane_addon_action.receipt) ->
-    match receipt.state with
-    | Queued -> finish receipt Lane_addon_action.Failed_before_effect "worker lifetime ended before dispatch"
-    | _ -> finish receipt Lane_addon_action.Outcome_unknown
-        "worker lifetime ended before a durable action result; no automatic retry") e.current_action;
-  e.current_action <- None;
-  Queue.iter (fun receipt -> finish receipt Lane_addon_action.Failed_before_effect
-    "worker lifetime ended while request was queued") e.action_queue;
+    match save_action m receipt with
+    | Ok () -> None
+    | Error message ->
+        Log.Misc.error "Lane action finalization persistence: %s" message;
+        Some receipt in
+  (match e.current_action with
+   | None -> ()
+   | Some receipt ->
+       let state, detail = match receipt.state with
+         | Lane_addon_action.Queued -> Lane_addon_action.Failed_before_effect,
+             "worker lifetime ended before dispatch"
+         | Lane_addon_action.Running | Lane_addon_action.Confirmed
+         | Lane_addon_action.Failed_before_effect | Lane_addon_action.Outcome_unknown ->
+             Lane_addon_action.Outcome_unknown,
+             "worker lifetime ended before a durable action result; no automatic retry" in
+       (* A failed fallback cannot erase knowledge of an unconfirmed terminal
+          rename. Keep the exact received result until repair is durable. *)
+       e.current_action <- finish receipt state detail);
+  Queue.iter (fun receipt -> ignore (finish receipt Lane_addon_action.Failed_before_effect
+    "worker lifetime ended while request was queued")) e.action_queue;
   Queue.clear e.action_queue
 type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> output -> (unit, Lane_addon_store.observation_write_error) result
@@ -765,6 +775,15 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let retained_action_unlocked m ~instance_id ~request_id =
+  (* Never durably reconfirm a visible terminal file while the live worker
+     retains a failed-publication outcome. Persist that knowledge first. *)
+  let* () = match Hashtbl.find_opt m.entries instance_id with
+    | Some e -> (match e.current_action with
+        | Some current when current.request_id = request_id
+            && current.state = Lane_addon_action.Outcome_unknown ->
+            save_action_unlocked m current
+        | _ -> Ok ())
+    | None -> Ok () in
   let* json = offload (fun () -> Lane_addon_store.load_action m.store ~instance_id ~request_id) in
   match json with
   | None -> Ok None
@@ -772,21 +791,6 @@ let retained_action_unlocked m ~instance_id ~request_id =
       let* receipt = Lane_addon_action.of_json json in
       let* () = if receipt.instance_id = instance_id && receipt.request_id = request_id then Ok ()
         else Error "retained receipt belongs to a different request" in
-      let* receipt =
-        let failed_publication = match Hashtbl.find_opt m.entries instance_id with
-          | Some e -> (match e.current_action with
-              | Some current when current.request_id = request_id
-                  && current.state = Lane_addon_action.Outcome_unknown
-                  && (receipt.state = Lane_addon_action.Confirmed
-                      || receipt.state = Lane_addon_action.Failed_before_effect) -> Some current
-              | _ -> None)
-          | None -> None in
-        match failed_publication with
-        | None -> Ok receipt
-        | Some current ->
-            (* The terminal file may be visible even though its mandatory fsync
-               failed. Retain the known uncertainty before returning a receipt. *)
-            let* () = save_action_unlocked m current in Ok current in
       let active = match Hashtbl.find_opt m.entries instance_id with
         | Some e when e.running ->
             let owns (queued : Lane_addon_action.receipt) = queued.request_id = request_id in

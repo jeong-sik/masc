@@ -426,7 +426,149 @@ let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture 
   check int "restoring exact receipt bytes does not replay the effect" 1 !(fixture.calls);
   detach clock fixture id)
 
+let test_failed_terminal_and_fallback_keep_hot_uncertainty () = with_fixture (fun clock fixture ->
+  let armed = Atomic.make true in
+  let terminal_failures = Atomic.make 0 in
+  let fallback_failures = Atomic.make 0 in
+  let path_seen = Atomic.make None in
+  let writer ~store ~instance_id ~request_id json =
+    let receipt = Action.of_json json |> unwrap in
+    if Atomic.get armed &&
+       (receipt.state = Action.Confirmed || receipt.state = Action.Outcome_unknown) then (
+      let path = Filename.concat (Store.root store)
+        (Filename.concat "actions" (Filename.concat (Store.digest instance_id)
+          (Store.digest request_id ^ ".json"))) in
+      Atomic.set path_seen (Some path);
+      let result =
+        if receipt.state = Action.Confirmed then (
+          ignore (Atomic.fetch_and_add terminal_failures 1 : int);
+          Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+            ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO,"fsync",parent)))
+            path (Yojson.Safe.to_string json))
+        else (
+          ignore (Atomic.fetch_and_add fallback_failures 1 : int);
+          Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+            ~sync_file:(fun file -> raise (Unix.Unix_error (Unix.EIO,"fsync",file)))
+            ~sync_parent:(fun _ -> fail "pre-rename file sync failure must not reach parent sync")
+            path (Yojson.Safe.to_string json)) in
+      match result with
+      | Ok () -> Error "fault fixture unexpectedly completed receipt persistence"
+      | Error failure ->
+        let expected = if receipt.state = Action.Confirmed then Fs_compat.After_rename
+          else Fs_compat.Before_rename in
+        if failure.stage <> expected then fail "receipt fault crossed the wrong publication boundary";
+        Error (Fs_compat.atomic_replace_failure_to_string failure))
+    else Store.save_action store ~instance_id ~request_id json in
+  Runtime.For_testing.with_action_writer writer (fun () ->
+    let id = attach clock fixture ~acting:true in
+    let request_id = "terminal-and-fallback-sync-failure" in
+    ignore (act fixture id request_id (`Int 1) |> unwrap);
+    await clock (fun () -> Atomic.get fallback_failures > 0 &&
+      text "kind" (member "phase" (inspect fixture id)) = "failed");
+    check int "package action ran exactly once" 1 !(fixture.calls);
+    check int "terminal write reached its failed parent fsync" 1 (Atomic.get terminal_failures);
+    let path = match Atomic.get path_seen with Some path -> path | None -> fail "receipt path was not captured" in
+    let visible = Fs_compat.load_file path in
+    check string "failed finalizer left the visible terminal file" "confirmed"
+      (text "state" (Yojson.Safe.from_string visible));
+    List.iter (fun () ->
+      let before = Atomic.get fallback_failures in
+      rejects "hot status cannot expose an unconfirmed terminal receipt"
+        (dispatch fixture Runtime.Action_status ["instance_id",str id;"request_id",str request_id]);
+      check bool "status retries uncertainty publication, not package execution" true
+        (Atomic.get fallback_failures > before);
+      check string "failed fallback preserves the visible bytes for repair" visible (Fs_compat.load_file path);
+      check int "status never retries the external action" 1 !(fixture.calls)) [(); ()];
+    rejects "duplicate request cannot reuse unconfirmed terminal publication"
+      (act fixture id request_id (`Int 1));
+    check int "a duplicate during failed persistence has no effect" 1 !(fixture.calls);
+    Atomic.set armed false;
+    let recovered = status fixture id request_id in
+    check string "repair retains uncertainty instead of upgrading confirmation" "outcome_unknown"
+      (text "state" recovered);
+    check int "repair keeps the received package result" 1 (number "calls" (member "result" recovered));
+    check string "repaired uncertainty is durable" "outcome_unknown"
+      (text "state" (Yojson.Safe.from_string (Fs_compat.load_file path)));
+    ignore (act fixture id request_id (`Int 1) |> unwrap);
+    check int "a repaired receipt never replays the external action" 1 !(fixture.calls);
+    detach clock fixture id))
+
+let test_first_action_requires_durable_directory () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
+  let actions = Filename.concat (Store.root store) "actions" in
+  let writer ~store ~instance_id ~request_id json =
+    Store.For_testing.save_action store ~instance_id ~request_id json
+      ~sync_parent:(fun parent ->
+        if parent = actions then raise (Unix.Unix_error (Unix.EIO,"fsync",parent))
+        else
+          let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)) in
+  Runtime.For_testing.with_action_writer writer (fun () ->
+    List.iter (fun () ->
+      rejects "unsynced first action directory refuses dispatch"
+        (act fixture id "first-directory" (`Int 1));
+      check int "directory failure performs no external action" 0 !(fixture.calls);
+      check bool "failed directory publication creates no queued receipt" true
+        (Store.load_action store ~instance_id:id ~request_id:"first-directory" = Ok None)) [(); ()]);
+  ignore (act fixture id "first-directory" (`Int 1) |> unwrap);
+  ignore (await_state clock fixture id "first-directory" "confirmed");
+  ignore (act fixture id "first-directory" (`Int 1) |> unwrap);
+  check int "directory repair permits exactly one action" 1 !(fixture.calls);
+  detach clock fixture id)
+
+let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  let request_id = "cold-terminal-reconfirmation" in
+  ignore (act fixture id request_id (`Int 1) |> unwrap);
+  ignore (await_state clock fixture id request_id "confirmed");
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
+  let path = Filename.concat (Store.root store)
+    (Filename.concat "actions" (Filename.concat (Store.digest id) (Store.digest request_id ^ ".json"))) in
+  let bytes = Fs_compat.load_file path in
+  let load ~sync_file ~sync_parent =
+    Store.For_testing.load_action ~sync_file ~sync_parent store ~instance_id:id ~request_id in
+  let refused label result = match result with
+    | Error _ -> ()
+    | Ok _ -> fail (label ^ " exposed an unconfirmed terminal receipt") in
+  List.iter (fun () ->
+    let parent_calls = ref 0 in
+    refused "failed opened-file fsync" (load
+      ~sync_file:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",path)))
+      ~sync_parent:(fun fd -> incr parent_calls;Unix.fsync fd));
+    check int "file failure cannot reconfirm the parent" 0 !parent_calls;
+    refused "failed parent fsync" (load ~sync_file:Unix.fsync
+      ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",Filename.dirname path))));
+    check string "repeated failed reads never rewrite receipt bytes" bytes (Fs_compat.load_file path);
+    check int "cold receipt reads do not dispatch the action" 1 !(fixture.calls)) [(); ()];
+  let healthy = load ~sync_file:Unix.fsync ~sync_parent:Unix.fsync |> unwrap |> Option.get in
+  check string "healthy reconfirmation recovers the stored package result" "confirmed" (text "state" healthy);
+  check int "healthy receipt carries its original result" 1 (number "calls" (member "result" healthy));
+  check string "healthy reconfirmation leaves original bytes exact" bytes (Fs_compat.load_file path);
+  let held = path ^ ".original" in
+  let replaced = ref false in
+  Fun.protect
+    ~finally:(fun () -> if !replaced then (Unix.unlink path;Unix.rename held path))
+    (fun () ->
+      refused "identical-byte file replacement during fsync" (load
+        ~sync_file:(fun fd ->
+          Unix.fsync fd;
+          Unix.rename path held;
+          replaced := true;
+          Out_channel.with_open_bin path (fun channel -> output_string channel bytes))
+        ~sync_parent:Unix.fsync);
+      check bool "replacement seam actually ran" true !replaced;
+      check string "the replacement even has identical payload bytes" bytes (Fs_compat.load_file path));
+  let restored = load ~sync_file:Unix.fsync ~sync_parent:Unix.fsync |> unwrap |> Option.get in
+  check string "restored original identity reconfirms without effects" "confirmed" (text "state" restored);
+  check string "original bytes survive identity repair" bytes (Fs_compat.load_file path);
+  check int "all strict reads and repair retain one external action" 1 !(fixture.calls);
+  detach clock fixture id)
+
 let () = run "Lane action workflow" ["optional world actions",[
+  test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
+  test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;
+  test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;
   test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;

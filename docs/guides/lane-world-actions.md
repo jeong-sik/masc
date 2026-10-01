@@ -129,6 +129,15 @@ its bytes. The original action remains `outcome_unknown`; a successful later
 observation does not upgrade or replay it. A failure before rename leaves the
 observation sequence unchanged.
 
+A retained action receipt is accepted only after the exact opened file and its
+parent directory have been synced, and its bytes and both path identities have
+been verified again. A receipt visible after rename is insufficient when sync
+failed. Failed fallback persistence keeps the live uncertainty; a later read
+also reconfirms durability after detachment or process restart. If that
+verification fails, status and repeated submission return an error without
+reporting confirmation or dispatching the action again. This verification
+preserves the package result; it does not establish success beyond its claim.
+
 After a worker exits, orphaned running receipts become `outcome_unknown` and
 undispatched queued receipts become `failed_before_effect`. They are never
 automatically replayed against a replacement. Detachment retains receipts and

@@ -10989,7 +10989,7 @@ let runtime_usage_badge state runtime =
 let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   match
     List.filter_map Fun.id
-      [ runtime_usage_badge state runtime; runtime_quota_badge runtime; runtime_rate_limit_badge runtime ]
+      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime; runtime_usage_badge state runtime ]
   with
   | [] -> (Theme.info ()) ^ "no refusal" ^ Ansi.reset
   | badges -> String.concat " " badges

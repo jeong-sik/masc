@@ -122,23 +122,43 @@ def run(executable, no_color=False):
             raise AssertionError("Workspace error rows made PageDown skip undisplayed repositories")
         key(b":settings\r",b"studio.enabled")
         wide=capture("system-wide",32,160,b"Selected setting")
-        for needle in (b"Current on",b"Default off",b"override",b"Enable the observed feature"):
+        for needle in (b"Current", b"true", b"Default", b"false"):
             if needle not in wide: raise AssertionError(f"System omitted {needle!r}")
-        short=capture("system-short",16,80,b"studio.enabled")
-        if b"Enable the observed feature" not in short:
-            raise AssertionError("Short System omitted the selected setting contract")
-        if not re.search(rb"studio\.enabled\s+on\s+default off", short):
-            raise AssertionError("Short System omitted current/default values from its compact row")
+
+        def read_selected(expected):
+            # The same selected document becomes pageable in a short terminal.
+            # Check reachability through its advertised extent, then restore it.
+            seen = set()
+            while True:
+                screen = h.screen_text(bytes(output))
+                joined = re.sub(rb"\s+", b"", screen.replace("│".encode(), b""))
+                seen.update(value for value in expected if value in joined)
+                position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
+                if position is None:
+                    raise AssertionError("System omitted selected document position")
+                first, last, total = map(int, position.groups())
+                if last >= total:
+                    break
+                h.press_and_settle(process, fd, output, b"\x1b[6~")
+                next_position = re.search(rb"\b(\d+)-(\d+)/(\d+)\b",
+                    h.screen_text(bytes(output)))
+                if next_position is None or int(next_position.group(1)) <= first:
+                    raise AssertionError("System selected document stopped before its end")
+            if seen != set(expected):
+                raise AssertionError(f"System omitted selected content {set(expected) - seen!r}")
+            h.write_all(fd, output, b"\x1b[H")
+            h.drain_until_quiet(process, fd, output)
+
+        read_selected((b"Currenttrue", b"Defaultfalse", b"Enabletheobservedfeature", b"override"))
+        capture("system-short",16,80,b"studio.enabled")
+        read_selected((b"Currenttrue", b"Defaultfalse", b"Enabletheobservedfeature", b"override"))
         key(b"\r",b"editing studio.enabled")
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")
-        wrapped=capture("system-long-comparison",30,80,b"mention_or_thread")
-        # Complete string readings are drawn separately and may wrap across rows.
-        comparison = re.sub(rb"\s+", b"", wrapped)
+        capture("system-long-comparison",30,80,b"studio.mode")
         current = fixtures["/api/v1/runtime/params"][1]["parameters"][1]["current"]
-        for needle in (b"Current" + current.encode(),
-                       b"Defaultmention_or_thread", b"override"):
-            if needle not in comparison: raise AssertionError(f"System omitted comparison clause {needle!r}")
+        read_selected((b"Current" + json.dumps(current).encode(),
+                       b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")
         os.write(fd,b"q")
     h.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),

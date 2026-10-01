@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { candleAmountText, type CandleReading } from '../api/schemas/candle-observation'
+import { candleAmountText, type CandleReading } from '../lib/candle-observation'
 
 export function CandleSummary({ reading }: { reading: CandleReading }) {
   if (reading.status === 'off') return null

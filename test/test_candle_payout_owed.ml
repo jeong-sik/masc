@@ -106,7 +106,8 @@ let candle_toml config =
 ;;
 
 let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
-let enable_candle config = write_file (candle_toml config) {|[payout]
+let enable_candle config = write_file (candle_toml config) {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200

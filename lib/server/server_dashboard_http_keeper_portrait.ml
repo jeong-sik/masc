@@ -86,6 +86,8 @@ let process_cache = Cache.create ~byte_budget:cache_byte_budget
 type answer =
   | Invalid_name
   | Invalid_size of string
+  | Invalid_equipment of string
+  | Equipment_changed
   | Unknown_keeper
   | Lookup_failed of string
   | Encode_failed of string
@@ -131,18 +133,24 @@ let build_tag digest ~name ~equipment size =
   Http.Response.etag_of_body
     (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size); Keeper_portrait_equipment.key equipment ])
 
-let answer ~cache ~build ~name ~size ~keeper_present ~equipment ~holds_tag =
+let answer ~cache ~build ~name ~size ~expected_equipment ~keeper_present ~equipment ~holds_tag =
   if not (Keeper_config.validate_name name) then Invalid_name
   else
     match size_of_request size with
     | Error raw -> Invalid_size raw
     | Ok size ->
+      match expected_equipment with
+      | Some (Error detail) -> Invalid_equipment detail
+      | Some (Ok _) | None ->
       match keeper_present () with
       | Error message -> Lookup_failed message
       | Ok false -> Unknown_keeper
       | Ok true ->
         match equipment () with
         | Error message -> Lookup_failed message
+        | Ok equipment when (match expected_equipment with
+            | Some (Ok expected) -> expected <> equipment
+            | Some (Error _) | None -> false) -> Equipment_changed
         | Ok equipment ->
         match build with
         | Executable digest ->
@@ -185,11 +193,16 @@ let handle_get state request reqd name =
   let refuse status message =
     Server_auth.respond_json_value_with_cors ~status request reqd (error_json message)
   in
+  let expected_equipment = Server_utils.query_param request "expected_equipment"
+    |> Option.map (fun raw ->
+      match Yojson.Safe.from_string raw with
+      | json -> Keeper_portrait_equipment.of_json json
+      | exception Yojson.Json_error detail -> Error detail) in
   match
-    answer ~cache:process_cache ~build:(current_build ()) ~name
+    answer ~expected_equipment ~cache:process_cache ~build:(current_build ()) ~name
       ~size:(Server_utils.query_param request "size")
       ~keeper_present:(keeper_present config name)
-      ~equipment:(fun () -> Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper:name)
+      ~equipment:(fun () -> Candle_equipment.read_persisted ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper:name)
       ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
   with
   | Invalid_name -> refuse `Bad_request (Printf.sprintf "invalid keeper name: %s" name)
@@ -197,6 +210,8 @@ let handle_get state request reqd name =
     refuse `Bad_request
       (Printf.sprintf "size must be a whole number of pixels from %d to %d, not %S"
          Draw.min_size Draw.max_size raw)
+  | Invalid_equipment detail -> refuse `Bad_request ("invalid expected equipment: " ^ detail)
+  | Equipment_changed -> refuse `Conflict "Keeper equipment changed; refresh the Keeper observation before reading its portrait"
   | Unknown_keeper -> refuse `Not_found (Printf.sprintf "keeper %S not found" name)
   | Lookup_failed message -> refuse `Service_unavailable message
   | Encode_failed message -> refuse `Internal_server_error message

@@ -25,6 +25,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_identity = Ok { k_trace_id = "trace-" ^ name;
       k_created_at = "2026-09-30T00:00:00Z"; k_updated_at = "2026-09-30T00:00:00Z" }
   ; kr_portrait = Decode.Ready Keeper_portrait_look.bare
+  ; kr_candle_balance_milli = None
   ; kr_health = health
   ; kr_paused = paused
   ; kr_next_action = next_action
@@ -582,7 +583,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,"runtime_blocker_summary":null,
-       "portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
+       "candle_balance_milli":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
        "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase
@@ -647,15 +648,15 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
   let with_portrait portrait = match row with
     | `Assoc fields -> `Assoc (("portrait",portrait) :: List.remove_assoc "portrait" fields)
     | _ -> Alcotest.fail "bad row fixture" in
-  let decode row = Decode.decode_keeper_runtime_list (`Assoc ["keepers",`List [row];"total",`Int 1;"truncated",`Bool false]) in
+  let decode row = Decode.decode_keeper_runtime_list (`Assoc ["candle",`Assoc ["status",`String "off"];"keepers",`List [row];"total",`Int 1;"truncated",`Bool false]) in
   let equipped = {Keeper_portrait_look.bare with head=Keeper_portrait_look.Crown} in
   let ready = Keeper_portrait_equipment.reading_to_json (Keeper_portrait_equipment.Ready equipped) in
   (match decode (with_portrait ready) with
-   | Ok ([runtime],_,_,_) -> Alcotest.(check bool) "actual server gear survives" true (runtime.Decode.kr_portrait=Decode.Ready equipped)
+   | Ok ([runtime],_,_,_, _) -> Alcotest.(check bool) "actual server gear survives" true (runtime.Decode.kr_portrait=Decode.Ready equipped)
    | _ -> Alcotest.fail "equipped row failed");
   let unavailable = Keeper_portrait_equipment.reading_to_json (Keeper_portrait_equipment.Unavailable "ledger unreadable") in
   (match decode (with_portrait unavailable) with
-   | Ok ([runtime],[],_,_) -> Alcotest.(check bool) "portrait failure does not discard Keeper" true
+   | Ok ([runtime],[],_,_, _) -> Alcotest.(check bool) "portrait failure does not discard Keeper" true
        (runtime.Decode.kr_portrait=Decode.Unavailable "ledger unreadable")
    | _ -> Alcotest.fail "portrait failure hid Keeper");
   List.iter (fun invalid -> Alcotest.(check bool) "malformed portrait is never synthesized from name" true
@@ -666,17 +667,60 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
       (Result.is_error (decode (`Assoc (List.remove_assoc "portrait" fields))))
   | _ -> Alcotest.fail "bad row fixture"
 
+let test_roster_candle_amounts_and_status_agree () =
+  let amount = "18446744073709551614000" in
+  let ready = `Assoc ["status",`String "ready"; "issued_milli",`String amount;
+    "burned_milli",`String "1000"; "circulating_milli",`String "18446744073709551613000"] in
+  let row balance = match Yojson.Safe.from_string (gate_row "analyst") with
+    | `Assoc fields -> `Assoc (("candle_balance_milli",balance) :: List.remove_assoc "candle_balance_milli" fields)
+    | _ -> Alcotest.fail "bad Keeper fixture" in
+  let envelope candle balance = `Assoc ["candle",candle;"keepers",`List [row balance];"total",`Int 1;"truncated",`Bool false] in
+  (match Decode.decode_keeper_runtime_list (envelope ready (`String "9007199254740993")) with
+   | Ok ([runtime],[],false,1,Ok (Candle_observation.Ready supply)) ->
+     Alcotest.(check (option string)) "wallet is not rounded through float" (Some "9007199254740993") runtime.kr_candle_balance_milli;
+     Alcotest.(check string) "supply exceeds machine integer without loss" amount supply.issued_milli
+   | _ -> Alcotest.fail "exact Candle reading rejected");
+  let unavailable json = match Decode.decode_keeper_runtime_list json with
+    | Ok (rows, errors, truncated, total, Error detail) ->
+      Alcotest.(check bool) "currency failure is visible" true (String.length detail > 0);
+      let roster = Control.roster_of_reading ~rows ~errors ~truncated ~total in
+      let healthy = reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst" in
+      Alcotest.(check bool) "currency failure preserves live Keeper actions" true
+        (List.mem Control.Shutdown (Control.available healthy));
+      Alcotest.(check bool) "currency failure withdraws every wallet" true
+        (List.for_all (fun (row : Decode.keeper_runtime) -> row.kr_candle_balance_milli = None) rows)
+    | Ok (_,_,_,_,Ok _) -> Alcotest.fail "malformed currency became a valid observation"
+    | Error detail -> Alcotest.failf "currency failure hid the Keeper roster: %s" detail
+  in
+  List.iter (fun bad -> unavailable (envelope ready bad))
+    [`Null;`Int 0;`String "01";`String "-1";`String "1.2";`String "1e3"];
+  unavailable (envelope (`Assoc ["status",`String "off"]) (`String "0"));
+  let disabled = `Assoc ["status",`String "disabled";"reason",`String "ledger unreadable"] in
+  unavailable (envelope disabled (`String "1"));
+  let without key = function
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | _ -> Alcotest.fail "bad object fixture" in
+  unavailable (without "candle" (envelope ready (`String "1")));
+  unavailable (`Assoc ["candle",ready;
+    "keepers",`List [without "candle_balance_milli" (row (`String "1"))]]);
+  let error_row = `Assoc ["name",`String "broken";"status",`String "error";
+    "candle_balance_milli",`Null] in
+  unavailable (`Assoc ["candle",ready;"keepers",`List [row (`String "1");error_row]]);
+  match Decode.decode_keeper_runtime_list (envelope disabled `Null) with
+  | Ok ([_],[],_,_,Ok (Candle_observation.Disabled {reason})) -> Alcotest.(check string) "failure survives" "ledger unreadable" reason
+  | _ -> Alcotest.fail "disabled currency hid the Keeper"
+
 let test_roster_decode_reads_the_sandbox_profile () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
+         {|{"candle":{"status":"off"},"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row ~sandbox_profile:"docker" "contained")
          (gate_row ~sandbox_profile:"local" "on-the-host"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.failf "roster must decode: %s" detail
-  | Ok (rows, _, _, _) ->
+  | Ok (rows, _, _, _, _) ->
       Alcotest.(check (list string))
         "each row keeps its own declaration"
         [ "docker"; "local" ]
@@ -692,13 +736,13 @@ let test_roster_decode_keeps_paused_apart_from_phase () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
+         {|{"candle":{"status":"off"},"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row ~paused:true ~phase:"offline" "stopped-by-a-person")
          (gate_row ~paused:false ~phase:"offline" "fell-over"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.failf "roster must decode: %s" detail
-  | Ok (rows, _, _, _) ->
+  | Ok (rows, _, _, _, _) ->
       Alcotest.(check (list bool))
         "the pause reading is per row"
         [ true; false ]
@@ -717,10 +761,10 @@ let test_roster_decode_keeps_paused_apart_from_phase () =
 let test_a_row_without_a_sandbox_profile_is_rejected () =
   let json =
     Yojson.Safe.from_string
-      {|{"count":1,"total":1,"truncated":false,"keepers":[
+      {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[
          {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
           "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
-          "portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
+          "candle_balance_milli":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
           "health":"healthy","paused":false,"next_action":null,
           "phase":"running","keepalive_running":true,"activation_mode":"autonomous","runtime_id":"r",
           "created_at":"c","updated_at":"u"}]}|}
@@ -738,13 +782,13 @@ let test_a_row_without_a_sandbox_profile_is_rejected () =
 let test_roster_decode_reads_rows () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row "analyst")
          (gate_row ~health:"idle" "bandleader"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
-  | Ok (rows, _, truncated, total) ->
+  | Ok (rows, _, truncated, total, _) ->
       Alcotest.(check int) "two rows" 2 (List.length rows);
       Alcotest.(check bool) "not truncated" false truncated;
       Alcotest.(check int) "total" 2 total;
@@ -770,7 +814,7 @@ let test_roster_decode_reads_rows () =
 let test_roster_decode_rejects_an_unknown_status () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"keepers":[%s]}|}
          (gate_row ~health:"quarantined" "analyst"))
   in
   match Decode.decode_keeper_runtime_list json with
@@ -788,7 +832,7 @@ let test_roster_decode_rejects_an_unknown_status () =
 let test_roster_decode_rejects_an_unknown_phase () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"keepers":[%s]}|}
          (gate_row ~phase:"teleporting" "analyst"))
   in
   match Decode.decode_keeper_runtime_list json with
@@ -802,20 +846,20 @@ let test_roster_decode_rejects_an_unknown_phase () =
 (* A detail-less error is retained as unavailable, never a runtime snapshot. *)
 let error_row name = Printf.sprintf
     {|{"status":"error","runtime_class":"keeper","name":%S,
-       "keepalive_running":false,
+       "keepalive_running":false,"candle_balance_milli":null,
        "meta":null,"created_at":null,"updated_at":null}|}
     name
 
 let test_roster_decodes_an_error_row_without_refusing_the_rest () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"keepers":[%s,%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"keepers":[%s,%s]}|}
          (gate_row "healthy-one")
          (error_row "broken-meta"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.failf "roster must decode past an error row: %s" detail
-  | Ok (rows, errors, _, _) ->
+  | Ok (rows, errors, _, _, _) ->
       Alcotest.(check int) "only observed runtime rows survive" 1 (List.length rows);
       Alcotest.(check (list (pair string string))) "missing metadata stays an error"
         ["broken-meta", "Keeper metadata unavailable; the server supplied no error detail"] errors;
@@ -824,14 +868,14 @@ let test_roster_decodes_an_error_row_without_refusing_the_rest () =
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
     {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
-       "keepalive_running":false,"meta":null,"created_at":null,"updated_at":null,
+       "keepalive_running":false,"candle_balance_milli":null,"meta":null,"created_at":null,"updated_at":null,
        "effective_meta_error":{"keeper":"broken-meta","message":"metadata unreadable",
        "terminal_reason":"effective_meta_read_failed","severity":"error",
        "operator_action_required":true,"next_action":"fix_keeper_toml_or_keeper_instructions"}}|} in
-  let json = `Assoc ["keepers", `List [Yojson.Safe.from_string (gate_row "healthy-one"); producer_row]] in
+  let json = `Assoc ["candle",`Assoc ["status",`String "off"];"keepers", `List [Yojson.Safe.from_string (gate_row "healthy-one"); producer_row]] in
   match Decode.decode_keeper_runtime_list json with
   | Error message -> Alcotest.fail message
-  | Ok (rows, errors, _, _) ->
+  | Ok (rows, errors, _, _, _) ->
     Alcotest.(check int) "healthy Keeper remains visible" 1 (List.length rows);
     Alcotest.(check (list (pair string string))) "producer error retained verbatim"
       ["broken-meta", "metadata unreadable"] errors
@@ -842,7 +886,7 @@ let test_actual_producer_error_is_isolated () =
 let test_roster_decode_rejects_present_unknown_health_on_error_row () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"keepers":[%s]}|} (error_row "broken-meta"))
+      (Printf.sprintf {|{"candle":{"status":"off"},"keepers":[%s]}|} (error_row "broken-meta"))
   in
   let json_with_bad_health =
     match json with
@@ -930,13 +974,13 @@ let test_pause_does_not_hide_health () =
 let test_roster_decode_keeps_the_axes_apart () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
          (gate_row ~health:"offline" ~paused:true
             ~next_action:{|"recover"|} "wreck"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
-  | Ok ([ row ], _, _, _) ->
+  | Ok ([ row ], _, _, _, _) ->
       Alcotest.(check string) "health survives the surface fold" "offline"
         (Decode.keeper_health_to_string row.Decode.kr_health);
       Alcotest.(check bool) "pause is its own field" true row.Decode.kr_paused;
@@ -945,7 +989,7 @@ let test_roster_decode_keeps_the_axes_apart () =
       Alcotest.(check bool) "the action is carried" true
         (row.Decode.kr_next_action
          = Some Masc.Keeper_status_runtime.Recover)
-  | Ok (rows, _, _, _) ->
+  | Ok (rows, _, _, _, _) ->
       Alcotest.failf "expected one row, got %d" (List.length rows)
 
 (* A keeper in the Failing phase publishes health "failing". The roster reads
@@ -956,13 +1000,13 @@ let test_roster_decode_keeps_the_axes_apart () =
 let test_roster_decode_reads_a_failing_keeper () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
          (gate_row ~health:"failing" ~phase:"failing"
             ~next_action:{|"probe"|} "retro"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("a failing keeper's row must decode: " ^ err)
-  | Ok ([ row ], _, _, _) ->
+  | Ok ([ row ], _, _, _, _) ->
       Alcotest.(check bool) "health is the failing reading" true
         (Decode.keeper_health_reading row.Decode.kr_health
          = Decode.Health_failing);
@@ -981,27 +1025,27 @@ let test_roster_decode_reads_a_failing_keeper () =
       check_actions "a running keeper's actions"
         [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
         (Control.available r)
-  | Ok (rows, _, _, _) ->
+  | Ok (rows, _, _, _, _) ->
       Alcotest.failf "expected one row, got %d" (List.length rows)
 
 let test_roster_decode_null_action_is_none () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
          (gate_row ~next_action:"null" "quiet"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
-  | Ok ([ row ], _, _, _) ->
+  | Ok ([ row ], _, _, _, _) ->
       Alcotest.(check bool) "null decodes to None" true
         (row.Decode.kr_next_action = None)
-  | Ok (rows, _, _, _) ->
+  | Ok (rows, _, _, _, _) ->
       Alcotest.failf "expected one row, got %d" (List.length rows)
 
 let test_roster_decode_rejects_unknown_action () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
+      (Printf.sprintf {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
          (gate_row ~next_action:{|"reboot_the_universe"|} "odd"))
   in
   match Decode.decode_keeper_runtime_list json with
@@ -1028,11 +1072,11 @@ let test_purge_response_binds_exact_operation () =
 let test_configuration_error_isolated_and_deletable () =
   let json = Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"total":2,"truncated":false,"keepers":[%s,{"name":"probe","effective_meta_error":{"keeper":"probe","message":"sandbox_profile is required"}}]}|}
+         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"effective_meta_error":{"keeper":"probe","message":"sandbox_profile is required"}}]}|}
          (gate_row "analyst")) in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.fail detail
-  | Ok (rows, errors, truncated, total) ->
+  | Ok (rows, errors, truncated, total, _) ->
       let roster = Control.roster_of_reading ~rows ~errors ~truncated ~total in
       let healthy = reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst" in
       Alcotest.(check bool) "valid keeper retains live actions" true
@@ -1054,7 +1098,7 @@ let test_configuration_error_identity_must_match_the_row () =
   let roster keeper_field =
     Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"total":2,"truncated":false,"keepers":[%s,{"name":"probe","effective_meta_error":{%s"message":"sandbox_profile is required"}}]}|}
+         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"effective_meta_error":{%s"message":"sandbox_profile is required"}}]}|}
          (gate_row "analyst") keeper_field)
   in
   let names_field detail affix =
@@ -1181,6 +1225,7 @@ let () =
         ; Alcotest.test_case "the sandbox profile survives the decode" `Quick
             test_roster_decode_reads_the_sandbox_profile
         ; Alcotest.test_case "server equipment required; failures preserve Keeper" `Quick test_roster_equipment_is_required_and_failures_stay_per_keeper
+        ; Alcotest.test_case "Candle exact amounts and envelope status" `Quick test_roster_candle_amounts_and_status_agree
         ; Alcotest.test_case "paused stays apart from phase" `Quick
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick

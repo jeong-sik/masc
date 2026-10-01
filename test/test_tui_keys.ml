@@ -822,7 +822,7 @@ let test_git_changes_footer_names_only_changed_file_actions () =
 
 let test_git_diff_footer_names_scroll_code_and_files () =
   check str "Git diff has diff navigation footer"
-    "j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
+    "Shift-Left / Shift-Right:pan  j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_diff
 
 (* The Board draft's footers were literals in the renderer, so the pane above
@@ -2180,8 +2180,8 @@ let test_config_pane_footer_actions () =
     in
     enabled "PgUp/PgDn"
       (List.mem pane
-         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes
-         ; Config_voice ]);
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
+         ; Config_themes; Config_voice ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);

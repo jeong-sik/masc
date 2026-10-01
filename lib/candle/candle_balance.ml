@@ -3,6 +3,8 @@ module Goals = Set.Make (String)
 
 type t =
   { balances : int Names.t
+  ; issued : Z.t
+  ; burned : Z.t
   ; paid_goals : Goals.t
   ; owned : Keeper_portrait_item.t list Names.t
   ; selections : (Keeper_portrait_item.slot * Candle_event.equipment_choice) list Names.t
@@ -40,7 +42,19 @@ let error_to_string = function
       required_milli
 ;;
 
-let empty = { balances = Names.empty; paid_goals = Goals.empty; owned = Names.empty; selections = Names.empty }
+let empty = { balances = Names.empty; issued = Z.zero; burned = Z.zero; paid_goals = Goals.empty; owned = Names.empty; selections = Names.empty }
+
+type supply =
+  { issued_milli : string
+  ; burned_milli : string
+  ; circulating_milli : string
+  }
+
+let supply state =
+  { issued_milli = Z.to_string state.issued
+  ; burned_milli = Z.to_string state.burned
+  ; circulating_milli = Z.to_string (Z.sub state.issued state.burned)
+  }
 
 let balance state ~keeper =
   match Names.find_opt keeper state.balances with
@@ -62,8 +76,8 @@ let credit state (payment : Candle_payment.t) =
   if Goals.mem goal state.paid_goals
   then Error (Duplicate_payment goal)
   else (
-    let rec add balances = function
-      | [] -> Ok { state with balances; paid_goals = Goals.add goal state.paid_goals }
+    let rec add balances issued = function
+      | [] -> Ok { state with balances; issued; paid_goals = Goals.add goal state.paid_goals }
       | (allocation : Candle_payment.allocation) :: rest ->
         let current =
           match Names.find_opt allocation.keeper balances with
@@ -75,9 +89,10 @@ let credit state (payment : Candle_payment.t) =
         else
           add
             (Names.add allocation.keeper (current + allocation.amount_milli) balances)
+            (Z.add issued (Z.of_int allocation.amount_milli))
             rest
     in
-    add state.balances payment.allocations)
+    add state.balances state.issued payment.allocations)
 ;;
 
 let purchase state ~keeper ~item ~amount_milli =
@@ -95,6 +110,7 @@ let purchase state ~keeper ~item ~amount_milli =
     Ok
       { state with
         balances = Names.add keeper (available_milli - amount_milli) state.balances
+      ; burned = Z.add state.burned (Z.of_int amount_milli)
       ; owned = Names.add keeper (item :: items) state.owned
       }
 ;;

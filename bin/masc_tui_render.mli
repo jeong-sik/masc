@@ -28,7 +28,6 @@ module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
-module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
@@ -160,8 +159,6 @@ val browser_lane_selection_scroll :
   Masc_tui_types.Browser_lane_view.t -> int
 (** Reveal the selected node's first wrapped row after explicit selection. *)
 
-val ask_question_scroll_limit : Masc_tui_types.state -> int
-val ask_question_page_size : Masc_tui_types.state -> int
 
 val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int

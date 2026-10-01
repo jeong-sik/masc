@@ -20480,11 +20480,11 @@ and is loaded on demand through keeper_skill.
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
                 let delta = match k with
-                  | "pageup" -> -(Masc_tui_render.ask_question_page_size state)
-                  | "pagedown" -> Masc_tui_render.ask_question_page_size state
+                  | "pageup" -> -(Masc_tui_render_approvals.ask_question_page_size state)
+                  | "pagedown" -> Masc_tui_render_approvals.ask_question_page_size state
                   | "wheel-up" -> -1 | _ -> 1 in
                 state.ask_question_scroll <- max 0
-                  (min (Masc_tui_render.ask_question_scroll_limit state)
+                  (min (Masc_tui_render_approvals.ask_question_scroll_limit state)
                      (state.ask_question_scroll + delta))
             (* This arm takes every key while a question is open, so the
                surface Home and End below never reach it -- and reaching it
@@ -20494,7 +20494,7 @@ and is loaded on demand through keeper_skill.
             | "home" -> state.ask_question_scroll <- 0
             | "end" ->
                 state.ask_question_scroll <-
-                  Masc_tui_render.ask_question_scroll_limit state
+                  Masc_tui_render_approvals.ask_question_scroll_limit state
             | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
             | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state

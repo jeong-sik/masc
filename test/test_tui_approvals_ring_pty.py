@@ -10,6 +10,8 @@ import test_tui_keyboard_input as h
 # ring, the palette reaches their shared surface and the title still counts
 # the open question. See PR #37060 for the original badge regression.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_approvals_model.ml",
     "bin/masc_tui_approvals_model.mli",
     "bin/masc_tui_surface_navigation.ml",

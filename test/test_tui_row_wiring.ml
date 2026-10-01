@@ -18,6 +18,11 @@
 
 let render = "bin/masc_tui_render.ml"
 
+let approval_bindings = [ "approval_detail_pane"; "approval_sidebar_label"; "render_approval_detail"; "ask_age_cells"; "ask_summary_line"; "draw_ask_questions"; "approval_detail_line"; "approval_metadata_lines"; "render_approvals"; "ask_question_page_size"; "ask_question_scroll_limit"; "render_question_reader" ]
+
+let renderer_for binding =
+  if List.mem binding approval_bindings then "bin/masc_tui_render_approvals.ml" else render
+
 (* The Memory surface draws itself from here. Only the screen title stayed
    behind in [render]; the state, the row and the context moved out with the
    table cell that carries its own colour (#32870). *)
@@ -28,7 +33,7 @@ let reads_in ~module_path ~binding_name ~fields =
     ~module_path ~binding_name ~callees:[] ~fields
 
 let reads ~binding_name ~fields =
-  reads_in ~module_path:render ~binding_name ~fields
+  reads_in ~module_path:(renderer_for binding_name) ~binding_name ~fields
 
 (* A row two surfaces share is drawn by the primitives, not by either of
    them, so the guard over it names that file. *)
@@ -52,8 +57,7 @@ let reads_prim ~binding_name ~fields =
    it, the footer, and the ask section. *)
 let test_the_detail_height_is_read_off_the_line_it_draws () =
   let calls callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
-      ~binding_name:"render_approvals" ~callee
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals" ~callee
   in
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
@@ -227,20 +231,17 @@ let test_the_title_does_not_count_another_queue () =
    with the question block further down the pane. *)
 let test_the_approvals_title_counts_what_the_badge_counts () =
   Alcotest.(check int) "the title walks the shared pending helper" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals"
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Masc_tui_approvals_model.approvals_surface_pending");
   (* And names every kind it counted. A total with an unnamed part reads as
      an arithmetic error on screen. *)
   Alcotest.(check int) "the four kinds the surface answers" 4
-    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals"
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~literals:[ "held"; "gate"; "op"; "question" ]);
   (* And takes the question count from the same place the block heading and
      the badge take it, rather than reading the asks snapshot a third time. *)
   Alcotest.(check int) "the questions come off the shared reading" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals"
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Masc_tui_approvals_model.approvals_open_question_count");
   Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
     (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
@@ -284,8 +285,7 @@ let test_the_overview_draws_the_decision_projection () =
    approvals)" over a failed Gate poll (#39172 review, 2026-09-26). *)
 let test_the_approvals_screen_reads_the_shared_readings () =
   let calls callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
-      ~binding_name:"render_approvals" ~callee
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals" ~callee
 
   in
   Alcotest.(check int) "one reading for the whole screen" 1
@@ -1133,15 +1133,13 @@ let test_the_board_age_column_reads_the_sort_once () =
    that each of the three row kinds hands over its own asker. *)
 let test_an_approval_row_says_who_asked () =
   Alcotest.(check int) "the label is built through the shared one" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"approval_sidebar_label"
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"approval_sidebar_label"
        ~callee:"Render_schedule.sidebar_row_label");
   List.iter
     (fun field_name ->
       Alcotest.(check int)
         (field_name ^ " reaches the label") 1
-        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-           ~binding_name:"approval_sidebar_label" ~field_name))
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"approval_sidebar_label" ~field_name))
     [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
 ;;
 

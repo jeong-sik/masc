@@ -597,19 +597,28 @@ sources=%s
     write path (source foreign_run);
     check bool "unadmitted foreign Fusion source cannot inherit the old owner's read" true
       (Result.is_error (read owner));
+    check bool "repair cannot submit another Keeper's live source" true
+      (Result.is_error (save ~revision:(Store.digest (source foreign_run)) (source foreign_run)));
     write path (source old_run);
+    let malformed_foreign = source foreign_run ^ "\n[unrelated]\nvalue = [" in
+    write path malformed_foreign;
+    check bool "malformed foreign replacement cannot reveal current bytes" true
+      (Result.is_error (read owner));
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
-    let operator_document = Lane_addon_runtime.read_declaration ~caller:owner
-      ~access:(Lane_addon_sources.Keeper owner) ~config
-      (`Assoc ["source_path",`String operator_path]) |> require_document in
-    check string "operator-created private document retains its verified owner" malformed
-      (text "source_text" operator_document);
+    check bool "operator-created malformed replacement is not disclosed to prior owner" true
+      (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+        ~access:(Lane_addon_sources.Keeper owner) ~config
+        (`Assoc ["source_path",`String operator_path])));
     write path malformed;
-    let damaged = read owner |> require_document in
-    check string "invalid source is available for authorized repair" malformed (text "source_text" damaged);
+    check bool "unadmitted malformed source remains unreadable to prior owner" true
+      (Result.is_error (read owner));
     let next_run = register_private_run (root ^ "/replacement") owner in
-    ignore (save ~revision:(text "source_revision" damaged) (source next_run) |> require_document);
+    (match save ~revision:(Store.digest "stale") (source next_run) with
+     | Error error -> check bool "repair conflict does not return current bytes" true
+         (Option.is_none error.Lane_addon_declaration.current)
+     | Ok _ -> fail "stale repair replaced a changed document");
+    ignore (save ~revision:(Store.digest malformed) (source next_run) |> require_document);
     check string "repair can replace a pruned source" (source next_run)
       (read owner |> require_document |> text "source_text"))
 

@@ -805,17 +805,6 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
           (match access with
            | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
                ~source_revision:document.source_revision -> Ok ()
-           | Keeper keeper when Lane_addon_document_owner.repair_permits owner ~keeper ->
-               let denied = Error {Lane_addon_declaration.code=Invalid_request;
-                 message="Lane declaration is unavailable to this caller";current=None} in
-               (match offload (fun () -> Lane_addon_config.load_source
-                   ~source_path:document.source_path ~source_text:document.source_text) with
-                | Ok declaration ->
-                    (match Lane_addon_sources.authorize ~access declaration.binding,
-                           binding_visibility m ~access declaration.binding with
-                     | Ok (), Ok visibility when can_read access visibility -> Ok ()
-                     | _ -> denied)
-                | Error _ -> Ok ())
            | Keeper _ | Unauthenticated | Operator_configuration ->
                Error {Lane_addon_declaration.code=Invalid_request;
                  message="Lane declaration is unavailable to this caller";current=None})
@@ -855,7 +844,17 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let* current = match offload (fun () -> Lane_addon_declaration.read ~directory
       ~source_path:(Filename.concat directory request.file_name)) with
-      | Ok current -> let* () = authorize_document m ~access current in Ok (Some current)
+      | Ok current ->
+          let* () = match access with
+            | Keeper keeper ->
+                let* ownership = offload (fun () -> Lane_addon_document_owner.read
+                  ~root:(Lane_addon_store.root m.store) ~source_path:current.source_path)
+                  |> Result.map_error (fun message -> {Lane_addon_declaration.code=Io_error;message;current=None}) in
+                (match ownership with
+                 | Some owner when Lane_addon_document_owner.repair_permits owner ~keeper -> Ok ()
+                 | Some _ | None -> authorize_document m ~access current)
+            | Operator_configuration | Unauthenticated -> authorize_document m ~access current in
+          Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error error -> Error error in
     let* () = match access with

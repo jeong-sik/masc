@@ -8,8 +8,8 @@ type t
 val read : root:string -> source_path:string -> (t option, string) result
 val permits : t -> keeper:string -> source_revision:string -> bool
 val repair_permits : t -> keeper:string -> bool
-(** A completed owner may inspect malformed current bytes to repair them.
-    A valid unadmitted binding still needs live source authorization. *)
+(** A completed owner may submit a repair for unadmitted current bytes without
+    receiving their body. The proposed binding still needs live authority. *)
 val prepare : root:string -> source_path:string -> keeper:string ->
   prior_revision:string option -> proposed_revision:string -> (unit, string) result
 val complete : root:string -> source_path:string -> keeper:string ->

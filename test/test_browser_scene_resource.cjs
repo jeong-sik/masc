@@ -12,9 +12,24 @@ assert.ok(readFileSync(path.join(root, 'connectors/browser/extension/background.
 const limit = 1024 * 1024;
 const rect = {x:0, y:0, width:10, height:10, right:10, bottom:10};
 
+// The DOM seam preserves SHOW_TEXT source order without mutating nodes.
+const NodeFilter = {SHOW_TEXT:4};
+function createTreeWalker(root, whatToShow) {
+  assert.equal(whatToShow, NodeFilter.SHOW_TEXT);
+  const pending=Array.from(root.childNodes || []).reverse();
+  return {currentNode:root, nextNode() {
+    while (pending.length) {
+      const node=pending.pop();
+      if (node.nodeType===3) {this.currentNode=node;return true;}
+      for (let i=(node.childNodes || []).length-1;i>=0;i--) pending.push(node.childNodes[i]);
+    }
+    return false;
+  }};
+}
+
 function fixture({extraNodes = () => [], extraGlobals = {}} = {}) {
   const document = {title:'ordinary HTTP page', documentElement:{}, body:{childNodes:[]},
-    baseURI:'http://example.test/path'};
+    baseURI:'http://example.test/path', createTreeWalker};
   const style = {display:'block', visibility:'visible', opacity:'1', color:'rgb(0, 0, 0)',
     fontSize:'16px', fontWeight:'400', whiteSpace:'normal'};
   const link = {nodeType:1, localName:'a', innerText:'A', parentElement:null,
@@ -24,7 +39,7 @@ function fixture({extraNodes = () => [], extraGlobals = {}} = {}) {
   link.href='http://example.test/observed';
   document.body.childNodes.push(link);
   for (const node of extraNodes(document)) document.body.childNodes.push(node);
-  const context = vm.createContext({document, window:{}, ...extraGlobals,
+  const context = vm.createContext({document, NodeFilter, window:{}, ...extraGlobals,
     location:{href:'http://example.test/path?identity=exact#fragment'},
     innerWidth:800, innerHeight:600, scrollX:0, scrollY:0,
     getComputedStyle:() => style, HTMLInputElement:class {}, HTMLTextAreaElement:class {},
@@ -77,7 +92,7 @@ assert.equal('href' in htmlXlink, false,
 assert.equal(svgXlink.href, 'http://example.test/svg-destination',
   'an SVG anchor is still followed through XLink');
 assert.equal(
-  vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')].links.size", xlink.context), 2,
+  vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')].links.size", xlink.context), 2,
   'the HTML XLink anchor never enters the link map');
 
 // A recycled anchor remains the same DOM object, but not the same observation.
@@ -97,7 +112,7 @@ for (let revision=0;revision<100;revision++) {
   recycled.link.href='http://example.test/revision/'+revision;
   recycled.read();
 }
-const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')]",recycled.context);
+const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')]",recycled.context);
 assert.equal(registry.nodes.size,1,'connected recycled anchor retains only its latest reference');
 assert.equal(registry.links.size,1,'superseded href pins are retired');
 assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/);
@@ -115,3 +130,32 @@ for (const [name, alter] of [
   assert.throws(f.read, /scene_response_exceeds_1_mib/, `${name} must count toward full response bytes`);
 }
 console.log('scene resources: shared-script parity, insecure-context identity, observed href, and 6 JSON/UTF-8 overflow cases passed');
+
+// Run the shipped scene text walk against explicit DOM boundaries. Geometry
+// fixtures expose every text node; actual browser innerText parity is exercised
+// by test_browser_scene.py, independently of this offline execution seam.
+const textWalk = source.split('  const visibleText = element => {')[1].split('  const regionLabel =')[0];
+const textContext = vm.createContext({
+  NodeFilter,
+  css: node => ({display:node.hidden ? 'none' : node.display || 'inline',visibility:'visible',opacity:'1'}),
+  visible: node => !node.hidden, rendered: node => !node.hidden,
+  boxes: rects => rects,
+  document:{createTreeWalker,createRange:() => ({selectNodeContents(){},getClientRects:() => [rect]})},
+});
+vm.runInContext('const visibleText = element => {' + textWalk, textContext);
+function element(tag, display, children) {
+  const node={nodeType:1,localName:tag,display,childNodes:children};
+  for (const child of children) child.parentElement=node;
+  return node;
+}
+const text=value => ({nodeType:3,textContent:value});
+const blockControl=element('button','inline',[
+  element('span','block',[text('Save')]),element('span','block',[text('draft')])]);
+const cellControl=element('div','inline',[
+  element('span','table-cell',[text('Left')]),element('span','table-cell',[text('Right')])]);
+const breakControl=element('button','inline',[text('Save'),element('br','inline',[]),text('draft')]);
+textContext.controls={blockControl,cellControl,breakControl};
+assert.equal(vm.runInContext('visibleText(controls.blockControl)',textContext),'Save\ndraft');
+assert.equal(vm.runInContext('visibleText(controls.cellControl)',textContext),'Left\tRight');
+assert.equal(vm.runInContext('visibleText(controls.breakControl)',textContext),'Save\ndraft');
+console.log('scene text boundaries: shipped walk preserves single block/cell boundaries and explicit br');

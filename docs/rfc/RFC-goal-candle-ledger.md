@@ -79,7 +79,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 - **[사실]** Goal 전이는 `Goal_phase.decide_transition` 다음에 검증 원장에 기록하고, 그다음 phase 를 쓰고, 그다음 이벤트를 남긴다. 원장 기록이 실패하면 phase 쓰기를 막는다(`lib/workspace_goals.ml:409-416`). 사람이 확정하면 Goal 잠금 안에서 `confirmed_at` 이 먼저 검증 기록(`goal_verifications.json`)에 저장되고, 그 뒤에 Goal phase 가 `goals.json` 에 저장된다. 두 저장은 다른 파일이라 한꺼번에 일어나지 않는다(`lib/workspace_goals.ml:1187-1208`, `lib/goal/goal_verification.ml:510-519`, `lib/goal/goal_store.ml:591-616`).
 - **[사실]** 검증기의 통과·반박 결과는 `Goal_store.transact_goal` 안에서 검증 원장에 먼저 커밋되고, phase 는 그 뒤에 쓰인다. 결과의 `recorded_at` 은 트랜잭션에 들어가기 전에 정해진다(`lib/workspace_goals.ml:482-498`, `:815-862`). 결과를 커밋하는 곳은 `Goal_verification.record_proof_verdict` 를 부르는 `commit_verifier_decision` 한 곳이다(`:831`). 이미 커밋된 결과로 phase 를 옮기는 경로가 둘 더 있다. 서버가 커밋과 phase 쓰기 사이에 죽었을 때 `reconcile_committed_proof`(`:871`)가, `Verifying` 에서 `request_complete` 를 다시 받았을 때 `answer_verifying_repeat`(`:1008`)가 그렇다. 이미 반영된 결과가 다시 오면 phase 를 옮기지 않고 그대로 돌려준다(`:832-846`). 사람의 확정 `confirm_completion` 은 `request_id`, `verification_run_id`, `criterion_revision` 셋을 대조하고, 확정을 커밋한 뒤 이벤트를 남긴다(`:1204-1235`). Goal 의 criterion 은 `revision` 문자열을 가진다(`lib/goal/goal_store.mli:69-74`). 잠금 순서는 Goal, backlog, goal-task links 이고(`goal_store.mli:295-297`), 검증 원장 잠금은 Goal 잠금을 잡은 뒤에 잡는다(`lib/goal/goal_verification.mli:4-5`).
 - **[사실]** `read_backlog_observation_r` 는 주 파일을 못 읽으면 `.last-good` 를 돌려준다. 원본만 읽는 함수는 `read_backlog_r` 다(`lib/workspace/workspace_backlog.mli:8, 20-27`). Task 와 Goal 의 연결에는 `read_goal_task_links_authoritative_r` 가 있다(`lib/workspace/workspace_goal_index.mli:73`).
-- **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. GC 는 backlog 를 먼저 쓰고 잠금을 놓은 뒤에 archive 에 붙여서, 그 사이에는 끝난 Task 가 두 파일 어디에도 없다(`lib/workspace/workspace_gc.ml:121-129`). Task 를 삭제하면 Goal 연결도 함께 지운다(`lib/workspace/workspace_task.mli:29-36`).
+- **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. GC 는 archive 에 먼저 붙이고 그다음 backlog 를 써서, 그 사이에는 끝난 Task 가 두 파일에 다 있다. archive 를 읽거나 쓰지 못하면 GC 는 backlog 를 건드리지 않고 멈춘다(`lib/workspace/workspace_gc.ml` 의 `gc`). Task 를 삭제하면 Goal 연결도 함께 지운다(`lib/workspace/workspace_task.mli:29-36`).
   - lib 에는 archive 의 Task 를 엄격하게 읽는 함수가 없다. 행을 JSON 으로 꺼내는 `archive_entries_of_json`(모양이 다르면 빈 목록), id 만 읽는 `read_archive_task_ids`, 끝나지 않은 Task 만 읽고 못 읽는 항목은 건너뛰는 `read_orphaned_nonterminal_tasks` 가 있다(`lib/workspace/workspace_task_id.mli`).
 - **[사실]** runtime.toml 의 lane 표는 모르는 키를 서버 로드 에러로 다룬다(`lib/runtime/runtime_toml.ml:2620-2640`). 모르는 lane 이름의 표도 로드 에러다(`:2783-2793`). 설정을 runtime.toml 에 두면 Candle 설정 오류가 서버 부팅을 막을 수 있다.
 - **[사실]** 도구의 `defer_loading = true` 는 모델이 이름을 부르기 전까지 요청에서 뺀다. 도구 112개가 그렇다(`config/tools/masc_goal_upsert.toml:10-12` 의 주석, `config/tools/` 에서 `defer_loading = true` 를 센 값).
@@ -213,14 +213,14 @@ lane 은 요청을 셋으로 나눠 받는다. 한 요청이 아는 것을 줄�
 
 Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해서 Task 를 잘게 쪼개거나 제목에 지시문을 넣어도 총액은 오르지 않는다. 관계 판정은 후보 Task 를 하나씩 따로 받아서, 한 Task 제목의 지시문이 다른 Task 의 판정을 바꾸지 못한다. 표에 없는 입력(priority, 비용, 검증에 제출된 증거)은 어느 요청에도 넣지 않는다. priority 는 만든 쪽이 정하는 값이라 부풀릴 수 있다.
 
-**총액.** lane 은 등급 하나를 고른다. 등급은 닫힌 variant 이고(예: `Trivial`, `Small`, `Medium`, `Large`, `Epic`), 등급별 금액은 TOML 표로 정한다. 모델이 만든 임의의 숫자가 발행되지 않는다. 등급의 이름과 개수는 구현 전에 정한다.
+**총액.** lane 은 등급 하나를 고른다. 등급은 운영자가 확정한 다섯 닫힌 variant `Trivial`, `Small`, `Medium`, `Large`, `Epic` 이고, 등급별 금액은 TOML 표에 모두 명시한다. 코드 기본 금액은 없다. 모델이 만든 임의의 숫자가 발행되지 않는다.
 
 **후보 Task 와 후보 keeper.** 일꾼이 `Snapshot` 의 Task id 마다 backlog 와 `tasks-archive.json` 에서 Task 를 읽고 `Candidates` 를 쓴다.
 
 - Task 마다 상태는 셋이다. 찾음, 삭제됨, 못 읽음.
   - backlog 나 archive 에 있으면 찾음이다.
   - 둘 다 없고 Goal 연결도 남아 있지 않으면 삭제됨이다. Task 삭제가 연결도 함께 지우기 때문이다(2장).
-  - 둘 다 없는데 연결은 남아 있으면 못 읽음이다. GC 가 backlog 를 쓴 뒤 archive 에 붙이기 전이거나, archive 가 깨졌을 수 있다(2장).
+  - 둘 다 없는데 연결은 남아 있으면 못 읽음이다. archive 가 깨졌거나, 예전 GC 가 backlog 를 쓴 뒤 archive 에 붙이기 전에 죽으면서 잃은 Task 일 수 있다(2장).
   - 못 읽음이 하나라도 있으면 `Candidates` 를 쓰지 않고 다음에 다시 한다(3.2). 이 일꾼이 쓰는 archive reader 는 새로 만든 엄격한 것이다. 모양이 다르거나 못 읽는 행을 빈 목록이나 건너뛰기로 바꾸지 않고 못 읽음으로 돌려준다.
 - 후보 Task 는 찾음 상태이고 `done` 이며 끝난 시각이 Goal 생성 시각보다 늦고 확정 시각 이전인 Task 다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 다른 keeper 의 Task 를 후보에서 빼는 일을 막으려는 것이다. 끝난 시각과 담당자는 `done` 상태에 적힌 값이라서 일꾼이 언제 읽어도 같다.
 - 후보 keeper 는 후보 Task 담당자 가운데 keeper 인 사람이다. 담당자 이름을 `Keeper_id.Keeper_name.of_string`(`lib/keeper_registry/keeper_id.mli`)으로 파싱하고, 통과한 이름에 keeper 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. `Keeper_identity.Keeper_id.of_string` 은 소문자로 바꾸고 빈 문자열만 거절하는 함수라서 파일 경로를 만들기 전에 쓰지 않는다(`lib/keeper/keeper_identity.ml:15-45`). 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다.
@@ -270,7 +270,7 @@ price : item -> milli_candle
 
 - 소유는 `Purchased` 를 모아 계산한다. 이미 가진 아이템은 다시 살 수 없다.
 - 착용은 슬롯마다 마지막 `Equipped` 로 정한다. 소유한 아이템만 착용할 수 있다. 이름에서 정한 기본 장신구로 되돌리는 것도 `Equipped`(아이템 자리에 `Default`)로 남긴다.
-- `Equipped` 는 조건 없이 덧붙는 줄이라서 착용을 자주 바꾸는 keeper 가 있으면 모든 읽기가 늘고 `Paid`·`Purchased` 의 덧붙이기와 겹친다. 착용 상태를 원장 밖에 둘지는 6번 PR 에서 정한다(7장).
+- 착용 상태도 같은 원장에 둔다. 소유 확인과 `Equipped` 기록은 같은 원장 CAS 안에서 처리한다. 슬롯의 선택이 같으면 다시 기록하지 않는다. 별도 착용 저장소와 구매 원장 사이에 동기화 경로를 만들지 않는다.
 - 초상화 렌더러는 이름에서 장신구를 정하는 호출부가 두 곳이다(2장). 두 곳 모두 서버가 정한 착용 상태를 받아 그리게 하고, 원장의 착용을 이름에서 정한 장신구보다 우선한다. 몸은 바꾸지 않는다. 장신구는 2D 초상화에만 그린다. 3D 렌더러는 마스코트만 그려서 바꾸지 않는다.
 - 서버의 응답 ETag 와 그림 캐시, TUI 의 그림 캐시는 이름과 크기만 키로 쓴다(2장). 착용 상태를 키에 넣지 않으면 구매한 뒤에도 옛 그림이 나간다. TUI 는 착용 상태를 서버가 주는 wire 필드로만 받는다. 로컬 파일을 읽는 경로(2장)와 원격 경로를 따로 두지 않는다. 이 필드는 엄격 디코더와 Python fixture 까지 같은 PR 에서 바꾼다.
 - 카탈로그가 18개라서 다 사면 쓸 곳이 없다. 이 점은 받아들이고 후속 RFC(현상금 Task, 모델 변경 요청)에서 다룬다.
@@ -439,10 +439,9 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - 바닥 20%(시간당 1% 감액과 함께 초기값).
 - 반감기의 시간 값. 처음은 `Off` 이고, 지급이 쌓인 뒤 3.8 의 어림을 다시 계산해서 정한다.
 - 유통량에 연동하는 물가 공식 f 와 그 입력의 정의(3.5). 지급이 쌓인 뒤에 정한다.
-- 등급의 이름과 개수, 등급별 금액. 가장 낮은 등급의 금액이 0 인지도 정한다. 0 보다 크면 Goal 을 많이 만드는 것만으로 Candle 이 늘어난다.
+- 다섯 등급의 실제 운영 금액. 가장 낮은 등급의 금액이 0 인지도 정한다. 0 보다 크면 Goal 을 많이 만드는 것만으로 Candle 이 늘어난다.
 - 정수 감소 계산의 고정소수점 자릿수와 내림 규칙(3.1.1).
 - 가중치 상한 `weight_max`(3.4).
-- 착용 상태를 원장에 둘지(3.6).
 - 5장 시험 세트의 합격선과 기준 Goal 묶음.
 
 운영자 승인이 필요한 것:

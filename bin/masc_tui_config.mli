@@ -118,5 +118,5 @@ val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val set_board_sort : base_path:string -> string -> (unit, string) result
 
 val set_candle : base_path:string -> string -> (unit, string) result
-(** Store how /about and the splash draw the candle, [\[tui\].candle], under
+(** Store how /about draws the candle, [\[tui\].candle], under
     the same lock and in the same file as {!set_board_sort}. *)

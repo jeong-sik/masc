@@ -5563,7 +5563,7 @@ let test_decode_memory_fact_reads_the_use_record () =
          ]
          @ match events with None -> [] | Some events -> [ "events", events ])
     in
-    Tui_decode.decode_memory_fact_snapshot
+    Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot
       (memory_fact_snapshot_json
          ~ordinary:
            (`Assoc
@@ -5577,14 +5577,14 @@ let test_decode_memory_fact_reads_the_use_record () =
   let only_fact = function
     | Error error -> Alcotest.failf "snapshot rejected: %s" error
     | Ok snapshot -> (
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_present store -> (
-            match store.Tui_decode.mos_facts with
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_present store -> (
+            match store.Masc.Tui_decode_memory_facts.mos_facts with
             | [ fact ] -> fact
             | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))
-        | Tui_decode.Memory_store_read_error error ->
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error error ->
             Alcotest.failf "ordinary store rejected: %s" error
-        | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+        | Masc.Tui_decode_memory_facts.Memory_store_absent -> Alcotest.fail "ordinary store absent")
   in
   let fact =
     only_fact
@@ -5594,28 +5594,28 @@ let test_decode_memory_fact_reads_the_use_record () =
               ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
-  (match fact.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-   | Tui_decode.Retrieved { count; distinct_days; last_at } ->
+  (match fact.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+   | Masc.Tui_decode_memory_facts.Retrieved { count; distinct_days; last_at } ->
        Alcotest.(check int) "retrieved" 4 count;
        Alcotest.(check int) "days" 2 distinct_days;
        Alcotest.(check (float 0.0)) "last" 1_775_000_040.0 last_at
-   | Tui_decode.Never_retrieved -> Alcotest.fail "a retrieved fact decoded as never retrieved");
-  Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
+   | Masc.Tui_decode_memory_facts.Never_retrieved -> Alcotest.fail "a retrieved fact decoded as never retrieved");
+  Alcotest.(check int) "retracted" 1 fact.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
-    fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
+    fact.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
-  (match unused.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-   | Tui_decode.Never_retrieved -> ()
-   | Tui_decode.Retrieved _ -> Alcotest.fail "0, 0 and null decoded as retrieved");
+  (match unused.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+   | Masc.Tui_decode_memory_facts.Never_retrieved -> ()
+   | Masc.Tui_decode_memory_facts.Retrieved _ -> Alcotest.fail "0, 0 and null decoded as retrieved");
   let rejected ~what ~needle snapshot =
     match snapshot with
     | Error error -> Alcotest.(check bool) what true (mentions needle error)
     | Ok snapshot -> (
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error error ->
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error error ->
             Alcotest.(check bool) what true (mentions needle error)
-        | Tui_decode.Memory_store_present _ -> Alcotest.failf "%s: the row was accepted" what
-        | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+        | Masc.Tui_decode_memory_facts.Memory_store_present _ -> Alcotest.failf "%s: the row was accepted" what
+        | Masc.Tui_decode_memory_facts.Memory_store_absent -> Alcotest.fail "ordinary store absent")
   in
   (* The server derives count, days and clock from one list of retrieval
      times, so they are all empty or all present. A row where they disagree
@@ -5638,7 +5638,7 @@ let test_decode_memory_fact_reads_the_use_record () =
    renderer to guess a colour for. *)
 let test_decode_memory_fact_refuses_an_unknown_category () =
   let snapshot category =
-    Tui_decode.decode_memory_fact_snapshot
+    Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot
       (memory_fact_snapshot_json
          ~ordinary:
            (`Assoc
@@ -5668,10 +5668,10 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
   let refused_naming word = function
     | Error error -> contains_substring error word
     | Ok snapshot -> (
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error error ->
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error error ->
             contains_substring error word
-        | Tui_decode.Memory_store_present _ | Tui_decode.Memory_store_absent ->
+        | Masc.Tui_decode_memory_facts.Memory_store_present _ | Masc.Tui_decode_memory_facts.Memory_store_absent ->
             false)
   in
   Alcotest.(check bool) "a word the producer never writes is refused" true
@@ -5680,58 +5680,58 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
     (fun category ->
       let word = Masc.Keeper_memory_os_types.category_to_string category in
       match snapshot word with
-      | Ok { Tui_decode.mfs_ordinary = Tui_decode.Memory_store_present
-               { Tui_decode.mos_facts = [ fact ]; _ }; _ } ->
+      | Ok { Masc.Tui_decode_memory_facts.mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present
+               { Masc.Tui_decode_memory_facts.mos_facts = [ fact ]; _ }; _ } ->
           Alcotest.(check bool) (word ^ " round-trips") true
-            (fact.Tui_decode.mf_category = category)
+            (fact.Masc.Tui_decode_memory_facts.mf_category = category)
       | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
     Masc.Keeper_memory_os_types.all_categories
 
 (* The "all keepers" Memory view merges per-keeper listings. A keeper that
    could not be read is named beside the facts that were read; a keeper with
    no memory yet is not a failure. *)
-let merge_fixture_fact claim : Tui_decode.memory_fact =
-  { Tui_decode.mf_claim = claim
+let merge_fixture_fact claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { Masc.Tui_decode_memory_facts.mf_claim = claim
   ; mf_category = Masc.Keeper_memory_os_types.Fact
   ; mf_origin = "authored"
   ; mf_first_seen = 1.
   ; mf_last_seen = 1.
   ; mf_memory_id = "mem-" ^ claim
-  ; mf_events = Tui_decode.no_memory_fact_events
+  ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
   }
 
-let merge_fixture_snapshot ?(ordinary = Tui_decode.Memory_store_absent) keeper =
-  { Tui_decode.mfs_keeper = keeper
+let merge_fixture_snapshot ?(ordinary = Masc.Tui_decode_memory_facts.Memory_store_absent) keeper =
+  { Masc.Tui_decode_memory_facts.mfs_keeper = keeper
   ; mfs_ordinary = ordinary
-  ; mfs_source = Tui_decode.Memory_store_absent
+  ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
   ; mfs_events_read_error = None
   }
 
-let merged_claims (snapshot : Tui_decode.memory_fact_snapshot) =
-  match snapshot.Tui_decode.mfs_ordinary with
-  | Tui_decode.Memory_store_present store ->
-    List.map (fun (f : Tui_decode.memory_fact) -> f.Tui_decode.mf_origin, f.mf_claim)
-      store.Tui_decode.mos_facts
-  | Tui_decode.Memory_store_absent | Tui_decode.Memory_store_read_error _ ->
+let merged_claims (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+  | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+    List.map (fun (f : Masc.Tui_decode_memory_facts.memory_fact) -> f.Masc.Tui_decode_memory_facts.mf_origin, f.mf_claim)
+      store.Masc.Tui_decode_memory_facts.mos_facts
+  | Masc.Tui_decode_memory_facts.Memory_store_absent | Masc.Tui_decode_memory_facts.Memory_store_read_error _ ->
     Alcotest.fail "the merge is always a present store"
 
 let test_merge_keeper_memory_facts_names_unread_keepers () =
   let present claims =
-    Tui_decode.Memory_store_present
-      { Tui_decode.mos_revision = 3
+    Masc.Tui_decode_memory_facts.Memory_store_present
+      { Masc.Tui_decode_memory_facts.mos_revision = 3
       ; mos_updated_at = 1.
       ; mos_facts = List.map merge_fixture_fact claims
       }
   in
   let snapshot, unread =
-    Tui_decode.merge_keeper_memory_facts ~now:10.
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~now:10.
       [ "alpha", Ok (merge_fixture_snapshot ~ordinary:(present [ "a1" ]) "alpha")
       ; "beta", Error "connection refused"
       ; ( "gamma"
         , Ok
             { (merge_fixture_snapshot "gamma") with
-              Tui_decode.mfs_ordinary = Tui_decode.Memory_store_read_error "unreadable"
-            ; mfs_source = Tui_decode.Memory_store_read_error "unreadable"
+              Masc.Tui_decode_memory_facts.mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_read_error "unreadable"
+            ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_read_error "unreadable"
             } )
       ; "delta", Ok (merge_fixture_snapshot "delta")
       ]
@@ -5754,7 +5754,7 @@ let test_merge_keeper_memory_facts_names_unread_keepers () =
 
 let test_merge_keeper_memory_facts_all_read () =
   let _, unread =
-    Tui_decode.merge_keeper_memory_facts ~now:10.
+    Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~now:10.
       [ "alpha", Ok (merge_fixture_snapshot "alpha") ]
   in
   Alcotest.(check (option string)) "nothing unread" None unread
@@ -5804,49 +5804,49 @@ let test_decode_memory_facts_keeps_both_stores () =
       ]
   in
   match
-    Tui_decode.decode_memory_fact_snapshot
+    Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot
       (memory_fact_snapshot_json ~ordinary ~source_bound ())
   with
   | Error err -> Alcotest.fail err
   | Ok snapshot -> (
-      Alcotest.(check string) "keeper" "alpha" snapshot.Tui_decode.mfs_keeper;
-      (match snapshot.Tui_decode.mfs_ordinary with
-       | Tui_decode.Memory_store_present store ->
-           Alcotest.(check int) "revision" 7 store.Tui_decode.mos_revision;
-           (match store.Tui_decode.mos_facts with
+      Alcotest.(check string) "keeper" "alpha" snapshot.Masc.Tui_decode_memory_facts.mfs_keeper;
+      (match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+       | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+           Alcotest.(check int) "revision" 7 store.Masc.Tui_decode_memory_facts.mos_revision;
+           (match store.Masc.Tui_decode_memory_facts.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
                   "lesson"
                   (Masc.Keeper_memory_os_types.category_to_string
-                     fact.Tui_decode.mf_category);
+                     fact.Masc.Tui_decode_memory_facts.mf_category);
                 Alcotest.(check string) "origin" "authored"
-                  fact.Tui_decode.mf_origin
+                  fact.Masc.Tui_decode_memory_facts.mf_origin
             | facts ->
                 Alcotest.fail
                   (Printf.sprintf "expected one fact, got %d"
                      (List.length facts)))
-       | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+       | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
          ->
            Alcotest.fail "ordinary store should be present");
-      match snapshot.Tui_decode.mfs_source with
-      | Tui_decode.Memory_store_present store -> (
-          (match store.Tui_decode.mss_facts with
+      match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+      | Masc.Tui_decode_memory_facts.Memory_store_present store -> (
+          (match store.Masc.Tui_decode_memory_facts.mss_facts with
            | [ fact ] ->
                Alcotest.(check string) "bound path" "docs/config.md"
-                 fact.Tui_decode.msf_path
+                 fact.Masc.Tui_decode_memory_facts.msf_path
            | facts ->
                Alcotest.fail
                  (Printf.sprintf "expected one source fact, got %d"
                     (List.length facts)));
-          match store.Tui_decode.mss_invalidations with
+          match store.Masc.Tui_decode_memory_facts.mss_invalidations with
           | [ row ] ->
               Alcotest.(check string) "reason as the server spelled it"
-                "source_changed" row.Tui_decode.mi_reason
+                "source_changed" row.Masc.Tui_decode_memory_facts.mi_reason
           | rows ->
               Alcotest.fail
                 (Printf.sprintf "expected one invalidation, got %d"
                    (List.length rows)))
-      | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+      | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
         ->
           Alcotest.fail "source store should be present")
 
@@ -5856,19 +5856,19 @@ let test_decode_memory_facts_keeps_store_states_apart () =
       ~ordinary:(`Assoc [ "read_error", `String "corrupt row 12" ])
       ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
-  match Tui_decode.decode_memory_fact_snapshot json with
+  match Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json with
   | Error err -> Alcotest.fail err
   | Ok snapshot ->
-      (match snapshot.Tui_decode.mfs_ordinary with
-       | Tui_decode.Memory_store_read_error detail ->
+      (match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+       | Masc.Tui_decode_memory_facts.Memory_store_read_error detail ->
            Alcotest.(check string) "the reason survives" "corrupt row 12"
              detail
-       | Tui_decode.Memory_store_absent | Tui_decode.Memory_store_present _ ->
+       | Masc.Tui_decode_memory_facts.Memory_store_absent | Masc.Tui_decode_memory_facts.Memory_store_present _ ->
            Alcotest.fail "a read error must not pass as a store state");
-      (match snapshot.Tui_decode.mfs_source with
-       | Tui_decode.Memory_store_absent -> ()
-       | Tui_decode.Memory_store_read_error _
-       | Tui_decode.Memory_store_present _ ->
+      (match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+       | Masc.Tui_decode_memory_facts.Memory_store_absent -> ()
+       | Masc.Tui_decode_memory_facts.Memory_store_read_error _
+       | Masc.Tui_decode_memory_facts.Memory_store_present _ ->
           Alcotest.fail "an absent store must stay absent")
 
 let test_decode_memory_facts_keeps_event_read_error () =
@@ -5878,13 +5878,13 @@ let test_decode_memory_facts_keeps_event_read_error () =
       ~ordinary:(`Assoc [ "present", `Bool false ])
       ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
-  match Tui_decode.decode_memory_fact_snapshot json with
+  match Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json with
   | Error error -> Alcotest.fail error
   | Ok snapshot ->
     Alcotest.(check (option string))
       "sidecar failure is not empty history"
       (Some "memory event sidecar read failed: permission denied")
-      snapshot.Tui_decode.mfs_events_read_error
+      snapshot.Masc.Tui_decode_memory_facts.mfs_events_read_error
 
 let test_decode_memory_facts_rejects_a_shapeless_store () =
   (* Neither read_error nor present: the store object answers nothing, and
@@ -5895,7 +5895,7 @@ let test_decode_memory_facts_rejects_a_shapeless_store () =
       ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   Alcotest.(check bool) "a shapeless store is a decode error, not empty" true
-    (Result.is_error (Tui_decode.decode_memory_fact_snapshot json))
+    (Result.is_error (Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json))
 
 let test_decode_repository_changes_keeps_git_axes () =
   let json =
@@ -8781,7 +8781,7 @@ let test_decode_and_join_runtime_surface () =
        | Some probe ->
            Alcotest.(check string) "freshness stays producer-owned"
              "served_stale"
-             (Tui_decode.runtime_probe_refresh_state_to_string
+             (Masc.Tui_decode_runtime_probe.runtime_probe_refresh_state_to_string
                 probe.rps_refresh_state)
        | None -> Alcotest.fail "fixture probe became unavailable");
       (match snapshot.rss_candidates with
@@ -8793,7 +8793,7 @@ let test_decode_and_join_runtime_surface () =
            (match failed.rcr_probe with
             | Some row ->
                 Alcotest.(check string) "failure kind" "network_error"
-                  (Tui_decode.runtime_provider_status_to_string row.rpp_status)
+                  (Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string row.rpp_status)
             | None -> Alcotest.fail "network failure became unobserved");
            Alcotest.(check bool) "stale absence is unobserved" true
              (Option.is_none unobserved.rcr_probe)
@@ -8818,7 +8818,7 @@ let test_decode_and_join_runtime_surface () =
 let test_runtime_probe_status_reads_every_word_the_server_writes () =
   List.iter
     (fun word ->
-      match Tui_decode.runtime_probe_status_of_string word with
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Ok _ -> ()
       | Error detail ->
         Alcotest.failf "the server writes %S and this refused it: %s" word
@@ -8834,7 +8834,7 @@ let test_runtime_probe_status_reads_every_word_the_server_writes () =
 let test_runtime_probe_status_refuses_words_nobody_writes () =
   List.iter
     (fun word ->
-      match Tui_decode.runtime_probe_status_of_string word with
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Error _ -> ()
       | Ok _ -> Alcotest.failf "%S decoded, and no producer writes it" word)
     [ "reachable"; "no_http_runtimes"; "warming"; "healthy"; "" ]
@@ -8846,23 +8846,23 @@ let test_runtime_probe_status_refuses_words_nobody_writes () =
 let test_runtime_probe_status_round_trips () =
   List.iter
     (fun status ->
-      let word = Tui_decode.runtime_probe_status_to_string status in
-      match Tui_decode.runtime_probe_status_of_string word with
+      let word = Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string status in
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Ok back when back = status -> ()
       | Ok _ -> Alcotest.failf "%S read back as a different status" word
       | Error detail ->
         Alcotest.failf "%S is written but not read: %s" word detail)
-    [ Tui_decode.Runtime_probe_reachable
-    ; Tui_decode.Runtime_probe_no_http_runtimes
-    ; Tui_decode.Runtime_probe_degraded
-    ; Tui_decode.Runtime_probe_unreachable
-    ; Tui_decode.Runtime_probe_warming
+    [ Masc.Tui_decode_runtime_probe.Runtime_probe_reachable
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_no_http_runtimes
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_degraded
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_unreachable
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_warming
     ]
 ;;
 
 let test_runtime_probe_rejects_unknown_status () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~first_status:"ok" ())
   with
   | Ok _ -> Alcotest.fail "unknown provider status decoded"
@@ -8870,14 +8870,14 @@ let test_runtime_probe_rejects_unknown_status () =
 
 let test_runtime_probe_rejects_status_reachability_disagreement () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~first_reachable:(`Bool false) ())
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
   | Error _ -> ()
 
 let test_runtime_probe_preserves_limitations () =
-  match Tui_decode.decode_runtime_probe_snapshot (runtime_probe_surface_json ()) with
+  match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot (runtime_probe_surface_json ()) with
   | Error detail -> Alcotest.fail detail
   | Ok snapshot ->
       Alcotest.(check (list string)) "producer limitations"
@@ -8886,7 +8886,7 @@ let test_runtime_probe_preserves_limitations () =
 
 let test_runtime_probe_accepts_empty_limitations () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~limitations:(`List []) ())
   with
   | Error detail -> Alcotest.fail detail
@@ -8895,7 +8895,7 @@ let test_runtime_probe_accepts_empty_limitations () =
 
 let test_runtime_probe_rejects_malformed_limitations () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json
          ~limitations:(`List [ `String "typed"; `Int 1 ]) ())
   with
@@ -8911,7 +8911,7 @@ let test_runtime_probe_rejects_malformed_limitations () =
    direction. *)
 let test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~source:"keeper_runtime.toml" ())
   with
   | Ok _ -> Alcotest.fail "a probe naming another file decoded"
@@ -8938,13 +8938,13 @@ let test_runtime_catalog_probe_is_independent_of_dispatch () =
   | Ok snapshot ->
       let runtime = List.find (fun row -> row.Tui_decode.ro_id = "runtime-c")
           snapshot.rss_resolved.rrs_runtimes in
-      (match Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id with
+      (match Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id with
        | None -> Alcotest.fail "catalog lost failed provider observation"
        | Some probe -> Alcotest.(check string) "failure remains independently visible"
-           "endpoint_not_found" (Tui_decode.runtime_provider_status_to_string probe.rpp_status);
+           "endpoint_not_found" (Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string probe.rpp_status);
            Alcotest.(check (option int)) "actual HTTP result" (Some 404) probe.rpp_http_status);
       Alcotest.(check bool) "missing observation stays absent" true
-        (Option.is_none (Tui_decode.runtime_probe_for_id snapshot ~runtime_id:"runtime-d"))
+        (Option.is_none (Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:"runtime-d"))
 
 let test_runtime_limits_reject_unknown_or_invalid_values () =
   let replace name value = function

@@ -4,6 +4,7 @@ title: "Board attention 은 이벤트 하나를 Jev 에게 한 번에 묻는다"
 status: Draft
 created: 2026-10-01
 updated: 2026-10-01
+revision: 2
 author: claude
 related: ["0424", "one-slot-fault-judgment-for-every-walk", "provider-declared-backpressure"]
 ---
@@ -104,8 +105,17 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 
 - push 경로의 전달을 네트워크 호출로 막지 않는다. 이벤트를 먼저 기록한 뒤, 별도 fiber 에서 Jev 를 부르고 결과로 후보를 기록한다.
   Jev 가 늦거나 실패하면 대기 후보로 기록되고 지금 경로를 탄다.
-- 한 요청의 질문 수 상한은 문서에 없다. **[확인 필요]** 질문 24~26개 요청의 거절 여부, 응답 시간, 비용을 먼저 잰다(4단계 1번).
-  거절되면 그 이벤트는 대기 후보 경로로 보낸다. 질문 수를 임의로 잘라 나누지 않는다.
+- 한 요청의 질문 수 상한은 문서에 없다. 거절되면 그 이벤트는 대기 후보 경로로 보낸다. 질문 수를 임의로 잘라 나누지 않는다.
+
+**4단계 1번 결과 [사실]** (2026-10-01, `docs/evidence/board-attention-jev-20261001/jev-request-shape-eval.txt`):
+
+- 실제 이벤트 13개에 Keeper 21~24명분 질문을 한 요청으로 보냈다. 모두 받아들여졌고(HTTP 200), 0.24~0.55초 걸렸다.
+  입력 토큰은 이벤트당 약 5,200~6,400개로, 같은 이벤트를 Keeper 마다 따로 물은 24번(약 28,000개)의 약 1/4~1/5 이다.
+- 질문을 여러 개 실어도 답은 달라지지 않았다. 같은 문구로 질문 하나씩 보낸 요청과 24명 중 23명이 같았다.
+- 대신 state 모양이 답을 바꿨다. 그때 운영 요청은 state 맨 위에 그 Keeper 의 `keeper_role` 을 두었고, 그 모양에서 Jev 는 "관련 있음"을 훨씬 자주 답했다.
+  최근 이벤트 10개(Keeper 228쌍)에서 두 모양이 26쌍 갈렸다. 어느 쪽 답인지 숨긴 판정자가 운영 판정 기준으로 판정하자
+  신호만 둔 모양이 23건, 운영 모양이 3건 맞았다.
+- #40505 가 단건 요청도 신호만 두는 모양으로 바꿨다. 그래서 2.1 을 넣어도 판정은 다시 흔들리지 않는다.
 - cursor replay 경로(`keeper_world_observation.ml` 의 post_created 재생)는 지금처럼 후보 단위로 둔다.
 
 ### 2.2 검증 레인은 GLM 칸을 나눠 쓰지 않는다
@@ -126,7 +136,10 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 - 일시정지된 Keeper 는 후보를 만들 때 빼지 않는다. 다시 켜졌을 때 그동안의 소식을 판정받아야 한다.
   2.1 이 들어가면 이 후보들도 기록할 때 Jev 로 대부분 끝나서, 쌓이는 것은 LLM 이 필요한 후보뿐이다.
 - 설정이 지워진 Keeper 의 Board attention 원장과 파티션은 Keeper 를 지울 때 함께 지운다.
-  **[확인 필요]** Keeper 삭제 경로가 어디이고, 지금 무엇을 지우는지.
+  **[사실]** Keeper 를 지울 때 쓰는 정리 목록(`lib/keeper/keeper_shutdown_types.ml:593` `dashboard_purge_artifact_plan`)에
+  Board attention 후보 원장과 파티션 원장이 없다. 같은 목록의 주석은 메모리 파일에 대해, 남은 파일을 같은 이름의 새 Keeper 가
+  물려받는다고 경고한다. Board attention 도 같다: 같은 이름으로 `lane-smith` 를 다시 만들면 대기 395건과 격리 기록을 물려받는다.
+  **[제안]** 두 원장을 이 목록에 더한다.
 
 ## 3. 하지 않는 것
 
@@ -138,7 +151,7 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 
 ## 4. 단계
 
-1. **Jev 요청 크기 확인.** 실제 이벤트 하나에 질문 24~26개를 실은 요청을 몇 번 보내서, 거절 여부, 응답 시간, 비용을 잰다.
+1. **Jev 요청 크기 확인.** 끝났다(2.1 의 결과). 요청 모양은 #40505 로 맞췄다.
 2. **push 경로 fan-out.** 2.1. 대기 후보 기록과 Jev 판정 기록을 같은 후보 원장 계약으로 쓴다.
 3. **검증 레인 칸 분리.** 2.2. 운영자가 설정을 바꾸고, 바꾸기 전후로 검증 레인의 900초 실패 수를 잰다.
 4. **지워진 Keeper 정리.** 2.3.
@@ -162,3 +175,24 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 라이브러리안 레인(`librarian_exact`)의 첫 슬롯인 `ollama_cloud` deepseek-v4-1-flash 는 Ollama 계정의 주간 한도가 다 차서
 (`seven_day = 1.0`, 2026-09-30 06:33 KST부터) 한 건도 답하지 못한다†. 그래서 호출 대부분이 CLI 대체 슬롯인
 `claude-sonnet-5-5-high`(약 60%)와 `codex-gpt-6-1-sol-low` 로 간다†. CLI 대체가 성공하면 앞선 429 가 로그에 남지 않는다.
+
+## 8. Push 구현 (2026-10-01)
+
+`keeper_board_attention_fanout`은 push 경로가 새로 저장한 후보들을 서버 switch의
+별도 fiber에서 한 요청으로 판정한다. 후보는 모델 호출 전에 Pending으로 영속화하고,
+기존 singleton partition의 Ready 세대를 먼저 claim한다. 기존 워커나 시작 복구가
+소유권을 바꾸면 CAS가 오래된 결과의 적용을 막는다. 이미 존재하는 후보는 기존 워커가 맡는다.
+
+확신 있는 답은 Vendor_system_one 출처로 Completed partition에 기록한다.
+관련 없음은 바로 소비하고, 관련 있음은 owner의 Attention_result 경로로 전달한다.
+낮은 확신·uncertain·누락된 답·호출 오류는 claim을 Ready로 돌리고 기존 워커를 깨운다.
+excluded_keepers는 외부 요청에 포함하지 않는다. 서버 clock을 넘겨 기존 HTTP timeout을 적용한다.
+재시작은 기존 partition 복구를 사용하며, 원장에 기록된 후보를 유실하지 않는다.
+
+기존 post_created owner cursor 경로는 유지한다. push의 댓글·수정 및 초기 cursor 예외만
+묶는다. 따라서 모든 Board 이벤트가 반드시 한 호출만 발생한다는 보장은 하지 않는다.
+워커 대체 경로와 destination failover도 추가 호출을 만들 수 있다.
+
+소스 검증용 HTTP fixture는 한 요청의 다중 질문, owner를 거치는 관련 있음,
+관련 없음 소비, uncertain·낮은 확신·누락 답의 Ready 복귀 및 제외 Keeper를 확인한다.
+배포 및 운영 효과 측정은 별도 증거가 필요하다.

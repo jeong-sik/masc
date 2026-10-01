@@ -177,7 +177,7 @@ let plain_log_row ~time entry =
 let log_entry_rows ~width ~time (entry : Tui_decode.log_entry) =
   let wrap text =
     Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-      (Tui_decode.sanitize_terminal_text text)
+      (Masc.Tui_terminal_text.sanitize_terminal_text text)
     |> List.map (fun line -> "  " ^ line)
   in
   let cells = log_cells entry in

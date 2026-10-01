@@ -1358,10 +1358,16 @@
  (libraries masc_tui_theme masc_tui_terminal_palette))
 
 (library
+ (name masc_tui_voice_wizard_session)
+ (wrapped false)
+ (modules masc_tui_voice_wizard_session)
+ (libraries masc.voice_wizard masc.voice_setup masc_tui_message_layout))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1371,8 +1377,6 @@
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
   masc_tui_answering
-  masc.voice_wizard
-  masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_fusion_launch
@@ -1485,6 +1489,13 @@
 ; surface could only be extracted from masc_tui_render.ml by staying inside
 ; this same stanza -- which is why the file split out in #3808 grew back to
 ; 16.5k lines. A library makes per-surface modules possible at all.
+(library
+ (name masc_tui_palette)
+ (wrapped false)
+ (modules masc_tui_palette)
+ (libraries masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows
+  masc_tui_message_layout masc_tui_code_lexer masc.keeper_contract masc))
+
 (library
  (name masc_tui_render_tools)
  (wrapped false)
@@ -1675,6 +1686,7 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer
   masc_tui_ansi
@@ -1745,6 +1757,13 @@
   masc_tui_message_layout
   unix))
 
+;; The last answer to each dashboard read, kept with its entity tag so the
+;; next read can ask whether it changed. A library so a test can drive it.
+(library
+ (name masc_tui_kept_reads)
+ (wrapped false)
+ (modules masc_tui_kept_reads))
+
 (executable
  (name masc_tui)
  (modules
@@ -1756,6 +1775,9 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_voice_wizard_session
+  masc_tui_kept_reads
+  masc_tui_palette
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text
@@ -1822,6 +1844,7 @@
   masc_tui_input_decoder
   masc_tui_input_reader
   masc_tui_code_lexer
+  masc_tui_code_results
   masc_tui_memo
   masc_tui_span
   masc_tui_diff
@@ -2211,6 +2234,18 @@
   masc_tui_paste
   masc_tui_terminal_palette
   masc_tui_utf8_input))
+
+(library
+ (name masc_tui_code_results)
+ (wrapped false)
+ (modules masc_tui_code_results)
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_fetched
+  masc_tui_code_lexer
+  masc_tui_memo
+  masc_tui_message_layout))
 
 (library
  (name masc_tui_input_reader)

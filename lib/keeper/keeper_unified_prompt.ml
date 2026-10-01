@@ -1874,8 +1874,7 @@ let build_prompt_internal
             actionable line. Unmeasurable rows collapse into one count: a
             live playground answered 19 of 32 rows with the same
             budget-exhausted reason (2026-09-01 field probe), and repeating
-            an identical failure line 19 times per turn is noise the
-            keeper_status tool already carries in full. *)
+            an identical failure line 19 times per turn is noise. *)
          let measured, unmeasured =
            List.partition
              (fun (row : Keeper_sandbox_control.freshness_row) ->

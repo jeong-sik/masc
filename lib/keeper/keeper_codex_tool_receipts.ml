@@ -49,13 +49,19 @@ let hooks t (original : Agent_core.Hooks.hooks) =
     | None -> Agent_core.Hooks.Continue
   in
   let after hook event =
-    let result = invoke hook event in
-    (match event with
-     | Agent_core.Hooks.PostToolUse { invocation; _ }
-     | Agent_core.Hooks.PostToolUseFailure { invocation; stage = Agent_core.Hooks.Validation_before_execution; _ } -> committed t invocation
-     | Agent_core.Hooks.PostToolUseFailure { stage = Agent_core.Hooks.Execution; _ } -> ()
-     | _ -> ());
-    result
+    (* The log can commit before a later observer is cancelled. Keep receipt
+       delivery protected while allowing the original hook to be interrupted. *)
+    Eio_guard.protect
+      ~finally:(fun () ->
+        match event with
+        | Agent_core.Hooks.PostToolUse { invocation; _ }
+        | Agent_core.Hooks.PostToolUseFailure
+            { invocation; stage = Agent_core.Hooks.Validation_before_execution; _ } ->
+          committed t invocation
+        | Agent_core.Hooks.PostToolUseFailure
+            { stage = Agent_core.Hooks.Execution; _ } -> ()
+        | _ -> ())
+      (fun () -> invoke hook event)
   in
   { original with
     pre_tool_use = Some (fun event ->

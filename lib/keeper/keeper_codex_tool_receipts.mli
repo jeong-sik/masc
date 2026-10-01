@@ -7,4 +7,5 @@ val start : t -> call_id:string -> block_index:int -> unit
 val finish : t -> call_id:string -> unit
 val hooks : t -> Agent_core.Hooks.hooks -> Agent_core.Hooks.hooks
 (** The pre-hook binds the invocation before execution. The post-hook reports
-    only a committed receipt, before the event bus consumes its join. *)
+    only a committed receipt, before the event bus consumes its join, including
+    when the original hook is cancelled after committing the log row. *)

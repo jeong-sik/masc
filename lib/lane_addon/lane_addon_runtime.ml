@@ -935,16 +935,10 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
           (match access with
            | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
                ~source_revision:document.source_revision ->
-               let denied = Error {Lane_addon_declaration.code=Invalid_request;
-                 message="Lane declaration is unavailable to this caller";current=None} in
-               (match offload (fun () -> Lane_addon_config.load_source
-                   ~source_path:document.source_path ~source_text:document.source_text) with
-                | Ok declaration ->
-                    (match Lane_addon_sources.authorize ~access declaration.binding,
-                           binding_visibility m ~access declaration.binding with
-                     | Ok (), Ok visibility when can_read access visibility -> Ok ()
-                     | _ -> denied)
-                | Error _ -> denied)
+               (* Completed document ownership is repair authority, independent
+                  of live source retention and current TOML validity. Proposed
+                  replacement bytes still pass live authorization in save. *)
+               Ok ()
            | Keeper _ | Unauthenticated | Operator_configuration ->
                Error {Lane_addon_declaration.code=Invalid_request;
                  message="Lane declaration is unavailable to this caller";current=None})

@@ -1,0 +1,1942 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_code_history_layout_pty: start 2026-09-30T08:11:22Z (dune alias)
+File "test/stanzas/test_tui_code_history_layout_pty.inc", lines 1-5, characters 0-243:
+1 | (rule
+2 |  (alias runtest-test_tui_code_history_layout_pty)
+3 |  (deps test_tui_code_history_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+4 |  (action
+5 |   (run python3 %{dep:test_tui_code_history_layout_pty.py} %{dep:../bin/masc_tui.exe})))
+(cd _build/default/test && /usr/bin/python3 ./test_tui_code_history_layout_pty.py ../bin/masc_tui.exe)
+Traceback (most recent call last):
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_history_layout_pty.py", line 124, in <module>
+    run(os.path.abspath(sys.argv[1]), width, plain)
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_history_layout_pty.py", line 115, in run
+    h.run_terminal_scenario(executable,
+  File "/home/runner/work/masc/masc/_build/default/test/test_tui_keyboard_input.py", line 2310, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_history_layout_pty.py", line 62, in interact
+    assert "Esc:back" in h.screen_text(bytes(output)).decode("utf-8")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+[targeted] test_tui_code_history_layout_pty: FAIL exit 1 in 28s
+[targeted] test_tui_keyboard_input-repositories: start 2026-09-30T08:11:50Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe repositories)
+tui Repositories regression: PASS
+[targeted] test_tui_keyboard_input-repositories: OK in 16s
+[targeted] dune build test/test_tui_keys.exe 
+[targeted] test/test_tui_keys: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_keys: start 2026-09-30T08:12:16Z
+::group::{masc_tui_keys}
+Testing `masc_tui_keys'.
+This run has ID `5FJNJZ9A'.
+
+ASSERT Info tab keys
+ASSERT Sandbox tab keys
+ASSERT Settings tab keys
+ASSERT Secrets tab keys
+ASSERT GitHub tab keys
+ASSERT Identity tab keys
+ASSERT Channels tab keys
+ASSERT Automation tab keys
+ASSERT Runs tab keys
+  [OK]          table                            0   detail tab bindings cove...
+ASSERT writing names the letters' exceptions and no q
+ASSERT a new post's menu cycles the hearth
+ASSERT a reply's menu has no hearth to cycle
+  [OK]          table                            1   board compose footers ar...
+ASSERT a split detail offers the wide one
+ASSERT and does not offer the list it already draws
+ASSERT a wide detail offers the list back
+ASSERT and does not offer the width it already has
+ASSERT one pane offers no width key
+ASSERT one pane offers no pane keys
+ASSERT one pane still reads the post
+  [OK]          table                            2   the wide key names where...
+ASSERT alternatives
+ASSERT spaced alternatives and a double press
+ASSERT a chord
+ASSERT a single key
+ASSERT Sandbox takes s and o
+ASSERT Channels takes e
+ASSERT Channels takes U for unbind all
+ASSERT Info takes both Board requeue keys
+  [OK]          table                            3   key atoms read the table...
+  [OK]          table                            4   no detail tab key is a q...
+ASSERT the tab switch leads on Info
+ASSERT b reaches the strip
+ASSERT B reaches the strip
+ASSERT the tab switch leads on Sandbox
+ASSERT o reaches the strip
+ASSERT d/m/s reaches the strip
+ASSERT PgUp/PgDn reaches the strip
+ASSERT R reaches the strip
+ASSERT the tab switch leads on Settings
+ASSERT e reaches the strip
+ASSERT the tab switch leads on Secrets
+ASSERT the tab switch leads on GitHub
+ASSERT L reaches the strip
+ASSERT P reaches the strip
+ASSERT 1 reaches the strip
+ASSERT 2 reaches the strip
+ASSERT 3 reaches the strip
+ASSERT 4 reaches the strip
+ASSERT 5 reaches the strip
+ASSERT the tab switch leads on Identity
+ASSERT arrows+enter reaches the strip
+ASSERT T reaches the strip
+ASSERT A reaches the strip
+ASSERT / reaches the strip
+ASSERT R reaches the strip
+ASSERT the tab switch leads on Channels
+ASSERT j/k reaches the strip
+ASSERT J/K reaches the strip
+ASSERT PgUp/PgDn reaches the strip
+ASSERT b / e / u u reaches the strip
+ASSERT U U reaches the strip
+ASSERT the tab switch leads on Automation
+ASSERT the tab switch leads on Runs
+  [OK]          table                            5   detail tab strip project...
+ASSERT b is documented in the sheet
+ASSERT B is documented in the sheet
+ASSERT o is documented in the sheet
+ASSERT d/m/s is documented in the sheet
+ASSERT PgUp/PgDn is documented in the sheet
+ASSERT R is documented in the sheet
+ASSERT e is documented in the sheet
+ASSERT L is documented in the sheet
+ASSERT P is documented in the sheet
+ASSERT 1 is documented in the sheet
+ASSERT 2 is documented in the sheet
+ASSERT 3 is documented in the sheet
+ASSERT 4 is documented in the sheet
+ASSERT 5 is documented in the sheet
+ASSERT arrows+enter is documented in the sheet
+ASSERT T is documented in the sheet
+ASSERT A is documented in the sheet
+ASSERT / is documented in the sheet
+ASSERT R is documented in the sheet
+ASSERT j/k is documented in the sheet
+ASSERT J/K is documented in the sheet
+ASSERT PgUp/PgDn is documented in the sheet
+ASSERT b / e / u u is documented in the sheet
+ASSERT U U is documented in the sheet
+  [OK]          table                            6   detail tab keys reach th...
+ASSERT Dashboard names 0 key(s) holding the Enter atom (found: )
+ASSERT Work names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Keepers names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Usage names 0 key(s) holding the Enter atom (found: )
+ASSERT Board names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Workspace names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT System names 2 key(s) holding the Enter atom (found: e / Enter | Enter)
+ASSERT Activity names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Keeper detail names 0 key(s) holding the Enter atom (found: )
+ASSERT Chat names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Keepers / Logs names 0 key(s) holding the Enter atom (found: )
+ASSERT Keepers / Calls names 0 key(s) holding the Enter atom (found: )
+ASSERT Keepers / Runtime names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Lanes names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT System / Runtime / Clients names 0 key(s) holding the Enter atom (found: )
+ASSERT Approvals names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Work / Task Review names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Work / Task Verdicts names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Fusion names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Keepers / Schedules names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Memory names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT Workspace / Code names 2 key(s) holding the Enter atom (found: Right / Enter | Enter (history))
+ASSERT Changes names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT System / Runtime names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT System / Resources names 1 key(s) holding the Enter atom (found: Enter)
+ASSERT System / Tools names 0 key(s) holding the Enter atom (found: )
+ASSERT System / Logs names 1 key(s) holding the Enter atom (found: Right / Enter)
+ASSERT Connectors names 0 key(s) holding the Enter atom (found: )
+  [OK]          table                            7   every surface names one ...
+ASSERT Dashboard is still a surface the sheet lists
+ASSERT Usage is still a surface the sheet lists
+ASSERT Keeper detail is still a surface the sheet lists
+ASSERT System / Runtime / Clients is still a surface the sheet lists
+ASSERT System / Tools is still a surface the sheet lists
+ASSERT Keepers / Logs is still a surface the sheet lists
+ASSERT Keepers / Calls is still a surface the sheet lists
+ASSERT Connectors is still a surface the sheet lists
+ASSERT Workspace / Code is still a surface the sheet lists
+ASSERT System is still a surface the sheet lists
+  [OK]          table                            8   every Enter exception na...
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+ASSERT a surface with no bindings has no footer and no help row
+  [OK]          table                            9   every surface answers.
+ASSERT the Keeper logs footer names "j/k:scroll"
+ASSERT the Keeper logs footer names "PgUp/PgDn:page"
+ASSERT the Keeper logs footer names "Home/End:now / oldest"
+ASSERT the Keeper logs footer names "Left / Esc:back"
+  [OK]          table                           10   Keeper logs names the ke...
+ASSERT the runtime picker footer names "j/k:move"
+ASSERT the runtime picker footer names "PgUp/PgDn:page"
+ASSERT the runtime picker footer names "Enter:choose"
+ASSERT the runtime picker footer names "d:default"
+ASSERT the runtime picker footer names "Esc:back"
+  [OK]          table                           11   the runtime picker names...
+ASSERT every screen with keys has a sheet section (missing, by first key: )
+  [OK]          table                           12   every surface with keys ...
+ASSERT no drawn footer row names one key twice ()
+  [OK]          table                           13   no drawn row names one k...
+ASSERT each key appears once per surface (keys: m, r, Tab, q)
+ASSERT each key appears once per surface (keys: e / l, j/k, f, Enter, Esc, Home/End, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, p, w, 1 / 2 / 3, Esc, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Right / Enter, c, l, t, u, g, p / w, s, e, f, a, x, D, /, n / N, Esc, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: h/l, [ / ], o, U, Left / Esc, Home/End, c, t, g, p / w, s, e, f, a, x, D)
+ASSERT each key appears once per surface (keys: j/k, PgUp/PgDn, Home/End, Left / Esc, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Home/End, Left / Esc, r, Tab, q)
+ASSERT each key appears once per surface (keys: Left, Right, Up / Down, Enter, Ctrl-J, Ctrl-Y, Ctrl-A, Ctrl-G, Ctrl-U, Ctrl-K / Ctrl-P, Ctrl-T, PgUp/PgDn, Ctrl-R, Ctrl-D, Ctrl-S, Ctrl-N, Ctrl-F, /approve /deny, /copy, Ctrl-Q, Esc)
+ASSERT each key appears once per surface (keys: j/k, PgUp/PgDn, /, Enter, d, Esc)
+ASSERT each key appears once per surface (keys: j/k, o / A, Right / Enter, a, s, e, p, Esc, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Right / Enter, Left / Esc, w, v / V, c, [ / ], s, f / F, H, z, b, Y, Ctrl-W, h/l, PgUp/PgDn, /, n / N, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Enter, y / n, R, a, [ / ], w, e, Left/Right, 1-9, t, s, c, Esc, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, t, p, v, Right / Enter, Left / Esc, f, s, [ / ], c, a, x, o, Y, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, PgUp/PgDn, Right / Enter, Left / Esc, [ / ], n, e, x, Y, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, v, h, Right / Enter, Left / Esc, [ / ], < / >, a / x, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, v, PgUp/PgDn, Right / Enter, Left / Esc, [ / ], y / x, Y, /, n / N, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, PgUp/PgDn, Enter, [ / ], K, B, a, Y, /, n / N, Esc, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Enter, H, d, a, Left / Esc, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, h/l, Right / Enter, Left / Esc, Shift-Left / Shift-Right, /, n / N, K, R, D, B, b, m, d, Enter (history), H, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, [ / ], Right / Enter, Left / Esc, d, v, /, n / N, o, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: B, Ctrl-O, j/k, b / u, Esc, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, PgUp/PgDn, Right / Enter, p, c, e, a, x, J/K, f, m, R, D, Left / Esc, /, n / N, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, p / Esc, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, p, A, L, PgUp/PgDn, v, 9, s, t, e, e / Enter, E, Enter, x, f, n, u, i, a, o, Esc, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, h/l, Ctrl-W, J/K, [ / ], PgUp/PgDn, Home/End, Enter, Esc, /, n / N, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Home/End, p, J/K, [ / ], c / C, e, Esc, r, Tab, q)
+ASSERT each key appears once per surface (keys: e, j/k, PgUp/PgDn, [ / ], l, v, c, Right / Enter, Left / Esc, /, n / N, Home/End, r, Tab, q)
+ASSERT each key appears once per surface (keys: j/k, Enter, a / A, s, d, Esc, /, n / N, PgUp/PgDn, Home/End, r, Tab, q)
+  [OK]          table                           14   no surface repeats a key.
+ASSERT "m" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "e / l" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "w" spells its key canonically
+ASSERT "1 / 2 / 3" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "l" spells its key canonically
+ASSERT "t" spells its key canonically
+ASSERT "u" spells its key canonically
+ASSERT "g" spells its key canonically
+ASSERT "p / w" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "D" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "h/l" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "o" spells its key canonically
+ASSERT "U" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "t" spells its key canonically
+ASSERT "g" spells its key canonically
+ASSERT "p / w" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "D" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "Left" spells its key canonically
+ASSERT "Right" spells its key canonically
+ASSERT "Up / Down" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "Ctrl-J" spells its key canonically
+ASSERT "Ctrl-Y" spells its key canonically
+ASSERT "Ctrl-A" spells its key canonically
+ASSERT "Ctrl-G" spells its key canonically
+ASSERT "Ctrl-U" spells its key canonically
+ASSERT "Ctrl-K / Ctrl-P" spells its key canonically
+ASSERT "Ctrl-T" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Ctrl-R" spells its key canonically
+ASSERT "Ctrl-D" spells its key canonically
+ASSERT "Ctrl-S" spells its key canonically
+ASSERT "Ctrl-N" spells its key canonically
+ASSERT "Ctrl-F" spells its key canonically
+ASSERT "/approve /deny" spells its key canonically
+ASSERT "/copy" spells its key canonically
+ASSERT "Ctrl-Q" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "d" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "o / A" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "w" spells its key canonically
+ASSERT "v / V" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "f / F" spells its key canonically
+ASSERT "H" spells its key canonically
+ASSERT "z" spells its key canonically
+ASSERT "b" spells its key canonically
+ASSERT "Y" spells its key canonically
+ASSERT "Ctrl-W" spells its key canonically
+ASSERT "h/l" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "y / n" spells its key canonically
+ASSERT "R" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "w" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "Left/Right" spells its key canonically
+ASSERT "1-9" spells its key canonically
+ASSERT "t" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "t" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "o" spells its key canonically
+ASSERT "Y" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "n" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "Y" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "h" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "< / >" spells its key canonically
+ASSERT "a / x" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "y / x" spells its key canonically
+ASSERT "Y" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "K" spells its key canonically
+ASSERT "B" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "Y" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "H" spells its key canonically
+ASSERT "d" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "h/l" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "Shift-Left / Shift-Right" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "K" spells its key canonically
+ASSERT "R" spells its key canonically
+ASSERT "D" spells its key canonically
+ASSERT "B" spells its key canonically
+ASSERT "b" spells its key canonically
+ASSERT "m" spells its key canonically
+ASSERT "d" spells its key canonically
+ASSERT "Enter (history)" spells its key canonically
+ASSERT "H" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "d" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "o" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "B" spells its key canonically
+ASSERT "Ctrl-O" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "b / u" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "J/K" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "m" spells its key canonically
+ASSERT "R" spells its key canonically
+ASSERT "D" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "p / Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "A" spells its key canonically
+ASSERT "L" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "9" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "t" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "e / Enter" spells its key canonically
+ASSERT "E" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "x" spells its key canonically
+ASSERT "f" spells its key canonically
+ASSERT "n" spells its key canonically
+ASSERT "u" spells its key canonically
+ASSERT "i" spells its key canonically
+ASSERT "a" spells its key canonically
+ASSERT "o" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "h/l" spells its key canonically
+ASSERT "Ctrl-W" spells its key canonically
+ASSERT "J/K" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "p" spells its key canonically
+ASSERT "J/K" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "c / C" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "e" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "[ / ]" spells its key canonically
+ASSERT "l" spells its key canonically
+ASSERT "v" spells its key canonically
+ASSERT "c" spells its key canonically
+ASSERT "Right / Enter" spells its key canonically
+ASSERT "Left / Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+ASSERT "j/k" spells its key canonically
+ASSERT "Enter" spells its key canonically
+ASSERT "a / A" spells its key canonically
+ASSERT "s" spells its key canonically
+ASSERT "d" spells its key canonically
+ASSERT "Esc" spells its key canonically
+ASSERT "/" spells its key canonically
+ASSERT "n / N" spells its key canonically
+ASSERT "PgUp/PgDn" spells its key canonically
+ASSERT "Home/End" spells its key canonically
+ASSERT "r" spells its key canonically
+ASSERT "Tab" spells its key canonically
+ASSERT "q" spells its key canonically
+  [OK]          table                           15   one spelling per key.
+ASSERT "h" is spelled one way (found: h)
+ASSERT "a" is spelled one way (found: a)
+ASSERT "Ctrl-D" is spelled one way (found: Ctrl-D)
+ASSERT "a/x" is spelled one way (found: a / x)
+ASSERT "Ctrl-S" is spelled one way (found: Ctrl-S)
+ASSERT "e" is spelled one way (found: e)
+ASSERT "t" is spelled one way (found: t)
+ASSERT "p" is spelled one way (found: p)
+ASSERT "[/]" is spelled one way (found: [ / ])
+ASSERT "h/l" is spelled one way (found: h/l)
+ASSERT "Ctrl-U" is spelled one way (found: Ctrl-U)
+ASSERT "w" is spelled one way (found: w)
+ASSERT "c/C" is spelled one way (found: c / C)
+ASSERT "Ctrl-G" is spelled one way (found: Ctrl-G)
+ASSERT "Ctrl-Y" is spelled one way (found: Ctrl-Y)
+ASSERT "PgUp/PgDn" is spelled one way (found: PgUp/PgDn)
+ASSERT "Ctrl-Q" is spelled one way (found: Ctrl-Q)
+ASSERT "Left" is spelled one way (found: Left)
+ASSERT "E" is spelled one way (found: E)
+ASSERT "q" is spelled one way (found: q)
+ASSERT "J/K" is spelled one way (found: J/K)
+ASSERT "v/V" is spelled one way (found: v / V)
+ASSERT "d" is spelled one way (found: d)
+ASSERT "l" is spelled one way (found: l)
+ASSERT "Ctrl-R" is spelled one way (found: Ctrl-R)
+ASSERT "Home/End" is spelled one way (found: Home/End)
+ASSERT "e/Enter" is spelled one way (found: e / Enter)
+ASSERT "j/k" is spelled one way (found: j/k)
+ASSERT "A" is spelled one way (found: A)
+ASSERT "s" is spelled one way (found: s)
+ASSERT "v" is spelled one way (found: v)
+ASSERT "1/2/3" is spelled one way (found: 1 / 2 / 3)
+ASSERT "Esc" is spelled one way (found: Esc)
+ASSERT "/" is spelled one way (found: /)
+ASSERT "y/x" is spelled one way (found: y / x)
+ASSERT "Ctrl-T" is spelled one way (found: Ctrl-T)
+ASSERT "Up/Down" is spelled one way (found: Up / Down)
+ASSERT "Left/Esc" is spelled one way (found: Left / Esc)
+ASSERT "Enter(history)" is spelled one way (found: Enter (history))
+ASSERT "c" is spelled one way (found: c)
+ASSERT "/copy" is spelled one way (found: /copy)
+ASSERT "Tab" is spelled one way (found: Tab)
+ASSERT "Right" is spelled one way (found: Right)
+ASSERT "n" is spelled one way (found: n)
+ASSERT "Ctrl-O" is spelled one way (found: Ctrl-O)
+ASSERT "Ctrl-W" is spelled one way (found: Ctrl-W)
+ASSERT "z" is spelled one way (found: z)
+ASSERT "p/w" is spelled one way (found: p / w)
+ASSERT "b" is spelled one way (found: b)
+ASSERT "/approve/deny" is spelled one way (found: /approve /deny)
+ASSERT "Ctrl-K/Ctrl-P" is spelled one way (found: Ctrl-K / Ctrl-P)
+ASSERT "b/u" is spelled one way (found: b / u)
+ASSERT "f/F" is spelled one way (found: f / F)
+ASSERT "H" is spelled one way (found: H)
+ASSERT "9" is spelled one way (found: 9)
+ASSERT "Ctrl-F" is spelled one way (found: Ctrl-F)
+ASSERT "Shift-Left/Shift-Right" is spelled one way (found: Shift-Left / Shift-Right)
+ASSERT "D" is spelled one way (found: D)
+ASSERT "1-9" is spelled one way (found: 1-9)
+ASSERT "Y" is spelled one way (found: Y)
+ASSERT "Ctrl-A" is spelled one way (found: Ctrl-A)
+ASSERT "g" is spelled one way (found: g)
+ASSERT "K" is spelled one way (found: K)
+ASSERT "</>" is spelled one way (found: < / >)
+ASSERT "Ctrl-J" is spelled one way (found: Ctrl-J)
+ASSERT "U" is spelled one way (found: U)
+ASSERT "u" is spelled one way (found: u)
+ASSERT "p/Esc" is spelled one way (found: p / Esc)
+ASSERT "f" is spelled one way (found: f)
+ASSERT "Enter" is spelled one way (found: Enter)
+ASSERT "Right/Enter" is spelled one way (found: Right / Enter)
+ASSERT "Left/Right" is spelled one way (found: Left/Right)
+ASSERT "a/A" is spelled one way (found: a / A)
+ASSERT "o/A" is spelled one way (found: o / A)
+ASSERT "e/l" is spelled one way (found: e / l)
+ASSERT "m" is spelled one way (found: m)
+ASSERT "y/n" is spelled one way (found: y / n)
+ASSERT "Ctrl-N" is spelled one way (found: Ctrl-N)
+ASSERT "x" is spelled one way (found: x)
+ASSERT "R" is spelled one way (found: R)
+ASSERT "L" is spelled one way (found: L)
+ASSERT "r" is spelled one way (found: r)
+ASSERT "o" is spelled one way (found: o)
+ASSERT "B" is spelled one way (found: B)
+ASSERT "i" is spelled one way (found: i)
+ASSERT "n/N" is spelled one way (found: n / N)
+  [OK]          table                           16   a key is spelled one way...
+ASSERT and says it pages the runtime.toml pane
+ASSERT and the prompts pane
+ASSERT and the presets pane
+  [OK]          table                           17   Config declares the page...
+ASSERT Memory cycle help
+  [OK]          table                           18   chat help names the Memo...
+ASSERT Approvals is reached through Work
+ASSERT before any reading Work stands
+ASSERT before any reading nothing reads as settled
+ASSERT a reading with nothing in it is current
+ASSERT and Work still stands
+ASSERT a failed held-calls poll is not current
+ASSERT a failed held-calls poll keeps Work
+ASSERT a failed questions poll is not current
+ASSERT a failed questions poll keeps Work
+ASSERT an unread confirm queue is not current
+ASSERT an unread confirm queue keeps Work
+ASSERT a failed Gate poll is not current
+ASSERT a failed Gate poll keeps Work
+ASSERT a Gate queue the server could not read is not current
+ASSERT a Gate queue the server could not read keeps Work
+ASSERT a Gate queue not read yet is not current
+ASSERT a Gate queue not read yet keeps Work
+ASSERT held calls not read yet are not current
+ASSERT held calls not read yet keep Work
+ASSERT every list read and empty is current again
+ASSERT and Work still stands
+  [OK]          table                           19   Approvals stay reachable...
+ASSERT every list read and empty: nothing pending
+ASSERT and the Dashboard count stands
+ASSERT the empty queue names the Gate queue as stale
+ASSERT the title says the Gate queue is stale
+ASSERT the Dashboard count carries the ?
+ASSERT and the reading is not current
+ASSERT while Work still leads to it
+ASSERT an unreadable Gate store is named, not emptied
+ASSERT and the title says so
+ASSERT the next answered poll empties it again
+ASSERT with no note
+  [OK]          table                           20   a Gate poll failing afte...
+ASSERT Ctrl-Y starts a capture
+ASSERT Ctrl-A turns continuous capture on
+  [OK]          table                           21   chat help names the voic...
+ASSERT Keepers leaves n to the search step
+ASSERT Lanes leaves n to the search step
+ASSERT Verification leaves n to the search step
+ASSERT Harness leaves n to the search step
+ASSERT Repositories leaves n to the search step
+ASSERT Memory leaves n to the search step
+ASSERT Connectors leaves n to the search step
+ASSERT Runtime leaves n to the search step
+ASSERT System logs leaves n to the search step
+ASSERT Code leaves n to the search step
+ASSERT Board leaves n to the search step
+ASSERT Planning leaves n to the search step
+ASSERT Fusion leaves n to the search step
+ASSERT Changes leaves n to the search step
+ASSERT Resources leaves n to the search step
+ASSERT Harness overrules with x
+  [OK]          table                           22   a searchable surface doe...
+ASSERT blame is listed
+ASSERT the definition walk kept its own key
+ASSERT b reads as blame
+ASSERT B reads as back
+  [OK]          table                           23   Code separates blame fro...
+ASSERT Code asks K
+ASSERT Code asks D
+ASSERT Code asks R
+  [OK]          table                           24   Code asks the language s...
+ASSERT an open file names K:hover
+ASSERT an open file names D:definition
+ASSERT an open file names R:references
+ASSERT an open file names b:blame
+ASSERT an open file names /:find
+ASSERT an open file names d:diff
+ASSERT an open file names H:history
+ASSERT an open file names m:notes
+ASSERT an open file scrolls
+ASSERT the tree does not name K:hover
+ASSERT the tree does not name D:definition
+ASSERT the tree does not name R:references
+ASSERT the tree does not name b:blame
+ASSERT the tree does not name H:history
+ASSERT the tree moves
+ASSERT an overlay drops the code keys
+ASSERT an overlay opens a commit
+ASSERT the tree has no commit to open
+ASSERT an open file has no commit to open
+  [OK]          table                           25   the Code footer names th...
+ASSERT the queue and the open approval spell it alike
+ASSERT the answer survives 120 cells
+ASSERT and so does the way out at 120 cells
+ASSERT the answer survives 60 cells
+ASSERT and so does the way out at 60 cells
+ASSERT the answer survives 44 cells
+ASSERT and so does the way out at 44 cells
+ASSERT the answer survives 34 cells
+ASSERT and so does the way out at 34 cells
+  [OK]          table                           26   an open approval keeps i...
+ASSERT Keepers names /
+ASSERT Keepers names n / N
+ASSERT Lanes names /
+ASSERT Lanes names n / N
+ASSERT Verification names /
+ASSERT Verification names n / N
+ASSERT Harness names /
+ASSERT Harness names n / N
+ASSERT Repositories names /
+ASSERT Repositories names n / N
+ASSERT Memory names /
+ASSERT Memory names n / N
+ASSERT Connectors names /
+ASSERT Connectors names n / N
+ASSERT Runtime names /
+ASSERT Runtime names n / N
+ASSERT System logs names /
+ASSERT System logs names n / N
+ASSERT Code names /
+ASSERT Code names n / N
+ASSERT Board names /
+ASSERT Board names n / N
+ASSERT Planning names /
+ASSERT Planning names n / N
+ASSERT Fusion names /
+ASSERT Fusion names n / N
+ASSERT Changes names /
+ASSERT Changes names n / N
+ASSERT Resources names /
+ASSERT Resources names n / N
+  [OK]          table                           27   every searchable surface...
+ASSERT large file count
+ASSERT repaint keeps the count
+ASSERT repaint reuses the settled reading
+ASSERT query change recounts
+ASSERT same-path replacement recounts
+ASSERT tree does not reuse file matches
+ASSERT overlay without a source has no count
+ASSERT closed file has no source
+ASSERT loaded empty file has zero matches
+  [OK]          table                           28   Code search counts follo...
+ASSERT list visible count
+ASSERT list cursor available
+ASSERT diff has no hidden search rows
+ASSERT diff has no hidden list count
+ASSERT diff cannot move a hidden list cursor
+ASSERT return visible count
+ASSERT return cursor available
+ASSERT stale index does not open a diff
+ASSERT refresh removed open row visible count
+ASSERT refresh removed open row cursor available
+ASSERT settled query survives
+  [OK]          table                           29   Changes diff uses visibl...
+ASSERT Harness list count
+ASSERT Harness list has a cursor
+ASSERT Harness detail has no count or n/N
+ASSERT Harness detail has no search rows
+ASSERT Harness detail has no cursor
+ASSERT Harness return restores count
+ASSERT Harness return restores cursor
+ASSERT Harness keeps settled query
+ASSERT System logs list count
+ASSERT System logs list has a cursor
+ASSERT System logs detail has no count or n/N
+ASSERT System logs detail has no search rows
+ASSERT System logs detail has no cursor
+ASSERT System logs return restores count
+ASSERT System logs return restores cursor
+ASSERT System logs keeps settled query
+  [OK]          table                           30   detail search counts fol...
+ASSERT the repository list answers the search
+ASSERT Workspace Activity answers no search
+  [OK]          table                           31   Workspace Activity offer...
+ASSERT Overview has no row list to search
+ASSERT Activity has no row list to search
+ASSERT Keeper detail has no row list to search
+ASSERT Keeper logs has no row list to search
+ASSERT Keeper calls has no row list to search
+ASSERT Chat has no row list to search
+ASSERT Approvals has no row list to search
+ASSERT Schedules has no row list to search
+ASSERT Config has no row list to search
+ASSERT Tools has no row list to search
+  [OK]          table                           32   a surface without rows o...
+ASSERT Runtime pick names /
+ASSERT and not the row search's n / N
+  [OK]          table                           33   the runtime picker names...
+ASSERT a turn that read nothing cancels nothing
+ASSERT and the key it did not read is not the second press
+  [OK]          two-press arms                   0   a loop turn without inpu...
+ASSERT a mouse report or a paste cancels
+ASSERT the second press holds the arm
+ASSERT a cursor move cancels it
+ASSERT a different case is a different key
+ASSERT either answer holds the approval
+ASSERT an unrelated key cancels it
+ASSERT an arm with no second press cancels on any key
+  [OK]          two-press arms                   1   input that is not the se...
+ASSERT the plain listing keeps its footer
+  [OK]          projections                      0   plain listing footer shape.
+ASSERT logs names filters and detail
+  [OK]          projections                      1   System logs browser footer.
+ASSERT tools names the effective Keeper switch
+  [OK]          projections                      2   Tools carries the Keeper...
+ASSERT the Changes footer is the table's
+  [OK]          projections                      3   Changes names the way ba...
+ASSERT list names its search and not the adjacent-detail step
+ASSERT the text names scrolling and the step it answers
+  [OK]          projections                      4   Resources steps through ...
+ASSERT Lanes names its run drill-down, config source, and way back
+  [OK]          projections                      5   Lanes opens standalone r...
+ASSERT loading row plus title and divider
+ASSERT six lane rows plus title and divider
+ASSERT retained rows plus explicit stale warning
+ASSERT bounded-window warning spends one row
+  [OK]          projections                      6   Lanes reserves standalon...
+ASSERT Harness names its task link
+  [OK]          projections                      7   Harness links to Overvie...
+ASSERT Schedules names create and modify
+  [OK]          projections                      8   Schedules names write an...
+ASSERT the bare name wins
+ASSERT an older server leaves the target intact
+ASSERT an unnamed non-Keeper target is not parsed
+ASSERT an absent target remains absent
+  [OK]          projections                      9   schedule display name us...
+ASSERT keeper is explicit
+ASSERT message is explicit
+ASSERT one-shot is the visible default
+ASSERT interval alternative is discoverable
+ASSERT cron alternative is discoverable
+  [OK]          projections                     10   schedule create form nam...
+ASSERT the two sides together name every status the contract has
+ASSERT running is refused before the editor opens
+ASSERT succeeded is refused before the editor opens
+ASSERT failed is refused before the editor opens
+ASSERT cancelled is refused before the editor opens
+ASSERT expired is refused before the editor opens
+ASSERT scheduled still opens the editor
+ASSERT due still opens the editor
+  [OK]          projections                     11   modify refuses exactly t...
+ASSERT scheduled refuses iff modify_allowed is false
+ASSERT due refuses iff modify_allowed is false
+ASSERT running refuses iff modify_allowed is false
+ASSERT succeeded refuses iff modify_allowed is false
+ASSERT failed refuses iff modify_allowed is false
+ASSERT cancelled refuses iff modify_allowed is false
+ASSERT expired refuses iff modify_allowed is false
+  [OK]          projections                     12   modify refusal is the sh...
+ASSERT the reason quotes the status the screen showed
+  [OK]          projections                     13   modify names the status ...
+ASSERT a status this build does not name is not refused here
+  [OK]          projections                     14   modify leaves an unnamed...
+ASSERT stable id
+ASSERT keeper
+ASSERT full message
+ASSERT urgency
+ASSERT daily kind
+ASSERT hour
+ASSERT minute
+ASSERT second
+ASSERT timezone
+ASSERT due timestamp
+ASSERT expiry remains present
+  [OK]          projections                     15   schedule update form pre...
+ASSERT repositories names the Code and Git changes paths
+  [OK]          projections                     16   Repositories offers Code...
+ASSERT the health table names the way into the facts
+ASSERT d toggles the keeper detail on the Memory table
+ASSERT the dead bracket hint is gone
+  [OK]          projections                     17   Memory offers the fact b...
+ASSERT the browser names movement, the category cycle, and Esc
+  [OK]          projections                     18   Memory facts footer name...
+ASSERT All lists both stores plus the drops
+ASSERT the filter narrows ordinary facts only
+ASSERT categories are the loaded ones, sorted
+  [OK]          projections                     19   Memory fact rows follow ...
+ASSERT All steps to the first
+ASSERT then to the next
+ASSERT the last returns to All
+ASSERT a vanished category restarts at All
+ASSERT no categories keeps All
+  [OK]          projections                     20   Memory category cycle re...
+ASSERT Git changes has one shared row footer
+  [OK]          projections                     21   Git changes has changed-...
+ASSERT Git diff has diff navigation footer
+  [OK]          projections                     22   Git diff has diff naviga...
+ASSERT verification names detail, approve, and reject
+  [OK]          projections                     23   Verification carries the...
+ASSERT the table spells the two as one key
+ASSERT and the pin names that spelling
+ASSERT the row had to drop something
+ASSERT and what it kept includes the way to answer
+  [OK]          projections                     24   Verification pins the wa...
+ASSERT fusion names its list keys
+  [OK]          projections                     25   Fusion pins the shared l...
+ASSERT the detail names the calling Keeper
+ASSERT the detail names the Board evidence
+ASSERT spelled as the list spells them
+  [OK]          projections                     26   fusion detail footer nam...
+ASSERT history remains in the selectable list with no retained runs
+ASSERT selection retains original Board identity
+ASSERT historical evidence does not inflate Keeper run count
+  [OK]          projections                     27   Fusion history is select...
+ASSERT read footer (split=false) names v / V:up / down
+ASSERT the Board list spells v / V:up / down the same
+ASSERT read footer (split=false) names c:reply
+ASSERT the Board list spells c:reply the same
+ASSERT read footer (split=false) names Y:copy link
+ASSERT the Board list spells Y:copy link the same
+ASSERT the pane keys follow the split (false)
+ASSERT read footer (split=true) names v / V:up / down
+ASSERT the Board list spells v / V:up / down the same
+ASSERT read footer (split=true) names c:reply
+ASSERT the Board list spells c:reply the same
+ASSERT read footer (split=true) names Y:copy link
+ASSERT the Board list spells Y:copy link the same
+ASSERT the pane keys follow the split (true)
+ASSERT read footer (split=false) names v / V:up / down
+ASSERT the Board list spells v / V:up / down the same
+ASSERT read footer (split=false) names c:reply
+ASSERT the Board list spells c:reply the same
+ASSERT read footer (split=false) names Y:copy link
+ASSERT the Board list spells Y:copy link the same
+ASSERT the pane keys follow the split (false)
+ASSERT j/k names what it moves
+ASSERT b names the reading focus switch
+ASSERT j/k names the focused thread
+ASSERT j/k names the post body
+  [OK]          projections                     28   Board read footer carrie...
+ASSERT selected alpha run
+ASSERT a shorter Keeper list remains selectable
+ASSERT a refreshed list remains selectable
+ASSERT empty list has no action target
+  [OK]          projections                     29   Keeper Runs clamps selec...
+ASSERT the standalone lane run list names open and back
+  [OK]          projections                     30   Lanes run list names the...
+ASSERT the stacked run detail footer is keys and the shared tail
+  [OK]          projections                     31   Lanes run detail names i...
+ASSERT Dashboard names Usage and the shared keys
+ASSERT Dashboard offers no task key t:tasks
+ASSERT Dashboard offers no task key Enter:detail
+ASSERT Work's task list reads its bindings
+  [OK]          projections                     32   Dashboard and Work task ...
+ASSERT no g/G on System logs
+ASSERT no f on System logs
+ASSERT level floor is documented
+ASSERT verbose is documented
+ASSERT category filter is documented
+ASSERT the ends stay on Acting
+ASSERT f stays on Acting
+  [OK]          projections                     33   System logs owns only re...
+ASSERT Approvals steps with [ / ]
+ASSERT Planning steps with [ / ]
+ASSERT Schedules steps with [ / ]
+ASSERT Verification steps with [ / ]
+ASSERT Harness steps with [ / ]
+ASSERT Fusion steps with [ / ]
+ASSERT Board steps with [ / ]
+ASSERT Changes steps with [ / ]
+ASSERT Resources steps with [ / ]
+ASSERT Keeper detail steps with [ / ]
+ASSERT System logs steps with [ / ]
+  [OK]          projections                     34   every detail surface ste...
+ASSERT planning names filter and sort
+  [OK]          projections                     35   Planning carries filter ...
+ASSERT both hearth directions
+ASSERT direct hearth chooser
+  [OK]          projections                     36   Board names both hearth ...
+ASSERT hot formula
+ASSERT trending formula
+ASSERT active phase set
+ASSERT phase and priority order
+ASSERT due order
+  [OK]          projections                     37   Board and Planning expla...
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+ASSERT the view's family is a ring stop
+  [OK]          projections                     38   every view has a ring stop.
+ASSERT Task Review is not a top-level ring entry
+ASSERT Task Review highlights Planning
+  [OK]          projections                     39   Task Review is a Plannin...
+ASSERT Verdicts is not a top-level ring entry
+ASSERT Verdicts highlights Planning
+ASSERT and the help sheet files it under Planning
+  [OK]          projections                     40   Verdicts is a Planning c...
+ASSERT Changes is not a top-level ring entry
+ASSERT Changes highlights Keepers
+  [OK]          projections                     41   Changes is a Keepers child.
+ASSERT Channels is not a top-level ring entry
+ASSERT Channels highlights Keepers
+ASSERT Automation is not a top-level ring entry
+ASSERT Automation highlights Keepers
+ASSERT Keeper operation tab labels
+  [OK]          projections                     42   Keeper operations are de...
+ASSERT the sheet explains the ST column
+ASSERT the sheet explains the mark "+"
+ASSERT the sheet explains the mark "!"
+ASSERT the sheet explains the mark "!"
+ASSERT the sheet explains the mark "-"
+ASSERT the sheet explains the mark "s"
+ASSERT the sheet explains the mark "x"
+ASSERT the sheet explains the mark "x"
+ASSERT the column can draw "+"
+ASSERT the column can draw "!"
+ASSERT the column can draw "-"
+ASSERT the column can draw "s"
+ASSERT the column can draw "x"
+  [OK]          projections                     43   the memory marks are in ...
+ASSERT the sheet carries "Prompt marks"
+ASSERT the sheet carries "Param marks"
+ASSERT the sheet explains the held-back mark "\226\138\152"
+ASSERT the sheet explains the held-back mark "\226\138\152"
+ASSERT the sheet explains the held-back mark "\226\138\152"
+ASSERT the sheet explains the mark "*"
+ASSERT the shipped file draws a blank
+ASSERT so the blank is no sheet row
+ASSERT the sheet explains the mark "!"
+ASSERT the prompt registry can draw "*"
+ASSERT the prompt registry can draw "\226\138\152"
+ASSERT the prompt registry can draw "!"
+ASSERT the sheet explains the param mark "\226\151\143"
+ASSERT the sheet explains the param mark "\226\151\139"
+ASSERT the params list can draw "\226\151\143"
+ASSERT the params list can draw "\226\151\139"
+  [OK]          projections                     44   the Config marks are in ...
+ASSERT every label answers for one key
+ASSERT Board still shares "pane"
+ASSERT Workspace / Code still shares "back"
+ASSERT System still shares "edit"
+  [OK]          projections                     45   no surface gives one ans...
+ASSERT the runtime pane names at most one key holding Enter (found: )
+ASSERT the runtime pane gives each answer once
+ASSERT the models pane names at most one key holding Enter (found: )
+ASSERT the models pane gives each answer once
+ASSERT the params pane names at most one key holding Enter (found: e / Enter:edit)
+ASSERT the params pane gives each answer once
+ASSERT the prompts pane names at most one key holding Enter (found: )
+ASSERT the prompts pane gives each answer once
+ASSERT the presets pane names at most one key holding Enter (found: )
+ASSERT the presets pane gives each answer once
+ASSERT the themes pane names at most one key holding Enter (found: Enter:use)
+ASSERT the themes pane gives each answer once
+ASSERT the voice pane names at most one key holding Enter (found: )
+ASSERT the voice pane gives each answer once
+  [OK]          projections                     46   every Config pane answer...
+ASSERT the sheet explains the Code tree's marks
+ASSERT the sheet explains the mark "\226\151\134"
+ASSERT the sheet explains the mark "\226\150\164"
+ASSERT the sheet explains the mark "\226\137\161"
+ASSERT the sheet explains the mark "\194\187"
+ASSERT the sheet explains the mark "\226\151\136"
+ASSERT the sheet explains the mark "\226\150\168"
+ASSERT the sheet explains the mark "\194\183"
+ASSERT the sheet explains the folder arrow
+ASSERT the tree can draw "\226\150\184"
+ASSERT the tree can draw "\226\151\134"
+ASSERT the tree can draw "\226\150\164"
+ASSERT the tree can draw "\226\137\161"
+ASSERT the tree can draw "\194\187"
+ASSERT the tree can draw "\226\151\136"
+ASSERT the tree can draw "\226\150\168"
+ASSERT the tree can draw "\194\183"
+  [OK]          projections                     47   the file marks are in th...
+ASSERT Lanes is reached through System
+ASSERT Lanes highlights System
+ASSERT help sheet names Lanes directly
+ASSERT Lanes documents the [p] way back
+  [OK]          projections                     48   Lanes is a main destinat...
+ASSERT Code is not a top-level ring entry
+ASSERT Code highlights Workspace
+ASSERT and the help sheet files it under Workspace
+ASSERT and the ring stop is spelled Workspace
+  [OK]          projections                     49   Code is a Workspace child.
+ASSERT Resources is not a top-level ring entry
+ASSERT Resources highlights Config
+ASSERT and the help sheet files it under Config
+ASSERT Config documents the [s] hop
+  [OK]          projections                     50   Resources is a Config ch...
+ASSERT Tools is not a top-level ring entry
+ASSERT Tools highlights Config
+ASSERT and the help sheet files it under Config
+ASSERT Config documents the [t] hop
+  [OK]          projections                     51   Tools is a Config child.
+ASSERT every mark the roster can draw is named
+ASSERT mark healthy is drawn
+ASSERT mark ● is named
+ASSERT mark failing is drawn
+ASSERT mark ! is named
+ASSERT mark idle is drawn
+ASSERT mark · is named
+ASSERT mark paused is drawn
+ASSERT mark ○ is named
+ASSERT mark offline is drawn
+ASSERT mark × is named
+ASSERT mark unread is drawn
+ASSERT mark - is named
+  [OK]          projections                     52   the sheet names every ke...
+ASSERT every column entry is on the sheet
+  [OK]          projections                     53   the sheet explains the k...
+ASSERT every legend row is on the sheet
+  [OK]          projections                     54   the sheet explains the c...
+ASSERT Dashboard does not repeat r
+ASSERT Dashboard does not repeat Tab
+ASSERT Dashboard does not repeat q
+ASSERT Work does not repeat r
+ASSERT Work does not repeat Tab
+ASSERT Work does not repeat q
+ASSERT Keepers does not repeat r
+ASSERT Keepers does not repeat Tab
+ASSERT Keepers does not repeat q
+ASSERT Usage does not repeat r
+ASSERT Usage does not repeat Tab
+ASSERT Usage does not repeat q
+ASSERT Board does not repeat r
+ASSERT Board does not repeat Tab
+ASSERT Board does not repeat q
+ASSERT Workspace does not repeat r
+ASSERT Workspace does not repeat Tab
+ASSERT Workspace does not repeat q
+ASSERT System does not repeat r
+ASSERT System does not repeat Tab
+ASSERT System does not repeat q
+ASSERT Activity does not repeat r
+ASSERT Activity does not repeat Tab
+ASSERT Activity does not repeat q
+ASSERT Keeper detail does not repeat r
+ASSERT Keeper detail does not repeat Tab
+ASSERT Keeper detail does not repeat q
+ASSERT Chat does not repeat r
+ASSERT Chat does not repeat Tab
+ASSERT Chat does not repeat q
+ASSERT Keepers / Logs does not repeat r
+ASSERT Keepers / Logs does not repeat Tab
+ASSERT Keepers / Logs does not repeat q
+ASSERT Keepers / Calls does not repeat r
+ASSERT Keepers / Calls does not repeat Tab
+ASSERT Keepers / Calls does not repeat q
+ASSERT Keepers / Runtime does not repeat r
+ASSERT Keepers / Runtime does not repeat Tab
+ASSERT Keepers / Runtime does not repeat q
+ASSERT Lanes does not repeat r
+ASSERT Lanes does not repeat Tab
+ASSERT Lanes does not repeat q
+ASSERT System / Runtime / Clients does not repeat r
+ASSERT System / Runtime / Clients does not repeat Tab
+ASSERT System / Runtime / Clients does not repeat q
+ASSERT Approvals does not repeat r
+ASSERT Approvals does not repeat Tab
+ASSERT Approvals does not repeat q
+ASSERT Work / Task Review does not repeat r
+ASSERT Work / Task Review does not repeat Tab
+ASSERT Work / Task Review does not repeat q
+ASSERT Work / Task Verdicts does not repeat r
+ASSERT Work / Task Verdicts does not repeat Tab
+ASSERT Work / Task Verdicts does not repeat q
+ASSERT Fusion does not repeat r
+ASSERT Fusion does not repeat Tab
+ASSERT Fusion does not repeat q
+ASSERT Keepers / Schedules does not repeat r
+ASSERT Keepers / Schedules does not repeat Tab
+ASSERT Keepers / Schedules does not repeat q
+ASSERT Memory does not repeat r
+ASSERT Memory does not repeat Tab
+ASSERT Memory does not repeat q
+ASSERT Workspace / Code does not repeat r
+ASSERT Workspace / Code does not repeat Tab
+ASSERT Workspace / Code does not repeat q
+ASSERT Changes does not repeat r
+ASSERT Changes does not repeat Tab
+ASSERT Changes does not repeat q
+ASSERT System / Runtime does not repeat r
+ASSERT System / Runtime does not repeat Tab
+ASSERT System / Runtime does not repeat q
+ASSERT System / Resources does not repeat r
+ASSERT System / Resources does not repeat Tab
+ASSERT System / Resources does not repeat q
+ASSERT System / Tools does not repeat r
+ASSERT System / Tools does not repeat Tab
+ASSERT System / Tools does not repeat q
+ASSERT System / Logs does not repeat r
+ASSERT System / Logs does not repeat Tab
+ASSERT System / Logs does not repeat q
+ASSERT Connectors does not repeat r
+ASSERT Connectors does not repeat Tab
+ASSERT Connectors does not repeat q
+ASSERT Keeper marks does not repeat r
+ASSERT Keeper marks does not repeat Tab
+ASSERT Keeper marks does not repeat q
+ASSERT Keeper columns does not repeat r
+ASSERT Keeper columns does not repeat Tab
+ASSERT Keeper columns does not repeat q
+ASSERT Memory marks does not repeat r
+ASSERT Memory marks does not repeat Tab
+ASSERT Memory marks does not repeat q
+ASSERT Board marks does not repeat r
+ASSERT Board marks does not repeat Tab
+ASSERT Board marks does not repeat q
+ASSERT File marks does not repeat r
+ASSERT File marks does not repeat Tab
+ASSERT File marks does not repeat q
+ASSERT Judge marks does not repeat r
+ASSERT Judge marks does not repeat Tab
+ASSERT Judge marks does not repeat q
+ASSERT Chat marks does not repeat r
+ASSERT Chat marks does not repeat Tab
+ASSERT Chat marks does not repeat q
+ASSERT Prompt marks does not repeat r
+ASSERT Prompt marks does not repeat Tab
+ASSERT Prompt marks does not repeat q
+ASSERT Param marks does not repeat r
+ASSERT Param marks does not repeat Tab
+ASSERT Param marks does not repeat q
+ASSERT Global names Tab / Shift-Tab
+ASSERT Global names r
+ASSERT Global names q
+ASSERT a surface's own r stays
+  [OK]          projections                     55   the sheet says the listi...
+ASSERT Config names its three off-ring children
+ASSERT Config still names 9:Runtime
+ASSERT Config still names s:resources
+ASSERT Config still names t:tools
+  [OK]          projections                     56   Config names child hops.
+ASSERT keeper lanes name c:clients
+ASSERT keeper lanes name Left / Esc:back
+ASSERT keeper lanes name p:all runtimes
+ASSERT keeper lanes name e:add candidate
+ASSERT keeper lanes name r:refresh
+ASSERT keeper lanes name a:new lane
+ASSERT keeper lanes name x:drop candidate
+ASSERT keeper lanes name J/K:move candidate
+ASSERT keeper lanes name D:remove lane
+ASSERT all runtimes name where p goes
+ASSERT and offer no failover to append
+ASSERT all runtimes offer no lane edit a:new lane
+ASSERT all runtimes offer no lane edit x:drop candidate
+ASSERT all runtimes offer no lane edit J/K:move candidate
+ASSERT all runtimes offer no lane edit D:remove lane
+ASSERT the refresh is not called live
+ASSERT the sheet names the p walk once
+ASSERT and lists failover
+  [OK]          projections                     57   Runtime footer is the ta...
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT pane availability of PgUp/PgDn
+ASSERT pane availability of v
+ASSERT pane availability of E
+ASSERT pane availability of Enter
+ASSERT pane availability of f
+ASSERT pane availability of x
+ASSERT pane availability of e
+ASSERT pane availability of n
+ASSERT pane availability of u
+ASSERT pane availability of i
+ASSERT pane availability of o
+ASSERT pane availability of a
+ASSERT pane availability of j/k
+ASSERT pane availability of p
+ASSERT pane availability of 9
+ASSERT pane availability of s
+ASSERT pane availability of t
+ASSERT pane availability of Esc
+ASSERT pane availability of q
+ASSERT the assets row leaves out a
+ASSERT the assets row leaves out i
+ASSERT the assets row leaves out e
+ASSERT the assets row leaves out x
+ASSERT the assets row keeps j/k
+ASSERT the assets row keeps PgUp/PgDn
+ASSERT the assets row keeps p
+ASSERT the assets row keeps 9
+ASSERT the assets row keeps Esc
+ASSERT the assets row keeps q
+ASSERT and o names the way back
+ASSERT presets keeps n at 120 columns
+ASSERT presets keeps u at 120 columns
+ASSERT presets keeps PgUp/PgDn at 120 columns
+ASSERT runtime.toml keeps a at 120 columns
+ASSERT the account form names Enter
+ASSERT the account form names Esc
+ASSERT the account form leaves out e
+ASSERT the account form leaves out r
+ASSERT the account form leaves out q
+ASSERT the account form leaves out Tab
+ASSERT the saved account form names y
+ASSERT the saved account form names Enter
+ASSERT the saved account form names Esc
+ASSERT the runtime assets keep their way back at 120 columns
+ASSERT params keeps Enter at 120 columns
+ASSERT params keeps E at 120 columns
+ASSERT params keeps x at 120 columns
+ASSERT params keeps its other action at 80 columns
+ASSERT params keeps the shared field at 80 columns
+ASSERT params keeps the field's other spelling at 80 columns
+ASSERT themes keeps PgUp/PgDn at 120 columns
+ASSERT themes keeps Enter at 120 columns
+ASSERT themes keeps x at 120 columns
+ASSERT themes keeps f at 120 columns
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: E
+ASSERT inactive action stays absent: Enter
+ASSERT inactive action stays absent: x
+ASSERT inactive action stays absent: f
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: E
+ASSERT inactive action stays absent: Enter
+ASSERT inactive action stays absent: x
+ASSERT inactive action stays absent: f
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: E
+ASSERT inactive action stays absent: Enter
+ASSERT inactive action stays absent: x
+ASSERT inactive action stays absent: f
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: E
+ASSERT inactive action stays absent: Enter
+ASSERT inactive action stays absent: x
+ASSERT inactive action stays absent: f
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: v
+ASSERT inactive action stays absent: e
+ASSERT inactive action stays absent: E
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: v
+ASSERT inactive action stays absent: e
+ASSERT inactive action stays absent: E
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: v
+ASSERT inactive action stays absent: e
+ASSERT inactive action stays absent: E
+ASSERT fitted Config row stays within terminal
+ASSERT Config retains Esc
+ASSERT Config retains q
+ASSERT inactive action stays absent: v
+ASSERT inactive action stays absent: e
+ASSERT inactive action stays absent: E
+  [OK]          projections                     58   Config footer follows ac...
+ASSERT the keeper-voice row names j/k
+ASSERT the keeper-voice row names ←/→
+ASSERT the keeper-voice row names Enter
+ASSERT the keeper-voice row names Esc
+ASSERT the keeper-voice row leaves out p
+ASSERT the keeper-voice row leaves out e
+ASSERT the keeper-voice row leaves out 9
+ASSERT the keeper-voice row leaves out r
+  [OK]          projections                     59   the keeper-voice screen ...
+ASSERT the voice pane names the key that opens it
+  [OK]          projections                     60   the voice pane offers th...
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT Activity stays within terminal
+ASSERT evidence never outlives its filter prerequisite
+ASSERT filter remains visible at affected widths
+ASSERT the key that opens an event is visible
+ASSERT no two Activity rows name the same action
+  [OK]          projections                     61   Activity filter survives...
+ASSERT Runtime is inside Config
+ASSERT runtime children highlight Config
+ASSERT runtime children highlight Config
+ASSERT Logs is not a top-level ring entry
+ASSERT Logs highlights System
+ASSERT the help sheet still exposes logs
+ASSERT the ring stop is spelled System
+ASSERT Activity documents the way to Logs
+  [OK]          projections                     62   Logs is an Activity child.
+ASSERT Usage is a top-level ring entry
+ASSERT Usage highlights itself
+ASSERT Dashboard documents the [m] hop
+  [OK]          projections                     63   Usage is a main destinat...
+ASSERT channel bindings remain under Keepers
+ASSERT Browser reader highlights Config
+ASSERT the selected ring entry is Config, not the fallback
+ASSERT Browser reader highlights Config
+ASSERT the selected ring entry is Config, not the fallback
+ASSERT closing the reader restores the Keeper parent
+  [OK]          projections                     64   Browser reader belongs t...
+ASSERT Approvals hidden when empty and not active
+ASSERT Approvals stay inside Work when active
+ASSERT Approvals stay inside Work when pending
+  [OK]          projections                     65   smart declutter hides em...
+ASSERT Ask keeps the top-level ring compact
+  [OK]          projections                     66   open ask keeps approvals...
+ASSERT two asks holding three questions
+ASSERT and the surface counts them the same way
+ASSERT only the open ask's questions
+  [OK]          projections                     67   the question count count...
+ASSERT before the first poll answers
+ASSERT a first poll that failed
+ASSERT which the title calls unread: nothing was read
+ASSERT rows kept from before a failed poll
+ASSERT an answered poll with no question
+ASSERT which counts the same 0 as unread
+  [OK]          projections                     68   the questions reading te...
+ASSERT Changes documents "[ / ]"
+ASSERT Changes documents "Right / Enter"
+ASSERT Changes documents "Left / Esc"
+ASSERT Changes documents "d"
+ASSERT Changes documents "o"
+ASSERT the palette has a row
+ASSERT the cross-surface Keepers jump has a row
+ASSERT Logs documents only what is bound
+  [OK]          projections                     69   help documents what was ...
+ASSERT the sheet files the reading's four keys
+ASSERT the sheet files "j/k"
+ASSERT the sheet files "PgUp/PgDn"
+ASSERT the sheet files "g / G"
+ASSERT the sheet files "Esc"
+ASSERT the browser row is filed under Memory too
+ASSERT the footer projects the same binding table
+  [OK]          projections                     70   the sheet files the fact...
+ASSERT uppercase runtime remains
+ASSERT lowercase u is free for Channels
+  [OK]          projections                     71   Keeper detail reserves u...
+ASSERT Global declares 3 once
+ASSERT 3 opens Keepers after local input declines it
+ASSERT message input keeps printable 3
+ASSERT another key does not open Keepers
+ASSERT Help states the local-owner boundary
+ASSERT 2 is not an Overview-only binding
+  [OK]          projections                     72   Keepers jump shares disp...
+ASSERT Dashboard: names the surface first
+ASSERT Dashboard: and carries its keys
+ASSERT Keepers: names the surface first
+ASSERT Keepers: and carries its keys
+ASSERT Chat: names the surface first
+ASSERT Chat: and carries its keys
+ASSERT System: names the surface first
+ASSERT System: and carries its keys
+  [OK]          projections                     73   the sheet opens on the c...
+ASSERT the roster and the chat open on different sections
+  [OK]          projections                     74   keeper sub-modes do not ...
+ASSERT Global first
+ASSERT then the strip's first surface
+  [OK]          projections                     75   without a surface the or...
+ASSERT id, author and title -- what the list draws
+  [OK]          board and planning rows          0   Board searches the post ...
+ASSERT reading a post
+ASSERT writing a post
+  [OK]          board and planning rows          1   reading and writing keep...
+ASSERT no rows
+  [OK]          board and planning rows          2   no posts, nothing to sea...
+ASSERT id and title
+  [OK]          board and planning rows          3   Planning searches the go...
+ASSERT nothing active survives the completed filter
+  [OK]          board and planning rows          4   Planning searches what t...
+ASSERT a goal is open
+  [OK]          board and planning rows          5   a goal detail keeps the ...
+ASSERT only standalone labels are searchable
+  [OK]          lanes rows                       0   search leads with the st...
+ASSERT run list keeps / closed
+ASSERT run detail keeps / closed
+  [OK]          lanes rows                       1   sub-modes stay unsearcha...
+ASSERT the title when there is one, the name otherwise, and a blank title is not one
+  [OK]          lanes rows                       2   Resources searches the n...
+ASSERT with the text focused there is no cursor to land a match on
+ASSERT and the list has one again
+  [OK]          lanes rows                       3   the resource reading off...
+ASSERT before the catalog arrives there are no rows
+  [OK]          lanes rows                       4   Resources without a list...
+ASSERT row 7
+ASSERT row 8
+ASSERT row 11
+ASSERT row 12
+ASSERT row 12
+ASSERT row 13
+ASSERT row 14
+ASSERT row 15
+  [OK]          lanes rows                       5   a click reads the frame ...
+ASSERT row 14
+ASSERT row 15
+ASSERT row 16
+ASSERT row 17
+  [OK]          lanes rows                       6   a click pays for the err...
+ASSERT row 8
+ASSERT row 11
+ASSERT row 12
+  [OK]          lanes rows                       7   a click waits for the ma...
+
+Test Successful in 0.020s. 126 tests run.
+::endgroup::
+[targeted] test/test_tui_keys: OK in 0s

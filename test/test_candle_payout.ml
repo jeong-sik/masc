@@ -52,6 +52,7 @@ let candidates_row ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_
         ; tasks = []
         ; candidate_task_ids = [ "task-1" ]
         ; candidate_keepers = keepers
+        ; candidate_task_keepers = ["task-1", List.nth_opt keepers 0]
         }
   }
 ;;

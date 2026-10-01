@@ -48,7 +48,7 @@ let run ~operation ~base_path ~keeper_name ~args =
   match operation with
   | Balance ->
     let* () = input (Candle_json.finish ~context fields) in
-    let* account = shop (Candle_shop.account ~base_path ~keeper) in
+    let* account = shop (Candle_shop.account ~now:Time_compat.now ~base_path ~keeper) in
     Ok (account_json account)
   | Catalog ->
     let* () = input (Candle_json.finish ~context fields) in
@@ -115,7 +115,11 @@ let error_info = function
       | Candle_shop.Purchase_refused (Candle_balance.Insufficient_balance _) ->
         "insufficient_balance", Tool_result.Workflow_rejection
       | Candle_shop.Purchase_refused
-          ( Candle_balance.Unowned_equipment _
+          ( Candle_balance.Missing_half_life
+          | Candle_balance.Clock_reversed _
+          | Candle_balance.Invalid_half_life _
+          | Candle_balance.Decay_failed _
+          | Candle_balance.Unowned_equipment _
           | Candle_balance.Wrong_equipment_slot _
           | Candle_balance.Negative_purchase _
           | Candle_balance.Duplicate_payment _

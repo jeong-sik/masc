@@ -26,6 +26,9 @@ type config =
     (** Verification-only private CODEX_HOME prepared with projected auth and
         provider configuration. Its safe CLI overrides apply only here. *)
   ; model : string option
+  ; context_window : int option
+    (** Resolved MASC model window, passed to the actual client on both start
+        and resume. [None] preserves the selected account's Codex setting. *)
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390): [Native_read] maps to the
@@ -132,12 +135,18 @@ type turn_usage =
 
 val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
 
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+(** Scheduling notice outcome at natural turn completion. Pending means a
+    notice was sent but its acknowledgement did not precede the terminal frame;
+    it is not evidence that the original operation finished. *)
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
@@ -301,6 +310,9 @@ end
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Reasoning_effort_admission_failed of { model : string; detail : string }
+      (* Account metadata refused an explicit effort before history or turn
+         input was sent. Retrying this failure cannot replay a model turn. *)
   | Turn_input_write_failed of string
       (* The client and thread were initialized, but complete turn-input
          transmission is unconfirmed. Partial delivery must not be replayed
@@ -391,7 +403,11 @@ val probe_subscription :
 (** Start the official app-server and measure only [initialize] plus
     [account/read]. No thread or model turn is created. *)
 
-type listed_model = { id : string; model : string; display_name : string; is_default : bool }
+type listed_model = {
+  id : string; model : string; display_name : string; is_default : bool;
+  supported_reasoning_efforts : string list;
+  default_reasoning_effort : string;
+}
 val list_models :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config -> (listed_model list, error) result
@@ -407,6 +423,12 @@ val read_rate_limits :
     the app-server's schema says clients must not infer recovery from them. *)
 
 val run_turn :
+  ?await_handoff:(unit -> bool) ->
+  (* Event-driven scheduling notice. The waiter returns true when queued input
+     needs the turn slot, false when its owner closes. It is cancelled when the
+     turn ends. Only the protocol consumer writes the steer, after any active
+     dynamic-tool result, including before the first tool. Input is not consumed
+     and the client still completes naturally. *)
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?thread_mode:thread_mode ->
@@ -424,6 +446,14 @@ val run_turn :
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for
       preparation, spawn, handshake, or incomplete input-write failures. *)
+  ?on_reasoning_effort_resolved:(model:string ->
+    requested:Llm_provider.Reasoning_effort.t option ->
+    effective:Llm_provider.Reasoning_effort.t option -> unit) ->
+  (* Explicit effort is admitted against this account's paginated model/list
+     before turn input is sent. Unsupported values snap to the nearest known
+     lower advertised tier, or the lowest known tier. Unknown upstream strings
+     remain discovery metadata; they never acquire an invented rank. An unset
+     request leaves Codex's default in charge and sends no model/list request. *)
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->

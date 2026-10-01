@@ -45,16 +45,13 @@ let config_bindings =
   ; b Navigate "L" "logs"
       ~help:"server logs under System", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+      ~help:"pages runtime.toml, the voice reading and the detail of params, prompts \
              and presets, and moves the selection a page on models and themes",
-      Some [ Config_runtime; Config_models; Config_prompts; Config_presets
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
   ; b Navigate "Home/End" "detail"
-      ~help:"first and last wrapped detail rows of the selected preset",
-      Some [ Config_presets ]
-  ; b Navigate "Home/End" "detail"
-      ~help:"on prompts, the first or last wrapped row of the selected registry or asset document",
-      Some [ Config_prompts ]
+      ~help:"first or last wrapped detail row of a selected preset, or of a prompt registry or asset document",
+      Some [ Config_presets; Config_prompts ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -1147,7 +1144,16 @@ let config_row ~own ~shared =
 
 let footer_hints_config ~pane =
   let own, shared = config_pane_bindings pane in
-  config_row ~own ~shared
+  if pane = Config_params then
+    (* At 80 cells the page/selection hints otherwise outlive E, the only
+       door to advanced JSON. The pane body already names those navigation
+       keys; keep its distinct edit actions ahead of them in the footer. *)
+    let actions, navigation =
+      List.partition (fun binding -> binding.group = Act) own in
+    String.concat "  "
+      [ hints_of_bindings actions; hints_of_bindings navigation
+      ; hints_of_bindings shared ]
+  else config_row ~own ~shared
 
 (* The keeper-voice screen: two lists and one write. The keys are its own --
    the keeper walks under [j]/[k] and the voice under the arrows, so an
@@ -1276,9 +1282,9 @@ let code_notes_bindings =
 let code_history_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Act "H" "close"
   ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]
@@ -1498,7 +1504,8 @@ let footer_hints_git_changes =
 
 let footer_hints_git_diff =
   hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
      ; b Act "p" "open PR"
      ; b Act "t/g" "task / goal"
@@ -1868,7 +1875,7 @@ let help_sections_for_state (state : state) =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "b" "browser"
+    [ b Navigate "b" "choose browser"
     ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"

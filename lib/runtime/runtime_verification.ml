@@ -835,13 +835,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
             cli_path = execution.cli_path
           ; isolated_home = Some isolated_home
           ; model = execution.model
+          ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
           }
         in
         let reasoning_effort =
-          Runtime_inference.clamp_reasoning_effort_to_catalog
-            ~model_id:execution.model ~requested:runtime.model.reasoning_effort
+          runtime.model.reasoning_effort
         in
         (match
            Runtime_codex_app_server.run_turn

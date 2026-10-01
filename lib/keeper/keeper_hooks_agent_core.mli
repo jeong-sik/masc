@@ -200,7 +200,11 @@ type tool_stream_observation =
           streamed calls stay delivery-only; no ordinal or provider-id guess
           is allowed to attach a canonical execution. *)
 
+(** [observation_token] is captured for registry callbacks. Omission disables
+    registry turn observation; it never adopts a currently active turn. *)
 val make_hooks :
+  ?preview:Keeper_turn_preview.writer ->
+  ?observation_token:Keeper_turn_observation_token.t ->
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->

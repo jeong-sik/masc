@@ -23,6 +23,26 @@
 # Exit:  0 all checks passed, 1 a check failed, 2 refused to run.
 set -uo pipefail
 
+# Both the test and the restart script discover processes by name. A startup
+# scan cannot protect a TUI that another session starts later, so run every
+# discovery and signal inside a private Linux PID namespace and proc mount.
+# Namespace setup failure is fatal: never fall back to the caller's processes.
+if [ "${1:-}" != "--isolated-pid-namespace" ]; then
+  command -v unshare >/dev/null 2>&1 || {
+    echo "[e2e] requires Linux unshare with PID and mount namespaces" >&2
+    exit 2
+  }
+  parent_namespace="$(readlink /proc/self/ns/pid)" || exit 2
+  exec unshare --user --map-root-user --mount --pid --fork --mount-proc \
+    --kill-child=KILL bash "${BASH_SOURCE[0]}" --isolated-pid-namespace "$parent_namespace"
+fi
+[ "$#" -eq 2 ] && [ "$$" -eq 1 ] &&
+  [ "$(readlink /proc/self/ns/pid)" != "$2" ] || {
+    echo "[e2e] refusing: private PID namespace was not established" >&2
+    exit 2
+  }
+shift 2
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_SCRIPT="$SCRIPT_DIR/tui-graceful-restart.sh"
 [ -f "$REAL_SCRIPT" ] || { echo "missing $REAL_SCRIPT" >&2; exit 2; }
@@ -52,17 +72,6 @@ kill_surfaces() {
   done
   sleep 1
 }
-
-# Refuse rather than restart someone's live TUI. The script under test finds
-# surfaces machine-wide by comm, so if a real one is already up this test
-# would SIGTERM it and start the stand-in in its place.
-pre_existing="$(surface_pids)"
-if [ -n "$pre_existing" ]; then
-  echo "[e2e] refusing: a TUI surface is already running (pid(s):" \
-       "$(echo "$pre_existing" | tr '\n' ' ')). This test restarts every" \
-       "surface it finds. Quit the TUI and run it again." >&2
-  exit 2
-fi
 
 failures=0
 check() {

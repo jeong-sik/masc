@@ -148,6 +148,20 @@ class WkblScoreRuns(unittest.TestCase):
         self.assertFalse(result["coverage"][0]["complete"])
         self.assertIn("unreviewed_event", result["coverage"][0]["detail"])
 
+    def test_boolean_and_float_scoring_sides_are_tool_errors(self):
+        for event_index, invalid_side in ((10, True), (10, 1.0), (12, 2.0)):
+            with self.subTest(event_index=event_index, team_side=invalid_side):
+                source = copy.deepcopy(FIXTURE)
+                event = next(row for row in source["observations"][0]["rows"]
+                             if row["event_index"] == event_index)
+                self.assertEqual(event["team_side"], 1 if event_index == 10 else 2)
+                event["team_side"] = invalid_side
+                result = self.exchange([[source]])[2]["result"]
+                self.assertTrue(result["isError"], result)
+                self.assertNotIn("structuredContent", result)
+                self.assertIn("scoring team_side must be a nonnegative integer",
+                              result["content"][0]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

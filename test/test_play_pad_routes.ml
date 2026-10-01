@@ -177,6 +177,50 @@ let test_the_pad () =
            | Error (Dos_lane.Other_program { expected = "zzt"; loaded = "samguk3" }) -> true
            | Ok _ | Error _ -> false);
         check int "none of them moved the machine" before (change_count ());
+        let pads = Masc.Play_pad.pads_dir ~base_path in
+        mkdir_p pads;
+        let override = Filename.concat pads "samguk3.toml" in
+        let refuses_override what create remove =
+          create ();
+          Fun.protect ~finally:remove (fun () ->
+            let before = change_count () in
+            let activity = newest_activity () in
+            List.iter (fun (meth, response) ->
+              check int (what ^ " " ^ meth ^ " rejects the invalid workspace authority") 500
+                (status_of response);
+              check bool (what ^ " " ^ meth ^ " names the layout failure") true
+                (member "code" (body_of response) = Some (`String "layout_invalid")))
+              ["GET",call ~token:player "GET"; "POST",press ~token:player "BTN_SOUTH"];
+            check int (what ^ " never presses builtin keys") before (change_count ());
+            check bool (what ^ " preserves machine activity") true (newest_activity () = activity))
+        in
+        refuses_override "dangling layout link"
+          (fun () -> Unix.symlink "missing-layout.toml" override) (fun () -> Unix.unlink override);
+        refuses_override "unexamined looping layout link"
+          (fun () -> Unix.symlink "samguk3.toml" override) (fun () -> Unix.unlink override);
+        refuses_override "layout directory"
+          (fun () -> Unix.mkdir override 0o700) (fun () -> Unix.rmdir override);
+        refuses_override "layout FIFO without a writer"
+          (fun () -> Unix.mkfifo override 0o600) (fun () -> Unix.unlink override);
+        if Unix.geteuid () <> 0 then
+          refuses_override "unsearchable layout directory"
+            (fun () -> Unix.chmod pads 0) (fun () -> Unix.chmod pads 0o700);
+        let target = Filename.concat base_path "layout-target.toml" in
+        Out_channel.with_open_bin target (fun oc ->
+          output_string oc "[BTN_SOUTH]\nkeys = [\"space\"]\nlabel = \"override\"\n");
+        Unix.symlink target override;
+        Fun.protect ~finally:(fun () -> Unix.unlink override) (fun () ->
+          let layout = call ~token:player "GET" in
+          check int "a regular symlink is a readable workspace override" 200 (status_of layout);
+          let layout = body_of layout in
+          check bool "symlink content keeps workspace authority" true
+            (member "source" layout = Some (`String "workspace"));
+          match member "buttons" layout with
+          | Some (`List [button]) -> check bool "symlink override keeps its actual machine keys" true
+              (member "keys" button = Some (`List [`String "space"]))
+          | _ -> fail "symlink override did not supply its single button");
+        check int "true absence restores the readable builtin" 200
+          (status_of (call ~token:player "GET"));
         let pressed = press ~token:player "BTN_SOUTH" in
         check int "the holder presses a bound button" 200 (status_of pressed);
         let who, action = newest_activity () in

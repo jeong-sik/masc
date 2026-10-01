@@ -75,6 +75,7 @@ let candidates ?(tasks = None) () =
        ; tasks
        ; candidate_task_ids = [ "task-1" ]
        ; candidate_keepers = [ "keeper-a" ]
+       ; candidate_task_keepers = ["task-1", Some "keeper-a"]
        })
 ;;
 
@@ -102,6 +103,19 @@ let event_testable =
 
 let line_of row = ok_or_fail (E.to_line row)
 
+let test_half_life_policy_facts () =
+  List.iter (fun half_life ->
+    let row = event (E.Half_life_set half_life) in
+    Alcotest.(check event_testable) "explicit half-life survives a ledger round trip" row
+      (ok_or_fail (E.of_line (line_of row)))) [Candle_decay.Off;Candle_decay.Hours 1;Candle_decay.Hours max_int];
+  let raw value = `Assoc ["kind",`String "half_life_set";"at",Candle_time.to_yojson now;"half_life",value] in
+  List.iter (fun value -> match E.of_yojson (raw value) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid half-life fact accepted")
+    [`Null;`Bool true;`Int 0;`Int (-1);`Float 1.5;`String "OFF";`String "1"];
+  match E.to_line (event (E.Half_life_set (Candle_decay.Hours 0))) with
+  | Error _ -> () | Ok _ -> Alcotest.fail "invalid constructed hours could be written"
+;;
+
 let test_the_row_format () =
   Alcotest.(check string)
     "snapshot"
@@ -121,7 +135,7 @@ let test_the_row_format () =
      ^ {|"tasks":[{"task_id":"task-1","state":"found","title":"Write the ledger","assignee":"keeper-a",|}
      ^ {|"status":"done","completed_at":"2026-09-25T00:00:00Z"},{"task_id":"task-2","state":"deleted"},|}
      ^ {|{"task_id":"task-3","state":"found","title":"Still going","assignee":null,"status":"todo",|}
-     ^ {|"completed_at":null}],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+     ^ {|"completed_at":null}],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"],"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]}|})
     (line_of (candidates ()));
   Alcotest.(check string)
     "unattributed"
@@ -143,7 +157,7 @@ let test_a_status_is_spelled_as_the_backlog_spells_it () =
      ^ {|{"task_id":"task-4","state":"found","title":"awaiting","assignee":null,"status":"awaiting_verification","completed_at":null},|}
      ^ {|{"task_id":"task-5","state":"found","title":"done","assignee":null,"status":"done","completed_at":"2026-09-25T00:00:00Z"},|}
      ^ {|{"task_id":"task-6","state":"found","title":"cancelled","assignee":null,"status":"cancelled","completed_at":null}|}
-     ^ {|],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+     ^ {|],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"],"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]}|})
     (line_of (candidates ~tasks:(Some every_status) ()))
 ;;
 
@@ -297,6 +311,10 @@ let test_a_row_that_is_not_exactly_the_schema_is_refused () =
       , replace_first ~sub:{|"candidate_task_ids":["task-1"]|} ~by:{|"candidate_task_ids":"task-1"|} valid_candidates )
     ; ( "candidates without keepers field"
       , replace_first ~sub:{|,"candidate_keepers":["keeper-a"]|} ~by:"" valid_candidates )
+    ; ( "candidates without per-task Keeper eligibility"
+      , replace_first ~sub:{|,"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]|} ~by:"" valid_candidates )
+    ; ( "candidate Keeper eligibility is not an optional name"
+      , replace_first ~sub:{|"keeper":"keeper-a"|} ~by:{|"keeper":true|} valid_candidates )
     ; ( "unattributed with an unknown reason"
       , replace_first ~sub:{|"no_candidates"|} ~by:{|"no_luck"|} valid_unattributed )
     ; ( "unattributed with an extra field"
@@ -339,6 +357,7 @@ let () =
     ; ( "strict reading"
       , [ Alcotest.test_case "every row requires its verifier run" `Quick
             test_every_row_requires_its_verifier_run
+        ; Alcotest.test_case "half-life facts are explicit and closed" `Quick test_half_life_policy_facts
         ; Alcotest.test_case
             "the valid line used below does read"
             `Quick

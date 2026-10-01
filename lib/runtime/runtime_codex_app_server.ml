@@ -2480,13 +2480,15 @@ let context_admission_identity ~cwd config =
     Filename.concat directory ".codex/config.toml" ::
     (if parent = directory then [] else inherited_configs parent) in
   let executable = Runtime_official_cli_install.spawn_path Codex ~command:config.cli_path in
-  let source_files = "/etc/codex/config.toml" :: inherited_configs cwd @ Option.fold ~none:[] ~some:(fun home ->
-    List.map (Filename.concat home) ["config.toml"; "auth.json"; "models_cache.json"]) selected_home in
-  let* custom_catalog = match selected_home with
-    | None -> Ok None
-    | Some home -> Runtime_verification_codex_home.configured_model_catalog_path ~home
-        |> Result.map_error (fun detail -> Invalid_config detail) in
-  let source_files = Option.to_list custom_catalog @ source_files in
+  let config_files = "/etc/codex/config.toml" :: inherited_configs cwd @
+    Option.to_list (Option.map (fun home -> Filename.concat home "config.toml") selected_home) in
+  let* catalog_files = List.fold_left (fun result config_path ->
+    let* files = result in
+    let* dependencies = Runtime_verification_codex_home.model_catalog_dependencies ~config_path
+      |> Result.map_error (fun detail -> Invalid_config detail) in
+    Ok (dependencies @ files)) (Ok []) config_files in
+  let source_files = catalog_files @ config_files @ Option.fold ~none:[] ~some:(fun home ->
+    List.map (Filename.concat home) ["auth.json"; "models_cache.json"]) selected_home in
   let revisions = List.map (fun path ->
     fingerprint path ^ (if Sys.file_exists path then Fs_compat.load_file path else "")) source_files in
   let key = Digestif.SHA256.(to_hex (digest_string

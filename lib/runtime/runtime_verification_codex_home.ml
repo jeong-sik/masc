@@ -90,6 +90,21 @@ let inherited_server_names ~directory =
 let auth_file = "auth.json"
 let auth_path ~codex_home = Filename.concat codex_home auth_file
 
+let model_catalog_dependencies ~config_path =
+  if not (Sys.file_exists config_path) then Ok [] else
+  try
+    let doc = Otoml.Parser.from_string (Fs_compat.load_file config_path) in
+    let root = Option.to_list (Otoml.find_opt doc Otoml.get_string ["model_catalog_json"]) in
+    let profiles = match Otoml.find_opt doc Otoml.get_table ["profiles"] with
+      | None -> []
+      | Some profiles -> List.filter_map (fun (_, profile) ->
+          Otoml.find_opt profile Otoml.get_string ["model_catalog_json"]) profiles in
+    Ok (List.map (fun path -> if Filename.is_relative path
+      then Filename.concat (Filename.dirname config_path) path else path) (root @ profiles))
+  with Otoml.Type_error _ | Otoml.Parse_error _ ->
+    Error "An inherited Codex model catalog configuration is invalid."
+;;
+
 let configured_model_catalog_path ~home =
   let path = Filename.concat home "config.toml" in
   if not (Sys.file_exists path) then Ok None else

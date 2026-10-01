@@ -2039,6 +2039,42 @@ let test_context_admission_cache_keeps_coexisting_windows () =
           (List.length (In_channel.with_open_bin probes In_channel.input_lines))))
 ;;
 
+let test_context_catalog_dependency_invalidates_admission () =
+  let directory = Filename.temp_dir "codex-project-catalog-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
+    let config_dir = Filename.concat directory ".codex" in
+    let account_home = Filename.concat directory "account" in
+    Unix.mkdir config_dir 0o700; Unix.mkdir account_home 0o700;
+    let catalog_path = Filename.concat config_dir "selected-models.json" in
+    let write path body = Out_channel.with_open_bin path (fun channel -> output_string channel body) in
+    write (Filename.concat config_dir "config.toml") "model_catalog_json = \"selected-models.json\"\n";
+    let catalog maximum = Yojson.Safe.to_string (`Assoc ["models", `List [`Assoc
+      ["slug", `String "gpt-fixture"; "max_context_window", `Int maximum;
+       "effective_context_window_percent", `Int 95]]]) in
+    write catalog_path (catalog 1000000);
+    let capture_path = Filename.concat directory "requests.jsonl" in
+    write capture_path "";
+    with_fixture ~capture_path [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+      (fun path ->
+        let original = In_channel.with_open_bin path In_channel.input_all in
+        let instrumented = original |> String.split_on_char '\n'
+          |> List.map (fun line -> if String.starts_with ~prefix:"if [ \"$1\" = debug ]" line
+              then "if [ \"$1\" = debug ]; then cat " ^ shell_quote catalog_path ^ "; exit 0; fi"
+              else line) |> String.concat "\n" in
+        write path instrumented;
+        (match run_fixture ~account_home ~cwd:directory ~context_window:400000 path with
+         | Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+        let before = Fs_compat.load_file capture_path in
+        (* Only the catalog bytes change. Config path/profile and binary stay
+           fixed, so a config-only cache would wrongly reuse its old admission. *)
+        write catalog_path (catalog 272000);
+        (match run_fixture ~account_home ~cwd:directory ~context_window:400000 path with
+         | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "changed external catalog reused stale context admission");
+        check string "new smaller catalog refuses before another thread" before (Fs_compat.load_file capture_path)))
+;;
+
 let test_selected_client_context_admission () =
   let module Admission = Runtime_codex_context_admission in
   let catalog maximum = `Assoc ["models", `List [`Assoc
@@ -7370,6 +7406,8 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
+        ; test_case "external catalog changes invalidate context admission" `Quick
+            test_context_catalog_dependency_invalidates_admission
         ; test_case "context admission cache retains coexisting declarations" `Quick
             test_context_admission_cache_keeps_coexisting_windows
         ; test_case "selected client context admits supported start and resume windows" `Quick

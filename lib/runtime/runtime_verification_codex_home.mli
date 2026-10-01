@@ -4,6 +4,10 @@ val project_config : ?disabled_mcp_servers:string list -> string -> (string, str
 val auth_path : codex_home:string -> string
 (** Where Codex keeps a file-backed login under [codex_home] (its [CODEX_HOME]). *)
 
+val model_catalog_dependencies : config_path:string -> (string list, string) result
+(** Catalog files referenced by a config layer, including profile declarations.
+    Used for cache invalidation; it does not select a different active profile. *)
+
 val configured_model_catalog_path : home:string -> (string option, string) result
 (** Resolve an explicitly configured model catalog in the account profile.
     An absent file/config declaration returns None. *)

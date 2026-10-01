@@ -1553,16 +1553,19 @@ let mcp_config tools =
             ]))
 ;;
 
-(* The CLI's effort vocabulary as a total snap: [minimal] is the one effort
-   the CLI refuses, and its nearest admitted neighbour is [low]. Every other
-   effort is itself. [reasoning_args] below stays the enforcing boundary
-   (a caller that skips this snap still fails loudly rather than sending a
-   flag the CLI rejects); the keeper lane applies the snap so an
-   operator-declared [minimal] survives as a turn instead of killing it,
-   mirroring the Codex lane's catalog clamp. *)
+(* Claude Code's CLI ladder is low/medium/high/xhigh/max. The canonical
+   vocabulary also serves other runtimes, so its unsupported endpoints must
+   be admitted here even when the selected model has no catalog row.
+   https://code.claude.com/docs/en/cli-reference#cli-flags *)
 let cli_admitted_reasoning_effort = function
   | Llm_provider.Reasoning_effort.Minimal -> Llm_provider.Reasoning_effort.Low
-  | effort -> effort
+  | Llm_provider.Reasoning_effort.Ultra -> Llm_provider.Reasoning_effort.Max
+  | (Llm_provider.Reasoning_effort.None_
+    | Llm_provider.Reasoning_effort.Low
+    | Llm_provider.Reasoning_effort.Medium
+    | Llm_provider.Reasoning_effort.High
+    | Llm_provider.Reasoning_effort.XHigh
+    | Llm_provider.Reasoning_effort.Max) as effort -> effort
 ;;
 
 let reasoning_args = function
@@ -1573,7 +1576,15 @@ let reasoning_args = function
     Error
       (Invalid_config
          "Claude Code does not admit reasoning effort minimal; use low, medium, high, xhigh, max, or none")
-  | Some effort ->
+  | Some Llm_provider.Reasoning_effort.Ultra ->
+    Error
+      (Invalid_config
+         "Claude Code does not admit reasoning effort ultra; use low, medium, high, xhigh, max, or none")
+  | Some ((Llm_provider.Reasoning_effort.Low
+          | Llm_provider.Reasoning_effort.Medium
+          | Llm_provider.Reasoning_effort.High
+          | Llm_provider.Reasoning_effort.XHigh
+          | Llm_provider.Reasoning_effort.Max) as effort) ->
     Ok [ "--effort"; Llm_provider.Reasoning_effort.to_string effort ]
 ;;
 
@@ -2073,33 +2084,15 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        turn.session_id
        turn.turn_id
        turn.model
-   | Error
-       (Stopped_by_host
-          { stop = Terminal_tool_boundary { outcome = Terminal_failed _; _ }; _ }
-        as failed) ->
-     (* A terminal tool that failed is a host stop the keeper settles as
-        [Terminal_effect_failed]; it stays a warning. *)
-     Log.Runtime_agent.warn
-       "Claude Code turn failed (kind=%s): %s"
-       (error_kind failed)
-       (error_to_string failed)
-   | Error
-       (Stopped_by_host
-          { stop =
-              ( Repeated_tool_call _
-              | Terminal_tool_boundary
-                  { outcome =
-                      (Terminal_completed | Durable_stimulus_deferred)
-                  ; _
-                  } )
-          ; _
-          } as stop) ->
+   | Error (Stopped_by_host { stop; _ } as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
      (* The host ended the turn on purpose, at a terminal tool boundary or
         after a repeated tool call, and the keeper settles it as a completed
-        or yielded turn. Fifty of these read as failures on 2026-09-02. *)
+        or yielded turn. Fifty of these read as failures on 2026-09-02. A
+        terminal tool that failed falls through to the warning below. *)
      Log.Runtime_agent.info
        "Claude Code turn stopped by host: %s"
-       (error_to_string stop)
+       (error_to_string stopped)
    | Error error ->
      (* The sibling branches above pass [error_to_string]; this one passed only
         the kind, so every failure that does not stop at a host boundary landed

@@ -34,7 +34,7 @@ let home_decision_rows (state : state) =
   let questions =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Tui_decode_asks.ask_row) ->
+      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
           let why = match row.ar_context, row.ar_questions with
             | Some reason, _ -> reason
             | None, question :: _ -> question.aq_prompt
@@ -127,7 +127,7 @@ let reconcile_home_request_detail state =
                  (approval_items state))
         | Home_question ask_id ->
             Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
+              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id

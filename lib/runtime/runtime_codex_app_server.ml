@@ -1419,8 +1419,8 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       continue ())
   | Response_error { id = 6; code; message; _ } when !handoff = Handoff_pending ->
     handoff := Handoff_rejected;
-    Log.Runtime_agent.warn "Codex scheduling handoff refused thread=%s turn=%s code=%d detail=%s"
-      thread_id turn_id code message;
+    Log.Runtime_agent.warn "Codex scheduling handoff refused thread=%s turn=%s code=%s detail=%s"
+      thread_id turn_id (Option.fold ~none:"absent" ~some:string_of_int code) message;
     continue ()
   | Response _ | Response_error _ ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"

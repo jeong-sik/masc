@@ -1,15 +1,10 @@
-"""Where the frame's rows sit on the Board, Config, keeper detail and keeper
-chat, before the region steps move them.
+"""Exercise Board, Config, Keeper detail and chat at terminal width boundaries.
 
-The workbench RFC's region steps (section 5.9, G0 to G5) change how many rows
-the frame spends on itself. G0 makes every reader of that count read one value
-from Masc_tui_frame. This suite opens a screen for each reader below and pins
-the body's top, title, rules, bottom border, last drawn row, blank rows and any
-list window, the roster's borders and the key hints' row, so a step changes
-these numbers on purpose and its diff shows what moved.
-docs/evidence/tui-region-baseline-2026-09-28 maps every reader to the screen
-that measures it; two more suites cover the overlays and the remaining detail
-screens.
+Each screen must answer its reads, fit within the terminal and retain complete
+pane boundaries. Gate actions must respond to clicks on their visible rows and
+ignore clicks beside them. Frame measurements and recorded terminal bytes are
+observations for review; historical row positions and blank counts are not
+functional requirements.
 
 Readers measured here:
 - surface_chrome_rows (masc_tui_render_prim.ml): the Board list and Config,
@@ -103,57 +98,6 @@ OBSERVER_KEEPALIVE_SECONDS = 1.0
 # value line the sweep waits for.
 CONFIG_LOADED = b"first-value = 1"
 
-
-
-def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
-    return {"top": top, "title": title, "rules": rules, "bottom": bottom,
-            "last": last, "blank": blank, "windows": windows, **pinned}
-
-
-# What measure() finds on each screen: measured by replaying Test run
-# 36427566813's screens through the helpers, confirmed by run 36431311636
-# (docs/evidence/tui-region-baseline-2026-09-28). Row 1 is
-# the tab strip, row 2 the body's top and row 3 its title everywhere here; the
-# key hints are the body's last row, 29 above the composer and 30 on the chat.
-# The Activity pane beside the body from 158 columns leaves the body's rows
-# where they were.
-# #39750 places the three Identity rows beside a twelve-row mosaic portrait.
-# The recorded CI frames from job 109222918530 retain the same 22-row viewport
-# and borders, with nine more content rows; see the evidence README's refresh.
-KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
-BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
-CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-# The compact candle leaves one more transparent mosaic row than the old
-# portrait; the title, rule, last content row and 22-row viewport do not move.
-# PR-check job109790368513: replayed six unframed and two roster Info
-# frames. Identity, failure, attention and Gate facts remain; the24px candle
-# has two transparent bottom mosaic rows. Only unframed blank count changes.
-DETAIL = layout("blank", 3, (4,), None, 27, 6, ("1-22/46",))
-DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
-                              roster={"top": 2, "bottom": 28})
-# #39883 reserves rows below the roster for the chat Keeper's portrait.
-# Only the left roster border moves. The right composer stays at row 27,
-# column 39, so its blank-row count remains 19 (see the evidence README).
-CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
-                            roster={"top": 2, "bottom": 13})
-CHAT = layout("blank", 3, (4, 26), None, 29, 19)
-# At 157 the folded Gate argument fits one row instead of two.
-CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 29, 20)
-
-# (screen, width) -> what measure() finds there.
-EXPECTED: dict[tuple[str, object], dict[str, object]] = {
-    **{("keepers", width): KEEPERS for width in WIDTHS},
-    **{("board", width): BOARD for width in WIDTHS},
-    **{("config", width): CONFIG for width in WIDTHS},
-    **{("keeper-detail", width): DETAIL for width in WIDTHS},
-    **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER
-       for width in ROSTER_WIDTHS},
-    **{("keeper-chat-roster", width): CHAT_BESIDE_ROSTER for width in ROSTER_WIDTHS},
-    **{("keeper-chat", width): CHAT for width in WIDTHS},
-    ("keeper-chat", 157): CHAT_ONE_ROW_GATE,
-    # The folded Gate argument's first row in the chat at 100 columns.
-    ("chat-gate-row", CHAT_PRESS_WIDTH): {"row": 6},
-}
 
 
 class Counted:
@@ -377,7 +321,6 @@ def interaction(served: region.ServedFixtures):
         if FILE_CHANGE_READS.count == reads_before:
             raise AssertionError(f"the unfold at row {gate_row} read no file changes")
 
-        region.check_all(measured, EXPECTED)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 

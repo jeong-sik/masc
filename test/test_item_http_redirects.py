@@ -59,7 +59,7 @@ def helpers():
     ns = {'urllib': urllib, 'json': json, 'hashlib': hashlib,
           'origin': origin, 'token': 'synthetic-admin-redirect-control',
           'keeper_token': 'synthetic-worker-redirect-control',
-          'records': [], 'rpc_sequence': 0, 'rpc_session': {}}
+          'records': [], 'rpc_sequence': 0, 'rpc_session': {}, 'server_generation': 1}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(args.source), 'exec'), ns)
     return ns
 

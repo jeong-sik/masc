@@ -5990,7 +5990,7 @@ let row_list (state : state) : row_list option =
                      state.code_file_cursor <- index;
                      state.code_file_scroll <-
                        Masc_tui_scroll.ensure_visible ~cursor:index
-                         ~height:(Masc_tui_render.code_pane_content_height state)
+                         ~height:(Masc_tui_render_code.code_pane_content_height state)
                          state.code_file_scroll)
                }
          (* Nothing to move through while the file is still being read, and
@@ -14368,7 +14368,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Code_results.Reveal_cursor ->
            state.code_file_scroll <-
              Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
-               ~height:(Masc_tui_render.code_pane_content_height state)
+               ~height:(Masc_tui_render_code.code_pane_content_height state)
                state.code_file_scroll
        | Code_results.Load_file path -> launch_code_file_load state ~mailbox ~path)
   | Code_diff_loaded (request, result) ->
@@ -23110,7 +23110,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_notes_viewport state in
+           let count, height = Masc_tui_render_code.code_notes_viewport state in
            let maximum = max 0 (count - height) in
            let current = max 0 (min state.code_notes_scroll maximum) in
            let page = Masc_tui_scroll.page_step ~height in
@@ -23157,7 +23157,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_history_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_history_viewport state in
+           let count, height = Masc_tui_render_code.code_history_viewport state in
            let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
            let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
            let page = Masc_tui_scroll.page_step ~height in
@@ -24294,7 +24294,7 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
@@ -24307,7 +24307,7 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
@@ -24321,7 +24321,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -24673,14 +24673,14 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
@@ -24694,7 +24694,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -25054,7 +25054,7 @@ and is loaded on demand through keeper_skill.
                   match Masc_tui_fetched.current state.code_history with
                   | Some (_, Masc_tui_fetched.Ready _) -> (
                       match
-                        Masc_tui_render.code_history_selected state
+                        Masc_tui_render_code.code_history_selected state
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
@@ -25073,7 +25073,7 @@ and is loaded on demand through keeper_skill.
                             state.code_file_scroll <-
                               Masc_tui_scroll.ensure_visible ~cursor
                                 ~height:
-                                  (Masc_tui_render.code_pane_content_height state)
+                                  (Masc_tui_render_code.code_pane_content_height state)
                                 state.code_file_scroll
                           (* No rows on screen to jump within. *)
                           | Some (_, _) | None -> ())

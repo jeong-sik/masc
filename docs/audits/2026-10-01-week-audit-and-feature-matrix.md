@@ -12,7 +12,7 @@
 - "확인"은 검증 두 명 이상이 코드 경로를 직접 따라갔다는 뜻이다. "라이브"는 `<base-path>/.masc` 의 로그나 상태 파일로 확인했다는 뜻이다. 확인하지 못한 것은 "확인 못 함"이라고 적었다.
 - 감사관은 로컬 빌드와 서버 재시작을 하지 않았다(저장소 `execution_protocol`). 이 감사에서 연 PR 의 시험 방법은 각 PR 본문에 있다.
 - 라이브 서버가 감사 중에 여러 번 다시 떴다(10-01 02:30 e1f1429890, 09:22 fda7ada7f6). 라이브 값은 감사관이 본 시각의 값이다.
-- 이 문서는 위 고정 커밋과 당시 관측의 기록이며 현재 main 이나 현재 배포 상태의 검증 결과가 아니다. 기준 이후 main 에 74개 커밋이 더 들어갔다. 표의 "열린 PR" 은 스냅샷 기준이다.
+- 이 문서는 위 고정 커밋과 당시 관측의 기록이며 현재 main 이나 현재 배포 상태의 검증 결과가 아니다. 기준 이후 main 에 76개 커밋이 더 들어갔다. 표의 "열린 PR" 은 스냅샷 기준이다.
 
 ## 1. 한눈에
 
@@ -95,7 +95,7 @@
 | D2-01 | P1 | #40019 뒤 continuity 스냅샷 commit 이 매번 거절돼 Librarian 모델 답이 버려진다 | 확인 · High | #40359 머지 |
 | D2-03 | P1 | Codex 턴 중간 compaction 뒤 item/started 신원 불일치가 치명 오류가 돼, 효과 차단과 새 Start(약 876KB)로 이어진다 | 확인 · Medium | #40364 머지(D1-02 와 같은 원인) |
 | D3-01 | P1 | Continuity 회차가 모델을 부른 뒤 저장에 실패하고 같은 입력으로 반복한다 (#40019 의 나머지 절반) | 열린 PR 이 다룸 · High | #40359·#40373 머지 |
-| D6-01 | P1 | 요청이 나가지도 못한 DNS 실패가 입력 문제로 분류돼 Board attention 파티션이 Blocked 로 굳는다 | 확인 · High | #40397 Draft |
+| D6-01 | P1 | 요청이 나가지도 못한 DNS 실패가 입력 문제로 분류돼 Board attention 파티션이 Blocked 로 굳는다 | 확인 · High | #40397 (소스 리뷰 PASS) |
 | D6-02 | P1 | Board attention 대기열이 줄지 않는다: 처리까지 중앙값 13초 → 12.9시간 | 확인 · High | RFC #40450 머지(판정 단위를 신호 하나로). 구현은 아직 |
 | D6-03 | P1 | verifier_exact 재시도가 닫히지 않는다: 하루 469번 시도, 판정 18건, 900초 무응답 330번 | 확인 · High | 운영자 결정(슬롯 추가, 12절) |
 | D7-01 | P1 | #39975 가 지운 goal_notification 행이 e-masc-the-leader 대화 파일에 남아 그 Keeper 의 저장이 전부 막힌다 | 확인 · High | D5-01 과 같음 |
@@ -103,7 +103,7 @@
 | L2-02 | P1 | 지워진 goal_notification 행 한 줄이 e-masc-the-leader 채팅 저장과 멘션 전달을 막고 있어요 | 열린 PR 이 다룸 · High | D5-01 과 같음 |
 | D10-01 | P1 | 초대 발급의 '공개 주소 있음' 검사가 켜질 수 없다. 링크가 127.0.0.1 로 나간다 | 확인 · High | 보류(12절) |
 | L3-01 | P1 | 여유 공간이 시간당 수십 GiB 줄고, 줄이는 장치가 자동으로 돌지 않는다 | 확인 · Medium | 운영자 결정(정리, 12절) |
-| X4-01 | P1 | Stagehand '라이브 활성화' 증거는 fixture 한 번의 성공이고, 그 뒤 Keeper 호출 10건은 전부 실패했어요 | 확인 · High | 열린 PR 없음. #40194 는 TUI 선택 화면만 다룬다 |
+| X4-01 | P1 | Stagehand '라이브 활성화' 증거는 fixture 한 번의 성공이고, 그 뒤 Keeper 호출 10건은 전부 실패했어요 | 확인 · High | 운영자 결정(슬롯 시간 배분, 12절 19번). 열린 PR 은 없다 |
 
 이번에 검증이 P1 에서 P2 로 낮춘 것 중 눈여겨볼 것은 넷이다.
 
@@ -275,6 +275,7 @@ Terminal-Bench 4.0.0(2026-08-26 릴리스, 66 task)을 head 로 돌려 본 기�
 16. **TUI 첫 화면 이름.** Overview·Dashboard·Home 중 하나를 고른다. 설정 값 `overview` 를 바꾸면 runtime.toml 이 깨지므로 설정 이름은 따로 정한다(D16a-11).
 17. **`scripts/lint/` 에 남은 검사기 19개.** `run-lint-suite.sh` 를 지운 뒤로 이 검사기들을 돌리는 곳이 `.github` 에 없고 `scripts`·`test` 에는 서로 부르는 것뿐이다. 남길지, 지울지, 돌리는 곳을 만들지 정한다. `docs/architecture/functional-core-effect-boundary.md` 는 지운 `ocaml-boundary-ratchet.sh` 를 CI 가 돌린다고 적는데 `tools/ocaml_boundary_audit` 는 남아 있어서, 이 도구를 살릴지에 따라 문서를 고친다(D16a-06, #40517).
 18. **구현된 RFC 에 남은 지운 파일 인용.** RFC-0132 표와 RFC-0240 세 곳이 지운 `keeper_rollover.ml` 을, RFC-0465 가 지운 `pr_history` 를 가리킨다. 시점 인벤토리라 줄 수와 번호가 얽혀 있어 고치지 않았다. 지운 Goal `owner` 의 RFC-0362 는 RFC-0387·0444·0446·0448·goal-candle-ledger 가 본문에서 가리켜서 한 번에 못 지운다. 옛 RFC 는 기록으로 두는지, 지운 것을 가리키는 줄을 뺄지 정한다(D16a-05).
+19. **Stagehand 호출의 슬롯 시간 배분.** Stagehand 문장 하나의 마감은 120초다(`browser_stagehand_wire.ml` 의 `sentence_timeout`). Browser lane 의 첫 슬롯 `glm-coding` 은 provider 본문 마감이 1,200초이고 둘째 `ollama_cloud` 는 180초다(`runtime.toml`). 첫 슬롯이 멈추면 120초에 호출 전체가 끊겨서 둘째 슬롯은 시도도 못 한다. 활성화 뒤 `BrowserInstruct` 10건 중 8건이 120.0초에 끝났고 성공은 0건이다. 정할 것: (가) 호출 마감을 슬롯 수로 나눠 슬롯마다 준다, (나) lane 설정에 슬롯별 마감을 둔다, (다) 슬롯 순서만 바꾼다. RFC-exact-lane-walks-one-slot-list 는 슬롯 한 번의 시간 한도를 provider 의 `exact-body-timeout-s` 에 두고 "lane 전체의 시간 한도는 지금도 없고, 이 RFC 도 만들지 않는다"고 적었다. (가)와 (나)는 이 구분을 바꾸므로 RFC 에 먼저 적는다(X4-01).
 
 
 ## 13. 이번 감사에서 연 PR
@@ -287,16 +288,16 @@ Terminal-Bench 4.0.0(2026-08-26 릴리스, 66 task)을 head 로 돌려 본 기�
 | #40364 | 머지 | Codex 클라이언트가 sub-agent 를 못 띄우게 해서 프레임 신원 불일치의 원인을 줄임(D1-02, D2-03) |
 | #40373 | 머지 | continuity 전용 회차가 스냅샷 거절이면 Failed 로 기록(D3-02) |
 | #40427 | Ready, APPROVED | Task GC 가 archive 에 먼저 붙인 뒤 backlog 에서 지움(D6-11) |
-| #40397 | Draft | 요청이 나가기 전에 네트워크가 실패한 후보는 격리하지 않고 기다림(D6-01) |
-| #40407 | Draft | 아무것도 고르지 않는 wake 대상 resolver 삭제(D5-11, X3-03) |
-| #40451 | Draft | Board 수정·thread·고정·닫기·다시 열기·삭제 뒤 목록 캐시를 비움(D12-01) |
+| #40397 | Ready, 소스 리뷰 PASS | 요청이 나가기 전에 네트워크가 실패한 후보는 격리하지 않고 기다림(D6-01) |
+| #40407 | Ready, 소스 리뷰 PASS | 아무것도 고르지 않는 wake 대상 resolver 삭제(D5-11, X3-03) |
+| #40451 | Ready, 소스 리뷰 PASS | Board 수정·thread·고정·닫기·다시 열기·삭제 뒤 목록 캐시를 비움(D12-01) |
 | #40453 | 머지 | changelog 조각 40028 에 PR 번호를 적어 릴리스 assemble 이 멈추지 않게 함 |
-| #40509 | Draft | Terminal-Bench 를 돌리기 전에 arm 마다 서버를 띄워 arm 이 선언한 keeper 전부를 `keeper_up` 까지 올려 봄(D14-03). 적대적 리뷰의 P1·P2 를 반영했다 |
-| #40512 | Draft, 소스 리뷰 PASS | `quick-bench.sh`·`benchmark.sh` 가 `MASC_URL` 을 받아야 돌고(기본값이 운영 서버였다), 없는 `masc_agents` 호출을 지움(D14-05) |
-| #40510 | Draft | Keeper 가 읽는 글에서 없는 도구와 지운 개념 삭제(D15-02, D15-03) |
-| #40518 | Draft | Terminal-Bench trial 기록에 체크아웃 커밋·설정 sha256·effort 를 남김(D14-02) |
-| #40515 | Draft | 용어집에서 지운 일을 설명하는 문장 둘과 없는 항목을 가리키는 참조 둘을 고침(D16a-08) |
-| #40516 | Draft | 지운 Overview Team 블록이 쓰던, 아무도 읽지 않는 계산과 `keeper_phase_band` 삭제(D16a-04) |
-| #40517 | Draft | 지운 CI 스크립트를 가리키던 문서·주석과, 읽는 곳 없는 목록 파일 3개 정리(D16a-06) |
+| #40509 | Draft, 리뷰 대기 | Terminal-Bench 를 돌리기 전에 arm 마다 서버를 띄워 arm 이 선언한 keeper 전부를 `keeper_up` 까지 올려 봄(D14-03). 적대적 리뷰의 P1·P2 를 반영했다 |
+| #40512 | Ready, 소스 리뷰 PASS | `quick-bench.sh`·`benchmark.sh` 가 `MASC_URL` 을 받아야 돌고(기본값이 운영 서버였다), 없는 `masc_agents` 호출을 지움(D14-05) |
+| #40510 | Ready, 소스 리뷰 PASS | Keeper 가 읽는 글에서 없는 도구와 지운 개념 삭제(D15-02, D15-03) |
+| #40518 | Draft, 리뷰 대기 | Terminal-Bench trial 기록에 체크아웃 커밋·설정 sha256·effort 를 남김(D14-02) |
+| #40515 | Ready, 소스 리뷰 PASS | 용어집에서 지운 일을 설명하는 문장 둘과 없는 항목을 가리키는 참조 둘을 고침(D16a-08) |
+| #40516 | Ready, 소스 리뷰 PASS | 지운 Overview Team 블록이 쓰던, 아무도 읽지 않는 계산과 `keeper_phase_band` 삭제(D16a-04) |
+| #40517 | Draft, 리뷰 대기 | 지운 CI 스크립트를 가리키던 문서·주석과, 읽는 곳 없는 목록 파일 3개 정리(D16a-06) |
 
 리뷰 코멘트: 이슈 #40404(Librarian witness_line 세대 문제)에 fallback 시작 줄이 `R.select` 와 다르다는 관찰을 적었다.

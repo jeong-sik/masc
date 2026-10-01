@@ -7,6 +7,7 @@ let input = ''
 for await (const chunk of process.stdin) input += chunk
 const { origin, token, output, sourceSha, keeper, ownedItem, balanceLabel } = JSON.parse(input)
 input = ''
+if (typeof balanceLabel !== 'string' || !balanceLabel) throw new Error('Missing expected wallet label')
 const target = new URL(origin)
 if (target.hostname !== '127.0.0.1' || target.protocol !== 'http:') {
   throw new Error('Item browser acceptance requires isolated loopback HTTP')
@@ -22,11 +23,18 @@ let stage = 'context'
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   await context.addInitScript(({ token, origin }) => {
-    if (location.origin === origin) sessionStorage.setItem('masc_bearer_token', token)
+    if (location.origin === origin) {
+      sessionStorage.setItem('masc_bearer_token', token)
+      sessionStorage.setItem('masc_bearer_token_meta', JSON.stringify({ source: 'manual' }))
+    }
   }, { token, origin: target.origin })
   // Keep all requests inside the isolated server; every API response is real.
   await context.route('**/*', route => {
     const url = new URL(route.request().url())
+    if (url.origin === target.origin && url.pathname === '/api/v1/dashboard/dev-token') {
+      errors.push('bootstrap attempted to replace the supplied manual bearer')
+      return route.abort('blockedbyclient')
+    }
     if (url.origin === target.origin) return route.continue()
     return route.abort('blockedbyclient')
   })

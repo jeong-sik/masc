@@ -21,6 +21,8 @@ import tui_keyboard_harness as h
 SOURCE_MODULES = (
     "test/tui_keyboard_harness.py",
     "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render_schedule.ml",

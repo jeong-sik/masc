@@ -40,6 +40,8 @@ SOURCE_MODULES = (
     "test/test_tui_item_workspace_authority_pty.py",
     "test/test_tui_remote_equipped_portrait.py",
     "test/test_tui_remote_workspace_history_pty.py",
+    "test/test_tui_memory_provenance_layout_pty.py",
+    "test/test_tui_answering_layout_pty.py",
     "test/test_tui_search_count.py",
     "evidence/39827/capture.py",
     "docs/evidence/2026-09-30-candle-currency-native/scenario.py",
@@ -257,7 +259,9 @@ class ScenarioSelectionTest(unittest.TestCase):
             self.assertNotEqual(capture.digest(copies[owner_key]), hashes[owner_key])
 
     def test_incoming_workspace_suites_resolve_split_owner_helpers(self) -> None:
-        for filename in ("test_tui_item_workspace_authority_pty.py",
+        for filename in ("test_tui_memory_provenance_layout_pty.py",
+                         "test_tui_answering_layout_pty.py",
+                         "test_tui_item_workspace_authority_pty.py",
                          "test_tui_remote_equipped_portrait.py",
                          "test_tui_remote_workspace_history_pty.py"):
             source = ast.parse((HERE / filename).read_text())

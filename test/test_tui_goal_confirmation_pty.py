@@ -27,6 +27,8 @@ SOURCE_MODULES = (
     'test/tui_keyboard_approvals.py',
     'test/tui_keyboard_harness.py',
     'test/tui_keyboard_planning.py',
+    'bin/masc_tui_async_protocol.ml',
+    'bin/masc_tui_async_protocol.mli',
 )
 
 

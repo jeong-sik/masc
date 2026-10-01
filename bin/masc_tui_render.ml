@@ -12607,22 +12607,23 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  let lines =
-    match state.usage_section with
-    | Usage_plan -> scopes
-    | Usage_trend -> provider_history_lines ~cols state
-    | Usage_keepers -> keepers @ [ "" ] @ transport
+  let wrap_evidence lines =
+    (* Wrap before the scroll window is counted. Coverage and missing samples
+       remain reachable rows on narrow terminals. *)
+    List.concat_map
+      (fun line ->
+        if String.equal line "" then [ "" ]
+        else
+          Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
+          |> List.mapi (fun index text ->
+               if index = 0 then text else "   " ^ text))
+      lines
   in
-  (* Wrap before the scroll window is counted. Coverage and missing samples
-     are evidence, so a narrow terminal must keep them as reachable rows. *)
-  List.concat_map
-    (fun line ->
-      if String.equal line "" then [ "" ]
-      else
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
-        |> List.mapi (fun index text ->
-             if index = 0 then text else "   " ^ text))
-    lines
+  match state.usage_section with
+  (* Plan cards already have a cell-sized border and wrapped contents. *)
+  | Usage_plan -> scopes
+  | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
+  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

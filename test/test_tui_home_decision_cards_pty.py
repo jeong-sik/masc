@@ -232,11 +232,18 @@ def each_failed_source_keeps_other_cards(executable):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             h.wait_for_output(process, fd, output, known, start=0, timeout=10)
             note = b"Approvals and questions: " + failed_label + b" not fully read"
-            # Match the sole-source label through the end of its drawn row.
-            # A sparse frame can finish here with cursor-hide instead of moving
-            # to another row; neither boundary accepts trailing source labels.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m(?:\x1b\[[0-9;]*H|\x1b\[\?25l)")
-            h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
+            # Compare the whole rendered row in the last completed frame.
+            # This accepts sparse frames without admitting transient notes
+            # with other unread-source labels or an unfinished frame.
+            def settled():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
+                return any(row.strip() == note for row in rows.values())
+
+            if not h.wait_for_fixture_state(process, fd, output, settled, timeout=10):
+                raise AssertionError(f"Home did not complete the sole-source row: {note!r}")
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),
                               final_cursor=b"\x1b[?25l")

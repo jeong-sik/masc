@@ -1054,6 +1054,7 @@
   masc ; the health reading is a typed variant: the pane decides what a gone
        ; keeper's open turn may claim, as masc_tui_keeper_mark already
        ; reads the same variant for its glyph.
+  masc_tui_ansi
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -1370,7 +1371,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.masc_candle masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1471,6 +1472,43 @@
  (wrapped false)
  (modules masc_tui_surface_navigation)
  (libraries masc_tui_types masc_tui_approvals_model))
+
+(library
+ (name masc_tui_fusion_model)
+ (wrapped false)
+ (modules masc_tui_fusion_model)
+ (libraries masc_tui_types masc_tui_fetched masc))
+
+(library
+ (name masc_tui_surface_search)
+ (wrapped false)
+ (modules masc_tui_surface_search)
+ (libraries masc_tui_types masc_tui_fusion_model masc_tui_fetched masc_tui_pick_list
+  masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc))
+
+(library
+ (name masc_tui_identity_updates)
+ (wrapped false)
+ (modules masc_tui_identity_updates)
+ (libraries masc_tui_identity_model masc_tui_types))
+
+(library
+ (name masc_tui_resources_updates)
+ (wrapped false)
+ (modules masc_tui_resources_updates)
+ (libraries masc_tui_types masc_tui_mcp masc))
+
+(library
+ (name masc_tui_board_updates)
+ (wrapped false)
+ (modules masc_tui_board_updates)
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_board_selection))
+
+(library
+ (name masc_tui_fusion_updates)
+ (wrapped false)
+ (modules masc_tui_fusion_updates)
+ (libraries masc_tui_fusion_model masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc))
 
 (library
  (name masc_tui_approval_authority)
@@ -1652,7 +1690,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
@@ -1801,22 +1839,29 @@
  (name masc_tui)
  (modules
   masc_tui
+  masc_tui_async_protocol
+  masc_tui_board_requests
+  masc_tui_code_requests
+  masc_tui_resources_requests
+  masc_tui_identity_requests
+  masc_tui_github_requests
   masc_tui_render
-  masc_tui_render_approvals
+  masc_tui_render_board
   masc_tui_render_code
   masc_tui_render_resources
-  masc_tui_render_board
+  masc_tui_render_approvals
+  masc_tui_render_fusion
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+  masc_tui_palette
   masc_tui_candle
   masc.masc_candle
   masc_cli_keeper_create
   masc_tui_voice_wizard_session
   masc_tui_kept_reads
-  masc_tui_palette
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text
@@ -2304,3 +2349,33 @@
   eio.unix
   unix
   mtime.clock.os))
+
+(library
+ (name masc_tui_identity_model)
+ (wrapped false)
+ (modules masc_tui_identity_model)
+ (libraries masc_tui_pick_list masc_tui_message_layout))
+
+(library
+ (name masc_tui_render_identity)
+ (wrapped false)
+ (modules masc_tui_render_identity)
+ (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_identity_input)
+ (wrapped false)
+ (modules masc_tui_identity_input)
+ (libraries masc_tui_types masc_tui_identity_model masc_tui_message_layout))
+
+(library
+ (name masc_tui_github_ui)
+ (wrapped false)
+ (modules masc_tui_github_ui)
+ (libraries masc_tui_types masc_tui_ansi masc_tui_github_identity masc_tui_message_layout masc yojson))
+
+(library
+ (name masc_tui_render_github)
+ (wrapped false)
+ (modules masc_tui_render_github)
+ (libraries masc_tui_ansi masc))

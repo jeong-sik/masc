@@ -149,6 +149,25 @@ describe('FetchScheduler', () => {
     expect(scheduler.fetching).toBe(false)
   })
 
+  it('requestNowAndWait queues and awaits a fresh fetch after an in-flight read', async () => {
+    const completes: Array<() => void> = []
+    const fetchFn = vi.fn(() => new Promise<void>(resolve => completes.push(resolve)))
+    const scheduler = new FetchScheduler(fetchFn)
+    scheduler.requestNow()
+    let finished = false
+    const refresh = scheduler.requestNowAndWait().then(() => { finished = true })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    completes[0]!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(finished).toBe(false)
+    completes[1]!()
+    await refresh
+    expect(finished).toBe(true)
+    scheduler.dispose()
+  })
+
   it('inflightPromise is accessible for await-based callers', async () => {
     let resolveFn!: () => void
     const fetchFn = vi.fn().mockImplementation(

@@ -1,0 +1,78 @@
+id = "fusion-report"
+revision = "0.1.0"
+title = "Fusion reports with retained evidence"
+contributions = ["derive"]
+image = "masc-lane-fusion-report:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.report]
+lanes = ["fusion/report-context", "fusion/report"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+# The 4 MiB results envelope grows when the report adds Markdown and
+# retained producer provenance. This package owns its separate reply allocation.
+max_reply_bytes = 8388608
+
+[interface]
+presentation = '''{
+  "description": "Fusion 분석 본문과 근거를 에이전트가 읽을 보고서로 만듭니다",
+  "readings": [
+    {"lane_id": "fusion/report", "path": ["body"], "label": "보고서", "format": "text"},
+    {"lane_id": "fusion/report", "path": ["input_complete"], "label": "입력 근거 모두 있음", "format": "boolean"},
+    {"lane_id": "fusion/report", "path": ["delivery_label"], "label": "전달", "format": "text"}
+  ]
+}'''
+# Installation bindings are checked against this contract before a worker starts.
+# Inputs are lane_output ports only.
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "description": "Latest completed named output of another installation in the same run",
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name this input carries inside the package"
+          },
+          "kind": {
+            "type": "string",
+            "const": "lane_output"
+          },
+          "installation_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable id of the producing installation declaration"
+          },
+          "output_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Named output port published by the producer"
+          },
+          "selection": {
+            "type": "string",
+            "const": "latest_completed"
+          }
+        },
+        "required": [
+          "source_id",
+          "kind",
+          "installation_id",
+          "selection"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "sources"
+  ],
+  "additionalProperties": false
+}'''

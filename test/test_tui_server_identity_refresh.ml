@@ -36,13 +36,18 @@ let test_workspace_identity_matches_canonical_paths () =
   let dir = Filename.temp_file "tui-workspace-identity-" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
+  Unix.mkdir (Filename.concat dir ".masc") 0o755;
   let alias = dir ^ "-alias" in
   Fun.protect
     ~finally:(fun () ->
       (try Sys.remove alias with Sys_error _ -> ());
+      Unix.rmdir (Filename.concat dir ".masc");
       Unix.rmdir dir)
     (fun () ->
        Unix.symlink dir alias;
+       Alcotest.(check bool) "same canonical base and runtime root retain request authority" true
+         (Masc_tui_types.server_workspace_matches ~expected:(Some (identity alias))
+            (Ok (identity dir)));
        match
          Masc_tui_types.workspace_identity_of_refresh
            ~local_base_path:alias
@@ -62,6 +67,20 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "local path" "/workspace/local" local_base_path;
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
+
+let test_same_base_with_different_masc_root_cannot_restore_inputs () =
+  let a = identity "/workspace/shared" in
+  let b = { a with sid_masc_root = "/workspace/other-cluster/.masc" } in
+  (match Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:"/workspace/shared" (Ok b) with
+   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+   | _ -> Alcotest.fail "a different MASC root authorized local metadata");
+  let key identity = Masc_tui_types.workspace_input_identity_of_server (Some identity) in
+  let retained = [key a, "A's queued input and draft"] in
+  Alcotest.(check (option string)) "B cannot restore A's retained input" None
+    (List.assoc_opt (key b) retained);
+  Alcotest.(check (option string)) "returning to A retains explicit resume"
+    (Some "A's queued input and draft") (List.assoc_opt (key a) retained)
 
 (* The keeper, task and log lists start empty and are read only once the server
    vouches for this workspace, so before that an empty list is not an empty
@@ -83,10 +102,34 @@ let test_local_rows_are_unread_until_the_workspace_is_read () =
   Alcotest.(check string) "a read with an error failed" "failed"
     (page (Some "keeper metadata unavailable"))
 
+let test_request_authority_requires_complete_current_identity () =
+  let before = identity "/a" in
+  let accepts after =
+    Masc_tui_types.server_workspace_matches ~expected:(Some before) after
+  in
+  Alcotest.(check bool) "same workspace" true (accepts (Ok before));
+  Alcotest.(check bool) "dynamic health does not revoke" true
+    (accepts (Ok { before with sid_uptime = Some "30s" }));
+  Alcotest.(check bool) "different base" false (accepts (Ok (identity "/b")));
+  Alcotest.(check bool) "different runtime root" false
+    (accepts (Ok { before with sid_masc_root = "/a/other-root" }));
+  Alcotest.(check bool) "booting successor" false
+    (accepts (Ok { before with sid_state_ready = Some false }));
+  Alcotest.(check bool) "unavailable successor" false (accepts (Error "unavailable"));
+  Alcotest.(check bool) "no prior identity" false
+    (Masc_tui_types.server_workspace_matches ~expected:None (Ok before));
+  Alcotest.(check bool) "missing root cannot authorize" false
+    (let incomplete = { before with sid_masc_root = "" } in
+     Masc_tui_types.server_workspace_matches ~expected:(Some incomplete) (Ok incomplete))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "same endpoint replaces A with B" `Quick
+      , [ Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
+            test_same_base_with_different_masc_root_cannot_restore_inputs
+        ; Alcotest.test_case "request authority requires complete current identity" `Quick
+            test_request_authority_requires_complete_current_identity
+        ; Alcotest.test_case "same endpoint replaces A with B" `Quick
             test_same_endpoint_restart_replaces_a_with_b
         ; Alcotest.test_case "failed probe is unread, not stale" `Quick
             test_failed_probe_is_unread_not_stale

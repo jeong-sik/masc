@@ -1915,6 +1915,20 @@ let test_hearths () =
   Alcotest.(check int) "automation excluded" 0 (count "automation-hearth" direct_only);
   Alcotest.(check int) "human retained" 1 (count "test-hearth" direct_only)
 
+let test_whitespace_hearth_becomes_none () =
+  (* Issue #40070: a whitespace-only hearth must not become Some "" in the
+     store. The list filter (board_dispatch.ml) trims and lowercases before
+     matching, so a stored Some "" identifies a hearth that cannot be
+     selected by any hearth= value. Treat whitespace-only as None. *)
+  match
+    Board_dispatch.create_post ~author:"hearth-ws" ~content:"whitespace hearth"
+      ~hearth:"   " ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      Alcotest.(check (option string)) "whitespace-only hearth stored as None"
+        None post.hearth
+
 let test_set_thread_id () =
   match
     Board_dispatch.create_post ~author:"thread-test" ~content:"link me"
@@ -2751,6 +2765,8 @@ let () =
       Alcotest.test_case "stats" `Quick (with_eio test_stats);
       Alcotest.test_case "search" `Quick (with_eio test_search);
       Alcotest.test_case "hearths" `Quick (with_eio test_hearths);
+      Alcotest.test_case "whitespace-only hearth becomes None" `Quick
+        (with_eio test_whitespace_hearth_becomes_none);
       Alcotest.test_case "set_thread_id" `Quick (with_eio test_set_thread_id);
       Alcotest.test_case "set_pinned toggle + restart" `Quick (with_eio test_set_pinned);
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);

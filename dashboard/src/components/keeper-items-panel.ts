@@ -7,7 +7,7 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
-import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
+import { executionWorkspaceAuthority, executionWorkspaceRevision, keeperRosterObservationRevision, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 type Reading =
   | { kind: 'loading'; identity: string }
@@ -32,13 +32,15 @@ function candle(milli: string): string {
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const authority = executionWorkspaceAuthority.value
+  const workspaceRevision = executionWorkspaceRevision.value
+  const rosterObservation = keeperRosterObservationRevision.value
   const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
   const [refresh, setRefresh] = useState<Refresh>({ kind: 'idle' })
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
   const expectedRevision = keeper.candle_account_revision
-  const observation = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, expectedRevision, authRevision])
+  const observation = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, expectedRevision, authRevision, workspaceRevision])
   const currentRefresh = refresh.kind !== 'idle' && refresh.authority === authority
     && refresh.observation === observation ? refresh : null
   const refreshKind = currentRefresh?.kind ?? 'idle'
@@ -55,6 +57,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     }
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
+      && executionWorkspaceRevision.peek() === workspaceRevision
       && executionWorkspaceAuthority.peek() === authority
       && currentStoredTokenRevision() === authRevision
     fetchKeeperItems(keeper.name, authority.workspaceRoot, controller.signal)
@@ -69,7 +72,15 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
         if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
-  }, [identity, authority, refreshKind, authRevision])
+  }, [identity, authority, refreshKind, authRevision, workspaceRevision])
+
+  useEffect(() => {
+    // Retry settled failures without replacing an in-flight read on each tick.
+    if (reading.kind === 'error' && reading.identity === identity
+      && reading.authority === authority && refreshKind === 'idle') {
+      setRevision(value => value + 1)
+    }
+  }, [rosterObservation])
 
   const current: Reading = currentRefresh?.kind === 'pending' ? { kind: 'loading', identity }
     : currentRefresh?.kind === 'failed' && authority !== null
@@ -109,7 +120,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}
     ${account ? html`
       <div class="flex flex-wrap items-center gap-5 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
-        <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} previewItem=${previewItem} sizePx=${112} fallback=${previewItem
+        <${KeeperPortrait} name=${keeper.name} accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} previewItem=${previewItem} sizePx=${112} fallback=${previewItem
           ? html`<p role="alert" class="m-0 text-xs text-[var(--color-fg-muted)]">미리보기 그림을 불러오지 못했습니다. 현재 착용 보기로 돌아가 다시 선택해주세요.</p>`
           : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
         <div>

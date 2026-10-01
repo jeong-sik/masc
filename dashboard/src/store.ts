@@ -142,6 +142,10 @@ export const serverStatus = signal<ServerStatus | null>(null)
 // tile labelled 전체 작업, most visibly for cancellations, which leave the
 // window and then appear nowhere. Null when the payload omits the count.
 export const executionTaskTotal = signal<number | null>(null)
+// Invalidates asynchronous account reads when workspace/publication authority changes.
+export const executionWorkspaceRevision = signal(0)
+// Accepted roster observations drive retries without changing workspace identity.
+export const keeperRosterObservationRevision = signal(0)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -1121,6 +1125,7 @@ export function invalidateExecutionSnapshotGeneration(
     return true
   }
   if (executionPublicationEpoch !== epoch) {
+    executionWorkspaceRevision.value += 1
     const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
     if (previousEpoch !== null && previousEpoch !== epoch) {
       retireExecutionPublicationEpoch(previousEpoch)
@@ -1140,6 +1145,7 @@ export function invalidateExecutionSnapshotGeneration(
 }
 
 export function resetExecutionSnapshotGeneration(): void {
+  executionWorkspaceRevision.value += 1
   executionReconnectPreviousEpoch = executionPublicationEpoch
   executionPublicationEpoch = null
   executionPublicationGenerationWatermark = -1
@@ -1198,6 +1204,7 @@ export function hydrateExecutionSnapshot(
     && (candleSequence === undefined || candleSequence < candleObservationSequenceWatermark)) return false
   if (identity !== null) {
     if (executionPublicationEpoch === null) {
+      executionWorkspaceRevision.value += 1
       candleObservationSequenceWatermark = -1
       if (
         executionReconnectPreviousEpoch !== null
@@ -1229,6 +1236,7 @@ export function hydrateExecutionSnapshot(
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {
+    executionWorkspaceRevision.value += 1
     // cancelDashboardWorkspaceMessagesRefresh() releases
     // workspaceMessagesDurableAuthority itself.
     cancelDashboardWorkspaceMessagesRefresh()
@@ -1259,6 +1267,7 @@ export function hydrateExecutionSnapshot(
     ? { status: 'unavailable', reason: 'Current workspace identity unavailable' }
     : readCandleRosterObservation(data.candle, data.keepers)
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
+  keeperRosterObservationRevision.value += 1
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
@@ -1340,6 +1349,7 @@ async function doFetchExecution(): Promise<void> {
       throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
     }
     console.warn('[Dashboard] execution fetch error:', err)
+    acceptedExecutionWorkspace.value = null
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)

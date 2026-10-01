@@ -1,6 +1,6 @@
 module Decode = Masc.Tui_decode
 
-let safe = Decode.sanitize_terminal_text
+let safe = Masc.Tui_terminal_text.sanitize_terminal_text
 
 let seat_text = function
   | Masc.Tui_decode_fusion.Fusion_panel_seat identity -> "panel/" ^ safe identity

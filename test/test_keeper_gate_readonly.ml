@@ -484,7 +484,7 @@ let with_auto_judge f =
     @@ fun () ->
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail ("failed to install approval queue persistence: " ^ Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail ("failed to install approval queue persistence: " ^ Masc.Keeper_approval_queue_result.install_error_to_string error));
   let config = Workspace.default_config base_path in
   select_workspace config Keeper_gate_mode.Auto_judge;
   f base_path
@@ -755,7 +755,7 @@ let pending_count base_path =
   match Keeper_approval_queue.pending_count_for_keeper_in_workspace
           ~base_path ~keeper_name:"alpha" with
   | Ok count -> count
-  | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
 ;;
 
 let test_git_observation_returns_without_judge_queueing () =
@@ -871,7 +871,7 @@ let test_git_refusal_reaches_the_judge_with_the_original_status () =
          (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 23);
        check string "original stderr" stderr refusal.observed_stderr
      | Ok _ -> fail "the Git refusal was not recorded on the Judge request"
-     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+     | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error))
   | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 
@@ -900,7 +900,7 @@ let test_a_partly_refused_observe_run_keeps_the_judge_without_an_observation () 
      | Ok (Some { observation = Some _; _ }) ->
        fail "the row claims nothing started although a stage's box applied"
      | Ok None -> fail "the deferral wrote no row"
-     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+     | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error))
   | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 
@@ -935,7 +935,7 @@ let test_auto_judge_defers_a_refused_observe_run () =
        check int "nothing cut at this size" 0 refusal.observed_stderr_omitted_bytes
      | Ok (Some { observation = None; _ }) -> fail "the row carries no observation"
      | Ok None -> fail "the deferral wrote no row"
-     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+     | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error))
   | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 

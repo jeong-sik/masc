@@ -112,13 +112,14 @@ let claude_failure_status = function
     "probe_contract_error"
 ;;
 
-let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
+let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
     (config : Runtime_execution.codex_app_server) =
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
     ; account_home = config.account_home
     ; isolated_home = None
     ; model = config.model
+    ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
     ; native = Runtime_native_tools.codex_default
     ; developer_instructions = None
     ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s
@@ -263,6 +264,7 @@ let probe_body ~base_path ~body =
   | Runtime_execution.Codex_app_server config ->
     Ok
       (probe_codex
+         ~runtime
          ~mgr
          ~clock
          ~process_cwd

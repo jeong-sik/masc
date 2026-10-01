@@ -34,7 +34,6 @@ let make_goal ?(created_at = "2026-09-20T01:00:00Z") ?(due_date = Some "2026-09-
   : Goal_store.goal
   =
   { Goal_store.id = "goal-1"
-  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "rev-1"
   ; title = "Ship the ledger"
   ; metric = Some "tests"
@@ -44,8 +43,6 @@ let make_goal ?(created_at = "2026-09-20T01:00:00Z") ?(due_date = Some "2026-09-
   ; phase = Goal_phase.Verifying
   ; last_review_note = None
   ; last_review_at = None
-  ; notified_refuted_key = None
-  ; notified_overdue_key = None
   ; created_at
   ; updated_at = created_at
   }
@@ -177,7 +174,8 @@ let goal_ids events =
        | Candle_event.Candidates { goal_id; _ }
        | Candle_event.Unattributed { goal_id; _ }
        | Candle_event.Payout_failed { goal_id; _ } -> goal_id
-       | Candle_event.Paid p -> p.identity.goal_id)
+       | Candle_event.Paid p -> p.identity.goal_id
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 

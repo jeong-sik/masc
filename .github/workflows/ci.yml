@@ -1,22 +1,30 @@
 name: Stack Core build
 
 on:
-  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      candidate_sha:
+        type: string
+        required: true
+      candidate_verification:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: stack-core-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   core:
     name: Core build
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_sha }}
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps
       - uses: ./.github/actions/install-ocaml-deps

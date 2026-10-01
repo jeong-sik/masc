@@ -25,7 +25,7 @@ let reserve_retry_exact ~base_path (entry : Rule_types.pending_approval) =
 
 let check_rearm label expected = function
   | Ok actual -> Alcotest.(check bool) label expected actual
-  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 module Gate = Masc.Keeper_gate
@@ -124,7 +124,7 @@ let require_some message = function
 
 let require_ok message = function
   | Ok value -> value
-  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
 ;;
 
 let pending_entry_exn id =
@@ -187,7 +187,7 @@ let submit_submission_with_context
       ()
   with
   | Ok submission -> submission
-  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
 ;;
 
 let submit_with_context
@@ -227,7 +227,7 @@ let reject_and_cleanup ~base_path id =
 let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
-  | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 ;;
 
 let check_failed_audit_receipt ~event_type ~stage receipt =
@@ -369,8 +369,8 @@ let test_call_summary_is_stated_once_and_copied () =
              ~base_path
              ()
          with
-         | Ok submission -> submission.AQ.approval_id
-         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+         | Ok submission -> submission.Masc.Keeper_approval_queue_result.approval_id
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
        in
        let stated =
          submit_exn
@@ -570,10 +570,10 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
          first.approval_id
          retried.approval_id;
        (match retried.disposition with
-        | AQ.Folded_onto_unconsumed_grant -> ()
-        | AQ.Pending_created _ ->
+        | Masc.Keeper_approval_queue_result.Folded_onto_unconsumed_grant -> ()
+        | Masc.Keeper_approval_queue_result.Pending_created _ ->
           Alcotest.fail "retry opened a second approval over an unconsumed grant"
-        | AQ.Pending_deduplicated ->
+        | Masc.Keeper_approval_queue_result.Pending_deduplicated ->
           Alcotest.fail "resolved approval was still reported as pending");
        (match
           AQ.consume_approved_resolution
@@ -583,10 +583,10 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "grant consumption did not commit"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let after_consumption =
          submit_submission_with_context
            ~turn_id:13
@@ -600,8 +600,8 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
          true
          (not (String.equal first.approval_id after_consumption.approval_id));
        (match after_consumption.disposition with
-        | AQ.Pending_created _ -> ()
-        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+        | Masc.Keeper_approval_queue_result.Pending_created _ -> ()
+        | Masc.Keeper_approval_queue_result.Pending_deduplicated | Masc.Keeper_approval_queue_result.Folded_onto_unconsumed_grant ->
           Alcotest.fail "consumed grant absorbed a new effect request");
        reject_and_cleanup ~base_path after_consumption.approval_id;
        let after_rejection =
@@ -618,15 +618,15 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
          (not
             (String.equal after_consumption.approval_id after_rejection.approval_id));
        (match after_rejection.disposition with
-        | AQ.Pending_created _ -> ()
-        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+        | Masc.Keeper_approval_queue_result.Pending_created _ -> ()
+        | Masc.Keeper_approval_queue_result.Pending_deduplicated | Masc.Keeper_approval_queue_result.Folded_onto_unconsumed_grant ->
           Alcotest.fail "rejected delivery absorbed a retry");
        reject_and_cleanup ~base_path after_rejection.approval_id)
 ;;
 
 let check_update label expected = function
   | Ok actual -> Alcotest.(check bool) label expected actual
-  | Error error -> Alcotest.fail (AQ.summary_transition_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error)
 ;;
 
 type exact_identity =
@@ -693,11 +693,11 @@ let quarantine_exact identity cause =
 ;;
 
 let check_exact_update label expected = function
-  | Ok { AQ.changed; write_outcome = AQ.Fsync_completed } ->
+  | Ok { Masc.Keeper_approval_queue_result.changed; write_outcome = Masc.Keeper_approval_queue_result.Fsync_completed } ->
     Alcotest.(check bool) label expected changed
-  | Ok { write_outcome = AQ.Visible_sync_unconfirmed detail; _ } ->
+  | Ok { write_outcome = Masc.Keeper_approval_queue_result.Visible_sync_unconfirmed detail; _ } ->
     Alcotest.failf "%s returned visible durability uncertainty: %s" label detail
-  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 let run_exact_transition_with_writer transition ~writer identity =
@@ -753,26 +753,26 @@ let before_rename_cancellation_writer ~payload ~backtrace path _body =
 
 let check_visible_update label expected = function
   | Ok
-      { AQ.changed
-      ; write_outcome = AQ.Visible_sync_unconfirmed detail
+      { Masc.Keeper_approval_queue_result.changed
+      ; write_outcome = Masc.Keeper_approval_queue_result.Visible_sync_unconfirmed detail
       } ->
     Alcotest.(check bool) (label ^ " changed") expected changed;
     Alcotest.(check bool) (label ^ " detail") true (String.trim detail <> "")
-  | Ok { write_outcome = AQ.Fsync_completed; _ } ->
+  | Ok { write_outcome = Masc.Keeper_approval_queue_result.Fsync_completed; _ } ->
     Alcotest.failf "%s unexpectedly reported durable" label
-  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 let expect_summary_rejection label = function
   | Error
-      (AQ.Summary_transition_rejected
-        (AQ.Summary_exact_attempt_bound _)) ->
+      (Masc.Keeper_approval_queue_result.Summary_transition_rejected
+        (Masc.Keeper_approval_queue_result.Summary_exact_attempt_bound _)) ->
     ()
   | Error error ->
     Alcotest.failf
       "%s returned the wrong rejection: %s"
       label
-      (AQ.summary_transition_error_to_string error)
+      (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error)
   | Ok _ -> Alcotest.failf "%s accepted an execution-uncertain entry" label
 ;;
 
@@ -890,7 +890,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        let report = Eio.Promise.await install_done in
        let mutation_id = Eio.Promise.await mutation_done in
        (match report with
-        | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
         | Ok report -> Alcotest.(check int) "empty snapshot installed" 0 report.loaded_pending);
        let pending =
          AQ.list_pending_entries_for_workspace ~base_path
@@ -978,10 +978,10 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        let first = first_submission.approval_id in
        (match first_submission.disposition with
-        | AQ.Pending_created { write_result = Ok (); _ } -> ()
-        | AQ.Pending_created { write_result = Error _; _ } ->
+        | Masc.Keeper_approval_queue_result.Pending_created { write_result = Ok (); _ } -> ()
+        | Masc.Keeper_approval_queue_result.Pending_created { write_result = Error _; _ } ->
           Alcotest.fail "new pending request did not persist its audit"
-        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+        | Masc.Keeper_approval_queue_result.Pending_deduplicated | Masc.Keeper_approval_queue_result.Folded_onto_unconsumed_grant ->
           Alcotest.fail "new pending request was reported as deduplicated");
        let reordered =
          `Assoc
@@ -1001,10 +1001,10 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        let same = same_submission.approval_id in
        Alcotest.(check string) "same exact request" first same;
        (match same_submission.disposition with
-        | AQ.Pending_deduplicated -> ()
-        | AQ.Folded_onto_unconsumed_grant ->
+        | Masc.Keeper_approval_queue_result.Pending_deduplicated -> ()
+        | Masc.Keeper_approval_queue_result.Folded_onto_unconsumed_grant ->
           Alcotest.fail "pending duplicate matched a delivery, not the pending entry"
-        | AQ.Pending_created _ ->
+        | Masc.Keeper_approval_queue_result.Pending_created _ ->
           Alcotest.fail "exact duplicate reported a second pending commit");
        Alcotest.(check int)
          "exact duplicate emits no second pending audit"
@@ -1481,7 +1481,7 @@ let test_an_observation_survives_the_row_round_trip () =
              ()
          with
          | Ok { approval_id; _ } -> approval_id
-         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
        in
        Alcotest.(check bool)
          "the row carries the refusal"
@@ -1645,7 +1645,7 @@ let test_resolution_is_durable_and_origin_scoped () =
           Alcotest.(check bool) "journal complete input" true
             (Yojson.Safe.equal input request.input)
         | Ok None -> Alcotest.fail "approved journal was consumed before Gate use"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        Alcotest.(check bool) "unrelated Keeper receives no resolution" true
          (Option.is_none
             (durable_resolution_opt
@@ -1672,10 +1672,10 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~tool_name:"external-effect"
             ~input:(`Assoc [ "target", `String "other" ])
         with
-        | Ok AQ.Consumption_not_matching -> ()
-        | Ok (AQ.Consumption_committed _ | AQ.Consumption_already_committed) ->
+        | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _ | Masc.Keeper_approval_queue_result.Consumption_already_committed) ->
           Alcotest.fail "changed input consumed the exact grant"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -1684,10 +1684,10 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "exact request did not consume its grant"
-       | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let replay_output = {|{"result":"durable replay"}|} in
        let replay_output_ref =
          store_replay_artifact ~base_path replay_output
@@ -1696,22 +1696,22 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
         with
-        | Ok AQ.Replay_recorded -> ()
-        | Ok AQ.Replay_already_recorded ->
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
           Alcotest.fail "first replay outcome write was already present"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        (match
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
         with
-        | Ok AQ.Replay_already_recorded -> ()
-        | Ok AQ.Replay_recorded ->
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> ()
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded ->
           Alcotest.fail "identical replay outcome was rewritten as new"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let different_ref =
          store_replay_artifact ~base_path "different outcome"
        in
@@ -1719,11 +1719,11 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_failed different_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed different_ref)
         with
-        | Error (AQ.Grant_replay_outcome_conflict actual_id) ->
+        | Error (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict actual_id) ->
           Alcotest.(check string) "conflict identifies approval" id actual_id
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
         | Ok _ -> Alcotest.fail "conflicting replay outcome replaced durable truth");
        let open Yojson.Safe.Util in
        let delivery_wire =
@@ -1803,8 +1803,8 @@ let test_resolution_is_durable_and_origin_scoped () =
        ignore (install_exn ~base_path);
        (match AQ.approved_resolution_delivery ~base_path ~id with
         | Ok
-            { state = AQ.Resolution_consumed
-            ; replay_outcome = Some (AQ.Replay_applied output_ref)
+            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
+            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_applied output_ref)
             ; _
             } ->
           Alcotest.(check string)
@@ -1812,7 +1812,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             replay_output_ref.sha256
             output_ref.sha256
         | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let retry_message =
          Masc.Keeper_gate_replay.user_message_with_hitl_resolution
            ~base_path
@@ -1970,9 +1970,9 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        let report = install_exn ~base_path in
        Alcotest.(check int) "unconsumed grant restored" 1 report.replayed_deliveries;
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with
-        | Ok AQ.Resolution_unconsumed -> ()
-        | Ok AQ.Resolution_consumed -> Alcotest.fail "restart lost the unconsumed grant"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+        | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> Alcotest.fail "restart lost the unconsumed grant"
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let grant =
          match Gate.cycle_grant_of_resolution resolution with
          | Some grant -> grant
@@ -2061,10 +2061,10 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with
-        | Ok AQ.Resolution_consumed -> ()
-        | Ok AQ.Resolution_unconsumed ->
+        | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> ()
+        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed ->
           Alcotest.fail "consumed grant reappeared after restart"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -2129,10 +2129,10 @@ let consume_grant_exn ~base_path ~keeper_name ~input approval_id =
       ~tool_name:"external-effect"
       ~input
   with
-  | Ok (AQ.Consumption_committed _) -> ()
-  | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+  | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+  | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
     Alcotest.fail "grant consumption did not commit"
-  | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 
 let reinstall_exn ~base_path =
@@ -2146,10 +2146,10 @@ let check_delivery_retired ~base_path approval_id =
     false
     (List.mem approval_id (durable_delivery_ids ~base_path));
   match AQ.approved_resolution_state ~base_path ~id:approval_id with
-  | Error (AQ.Grant_resolution_missing actual) ->
+  | Error (Masc.Keeper_approval_queue_result.Grant_resolution_missing actual) ->
     Alcotest.(check string) "missing names the approval" approval_id actual
   | Ok _ -> Alcotest.fail "retired delivery is still readable"
-  | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 
 (* After retirement the queue holds nothing for the approval, so pressing the
@@ -2202,11 +2202,11 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
        AQ.record_consumed_resolution_replay
          ~base_path
          ~id:approval_id
-         ~outcome:(AQ.Replay_applied output_ref)
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
      with
-     | Ok AQ.Replay_recorded -> ()
-     | Ok AQ.Replay_already_recorded -> Alcotest.fail "outcome was already recorded"
-     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+     | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+     | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> Alcotest.fail "outcome was already recorded"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
     acknowledge_wake ~base_path ~keeper_name;
     let report = reinstall_exn ~base_path in
     Alcotest.(check int) "spent delivery retired" 1 report.retired_deliveries;
@@ -2238,9 +2238,9 @@ let test_consumed_delivery_with_queued_wake_survives_a_restart () =
     Alcotest.(check int) "queued wake keeps the delivery" 0 report.retired_deliveries;
     check_delivery_kept ~base_path approval_id;
     (match AQ.approved_resolution_state ~base_path ~id:approval_id with
-     | Ok AQ.Resolution_consumed -> ()
-     | Ok AQ.Resolution_unconsumed -> Alcotest.fail "consumed grant reappeared"
-     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+     | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> ()
+     | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> Alcotest.fail "consumed grant reappeared"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
     Alcotest.(check bool)
       "wake is still queued"
       true
@@ -2257,9 +2257,9 @@ let test_unconsumed_delivery_without_a_wake_survives_and_replays () =
     Alcotest.(check int) "unconsumed delivery is not retired" 0 report.retired_deliveries;
     Alcotest.(check int) "unconsumed delivery replayed" 1 report.replayed_deliveries;
     (match AQ.approved_resolution_state ~base_path ~id:approval_id with
-     | Ok AQ.Resolution_unconsumed -> ()
-     | Ok AQ.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
-     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+     | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+     | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
     let replayed =
       durable_resolution_opt ~base_path ~keeper_name ~approval_id
       |> require_some "replay did not queue the wake again"
@@ -2392,7 +2392,7 @@ let test_consumed_delivery_named_by_a_gate_wait_survives () =
     match AQ.observe_waiting_request ~base_path ~id:approval_id with
     | Ok (Some { AQ.waiting_decision = Some Rule_types.Decision.Approve; _ }) -> ()
     | Ok _ -> Alcotest.fail "the waiting operation lost its decision"
-    | Error error -> Alcotest.fail (AQ.storage_error_to_string error))
+    | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error))
 ;;
 
 (* A Keeper whose meta exists but whose queue has no durable state cannot say
@@ -2467,9 +2467,9 @@ let test_not_current_meta_keeps_the_delivery_until_the_meta_file_is_gone () =
     Alcotest.(check int) "not-current meta keeps the delivery" 0 report.retired_deliveries;
     check_delivery_kept ~base_path approval_id;
     (match AQ.approved_resolution_state ~base_path ~id:approval_id with
-     | Ok AQ.Resolution_unconsumed -> ()
-     | Ok AQ.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
-     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+     | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+     | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
     (match
        Masc.Keeper_meta_store.remove_snapshot
          (Masc.Workspace.default_config base_path)
@@ -2497,7 +2497,7 @@ let test_replay_to_a_not_current_meta_fails_and_keeps_the_delivery () =
     Alcotest.(check (list string))
       "replay to a not-current meta is a failure"
       [ approval_id ]
-      (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
+      (List.map (fun failure -> failure.Masc.Keeper_approval_queue_result.approval_id) report.delivery_replay_failures);
     check_delivery_kept ~base_path approval_id;
     ensure_keeper_exists ~base_path ~keeper_name;
     let recovered = reinstall_exn ~base_path in
@@ -2551,12 +2551,12 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
         | Error detail -> Alcotest.fail detail);
        (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
         | Ok
-            { state = AQ.Resolution_consumed
-            ; replay_outcome = Some (AQ.Replay_failed _)
+            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
+            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_failed _)
             ; _
             } -> ()
         | Ok _ -> Alcotest.fail "pre-effect failure left an actionable grant"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        Alcotest.(check bool)
          "failed replay is visible in chat"
          true
@@ -2579,12 +2579,12 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
        ignore (install_exn ~base_path);
        (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
         | Ok
-            { state = AQ.Resolution_consumed
-            ; replay_outcome = Some (AQ.Replay_failed _)
+            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
+            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_failed _)
             ; _
             } -> ()
         | Ok _ -> Alcotest.fail "restart revived the failed replay grant"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        Alcotest.(check bool)
          "continuation receipt survives restart"
          true
@@ -2743,14 +2743,14 @@ let test_exact_binding_codec_validates_entry_identity () =
             let invalid = { identity with request_body_sha256_arg } in
             match run_exact_transition AQ.bind_summary_exact_attempt invalid with
             | Error
-                (AQ.Exact_attempt_rejected
-                  (AQ.Exact_attempt_invalid_identity "request_body_sha256")) ->
+                (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+                  (Masc.Keeper_approval_queue_result.Exact_attempt_invalid_identity "request_body_sha256")) ->
               ()
             | Error error ->
               Alcotest.failf
                 "%s runtime hash returned the wrong error: %s"
                 label
-                (AQ.exact_attempt_error_to_string error)
+                (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
             | Ok _ ->
               Alcotest.failf "%s runtime hash was accepted" label)
          invalid_hashes;
@@ -2927,10 +2927,10 @@ let test_exact_attempt_binding_release_and_conflicts () =
        let conflicting = { first with call_id_arg = "call-conflicting" } in
        (match run_exact_transition AQ.bind_summary_exact_attempt conflicting with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_identity_conflict _)) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_identity_conflict _)) ->
           ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "conflicting active exact identity was accepted");
        check_exact_update
          "release before dispatch"
@@ -2946,10 +2946,10 @@ let test_exact_attempt_binding_release_and_conflicts () =
             first);
        (match run_exact_transition AQ.bind_summary_exact_attempt first with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_status_conflict _)) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_status_conflict _)) ->
           ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "released identity rebound as a new attempt");
        let replacement =
          { first with
@@ -2994,10 +2994,10 @@ let test_exact_attempt_binding_release_and_conflicts () =
          (quarantine_exact replacement quarantine_cause);
        (match quarantine_exact replacement Rule_types.Exact_cancellation with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_status_conflict _)) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_status_conflict _)) ->
           ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "different quarantine cause was accepted");
        (match
           run_exact_transition
@@ -3005,10 +3005,10 @@ let test_exact_attempt_binding_release_and_conflicts () =
             replacement
         with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_status_conflict _)) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_status_conflict _)) ->
           ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "quarantined exact attempt was released"))
 ;;
 
@@ -3181,8 +3181,8 @@ let test_exact_attempt_completion_is_atomic () =
        let mismatched_summary = exact_summary "different-call-id" in
        (match complete_exact identity mismatched_summary with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_provenance_mismatch
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_provenance_mismatch
                 { approval_id; expected_call_id; actual_model_run_id })) ->
           Alcotest.(check string) "provenance approval" id approval_id;
           Alcotest.(check string)
@@ -3193,7 +3193,7 @@ let test_exact_attempt_completion_is_atomic () =
             "provenance actual model run"
             mismatched_summary.model_run_id
             actual_model_run_id
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
        (match pending_entry_exn id with
         | { summary_status = Rule_types.Summary_pending
@@ -3250,10 +3250,10 @@ let test_exact_attempt_completion_is_atomic () =
        in
        (match complete_exact identity conflicting with
         | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_content_conflict actual)) ->
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+              (Masc.Keeper_approval_queue_result.Exact_attempt_content_conflict actual)) ->
           Alcotest.(check string) "content conflict identity" id actual
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "conflicting exact completion was accepted"))
 ;;
 
@@ -3281,8 +3281,8 @@ let test_exact_attempt_bind_storage_failure_is_not_success () =
        (if Sys.file_exists log_path then Sys.remove log_path);
        Unix.mkdir log_path 0o755;
        (match run_exact_transition AQ.bind_summary_exact_attempt identity with
-        | Error (AQ.Exact_attempt_storage_error _) -> ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error (Masc.Keeper_approval_queue_result.Exact_attempt_storage_error _) -> ()
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "failed exact binding persistence reported success");
        match pending_entry_exn id with
        | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
@@ -3359,8 +3359,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~writer:before_rename_writer
             before_identity
         with
-        | Error (AQ.Exact_attempt_storage_error _) -> ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Error (Masc.Keeper_approval_queue_result.Exact_attempt_storage_error _) -> ()
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "pre-rename binding failure reported success");
          Alcotest.(check bool)
            "runtime write failure advances queue authority"
@@ -3440,7 +3440,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           | Error error ->
             Alcotest.failf
               "pre-rename cancellation became an exact error: %s"
-              (AQ.exact_attempt_error_to_string error)
+              (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
           | Ok _ ->
             Alcotest.fail "pre-rename cancellation reported a write outcome");
          (match pending_entry_exn cancel_before_id with
@@ -3486,12 +3486,12 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          (fun (label, cause) ->
             match quarantine_exact release_identity cause with
             | Error
-                (AQ.Exact_attempt_rejected
-                  (AQ.Exact_attempt_status_conflict _)) ->
+                (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+                  (Masc.Keeper_approval_queue_result.Exact_attempt_status_conflict _)) ->
               ()
             | Error error ->
               Alcotest.fail
-                (AQ.exact_attempt_error_to_string error)
+                (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
             | Ok _ ->
               Alcotest.failf
                 "released binding accepted %s"
@@ -3670,7 +3670,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
            "recovery summary identity"
            summary.model_run_id
            actual_summary.model_run_id;
-         Ok { AQ.changed = false; write_outcome }
+         Ok { Masc.Keeper_approval_queue_result.changed = false; write_outcome }
        in
        let deterministic_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
@@ -3685,8 +3685,8 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
                ~request_body_sha256:_
                ~summary:_ ->
               Error
-                (AQ.Exact_attempt_rejected
-                   (AQ.Exact_attempt_content_conflict id)))
+                (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+                   (Masc.Keeper_approval_queue_result.Exact_attempt_content_conflict id)))
            ~base_path
        in
        (match deterministic_report.failures with
@@ -3709,7 +3709,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
            ~complete_summary_exact_attempt:
              (injected_completion
-                (AQ.Visible_sync_unconfirmed
+                (Masc.Keeper_approval_queue_result.Visible_sync_unconfirmed
                    "injected recovery parent sync failure"))
            ~base_path
        in
@@ -3737,7 +3737,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
                ~request_body_sha256:_
                ~summary:_ ->
               Error
-                (AQ.Exact_attempt_storage_error
+                (Masc.Keeper_approval_queue_result.Exact_attempt_storage_error
                    { path = "injected"; reason = "before rename" }))
            ~base_path
        in
@@ -3918,7 +3918,7 @@ let test_current_snapshot_rejects_unbound_available_summary () =
             true
             changed
         | Error error ->
-          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+          Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        let summary = exact_summary "recovered-unbound-call" in
        let snapshot =
          match read_pending_snapshot ~base_path with
@@ -3951,7 +3951,7 @@ let test_current_snapshot_rejects_unbound_available_summary () =
        let original = read_pending_snapshot_bytes ~base_path in
        AQ.For_testing.reset_runtime_state ();
        (match AQ.install_persistence ~base_path with
-        | Error (AQ.Install_storage_failed _) -> ()
+        | Error (Masc.Keeper_approval_queue_result.Install_storage_failed _) -> ()
         | Ok _ ->
           Alcotest.fail
             "current snapshot installed Exact_unbound with an available summary");
@@ -3990,7 +3990,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Ok true -> ()
         | Ok false -> Alcotest.fail "identity-unbound disposition was not stored"
         | Error error ->
-          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+          Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        let identity =
          exact_identity
            ~slot_id:"slot-blocked-bind"
@@ -3999,14 +3999,14 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
        in
        (match run_exact_transition AQ.bind_summary_exact_attempt identity with
         | Error
-            (AQ.Exact_attempt_rejected
-               (AQ.Exact_attempt_disposition_conflict
+            (Masc.Keeper_approval_queue_result.Exact_attempt_rejected
+               (Masc.Keeper_approval_queue_result.Exact_attempt_disposition_conflict
                   { disposition = Rule_types.Summary_attempt_identity_unbound; _ })) ->
           ()
         | Error error ->
           Alcotest.fail
             ("blocked bind returned the wrong rejection: "
-             ^ AQ.exact_attempt_error_to_string error)
+             ^ Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
         | Ok _ ->
           Alcotest.fail "blocked disposition bound without operator rearm");
        let entry = pending_entry_exn id in
@@ -4023,7 +4023,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Ok true -> ()
         | Ok false -> Alcotest.fail "operator rearm did not change blocked row"
         | Error error ->
-          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+          Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        let reserved_entry = pending_entry_exn id in
        check_rearm
          "in-flight start reservation cannot be reserved again"
@@ -4041,7 +4041,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
           Alcotest.fail
             "pre-bind start reservation did not settle identity-unbound"
         | Error error ->
-          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+          Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        let retryable_entry = pending_entry_exn id in
        check_rearm
          "pre-bind terminal failure restores explicit retryability"
@@ -4061,7 +4061,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
           when
             String.equal
               operator_detail
-              AQ.summary_attempt_start_reserved_operator_detail ->
+              Masc.Keeper_approval_queue_result.summary_attempt_start_reserved_operator_detail ->
           ()
         | Some _ ->
           Alcotest.fail
@@ -4103,11 +4103,11 @@ let test_orphaned_start_reservation_reclaims_to_ready () =
             ~input_hash:entry.input_hash
             ~sequence:entry.sequence
             ~reason_code:Rule_types.Summary_pre_worker_start_reserved
-            ~operator_detail:AQ.summary_attempt_start_reserved_operator_detail
+            ~operator_detail:Masc.Keeper_approval_queue_result.summary_attempt_start_reserved_operator_detail
         with
         | Ok true -> ()
         | Ok false -> Alcotest.fail "start reservation was not stored"
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        let reserved = pending_entry_exn id in
        (match
           AQ.release_orphaned_start_reservation
@@ -4119,7 +4119,7 @@ let test_orphaned_start_reservation_reclaims_to_ready () =
         | Ok true -> ()
         | Ok false ->
           Alcotest.fail "orphaned start reservation was not reclaimed"
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
             { summary_status = Rule_types.Summary_pending
@@ -4144,7 +4144,7 @@ let test_orphaned_start_reservation_reclaims_to_ready () =
         | Ok false -> ()
         | Ok true ->
           Alcotest.fail "reclaim touched a row that was not a start reservation"
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
        reject_and_cleanup ~base_path id)
 ;;
 
@@ -4241,11 +4241,11 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ~reason:"retired"
         with
         | Error
-            (AQ.Summary_owner_retirement_exact_attempt_unsettled _) ->
+            (Masc.Keeper_approval_queue_result.Summary_owner_retirement_exact_attempt_unsettled _) ->
           ()
         | Error error ->
           Alcotest.fail
-            (AQ.summary_owner_retirement_error_to_string error)
+            (Masc.Keeper_approval_queue_result.summary_owner_retirement_error_to_string error)
         | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
         | Some
@@ -4271,7 +4271,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         with
         | Error error ->
           Alcotest.fail
-            (AQ.summary_owner_retirement_error_to_string error)
+            (Masc.Keeper_approval_queue_result.summary_owner_retirement_error_to_string error)
         | Ok ids ->
           Alcotest.(check (list string))
             "retired ids"
@@ -4373,7 +4373,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        in
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "malformed snapshot must not install"
-       | Error (AQ.Install_storage_failed _) -> ()
+       | Error (Masc.Keeper_approval_queue_result.Install_storage_failed _) -> ()
         );
        Alcotest.(check bool)
          "failed install leaves workspace unavailable"
@@ -4503,7 +4503,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "unsupported version must fail install"
         | Error
-            (AQ.Install_storage_failed
+            (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
                   "gate_pending.version 8 is unsupported (current 11); reset \
                    runtime state before restarting MASC"
@@ -4513,7 +4513,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error error ->
           Alcotest.failf
             "unsupported version returned the wrong error: %s"
-            (AQ.install_error_to_string error));
+            (Masc.Keeper_approval_queue_result.install_error_to_string error));
        let store_path = AQ.For_testing.pending_store_path ~base_path in
        Alcotest.(check bool) "original remains for operator reset" true
          (Sys.file_exists store_path);
@@ -4545,7 +4545,7 @@ let snapshot_with_one_observed_entry ~base_path =
        ()
    with
    | Ok _ -> ()
-   | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+   | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
   let snapshot = read_pending_snapshot ~base_path in
   let entry =
     match Yojson.Safe.Util.member "pending" snapshot with
@@ -4612,7 +4612,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        match AQ.install_persistence ~base_path with
        | Ok _ -> Alcotest.fail "a v10 store must fail install"
        | Error
-           (AQ.Install_storage_failed
+           (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
                  "gate_pending.version 10 is unsupported (current 11); reset \
                   runtime state before restarting MASC"
@@ -4623,7 +4623,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error error ->
          Alcotest.failf
            "a v10 store returned the wrong error: %s"
-           (AQ.install_error_to_string error))
+           (Masc.Keeper_approval_queue_result.install_error_to_string error))
 ;;
 
 (* At the current version, an observation without refusal_kind is refused
@@ -4647,12 +4647,12 @@ let test_a_current_row_without_refusal_kind_is_refused () =
               | _ -> key, value))
            snapshot
        in
-       (match AQ.validate_pending_snapshot ~base_path with_stripped_entry with
+       (match Masc.Keeper_approval_queue_codec.validate_pending_snapshot ~base_path with_stripped_entry with
         | Ok () -> Alcotest.fail "a current entry without refusal_kind was accepted"
         | Error reason ->
           Alcotest.(check bool) "the refusal names the field" true
             (String_util.contains_substring reason "refusal_kind"));
-       (match AQ.validate_pending_snapshot ~base_path snapshot with
+       (match Masc.Keeper_approval_queue_codec.validate_pending_snapshot ~base_path snapshot with
         | Ok () -> ()
         | Error reason -> Alcotest.failf "the untouched snapshot was refused: %s" reason);
        let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in
@@ -4731,7 +4731,7 @@ let test_malformed_replay_sidecar_is_scoped_and_preserved () =
         | Error error ->
           Alcotest.fail
             ("malformed replay sidecar blocked the authorization store: "
-             ^ AQ.install_error_to_string error));
+             ^ Masc.Keeper_approval_queue_result.install_error_to_string error));
        Alcotest.(check bool)
          "malformed sidecar remains for operator repair"
          true
@@ -4783,7 +4783,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
         | Error error ->
           Alcotest.fail
             ("raw replay output wire blocked the authorization store: "
-             ^ AQ.install_error_to_string error));
+             ^ Masc.Keeper_approval_queue_result.install_error_to_string error));
        let keeper_name = "queue-ready-despite-raw-replay-wire" in
        let input = `Assoc [ "target", `String "current" ] in
        let approval_id = submit ~base_path ~keeper_name ~input in
@@ -4806,13 +4806,13 @@ let test_replay_sidecar_rejects_raw_output_wire () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
         | Ok _ ->
           Alcotest.fail "projection error blocked exact grant consumption"
         | Error error ->
           Alcotest.fail
             ("projection error blocked the authorization store: "
-             ^ AQ.grant_error_to_string error));
+             ^ Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let output_ref =
          store_replay_artifact ~base_path "current replay result"
        in
@@ -4820,9 +4820,9 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(AQ.Replay_applied output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
         with
-        | Error (AQ.Grant_replay_projection_unavailable { path; _ }) ->
+        | Error (Masc.Keeper_approval_queue_result.Grant_replay_projection_unavailable { path; _ }) ->
           Alcotest.(check string)
             "only replay-result publication remains unavailable"
             sidecar_path
@@ -4830,7 +4830,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
         | Error error ->
           Alcotest.fail
             ("wrong scoped replay projection error: "
-             ^ AQ.grant_error_to_string error)
+             ^ Masc.Keeper_approval_queue_result.grant_error_to_string error)
         | Ok _ ->
           Alcotest.fail "invalid projection was overwritten automatically");
        let persisted = Yojson.Safe.from_file sidecar_path in
@@ -5014,10 +5014,10 @@ let test_consumed_grant_after_failed_delivery_has_the_decision () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "the journaled grant was not consumed"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        Alcotest.(check int) "the consumed grant's decision is on the ledger" 1
          (resolved_rows_for_approval ~base_path id);
        ensure_keeper_exists ~base_path ~keeper_name;
@@ -5094,10 +5094,10 @@ let test_persisted_delivery_replays_before_origin_wake () =
             ~tool_name:"external-effect"
             ~input:(`Assoc [ "target", `String "replay" ])
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "replayed exact grant was not consumed"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let snapshot = read_pending_snapshot ~base_path in
        Alcotest.(check int) "consumption tombstone remains explicit" 1
          (snapshot |> member "deliveries" |> to_list |> List.length);
@@ -5205,11 +5205,11 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
                ~keeper_name
                ~approval_id:id));
        (match AQ.approved_resolution_state ~base_path ~id with
-        | Ok AQ.Resolution_unconsumed -> ()
-        | Ok AQ.Resolution_consumed ->
+        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+        | Ok Masc.Keeper_approval_queue_result.Resolution_consumed ->
           Alcotest.fail "wake acknowledgement consumed the exact grant"
         | Error error ->
-          Alcotest.fail (AQ.grant_error_to_string error));
+          Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -5218,13 +5218,13 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
         | Ok
-            ( AQ.Consumption_already_committed
-            | AQ.Consumption_not_matching ) ->
+            ( Masc.Keeper_approval_queue_result.Consumption_already_committed
+            | Masc.Keeper_approval_queue_result.Consumption_not_matching ) ->
           Alcotest.fail "preserved exact grant was not consumable"
        | Error error ->
-          Alcotest.fail (AQ.grant_error_to_string error)))
+          Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)))
 ;;
 
 let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
@@ -5331,11 +5331,11 @@ let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
                ~keeper_name
                ~approval_id:id));
        match AQ.approved_resolution_state ~base_path ~id with
-       | Ok AQ.Resolution_unconsumed -> ()
-       | Ok AQ.Resolution_consumed ->
+       | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+       | Ok Masc.Keeper_approval_queue_result.Resolution_consumed ->
          Alcotest.fail "wake cancellation consumed the exact grant"
        | Error error ->
-         Alcotest.fail (AQ.grant_error_to_string error))
+         Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error))
 ;;
 
 let test_one_delivery_replay_failure_does_not_stop_others () =
@@ -5409,7 +5409,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        Alcotest.(check (list string))
          "replay failures preserve durable sequence"
          [ first_id; second_id ]
-         (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
+         (List.map (fun failure -> failure.Masc.Keeper_approval_queue_result.approval_id) report.delivery_replay_failures);
        Alcotest.(check bool) "later delivery reached origin" true
          (Option.is_some
             (durable_resolution_opt
@@ -5448,7 +5448,7 @@ let test_submit_surfaces_storage_failure () =
           | Ok entries ->
             Alcotest.(check int) "memory not mutated" 0 (List.length entries)
           | Error error ->
-            Alcotest.fail (AQ.storage_error_to_string error)))
+            Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)))
 ;;
 
 let test_default_auto_judge_defers_without_blocking () =
@@ -5653,10 +5653,10 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "fixture approval grant was not consumed"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let stale_ref = store_replay_artifact ~base_path "stale failed replay" in
        let canonical_ref = store_replay_artifact ~base_path "canonical applied replay" in
        let stale_lifecycle : Chat_store.approval_lifecycle =
@@ -5680,16 +5680,16 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(AQ.Replay_applied canonical_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied canonical_ref)
         with
-        | Ok AQ.Replay_recorded -> ()
-        | Ok AQ.Replay_already_recorded | Error _ ->
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded | Error _ ->
           Alcotest.fail "canonical replay outcome was not recorded");
        let canonical_outcome =
          match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
          | Ok { replay_outcome = Some outcome; _ } -> outcome
          | Ok _ -> Alcotest.fail "canonical replay outcome is absent"
-         | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
        in
        (match
           AQ.ensure_replay_chat_projection
@@ -5717,7 +5717,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~outcome:(AQ.Replay_failed stale_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed stale_ref)
         with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "stale replay displaced the correction");
@@ -5895,7 +5895,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          0
          (match AQ.list_pending_entries_for_workspace ~base_path with
           | Ok entries -> List.length entries
-          | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+          | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
        let durable_resolution =
          durable_resolution_opt ~base_path ~keeper_name ~approval_id
          |> require_some "approved resolution was not delivered"
@@ -5987,10 +5987,10 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_already_committed -> ()
-        | Ok (AQ.Consumption_committed _ | AQ.Consumption_not_matching) ->
+        | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _ | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "consumed grant became authorizable again"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        drop_resolution ~base_path ~keeper_name durable_resolution)
 ;;
 
@@ -6411,10 +6411,10 @@ let test_rows_past_the_ratio_rewrite_the_snapshot () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok (AQ.Consumption_committed _) -> ()
-        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
           Alcotest.fail "grant consumption did not commit"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        (* A third row for one entry crosses the ratio: the snapshot is
           rewritten with the consumed delivery and the log is empty. *)
        Alcotest.(check int) "log emptied by the rewrite" 0 (log_row_count ~base_path);

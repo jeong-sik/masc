@@ -112,7 +112,7 @@ let test_an_inline_setting_claims_over_the_palette () =
 let voice_wizard_open state =
   state.Tui_types.voice_wizard <-
     Some
-      (Tui_types.voice_wizard_open ~section:Voice_setup.Tts
+      (Masc_tui_voice_wizard_session.voice_wizard_open ~section:Voice_setup.Tts
          ~provider:Voice_wizard.Elevenlabs ~revision:"a-revision")
 ;;
 
@@ -375,10 +375,10 @@ let test_reader_discards_active_and_queued_voice () =
 
 let test_ask_answer_input_ownership () =
   let state = fresh_state () in
-  let question : Masc.Tui_decode.ask_question =
+  let question : Masc.Tui_decode_asks.ask_question =
     { aq_id = "q1"; aq_header = "Route"; aq_prompt = "Which route?";
-      aq_mode = Masc.Tui_decode.Ask_single;
-      aq_free_text = Masc.Tui_decode.Ask_choices_only;
+      aq_mode = Masc.Tui_decode_asks.Ask_single;
+      aq_free_text = Masc.Tui_decode_asks.Ask_choices_only;
       aq_choices = [{ac_id = "route"; ac_label = "Offered route"; ac_description = None}] }
   in
   state.Tui_types.view <- Tui_types.Approvals;

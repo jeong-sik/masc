@@ -1443,16 +1443,16 @@ let canonical_reply_payload_of_body ~redact_text body =
     | None -> Error Invalid_turn_ref
   in
   let* external_effect_target =
-    (* The outcome and the terminal-effect receipt are decided from the same
-       [terminal_effect_state] (keeper_agent_run.ml), and the only terminal
-       effect receipt is a surface post (keeper_turn.ml
-       terminal_effect_fields). The decoder holds both directions - the
-       delivery target is present iff the outcome is Terminal_effect_settled -
-       so [Some] here is the proof the External_effect_completed event
-       needs. *)
-    let completed_external_effect =
-      Keeper_turn_outcome.equal turn_outcome
-        Keeper_turn_outcome.Terminal_effect_settled
+    (* A surface post can finish before the operation yields. Its delivery
+       receipt remains evidence without overriding the continuation boundary
+       or making the durable direct operation successful. *)
+    let receipt_required, receipt_allowed =
+      match turn_outcome with
+      | Keeper_turn_outcome.Terminal_effect_settled -> true, true
+      | Keeper_turn_outcome.Continuation_checkpoint -> false, true
+      | Keeper_turn_outcome.Visible_reply
+      | Keeper_turn_outcome.Awaiting_gate_approval
+      | Keeper_turn_outcome.No_visible_reply -> false, false
     in
     let values_of key =
       List.filter_map
@@ -1462,13 +1462,13 @@ let canonical_reply_payload_of_body ~redact_text body =
     in
     match values_of Keeper_surface_post.delivery_target_wire_key with
     | [] ->
-      if completed_external_effect
+      if receipt_required
       then
         Error
           (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
       else Ok None
     | [ value ] ->
-      if not completed_external_effect
+      if not receipt_allowed
       then
         Error
           (Invalid_external_effect_target
@@ -3927,73 +3927,6 @@ let handle_keeper_ask_answer ~actor state request reqd =
    answers through POST /api/v1/keepers/ask-answer; the choice ids it sends
    back come from the rows it was given, so no surface ever matches on label
    text and rewording a choice cannot orphan an answer. *)
-let ask_choice_json (choice : Keeper_ask.choice) =
-  `Assoc
-    [
-      ("choice_id", `String choice.choice_id);
-      ("label", `String choice.label);
-      ( "description",
-        match choice.description with None -> `Null | Some text -> `String text );
-    ]
-
-let ask_question_json (question : Keeper_ask.question) =
-  `Assoc
-    [
-      ("question_id", `String question.question_id);
-      ("header", `String question.header);
-      ("prompt", `String question.prompt);
-      ( "mode",
-        `String (match question.mode with Keeper_ask.Single -> "single" | Keeper_ask.Multi -> "multi") );
-      ( "free_text",
-        (* This is the operator's answer capability; the stored author form
-           remains Choices_only when only choices were originally offered. *)
-        match question.free_text with
-        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool true) ]
-        | Keeper_ask.Free_text_allowed { hint } ->
-            `Assoc
-              [
-                ("allowed", `Bool true);
-                ("hint", match hint with None -> `Null | Some text -> `String text);
-              ] );
-      ("choices", `List (List.map ask_choice_json question.choices));
-    ]
-
-let ask_resolution_json = function
-  | Keeper_ask.Open -> `Assoc [ ("state", `String "open") ]
-  | Keeper_ask.Answered_by { answers; answered_at; _ } ->
-      `Assoc
-        [
-          ("state", `String "answered");
-          ("answered_at", `Float answered_at);
-          ( "answered_question_ids",
-            `List
-              (List.map
-                 (fun (answer : Keeper_ask.answer) -> `String answer.question_id)
-                 answers) );
-        ]
-  | Keeper_ask.Withdrawn_because { reason; withdrawn_at } ->
-      `Assoc
-        [
-          ("state", `String "withdrawn");
-          ("reason", `String reason);
-          ("withdrawn_at", `Float withdrawn_at);
-        ]
-
-let ask_row_is_open = function
-  | Keeper_ask.Open -> true
-  | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
-
-let ask_row_json ~keeper_name (ask_id, ((a : Keeper_ask.ask), resolution)) =
-  `Assoc
-    [
-      ("keeper", `String keeper_name);
-      ("ask_id", `String ask_id);
-      ("asked_at", `Float a.asked_at);
-      ("context", match a.context with None -> `Null | Some text -> `String text);
-      ("questions", `List (List.map ask_question_json a.questions));
-      ("resolution", ask_resolution_json resolution);
-    ]
-
 let handle_keeper_asks_list state request reqd =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let include_resolved =
@@ -4002,8 +3935,8 @@ let handle_keeper_asks_list state request reqd =
   let rows_for keeper_name =
     Keeper_ask_store.rows ~base_path ~keeper_name
     |> List.filter (fun (_, (_, resolution)) ->
-           include_resolved || ask_row_is_open resolution)
-    |> List.map (ask_row_json ~keeper_name)
+           include_resolved || Keeper_ask_operator_projection.ask_row_is_open resolution)
+    |> List.map (Keeper_ask_operator_projection.ask_row_json ~keeper_name)
   in
   match Server_utils.query_param request "name" with
   | Some keeper_name ->

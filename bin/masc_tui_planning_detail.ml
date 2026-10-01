@@ -34,7 +34,7 @@ let wrapped ~width tone text =
   String.split_on_char '\n' text
   |> List.concat_map (fun line ->
        Message_layout.wrap_words ~max_cells:width
-         (Tui_decode.sanitize_terminal_text (without_line_end_cr line)))
+         (Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr line)))
   |> List.map (fun row -> { tone; text = row })
 
 type confirmation = {
@@ -119,7 +119,7 @@ let confirmation_lines ~width { goal_id; verdict; _ } =
   ]
   |> List.concat_map (fun text ->
        Message_layout.wrap_body ~max_cells:width
-         ~sanitize:Tui_decode.sanitize_terminal_text text
+         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text text
        |> List.map (fun text -> { tone = Waiting; text }))
 
 (* A verdict is a headline and, when the judge left one, the measurement it

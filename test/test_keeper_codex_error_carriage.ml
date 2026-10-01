@@ -99,9 +99,9 @@ let test_every_variant_lands_in_its_class () =
     "api:timeout";
   (* Idle after turn/start acceptance is ambiguous: the upstream turn may
      still commit (PR #28192 review P1). *)
-  check "idle timeout after turn/start stays internal"
+  check "idle timeout after turn/start retains timeout evidence"
     (Codex.Timeout { seconds = 300.0; turn_accepted = true })
-    "internal";
+    "api:timeout";
   (* Both are the host stopping a running turn. They stay off the rotation
      chain (the carrier is still an agent-core internal error) and carry the
      reason as a value instead of a sentence. *)
@@ -293,11 +293,47 @@ let test_transport_uncertainty_preserves_stronger_evidence () =
              Effect_attempted, Effect_attempted ]
 ;;
 
+let test_accepted_transport_failure_fences_replay_but_routes_timeout () =
+  let module Effect = Masc.Keeper_provider_attempt_effect in
+  List.iter (fun error ->
+    List.iter (fun initial ->
+      let observation = Atomic.make initial in
+      Map.observe_failed_dispatch
+        ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
+        error;
+      Alcotest.(check bool) "an accepted turn is not replayed without a terminal receipt"
+        false (Effect.allows_same_turn_retry (Atomic.get observation));
+      if initial = Effect.Effect_attempted then
+        Alcotest.(check bool) "known effect is not weakened" true
+          (Atomic.get observation = Effect.Effect_attempted))
+      Effect.[No_effect_observed; Effect_attempted])
+    [ Codex.Timeout { seconds = 300.; turn_accepted = true }
+    ; Codex.Process_exited { detail = "stdout closed"; turn_accepted = true }
+    ; Codex.Turn_input_write_failed "partial write"
+    ];
+  let before_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = false} in
+  let observation = Atomic.make Effect.No_effect_observed in
+  Map.observe_failed_dispatch
+    ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
+    before_dispatch;
+  Alcotest.(check bool) "admission timeout still permits fallback" true
+    (Effect.allows_same_turn_retry (Atomic.get observation));
+  let after_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = true} in
+  match Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+          (Map.codex_error_to_core_error after_dispatch) with
+  | Keeper_runtime_failure_route.Retry_after_observed
+      {retry_class = Provider_timeout; _} -> ()
+  | _ -> Alcotest.fail "accepted timeout lost its next-turn provider evidence"
+;;
+
 let () =
   Alcotest.run
     "keeper_codex_error_carriage"
     [ ( "carriage"
-      , [ Alcotest.test_case "transport uncertainty preserves prior effects" `Quick
+      , [ Alcotest.test_case "accepted transport failure fences replay and preserves timeout routing" `Quick
+            test_accepted_transport_failure_fences_replay_but_routes_timeout
+        ; Alcotest.test_case "transport uncertainty preserves prior effects" `Quick
             test_transport_uncertainty_preserves_stronger_evidence
         ; Alcotest.test_case
             "every variant lands in its class"

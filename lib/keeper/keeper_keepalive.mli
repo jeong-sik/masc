@@ -43,6 +43,7 @@ val not_in_registry_warn_state_step :
   not_in_registry_warn_decision * float StringMap.t
 
 val wakeup_relevant_keeper_for_board_signal :
+  ?dispatch_attention:(Keeper_board_attention_candidate.candidate list -> unit) ->
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 (** Addressed signals are durably routed immediately. Discoverable posts are
     left to the existing per-Keeper durable Board cursor because they have no

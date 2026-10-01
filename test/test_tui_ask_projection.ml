@@ -2,14 +2,13 @@
    with two keys, so a regression shows up as a wrong keystroke, not a wrong
    type. *)
 
-module Decode = Masc.Tui_decode
 module Ask = Masc_tui_ask_projection
 
-let choice id label : Decode.ask_choice =
+let choice id label : Masc.Tui_decode_asks.ask_choice =
   { ac_id = id; ac_label = label; ac_description = None }
 
-let question ?(mode = Decode.Ask_single) ?(free_text = Decode.Ask_choices_only)
-    ?(choices = [ choice "yes" "Yes"; choice "no" "No" ]) id : Decode.ask_question =
+let question ?(mode = Masc.Tui_decode_asks.Ask_single) ?(free_text = Masc.Tui_decode_asks.Ask_choices_only)
+    ?(choices = [ choice "yes" "Yes"; choice "no" "No" ]) id : Masc.Tui_decode_asks.ask_question =
   {
     aq_id = id;
     aq_header = "Header";
@@ -19,7 +18,7 @@ let question ?(mode = Decode.Ask_single) ?(free_text = Decode.Ask_choices_only)
     aq_choices = choices;
   }
 
-let row ?(resolution = Decode.Ask_open) ?(questions = [ question "q1" ]) id : Decode.ask_row =
+let row ?(resolution = Masc.Tui_decode_asks.Ask_open) ?(questions = [ question "q1" ]) id : Masc.Tui_decode_asks.ask_row =
   {
     ar_keeper = "asker";
     ar_id = id;
@@ -39,7 +38,7 @@ let chosen draft q =
 let check_ids = Alcotest.(check (list string))
 
 let single = question "q1"
-let multi = question ~mode:Decode.Ask_multi "q1"
+let multi = question ~mode:Masc.Tui_decode_asks.Ask_multi "q1"
 let yes = choice "yes" "Yes"
 let no = choice "no" "No"
 
@@ -96,7 +95,7 @@ let test_free_text_slot_for_choices_only () =
   | _ -> Alcotest.fail "alternative was not drafted"
 
 let test_free_text_slot_carries_hint () =
-  let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1" in
+  let q = question ~free_text:(Masc.Tui_decode_asks.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1" in
   Alcotest.(check (option string)) "hint reaches the editor" (Some "one line")
     (Ask.free_text_hint (Ask.free_text_slot ~ask_id:"a1" q))
 
@@ -108,7 +107,7 @@ let test_alternative_shortcut () =
   ) [0, None; 1, Some 2; 4, Some 5; 8, Some 9; 9, None; 12, None]
 
 let text_question_named id =
-  question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = None }) ~choices:[] id
+  question ~free_text:(Masc.Tui_decode_asks.Ask_free_text_allowed { aft_hint = None }) ~choices:[] id
 
 let text_question = text_question_named "q1"
 
@@ -157,7 +156,7 @@ let test_clear_removes () =
 
 let missing_ids = function
   | Ask.Missing questions ->
-      List.map (fun (q : Decode.ask_question) -> q.aq_id) questions
+      List.map (fun (q : Masc.Tui_decode_asks.ask_question) -> q.aq_id) questions
   | Ask.Ready _ -> [ "<ready>" ]
   | Ask.Not_open -> [ "<not-open>" ]
 
@@ -213,13 +212,13 @@ let test_ready_encodes_each_shape () =
 
 let test_answered_row_is_not_open () =
   let r =
-    row ~resolution:(Decode.Ask_answered { aa_answered_at = 2.0; aa_question_ids = [ "q1" ] }) "a1"
+    row ~resolution:(Masc.Tui_decode_asks.Ask_answered { aa_answered_at = 2.0; aa_question_ids = [ "q1" ] }) "a1"
   in
   check_ids "first write settled it" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask_id:"a1") ~row:r))
 
 let test_withdrawn_row_is_not_open () =
   let r =
-    row ~resolution:(Decode.Ask_withdrawn { aw_reason = "moot"; aw_withdrawn_at = 2.0 }) "a1"
+    row ~resolution:(Masc.Tui_decode_asks.Ask_withdrawn { aw_reason = "moot"; aw_withdrawn_at = 2.0 }) "a1"
   in
   check_ids "withdrawn" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask_id:"a1") ~row:r))
 
@@ -294,7 +293,7 @@ let test_summarize_empty_when_unanswered () =
     (Ask.summarize_answer (Ask.empty_draft ~ask_id:"a1") ~row:r)
 
 let test_summarize_quotes_written_answer () =
-  let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = None }) "q1" in
+  let q = question ~free_text:(Masc.Tui_decode_asks.Ask_free_text_allowed { aft_hint = None }) "q1" in
   let r = row ~questions:[ q ] "a1" in
   let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of q) ~text:"do it" in
   Alcotest.(check string) "written is quoted" "\"do it\""
@@ -319,12 +318,12 @@ let test_summarize_joins_questions_in_ask_order () =
 
 (* newly_opened_ask_ids: the bell rings once per question that arrives, not
    per poll and not for the state the session started in. *)
-let snapshot rows : Decode.asks_snapshot =
+let snapshot rows : Masc.Tui_decode_asks.asks_snapshot =
   { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
 
 let answered_row id =
   row
-    ~resolution:(Decode.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [] })
+    ~resolution:(Masc.Tui_decode_asks.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [] })
     id
 
 (* One filter, three callers: the panel draws these rows, its footer names the
@@ -334,7 +333,7 @@ let test_open_rows_keeps_only_what_is_waiting () =
   let rows = [ row "a1"; answered_row "a2"; row "a3" ] in
   Alcotest.(check (list string)) "the open ones, in wire order" [ "a1"; "a3" ]
     (List.map
-       (fun (r : Decode.ask_row) -> r.Decode.ar_id)
+       (fun (r : Masc.Tui_decode_asks.ask_row) -> r.Masc.Tui_decode_asks.ar_id)
        (Ask.open_rows (snapshot rows)))
 
 let test_newly_opened_silent_on_first_read () =
@@ -372,9 +371,68 @@ let test_silent_when_nothing_arrived () =
   Alcotest.(check bool) "no arrival, no ring, even off the surface" false
     (Ask.should_ring_for_new_ask ~new_ids:[] ~operator_is_watching_asks:false)
 
+(* The producer's real row encoder feeds the decoder and answer draft.
+   This proves the module split preserves the operator's choice identities
+   and the server's free-text capability, beyond a hand-written JSON fixture. *)
+let test_wire_question_reaches_the_answer_draft () =
+  let valid = function
+    | Ok value -> value
+    | Error _ -> Alcotest.fail "could not construct the producer's question"
+  in
+  let module Domain = Masc.Keeper_ask in
+  let choice = valid (Domain.choice ~choice_id:"later" ~label:"After lunch" ()) in
+  let question = valid (Domain.question ~question_id:"window" ~header:"Window"
+    ~prompt:"When?" ~choices:[choice] ~mode:Domain.Single
+    ~free_text:Domain.Choices_only) in
+  let ask = valid (Domain.ask ~ask_id:"wire-ask" ~keeper_name:"reader"
+    ~questions:[question] ~context:"Choose a deployment window"
+    ~continuation:(Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
+  let row = Masc.Keeper_ask_operator_projection.ask_row_json ~keeper_name:"reader"
+    (ask.ask_id, (ask, Domain.Open)) in
+  let snapshot = `Assoc [ "keeper", `String "reader"; "open_count", `Int 1;
+    "asks", `List [row] ] in
+  match Masc.Tui_decode_asks.decode_asks_snapshot snapshot with
+  | Error error -> Alcotest.fail error
+  | Ok snapshot ->
+      (match Ask.open_rows snapshot with
+       | [row] ->
+           Alcotest.(check (option string)) "context survives the wire"
+             (Some "Choose a deployment window") row.ar_context;
+           (match row.ar_questions with
+            | [question] ->
+                (match question.aq_free_text with
+                 | Masc.Tui_decode_asks.Ask_free_text_allowed _ -> ()
+                 | Masc.Tui_decode_asks.Ask_choices_only ->
+                     Alcotest.fail "producer offers an operator alternative");
+                (match question.aq_choices with
+                 | [choice] ->
+                     let draft = Ask.toggle_choice
+                       (Ask.empty_draft ~ask_id:row.ar_id) ~question ~choice in
+                     check_ids "the answer names the stable wire id"
+                       ["later"] (chosen draft question)
+                 | _ -> Alcotest.fail "expected one wire choice")
+            | _ -> Alcotest.fail "expected one wire question")
+       | _ -> Alcotest.fail "expected one open wire ask")
+
+let test_unknown_wire_resolution_is_rejected () =
+  let snapshot = Yojson.Safe.from_string {|{
+    "keeper":"reader", "open_count":0, "asks":[{
+      "keeper":"reader", "ask_id":"wire-ask", "asked_at":42,
+      "context":null, "questions":[], "resolution":{"state":"future"}
+    }]
+  }|} in
+  match Masc.Tui_decode_asks.decode_asks_snapshot snapshot with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown resolution must not create an answerable ask"
+
 let () =
   Alcotest.run "TUI ask projection"
-    [
+    [ ( "wire",
+        [ Alcotest.test_case "question reaches the answer draft" `Quick
+            test_wire_question_reaches_the_answer_draft
+        ; Alcotest.test_case "unknown resolution rejected" `Quick
+            test_unknown_wire_resolution_is_rejected
+        ] );
       ( "draft",
         [
           Alcotest.test_case "keeps a matching ask" `Quick test_draft_for_keeps_matching_ask;

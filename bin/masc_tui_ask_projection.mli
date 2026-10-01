@@ -21,30 +21,30 @@ type draft
 val empty_draft : ask_id:string -> draft
 val draft_ask_id : draft -> string
 
-val draft_for : draft option -> row:Masc.Tui_decode.ask_row -> draft
+val draft_for : draft option -> row:Masc.Tui_decode_asks.ask_row -> draft
 (** The draft when it belongs to [row], a fresh one otherwise. Moving the
     cursor to another ask therefore starts clean without the caller having to
     remember to reset, which is the whole class of bug this removes. *)
 
 val response_for :
-  draft -> question:Masc.Tui_decode.ask_question -> draft_response option
+  draft -> question:Masc.Tui_decode_asks.ask_question -> draft_response option
 
-val summarize_answer : draft -> row:Masc.Tui_decode.ask_row -> string
+val summarize_answer : draft -> row:Masc.Tui_decode_asks.ask_row -> string
 (** A human line for what the draft answers, in the labels the operator saw
     (never choice ids): chosen labels joined per question, a written answer
     quoted, a skipped question named. Empty when nothing is answered yet, so a
     caller can fall back to the Keeper name alone. *)
 
 val open_rows :
-  Masc.Tui_decode.asks_snapshot -> Masc.Tui_decode.ask_row list
+  Masc.Tui_decode_asks.asks_snapshot -> Masc.Tui_decode_asks.ask_row list
 (** The asks still waiting on a human, in wire order. The panel, its footer,
     and the executable all walk this list; a second copy of the predicate is
     how the cursor and the drawn rows come to disagree about which ask is
     selected. *)
 
 val newly_opened_ask_ids :
-  previous:Masc.Tui_decode.asks_snapshot option ->
-  current:Masc.Tui_decode.asks_snapshot ->
+  previous:Masc.Tui_decode_asks.asks_snapshot option ->
+  current:Masc.Tui_decode_asks.asks_snapshot ->
   string list
 (** Ask ids open in [current] but not in [previous] — the questions that
     arrived since the last read. A re-read of the same asks, and a first read
@@ -59,8 +59,8 @@ val should_ring_for_new_ask :
 
 val toggle_choice :
   draft ->
-  question:Masc.Tui_decode.ask_question ->
-  choice:Masc.Tui_decode.ask_choice ->
+  question:Masc.Tui_decode_asks.ask_question ->
+  choice:Masc.Tui_decode_asks.ask_choice ->
   draft
 (** [Ask_single] replaces the selection, and re-picking the chosen id clears
     it, so a mis-press needs no second key. [Ask_multi] adds or removes;
@@ -70,13 +70,13 @@ val toggle_choice :
 
 type free_text_slot
 
-val free_text_slot : ask_id:string -> Masc.Tui_decode.ask_question -> free_text_slot
+val free_text_slot : ask_id:string -> Masc.Tui_decode_asks.ask_question -> free_text_slot
 (** Every question offers an operator-written alternative. The slot binds the
     editor to the ask and the question, including questions that only offered
     choices. Both, because a question id is unique only inside its ask:
     masc_ask numbers every ask's questions from [q1]. *)
 
-val alternative_position : Masc.Tui_decode.ask_question -> int option
+val alternative_position : Masc.Tui_decode_asks.ask_question -> int option
 (** The next digit after the choices when it fits in 1-9; otherwise use [t]. *)
 
 val free_text_hint : free_text_slot -> string option
@@ -96,17 +96,17 @@ val set_text : draft -> slot:free_text_slot -> text:string -> draft
     a blank write, and an editor emptied by backspaces means unanswered. A
     draft for another ask than the slot's comes back unchanged. *)
 
-val skip : draft -> question:Masc.Tui_decode.ask_question -> draft
-val clear : draft -> question:Masc.Tui_decode.ask_question -> draft
+val skip : draft -> question:Masc.Tui_decode_asks.ask_question -> draft
+val clear : draft -> question:Masc.Tui_decode_asks.ask_question -> draft
 
 type readiness =
   | Ready of Yojson.Safe.t  (** the [answers] array, in the ask's order *)
-  | Missing of Masc.Tui_decode.ask_question list
+  | Missing of Masc.Tui_decode_asks.ask_question list
   | Not_open
       (** Already answered or withdrawn. A surface that offered submit here
           would be promising something the store settles by first write. *)
 
-val readiness : draft -> row:Masc.Tui_decode.ask_row -> readiness
+val readiness : draft -> row:Masc.Tui_decode_asks.ask_row -> readiness
 (** A draft belonging to another ask contributes nothing, so the answer is
     every question missing -- which is true, not a guess. *)
 
@@ -126,9 +126,9 @@ val gate_transition :
     that settles on first write and cannot be taken back. *)
 
 val reconcile_cursor :
-  current_rows:Masc.Tui_decode.ask_row list ->
+  current_rows:Masc.Tui_decode_asks.ask_row list ->
   cursor:int ->
-  next_rows:Masc.Tui_decode.ask_row list ->
+  next_rows:Masc.Tui_decode_asks.ask_row list ->
   int
 (** Follows the selected ask across a snapshot replacement, falling back to
     the bounded numeric cursor only when that ask is gone. *)

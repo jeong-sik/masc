@@ -42,79 +42,6 @@ type keeper = {
   k_updated_at : string;
 }
 
-val escape_invisible : string -> string
-(** Draw bidi controls, zero-width characters and tag characters (U+061C,
-    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
-    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
-    above it, since the tag block needs five digits. A terminal draws them as
-    nothing, so without this the glyphs an operator reads can differ from the
-    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
-    ASCII in tag characters is the same trick without the bidi). Two
-    exceptions are characters a reader can see the effect of, and each is
-    admitted by its neighbours rather than by a list: a zero-width joiner
-    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
-    three to seven tag characters in the lowercase-and-digit shape UTS #51
-    gives a subdivision code, then the terminator U+E007F -- which is kept
-    whole or escaped whole. Tag characters outside that shape are drawn even
-    behind a flag: the wider grammar spells sentences, and a flag is all a
-    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
-    boundary both route through here, so the rule lives in one place. *)
-
-val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
-    UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
-    external values form one printable terminal row. Call at the terminal
-    rendering boundary; decoded records intentionally retain their raw typed
-    value for non-terminal consumers. *)
-
-val sanitize_terminal_lines : string -> string
-(** [sanitize_terminal_lines text] keeps each LF of [text] as a line break and
-    puts every line between them through {!sanitize_terminal_text}, so each
-    other control byte -- a tab, a carriage return, an ESC -- is drawn as its
-    visible escape rather than sent to the terminal or folded into a space.
-    For a text read whole, where a reader must see what the bytes are. *)
-
-val preview_line : string -> string
-(** One row of a multi-line text for a list cell: each line break (LF, CR LF,
-    or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a
-    space, and everything else goes through {!sanitize_terminal_text}. Where
-    that function is the boundary for values that must not carry control
-    bytes, this one is for text whose breaks are content: a file's edit, a
-    tool call's arguments. *)
-
-val short_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
-    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
-    carries as a number. *)
-
-val short_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
-    converts to, then sanitized. A timestamp the codec cannot read keeps at most
-    its first 19 source bytes; slicing before the terminal boundary ensures a
-    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
-    [(never)]. *)
-
-val clock_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
-    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
-    as a number rather than an RFC 3339 string -- the pairing
-    {!short_timestamp_of_unix_for_terminal} already is for
-    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
-    string-input sibling this need not sanitize its own output. *)
-
-val clock_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
-    converts to - [Unix.localtime] on a screen, [Unix.gmtime] or a fixed
-    offset in a test - then sanitized. A timestamp the codec cannot read
-    keeps the conventional eight-byte slice, so the result is still one
-    clock-shaped row fragment; the final sanitizer makes arbitrary external
-    bytes safe even when the slice splits UTF-8. *)
-
-
 (** Where a goal stands with the completion judge.
 
     The phase says [executing] both for a goal nobody has reviewed and for one
@@ -782,80 +709,6 @@ type connector_snapshot = {
   cs_active : int;  (** How many the server counted as available. *)
 }
 
-(** Whether the non-blocking runtime-probe route served a cached reading or
-    scheduled background work. The wire vocabulary is closed so a producer
-    change cannot silently look fresh. *)
-type runtime_probe_refresh_state =
-  | Runtime_probe_fresh
-  | Runtime_probe_recent
-  | Runtime_probe_served_stale
-  | Runtime_probe_warming_up
-
-(** Fleet-level reachability verdict published by the runtime inventory
-    projection. This is provider metadata reachability, not a completion or
-    lane failover verdict. *)
-type runtime_probe_status =
-  | Runtime_probe_reachable
-  | Runtime_probe_no_http_runtimes
-  | Runtime_probe_degraded
-  | Runtime_probe_unreachable
-  | Runtime_probe_warming
-
-type runtime_provider_status =
-  | Runtime_provider_reachable
-  | Runtime_provider_missing_auth
-  | Runtime_provider_auth_failed
-  | Runtime_provider_network_error
-  | Runtime_provider_server_error
-  | Runtime_provider_endpoint_not_found
-  | Runtime_provider_http_error
-  | Runtime_provider_unknown_http_status
-  | Runtime_provider_skipped_cli
-  | Runtime_provider_skipped_native_auth
-  | Runtime_provider_invalid_endpoint
-  | Runtime_provider_invalid_execution_transport
-
-type runtime_probe_transport =
-  | Runtime_probe_http
-  | Runtime_probe_cli
-
-type runtime_provider_probe = {
-  rpp_runtime_id : string;
-  rpp_transport : runtime_probe_transport;
-  rpp_status : runtime_provider_status;
-  rpp_reachable : bool option;
-  rpp_http_status : int option;
-  rpp_latency_ms : float option;
-  rpp_error : string option;
-  rpp_checked_at : string;
-}
-
-type runtime_probe_summary = {
-  rpsu_runtimes : int;
-  rpsu_probed : int;
-  rpsu_reachable : int;
-  rpsu_failed : int;
-  rpsu_skipped : int;
-  rpsu_default_runtime_id : string option;
-}
-
-type runtime_probe_snapshot = {
-  rps_generated_at : string;
-  rps_refreshed_at_unix : float option;
-  rps_cache_ttl_sec : float;
-  rps_cache_age_sec : float option;
-  rps_cache_hit : bool;
-  rps_refresh_state : runtime_probe_refresh_state;
-  rps_status : runtime_probe_status;
-  rps_probe_ok : bool;
-  rps_checked_at : string;
-  rps_summary : runtime_probe_summary;
-  rps_providers : runtime_provider_probe list;
-  rps_errors : string list;
-  rps_observations : string list;
-  rps_limitations : string list;
-}
-
 (** One runtime row shared by the Keeper picker and Runtime surface.
     [ro_is_default] is derived from the document's top-level
     [default_runtime], not the row's independent binding flag. *)
@@ -863,6 +716,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -932,11 +789,11 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_probe : runtime_provider_probe option;
+  rcr_probe : Tui_decode_runtime_probe.runtime_provider_probe option;
 }
 
 type runtime_surface_snapshot = {
-  rss_probe : runtime_probe_snapshot option;
+  rss_probe : Tui_decode_runtime_probe.runtime_probe_snapshot option;
       (** Current or last-good optional observation. [None] means no provider
           probe has been read; resolved lane identity remains usable. *)
   rss_probe_error : string option;
@@ -946,25 +803,6 @@ type runtime_surface_snapshot = {
   rss_candidates : runtime_candidate_row list;
   rss_unassigned_probe_count : int;
 }
-
-val runtime_probe_refresh_state_to_string : runtime_probe_refresh_state -> string
-val runtime_probe_status_of_string :
-  string -> (runtime_probe_status, string) result
-(** The probe's own status, as [Server_dashboard_http_runtime_info] writes it:
-    the live summary picks between ["ok"], ["idle"], ["degraded"] and
-    ["unavailable"], the failure envelope writes ["unreachable"], and the
-    cold-start envelope writes ["warming_up"].
-
-    Exported so the contract can be pinned against that list. It drifted from
-    it once -- this read ["reachable"] and ["no_http_runtimes"], which nothing
-    writes, so every live response failed to decode and the Runtime surface
-    drew every candidate as unobserved. *)
-
-val runtime_probe_status_to_string : runtime_probe_status -> string
-(** The word the wire uses, so a badge drawn from this names the reading the
-    server named. Many-to-one: ["unavailable"] and ["unreachable"] read as one
-    status and write back as ["unreachable"]. *)
-val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
 type repository_status =
@@ -1227,87 +1065,6 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
-(** Whether a search has ever returned the fact. The count, the number of
-    distinct UTC days and the last clock come from one list of retrieval
-    times on the server, so they are all absent or all present; the decoder
-    rejects a row where they disagree. *)
-type memory_fact_retrieval =
-  | Never_retrieved
-  | Retrieved of { count : int; distinct_days : int; last_at : float }
-
-(** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): whether and how a search returned it,
-    how often it was retracted, and which dropped facts it continues. No
-    strength or score; the numbers are the record. *)
-type memory_fact_events = {
-  mfe_retrieval : memory_fact_retrieval;
-  mfe_retracted_count : int;
-  mfe_revised_from : string list;
-}
-
-(** A fact nothing has used yet: never retrieved, no retractions, no
-    predecessors. Fixtures start here. *)
-val no_memory_fact_events : memory_fact_events
-
-(** One remembered fact from a keeper's ordinary Memory OS store. The
-    category and origin are the server's closed taxonomy, carried as the
-    strings it spelled them in: this side renders and groups them by exact
-    equality and never classifies on its own. *)
-type memory_fact = {
-  mf_claim : string;
-  mf_category : Keeper_memory_os_types.category;
-  mf_origin : string;
-  mf_first_seen : float;
-  mf_last_seen : float;
-  mf_memory_id : string;
-  mf_events : memory_fact_events;
-}
-
-(** A fact bound to a file: it holds only while the file at [msf_path] still
-    hashes to [msf_sha256]. *)
-type memory_source_fact = {
-  msf_claim : string;
-  msf_first_seen : float;
-  msf_path : string;
-  msf_sha256 : string;
-}
-
-(** A source-bound fact the store dropped, and the server's reason string. *)
-type memory_invalidation = {
-  mi_source_path : string;
-  mi_invalidated_at : float;
-  mi_reason : string;
-}
-
-(** One store's reading. The server answers each store independently --
-    a read error, no snapshot yet, or the snapshot -- so one failing store
-    never blanks the other, and this side keeps the three states apart
-    instead of collapsing them into an empty list. *)
-type 'a memory_store_reading =
-  | Memory_store_read_error of string
-  | Memory_store_absent
-  | Memory_store_present of 'a
-
-type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
-  mos_facts : memory_fact list;
-}
-
-type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
-  mss_facts : memory_source_fact list;
-  mss_invalidations : memory_invalidation list;
-}
-
-type memory_fact_snapshot = {
-  mfs_keeper : string;
-  mfs_ordinary : memory_ordinary_store memory_store_reading;
-  mfs_source : memory_source_store memory_store_reading;
-  mfs_events_read_error : string option;
-}
-
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1420,15 +1177,6 @@ val keeper_phase_is_running : keeper_phase -> bool
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
 
-(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
-    Keeper's turns are failing or its fiber crashed; an alive one can take a
-    turn now or is between runs; a paused one was paused by an operator; a
-    stopped one was stopped or never started.
-    Exhaustive in the implementation, so a new phase has to choose a band. *)
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
-
-val keeper_phase_band : keeper_phase -> keeper_phase_band
-
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
     running, whether it has turned yet, and whether its turns are failing.
@@ -1456,8 +1204,14 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
+
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
+  kr_candle_balance_milli : string option;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -1481,10 +1235,12 @@ type keeper_runtime = {
     the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, configuration_errors, truncated, total)]. Explicit metadata errors
-    are retained per keeper without discarding readable rows. A row whose [status] or lifecycle [phase] is
+    [(rows, configuration_errors, truncated, total, candle)]. Explicit metadata errors
+    are retained per keeper without discarding readable rows. Malformed Candle
+    fields produce an [Error] observation and withdraw every balance while
+    keeping the readable Keeper lifecycle rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.
 
@@ -2593,13 +2349,6 @@ val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
 val decode_connector_snapshot :
   Yojson.Safe.t -> (connector_snapshot, string) result
 
-val decode_runtime_probe_snapshot :
-  Yojson.Safe.t -> (runtime_probe_snapshot, string) result
-(** Strict decoder for [GET /api/v1/dashboard/runtime-probe]. It accepts only
-    the producer's closed status vocabularies, requires the cache and provider
-    fields the Runtime surface draws, and rejects count/reachability/default
-    identity contradictions instead of repairing them locally. *)
-
 val decode_runtime_resolved_snapshot :
   Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
 (** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
@@ -2610,129 +2359,6 @@ val decode_runtime_resolved_snapshot :
 (** What each provider account said about its own usage windows, as
     [GET /api/v1/runtime/resolved] carries it. The server keeps these values
     as reported and derives no availability from them. *)
-type provider_usage_window_kind =
-  | Window_five_hour
-  | Window_seven_day
-  | Window_duration_minutes of int
-      (** A window length the server has no name for. *)
-  | Window_provider_label of string
-      (** A label the provider gave the window, kept as written. *)
-
-(** The usage in the unit the provider reported it in. Not clamped. *)
-type provider_usage_utilization =
-  | Utilization_fraction of float  (** [0.67] is 67 %. *)
-  | Utilization_percent of int
-
-(** What a window limits, as the server's decoder classified it from the
-    provider's own shape. *)
-type provider_usage_window_role =
-  | Role_gates_model_calls
-      (** Spending it refuses model calls on the account. *)
-  | Role_counts_other_use
-      (** It counts something a model call does not need, e.g. Z.AI's
-          TIME_LIMIT (MCP and tool calls). *)
-  | Role_unclassified_limit
-      (** A limit the server's decoder does not know. *)
-
-type provider_usage_window = {
-  puw_limit_id : string option;
-  puw_kind : provider_usage_window_kind;
-  puw_role : provider_usage_window_role;
-  puw_utilization : provider_usage_utilization;
-  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
-  puw_observed_at : float;  (** When the server heard this report. *)
-}
-
-(** A reported account holds at least one window; an account that has not
-    reported since the server started holds none. *)
-type provider_usage_state =
-  | Account_not_reported_since_start
-  | Account_reported of provider_usage_window * provider_usage_window list
-
-(** A provider table that bills to the account. *)
-type provider_usage_provider = {
-  pup_id : string;  (** The [providers.<id>] key. *)
-  pup_display_name : string;
-      (** The table's [display-name]; the id when the table names none. *)
-}
-
-type provider_usage_account = {
-  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
-  pua_scope_id : string;
-      (** The server's opaque id for the scope, the one its usage history
-          points carry as [scope_id]. Compared, never recomputed. *)
-  pua_providers : provider_usage_provider list;
-  pua_state : provider_usage_state;
-}
-
-type provider_usage_windows = {
-  puws_since : float;  (** Server process start: the table's first moment. *)
-  puws_accounts : provider_usage_account list;
-}
-
-type provider_usage_history_point = {
-  puhp_scope_id : string;
-  puhp_kind : string;
-  puhp_limit_id : string option;
-  puhp_unit : provider_usage_utilization;
-  puhp_observed_at : float;
-}
-
-type provider_usage_history = {
-  puh_days : int;
-  puh_generated_at : float;
-  puh_unreadable_reports : int;
-      (** Stored reports in the window the server could not read and left
-          out. A gap they leave is unknown, not a quiet day. *)
-  puh_points : provider_usage_history_point list;
-}
-
-val decode_provider_usage_history :
-  Yojson.Safe.t -> (provider_usage_history, string) result
-
-val decode_provider_usage_windows :
-  Yojson.Safe.t -> (provider_usage_windows, string) result
-(** Strict decoder for the [provider_usage_windows_since] and
-    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind], window [role] or utilization [unit] is an
-    error, as is a reported account without windows or an unreported one with
-    windows. *)
-
-type keeper_usage_coverage =
-  | Keeper_usage_complete
-  | Keeper_usage_partial of int
-  | Keeper_usage_failed of string
-
-type keeper_usage_row = {
-  kur_name : string;
-  kur_turn_samples : int;
-  kur_tokens : int option;
-  kur_cost_usd : float option;
-  kur_tokens_reported : int;
-  kur_tokens_missing : int;
-  kur_cost_reported : int;
-  kur_cost_missing : int;
-  kur_coverage : keeper_usage_coverage;
-}
-
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
-
-val decode_keeper_usage_window :
-  Yojson.Safe.t -> (keeper_usage_window, string) result
-(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero. *)
-
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -2742,7 +2368,7 @@ val decode_runtime_surface_snapshot :
     candidate absent from a stale probe remains [None]. *)
 
 val join_runtime_surface :
-  probe:runtime_probe_snapshot option ->
+  probe:Tui_decode_runtime_probe.runtime_probe_snapshot option ->
   probe_error:string option ->
   resolved:runtime_resolved_snapshot ->
   (runtime_surface_snapshot, string) result
@@ -2762,26 +2388,6 @@ val decode_memory_health_snapshot :
 (** Decode the fleet memory-health snapshot served at
     [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
     required: a keeper the server left out is invisible here, not defaulted. *)
-
-val decode_memory_fact_snapshot :
-  Yojson.Safe.t -> (memory_fact_snapshot, string) result
-(** Decode one keeper's fact listing served at
-    [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
-    field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store.
-    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
-    event history. *)
-
-val merge_keeper_memory_facts :
-  now:float ->
-  (string * (memory_fact_snapshot, string) result) list ->
-  memory_fact_snapshot * string option
-(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
-    "*"]). Each fact is tagged with its keeper. The second value names every
-    keeper that could not be read -- a failed load, or a store answering
-    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
-    when all were read. [Memory_store_absent] is a keeper with no memory yet,
-    not a failure. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result
@@ -3194,69 +2800,6 @@ type lsp_answer =
 
 val decode_lsp_answer : Yojson.Safe.t -> (lsp_answer, string) result
 
-(** {1 Questions a Keeper put to the operator}
-
-    Decoded from [GET /api/v1/keepers/asks]. The rows carry choice ids
-    alongside labels and the answer POST takes ids back, so a surface built on
-    these types never matches on label text: rewording a choice cannot orphan
-    an answer already recorded. *)
-
-type ask_choice = {
-  ac_id : string;  (** what an answer names; never the label *)
-  ac_label : string;
-  ac_description : string option;
-}
-
-type ask_mode =
-  | Ask_single
-  | Ask_multi
-
-type ask_free_text =
-  | Ask_free_text_allowed of { aft_hint : string option }
-  | Ask_choices_only
-
-type ask_question = {
-  aq_id : string;
-  aq_header : string;  (** two or three words; what a narrow row shows *)
-  aq_prompt : string;
-  aq_mode : ask_mode;
-  aq_free_text : ask_free_text;
-  aq_choices : ask_choice list;
-}
-
-type ask_resolution =
-  | Ask_open
-  | Ask_answered of {
-      aa_answered_at : float;
-      aa_question_ids : string list;
-    }
-  | Ask_withdrawn of {
-      aw_reason : string;
-      aw_withdrawn_at : float;
-    }
-
-type ask_row = {
-  ar_keeper : string;
-  ar_id : string;
-  ar_asked_at : float;
-  ar_context : string option;
-      (** why the Keeper is asking, in its own words. A row that hides this
-          reads as a decision with no stakes. *)
-  ar_questions : ask_question list;
-  ar_resolution : ask_resolution;
-}
-
-type asks_snapshot = {
-  asn_keeper : string option;
-  asn_open_count : int;  (** the server's count, not [List.length asn_rows] *)
-  asn_rows : ask_row list;
-}
-
-val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
-(** A row whose mode or free-text shape is unknown fails the decode rather
-    than defaulting: a surface that guessed would offer the operator a control
-    the server will refuse. *)
-
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
@@ -3324,58 +2867,8 @@ type verification_evidence =
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
 
-(** Strict hard-cut decoder for [/api/v1/skills/evidence]. The endpoint's
-    current projection is explicitly incomplete; missing or weakened coverage
-    fields are rejected instead of becoming zeroes in the terminal. *)
-type skill_evidence_status =
-  | Skill_evidence_observed
-  | Skill_evidence_not_observed_in_retained_coverage
-
-type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
-  | Skill_evidence_composition_unavailable
-
-type skill_evidence_coverage =
-  { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
-  ; sec_composition_unavailable : string list
-  ; sec_activation_scope : string
-  ; sec_activation_sessions_inspected : int
-  ; sec_activation_ledgers_loaded : int
-  ; sec_activation_gap_count : int
-  ; sec_activation_owner_gap_count : int
-  }
-
-type skill_evidence_owner_claim =
-  { seo_keeper : string
-  ; seo_source : string
-  }
-
-type skill_evidence_activation_item =
-  { sea_trace_id : string
-  ; sea_owner_status : string
-  ; sea_owner_claims : skill_evidence_owner_claim list
-  ; sea_owner_gap_count : int
-  ; sea_activation : Yojson.Safe.t
-  }
-
-type skill_evidence_activation =
-  | Skill_evidence_most_recent_observed of skill_evidence_activation_item
-  | Skill_evidence_most_recent_observed_timestamp_tie of
-      skill_evidence_activation_item list
-
-type skill_evidence =
-  { se_status : skill_evidence_status
-  ; se_activation : skill_evidence_activation option
-  ; se_composition : Yojson.Safe.t option
-  ; se_coverage : skill_evidence_coverage
-  }
-
-val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
-
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string
-val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option
 
 (** Decoded durable async inventory. Malformed counters are errors, never zero.
     The active inventory contains queued, running and cancelling requests only. *)

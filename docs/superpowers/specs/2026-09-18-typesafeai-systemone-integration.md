@@ -61,49 +61,40 @@ The JSON body has exactly three top-level fields:
 
 - `model`: the `model` of the `[typesafeai] destinations` entry being asked
   (`jev-latest` for the default destination);
-- `state`: one `singleton_judgment_request`;
+- `state`: `{ "signal": ... }`, the current signal only;
 - `questions`: one `relevance` choice question.
 
-`state.keeper_context` contains every field below, including the Keeper's full
-instructions rather than only an identifier:
-
-- `lane_keeper_name`, `keeper_record_id`, `keeper_runtime_uid`;
-- `instructions`;
-- `current_task_id`;
-- `mention_keeper_ids`.
-
-`state.items[0]` contains:
-
-- `candidate_id`;
-- `signal`, including `kind`, `post_id`, `author`, `title`, `content`,
-  `hearth`, `updated_at`, `reaction`, and, for a vote signal, `vote`;
-  `reaction` contains `target_type`, `target_id`, `user_id`, `emoji`, and
-  `reacted`, while `vote` contains `target_kind`, `target_id`,
-  `target_author`, `voter`, and `direction`;
-- the complete `post`: `id`, `author`, `title`, `body`, `post_kind`,
-  `visibility`, `created_at`, `updated_at`, `expires_at`, `votes_up`,
-  `votes_down`, `reply_count`, `pinned`, and any present `hearth`, `thread_id`,
-  `origin`, `classification_reason`, or arbitrary `meta` JSON;
-- every attached `comment`, each with `id`, `post_id`, `parent_id`, `author`,
-  `content`, `created_at`, `expires_at`, `votes_up`, and `votes_down`.
+`state.signal` contains `kind`, `post_id`, typed `comment_id`/`parent_id`,
+`author`, `title`, `content`, `hearth`, `updated_at`, `reaction`, and, for a
+vote signal, `vote`. `reaction` contains `target_type`, `target_id`,
+`user_id`, `emoji`, and `reacted`, while `vote` contains `target_kind`,
+`target_id`, `target_author`, `voter`, and `direction`. The post and comment
+snapshot is not sent.
 
 `questions.relevance` contains `type = choice`, an `instructions` string that
-names the Keeper, and a `criteria` object with the `relevant` and
-`not_relevant` labels and their descriptions.
+names the Keeper and lists its normalized `board_interests`, and a `criteria`
+object with the `relevant`, `not_relevant` and `uncertain` labels and their
+descriptions. Keeper instructions, record/runtime/task identity, and mention
+lists are not sent.
 
-This is the same singleton state used by the regular exact-output judgment
-path. Operators should enable the integration only when sending the credential
-and all Board, Keeper, and question data above to the configured endpoint is
-acceptable.
+The Keeper is named in the question rather than in the state. With the
+Keeper's role in the state (the exact-output lane's
+`singleton_judgment_request`), Jev answered relevant far more often; on
+2026-10-01 a blind judge reading the production rule sided with the
+question-only shape in 23 of the 26 cases where the two shapes disagreed.
+The same shape lets one request carry one question per Keeper for the same
+signal. Operators should enable the integration only when sending the
+credential and the Board signal and Keeper interests above to the configured
+endpoint is acceptable.
 
 ### 2.3 Transparent Fallback
 When opted in:
 1. MASC attempts the TypeSafe AI Jev evaluation first. The request is bounded by `Masc_http_client.default_request_timeout_sec`, the deadline the other outbound clients share.
-2. The kind of decision Jev picks decides what happens next. No confidence value is compared against a number; the confidence and probabilities Jev reported are written into the verdict's rationale for the record.
-   - `Relevant`: the verdict is returned. The durable judgment records a typed `Vendor_system_one` source containing the configured endpoint, the model named by the System One response, and the SHA-256 of the exact serialized request body. No catalog slot or AGENT_CORE receipt is claimed.
-   - `Not_relevant`: MASC runs the standard exact-output pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek) for the same candidate. A not-relevant verdict drops the post for that keeper, so it is the one Jev does not settle alone. Jev confirms only "send it to the keeper"; "don't send it" is always judged again by the LLM lane.
+2. Jev's decision and its confidence decide what happens next. The confidence and probabilities Jev reported are also written into the verdict's rationale for the record.
+   - `Relevant` or `Not_relevant` with confidence at or above `[typesafeai] board_attention_confidence_floor` (default 0.3, `Runtime_schema.default_typesafeai`): the verdict is returned. The durable judgment records a typed `Vendor_system_one` source containing the configured endpoint, the model named by the System One response, and the SHA-256 of the exact serialized request body. No catalog slot or AGENT_CORE receipt is claimed.
+   - Either decision below the floor, or an explicit `uncertain` answer: MASC runs the standard exact-output pipeline (`Exact_output.execute_flow_once`) for the same candidate. The floor follows TypeSafe's confidence-gated routing (https://docs.typesafe.ai/confidence.md); the comment on `default_typesafeai` records the measurement the default was set from.
 3. If the API call fails, times out, or the answer does not decode (including a choice the question did not offer), MASC runs the same exact-output pipeline.
-4. What Jev answered is recorded on the flow's existing terminal log entry (`board_attention exact_flow.execute terminal`), whose `details` carry `candidate_id`, `outcome` and a `jev` object. `jev.answer` is one of `off`, `cli_only`, `not_pending`, `relevant`, `not_relevant`, `failed`. A decoded Jev answer also carries `jev.provenance` with the same `endpoint`, response `model`, and `request_body_sha256` written to a durable relevant judgment. After `not_relevant`, `jev.rejudged` holds the decision the LLM lane returned (`null` when the flow returned none), so an overturned Jev answer is one entry with `answer = not_relevant` and `rejudged = relevant`. The judgment record itself names the lane that ultimately answered; the terminal entry preserves the prior Jev request when the LLM lane rejudges it.
+4. What Jev answered is recorded on the flow's existing terminal log entry (`board_attention exact_flow.execute terminal`), whose `details` carry `candidate_id`, `outcome` and a `jev` object. `jev.answer` is one of `off`, `cli_only`, `not_pending`, `relevant`, `not_relevant`, `low_confidence`, `uncertain`, `failed`. A decoded Jev answer also carries `jev.provenance` with the same `endpoint`, response `model`, and `request_body_sha256` written to a durable Jev judgment. After `low_confidence`, the entry also carries Jev's `decision`, `rationale` and `confidence`, and `jev.rejudged` holds the decision the LLM lane returned (`null` when the flow returned none), so an overturned Jev answer is one entry whose `decision` and `rejudged` differ. The judgment record itself names the lane that ultimately answered.
 
 ---
 

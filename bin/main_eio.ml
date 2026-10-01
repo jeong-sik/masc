@@ -1851,7 +1851,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     let loaded = try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
       with Env_config_core.Config_error message -> Error message in
     match loaded with
     | Error message ->
@@ -1860,7 +1860,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
         "invalid_configuration"
         "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
-      match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
+      match List.find_opt (fun (runtime : Runtime_instance.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
       | Some runtime ->
         (try
@@ -2253,18 +2253,18 @@ let runtime_probe_cmd_exit base_path runtime_id =
   match Runtime.load_list ~config_path:runtime_config_path with
   | Error failure ->
       Printf.eprintf "runtime-probe failed: %s\n"
-        (Runtime.to_diagnostic_text ~config_path:runtime_config_path failure);
+        (Runtime_config_error.to_diagnostic_text ~config_path:runtime_config_path failure);
       1
   | Ok (runtimes, _default, _, _, _) -> (
       match
         List.find_opt
-          (fun (rt : Runtime.t) -> String.equal rt.id runtime_id)
+          (fun (rt : Runtime_instance.t) -> String.equal rt.id runtime_id)
           runtimes
       with
       | None ->
           Printf.eprintf "runtime-probe: runtime %S is not configured\n" runtime_id;
           4
-      | Some (runtime : Runtime.t) -> (
+      | Some (runtime : Runtime_instance.t) -> (
           match runtime.execution with
           | Runtime_execution.Agent_core _ ->
               print_string "not-a-subscription\n";
@@ -3833,7 +3833,7 @@ let setup_validate_runtime base_path =
     try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
     with Env_config_core.Config_error message -> Error message
   in
   match loaded with
@@ -3845,7 +3845,7 @@ let setup_validate_runtime base_path =
       Option.bind
         (Runtime_verification.initial_runtime_id ~default_runtime_id:default.id
           ~assignments ~lanes ~keeper_name:"imp")
-        (fun id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
+        (fun id -> List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes) in
     match selected with
     | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
     | Some runtime ->

@@ -108,13 +108,13 @@ let same_day (a : Unix.tm) (b : Unix.tm) =
   a.Unix.tm_year = b.Unix.tm_year && a.Unix.tm_yday = b.Unix.tm_yday
 ;;
 
-(* [Tui_decode.clock_timestamp_for_terminal] answers HH:MM:SS and this strip
+(* [Masc.Tui_terminal_text.clock_timestamp_for_terminal] answers HH:MM:SS and this strip
    has one line to spend, so the seconds go. A wake the codec cannot read
    keeps its own text: a row that says nothing readable is still a row that
    says something is scheduled. *)
 let hour_and_minute ~now ~localtime row =
   match Time_codec.parse_rfc3339_opt row.at_iso with
-  | None -> Masc.Tui_decode.short_timestamp_for_terminal ~localtime row.at_iso
+  | None -> Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime row.at_iso
   | Some at ->
     let tm = localtime at in
     let clock = Printf.sprintf "%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min in
@@ -288,7 +288,7 @@ let overlay ~now ~localtime ~cols t =
        made the row stutter the way the Gate row did before #35436. *)
     (* Row-budget queries also project the agenda. Only the overlay displays
        read failures, so sanitize here, before measuring or clipping text. *)
-    let reason = Masc.Tui_decode.sanitize_terminal_text reason in
+    let reason = Masc.Tui_terminal_text.sanitize_terminal_text reason in
     { tone = Failed; text = two_column ~cols reason ""; goes_to = Nowhere }
   in
   (* An empty section is an answer only once its list was read. Before that,

@@ -226,9 +226,8 @@ val status_readable : Masc_tui_terminal_palette.t option -> status -> string
     the reply -- the plain code goes out, which is what every row drew before
     this existed. *)
 
-(** Test-only environment and projection fixtures. The R12 check in
-    [scripts/check-ssot.sh] is the repository production boundary: code under
-    [bin/] and [lib/] may not name this module outside its owner
+(** Test-only environment and projection fixtures. Code under [bin/] and
+    [lib/] may not name this module outside its owner
     implementation/interface. Production callers use the semantic tokens
     below. *)
 module For_testing : sig

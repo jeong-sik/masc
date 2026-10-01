@@ -76,20 +76,16 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
-
-let keeper_phase_band : keeper_phase -> keeper_phase_band = function
-  | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
-  | Keeper_state_machine.Running | Keeper_state_machine.Draining
-  | Keeper_state_machine.Restarting ->
-      Phase_alive
-  | Keeper_state_machine.Paused -> Phase_paused
-  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
-
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
 
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
+  kr_candle_balance_milli : string option;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -553,385 +549,6 @@ let active_tasks_of_domain ?goals_for_task tasks =
 let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
-
-(* #38445: a terminal draws bidi controls and zero-width characters as
-   nothing, so the glyphs an operator reads can differ from the bytes the
-   approval hash covers (Trojan Source, CVE-2021-42574). Both terminal
-   sanitizers route those codepoints through here, so the rule lives in one
-   place: the codepoint is drawn as its own escape text, never dropped. *)
-let is_invisible_codepoint code =
-  (* Unicode's own list, not a hand-kept one: Default_Ignorable_Code_Point is
-     every scalar a renderer may draw as nothing -- the bidi controls, the
-     zero-widths, the word joiner family (U+2060-U+2064), the Hangul fillers
-     (U+115F, U+1160, U+3164, U+FFA0), the soft hyphen, the variation
-     selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) and the tag block. A list
-     kept by hand here missed every one of those after the tag block. *)
-  Uchar.is_valid code && Uucp.Gen.is_default_ignorable (Uchar.of_int code)
-;;
-
-let zero_width_joiner = 0x200D
-let variation_selector_15 = 0xFE0E
-let variation_selector_16 = 0xFE0F
-
-(* The one ZWJ that is not hiding anything: the one holding an emoji
-   together. [Masc_tui_message_layout] already reads it that way when it
-   measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
-   drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
-   input line on recall. UAX #29 GB11 is the line: a ZWJ between two
-   pictographs joins them and stays; every other ZWJ joins nothing a reader
-   can see, so it is drawn as its escape with the rest of the invisibles.
-   The scalars below sit inside a cluster without ending it -- the two
-   presentation selectors and the skin tones -- so a joined ZWJ is still
-   recognised after them (🧑🏽‍💻). *)
-let continues_pictograph scalar =
-  let code = Uchar.to_int scalar in
-  code = variation_selector_15
-  || code = variation_selector_16
-  || Uucp.Emoji.is_emoji_modifier scalar
-
-let scalar_at text index =
-  if index >= String.length text
-  then None
-  else (
-    let decoded = String.get_utf_8_uchar text index in
-    if Uchar.utf_decode_is_valid decoded
-    then Some (Uchar.utf_decode_uchar decoded)
-    else None)
-
-let opens_pictograph text index =
-  match scalar_at text index with
-  | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
-  | None -> false
-
-(* The tags that are not hiding anything: the ones spelling a subregion flag.
-   U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
-   it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
-   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
-   and the exemption here is deliberately narrower than that block: only the
-   shape UTS #51 gives a subdivision, three to seven tag characters drawn
-   from lowercase letters and digits. The wider grammar would carry a
-   sentence -- tag space and tag punctuation spell one -- and a reader would
-   see a single flag where the hash covers words. The sequence is admitted
-   whole or not at all: a run that never reaches the terminator, or one
-   shaped like anything but a subdivision, is loose text spelled in invisible
-   characters, and the flag in front of it stays visible. *)
-let tag_small_letter_first = 0xE0061
-let tag_small_letter_last = 0xE007A
-let tag_digit_first = 0xE0030
-let tag_digit_last = 0xE0039
-let tag_spec_min = 3
-let tag_spec_max = 7
-let cancel_tag = 0xE007F
-let waving_black_flag = 0x1F3F4
-
-let is_tag_spec code =
-  (code >= tag_small_letter_first && code <= tag_small_letter_last)
-  || (code >= tag_digit_first && code <= tag_digit_last)
-
-(* Bytes of a complete subdivision sequence starting at [index] -- the
-   position just past the flag -- not counting the flag itself. [None] when
-   the run is too short or too long for a subdivision, meets a tag character
-   outside the lowercase-and-digit shape, or ends without the terminator. *)
-let tag_sequence_bytes text index =
-  let length = String.length text in
-  let rec scan position ~spec_count =
-    if position >= length
-    then None
-    else (
-      let decoded = String.get_utf_8_uchar text position in
-      if not (Uchar.utf_decode_is_valid decoded)
-      then None
-      else (
-        let step = Uchar.utf_decode_length decoded in
-        let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
-        if code = cancel_tag
-        then (
-          if spec_count >= tag_spec_min && spec_count <= tag_spec_max
-          then Some (position + step - index)
-          else None)
-        else if is_tag_spec code && spec_count < tag_spec_max
-        then scan (position + step) ~spec_count:(spec_count + 1)
-        else None))
-  in
-  scan index ~spec_count:0
-
-(* [\uXXXX] has room for the basic plane only and the tag block needs five
-   digits (U+E0061), so a wider fixed-width form of the same family carries
-   them: the reader can still see where one escape ends and the next begins. *)
-let escape_text code =
-  if code <= 0xFFFF
-  then Printf.sprintf "\\u%04X" code
-  else Printf.sprintf "\\U%08X" code
-
-(* No ASCII scalar is Default_Ignorable, a variation selector, a joiner, an
-   emoji modifier, a pictograph or the flag that opens a tag sequence, so
-   the walk below copies an all-ASCII text unchanged. A frame sanitises
-   every cell it draws, and most cells -- names, ids, counts, key hints --
-   are only ASCII, so such a text is returned as it came. *)
-let escape_invisible text =
-  if String.for_all (fun byte -> byte < '\x80') text then text
-  else
-  let output = Buffer.create (String.length text) in
-  let length = String.length text in
-  (* [base]: the scalar before this one, when it was drawn and is not itself
-     ignorable. The one selector kept is VS15/VS16 right after a text-default
-     emoji (Emoji, not Emoji_Presentation: U+2764, U+2642, a keycap digit) --
-     the pairs emoji-variation-sequences.txt registers, and the ones joined
-     emoji use. Every other selector is drawn as its escape: after a plain
-     letter, behind another selector, with no base, and also after an
-     ideograph, because this boundary cannot tell a registered IVD or
-     StandardizedVariants pair from an unregistered one, and an unregistered
-     pair displays as the bare base (Unicode FAQ, unsupported characters). *)
-  let keeps_selector ~base scalar =
-    let code = Uchar.to_int scalar in
-    (code = variation_selector_15 || code = variation_selector_16)
-    && Uucp.Emoji.is_emoji base
-    && not (Uucp.Emoji.is_emoji_presentation base)
-  in
-  let rec walk index ~after_pictograph ~base =
-    if index < length
-    then (
-      let decoded = String.get_utf_8_uchar text index in
-      let step = Uchar.utf_decode_length decoded in
-      let scalar = Uchar.utf_decode_uchar decoded in
-      let valid = Uchar.utf_decode_is_valid decoded in
-      let code = Uchar.to_int scalar in
-      let flag_tags =
-        if valid && code = waving_black_flag
-        then tag_sequence_bytes text (index + step)
-        else None
-      in
-      match flag_tags with
-      | Some tail ->
-        Buffer.add_substring output text index (step + tail);
-        walk (index + step + tail) ~after_pictograph:true ~base:None
-      | None ->
-        let joins_two_pictographs =
-          valid
-          && code = zero_width_joiner
-          && after_pictograph
-          && opens_pictograph text (index + step)
-        in
-        let selects_its_base =
-          valid
-          && Uucp.Gen.is_variation_selector scalar
-          && (match base with
-              | Some base -> keeps_selector ~base scalar
-              | None -> false)
-        in
-        let escaped =
-          valid
-          && is_invisible_codepoint code
-          && not (joins_two_pictographs || selects_its_base)
-        in
-        if escaped
-        then Buffer.add_string output (escape_text code)
-        else Buffer.add_substring output text index step;
-        let base =
-          if valid && (not escaped) && not (is_invisible_codepoint code)
-          then Some scalar
-          else None
-        in
-        let after_pictograph =
-          if not valid
-          then false
-          else if Uucp.Emoji.is_extended_pictographic scalar
-          then true
-          (* Only a joiner that actually joined carries the state: an escaped
-             one has been written out as text, so what follows it no longer
-             sits inside an emoji and a second joiner cannot ride through on
-             it. *)
-          else if continues_pictograph scalar || joins_two_pictographs
-          then after_pictograph
-          else false
-        in
-        walk (index + step) ~after_pictograph ~base)
-  in
-  walk 0 ~after_pictograph:false ~base:None;
-  Buffer.contents output
-;;
-
-(* Printable ASCII (0x20..0x7E) is the one input both passes below copy
-   byte for byte: no control to escape, no multi-byte sequence to check and,
-   through [escape_invisible], no scalar a terminal draws as nothing. It is
-   returned as it came; DEL and every other control still take the escape
-   table. *)
-let sanitize_terminal_text text =
-  if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
-  else
-  let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
-  let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
-  let output = Buffer.create (String.length text) in
-  let byte_at index = Char.code text.[index] in
-  let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
-  let valid_utf8_length index =
-    let remaining = String.length text - index in
-    let first = byte_at index in
-    if first >= 0xC2 && first <= 0xDF && remaining >= 2
-       && is_continuation (byte_at (index + 1))
-    then Some 2
-    else if first = 0xE0 && remaining >= 3
-            && byte_at (index + 1) >= 0xA0
-            && byte_at (index + 1) <= 0xBF
-            && is_continuation (byte_at (index + 2))
-    then Some 3
-    else if first >= 0xE1 && first <= 0xEC && remaining >= 3
-            && is_continuation (byte_at (index + 1))
-            && is_continuation (byte_at (index + 2))
-    then Some 3
-    else if first = 0xED && remaining >= 3
-            && byte_at (index + 1) >= 0x80
-            && byte_at (index + 1) <= 0x9F
-            && is_continuation (byte_at (index + 2))
-    then Some 3
-    else if first >= 0xEE && first <= 0xEF && remaining >= 3
-            && is_continuation (byte_at (index + 1))
-            && is_continuation (byte_at (index + 2))
-    then Some 3
-    else if first = 0xF0 && remaining >= 4
-            && byte_at (index + 1) >= 0x90
-            && byte_at (index + 1) <= 0xBF
-            && is_continuation (byte_at (index + 2))
-            && is_continuation (byte_at (index + 3))
-    then Some 4
-    else if first >= 0xF1 && first <= 0xF3 && remaining >= 4
-            && is_continuation (byte_at (index + 1))
-            && is_continuation (byte_at (index + 2))
-            && is_continuation (byte_at (index + 3))
-    then Some 4
-    else if first = 0xF4 && remaining >= 4
-            && byte_at (index + 1) >= 0x80
-            && byte_at (index + 1) <= 0x8F
-            && is_continuation (byte_at (index + 2))
-            && is_continuation (byte_at (index + 3))
-    then Some 4
-    else None
-  in
-  let rec append index =
-    if index < String.length text
-    then (
-      let byte = Char.code text.[index] in
-      if
-        byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
-      then (
-        Buffer.add_string output (escaped_byte byte);
-        append (index + 1))
-      else if byte < 0x80
-      then (
-        Buffer.add_char output text.[index];
-        append (index + 1))
-      else if
-        byte = 0xC2
-        && index + 1 < String.length text
-        && let next = Char.code text.[index + 1] in
-           next >= 0x80 && next <= 0x9F
-      then (
-        Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
-        append (index + 2))
-      else
-        match valid_utf8_length index with
-        | Some length ->
-          Buffer.add_substring output text index length;
-          append (index + length)
-        | None ->
-          Buffer.add_string output (escaped_byte byte);
-          append (index + 1))
-  in
-  append 0;
-  escape_invisible (Buffer.contents output)
-;;
-
-(* A text whose line breaks are its own shape, read whole rather than as one
-   row: each LF stays a break and every line goes through the same escape
-   table as a single row, so a tab, a carriage return or an ESC is drawn as
-   its visible [\xNN] and never reaches the terminal as a control byte. *)
-let sanitize_terminal_lines text =
-  String.split_on_char '\n' text
-  |> List.map sanitize_terminal_text
-  |> String.concat "\n"
-;;
-
-(* One row of a text that has rows. The terminal boundary escapes control
-   bytes because an external value may carry them by mistake or on purpose;
-   a file's newline is neither, it is the text's own shape, and a list cell
-   that prints it as [\x0A] reads as damage. So a break becomes a one-cell
-   return mark, a tab a space, and the rest goes through the same escape as
-   every other external value. The mark is neutral-width (U+23CE), so a
-   preview grows by one cell per line, never by six. *)
-let preview_line text =
-  let return_mark = "\xe2\x8f\x8e" in
-  let output = Buffer.create (String.length text) in
-  let length = String.length text in
-  let rec walk index =
-    if index < length
-    then (
-      match text.[index] with
-      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
-        Buffer.add_string output return_mark;
-        walk (index + 2)
-      | '\n' | '\r' ->
-        Buffer.add_string output return_mark;
-        walk (index + 1)
-      | '\t' ->
-        Buffer.add_char output ' ';
-        walk (index + 1)
-      | byte ->
-        Buffer.add_char output byte;
-        walk (index + 1))
-  in
-  walk 0;
-  sanitize_terminal_text (Buffer.contents output)
-;;
-
-let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
-  let tm = localtime unix_seconds in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
-
-(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
-   carries as a number rather than an RFC 3339 string -- the same pairing
-   {!short_timestamp_of_unix_for_terminal} already is for
-   {!short_timestamp_for_terminal}. *)
-let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
-  let tm = localtime unix_seconds in
-  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-;;
-
-(* The date and time beside a record, in the zone the operator's terminal is
-   in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
-   kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
-   under a header clock in local time read as the local hour it was not. A
-   timestamp the codec cannot read keeps the slice, for the same reason
-   [clock_timestamp_for_terminal] does. *)
-let short_timestamp_for_terminal ~localtime text =
-  sanitize_terminal_text
-    (match Time_codec.parse_rfc3339_opt text with
-     | Some unix_seconds -> short_timestamp_of_unix_for_terminal ~localtime unix_seconds
-     | None ->
-         if String.length text > 19 then String.sub text 0 19
-         else if String.length text = 0 then "(never)"
-         else text)
-;;
-
-(* The clock beside a row, in the zone the operator's terminal is in. The
-   server writes RFC 3339 on the UTC timeline; slicing HH:MM:SS straight out
-   of that string put a UTC clock on every log row under a header that showed
-   local time, nine hours apart in Seoul. [localtime] is the conversion the
-   caller chooses -- the terminal's own zone on a screen, a fixed one in a
-   test -- so this stays a function of its inputs. A timestamp the codec
-   cannot read keeps the old slice: the byte positions are still where a
-   clock would be, and the sanitizer still makes them safe to draw. *)
-let clock_timestamp_for_terminal ~localtime text =
-  sanitize_terminal_text
-    (match Time_codec.parse_rfc3339_opt text with
-     | Some unix_seconds ->
-         let tm = localtime unix_seconds in
-         Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
-           tm.Unix.tm_sec
-     | None -> if String.length text >= 19 then String.sub text 11 8 else text)
-;;
 
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
@@ -1436,8 +1053,8 @@ let json_error_sentence body =
 let raw_error_body_head_bytes = 240
 
 let http_transport_error ~verb ~url ~detail =
-  Printf.sprintf "%s failed: %s (%s)" (sanitize_terminal_text verb)
-    (sanitize_terminal_text detail) (sanitize_terminal_text url)
+  Printf.sprintf "%s failed: %s (%s)" (Tui_terminal_text.sanitize_terminal_text verb)
+    (Tui_terminal_text.sanitize_terminal_text detail) (Tui_terminal_text.sanitize_terminal_text url)
 
 let http_status_error ~status_code ~body =
   let body = String.trim body in
@@ -1454,7 +1071,7 @@ let http_status_error ~status_code ~body =
           (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code (sanitize_terminal_text detail)
+  Printf.sprintf "HTTP %d: %s" status_code (Tui_terminal_text.sanitize_terminal_text detail)
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =
@@ -2316,74 +1933,6 @@ type connector_snapshot = {
   cs_active : int;
 }
 
-type runtime_probe_refresh_state =
-  | Runtime_probe_fresh
-  | Runtime_probe_recent
-  | Runtime_probe_served_stale
-  | Runtime_probe_warming_up
-
-type runtime_probe_status =
-  | Runtime_probe_reachable
-  | Runtime_probe_no_http_runtimes
-  | Runtime_probe_degraded
-  | Runtime_probe_unreachable
-  | Runtime_probe_warming
-
-type runtime_provider_status =
-  | Runtime_provider_reachable
-  | Runtime_provider_missing_auth
-  | Runtime_provider_auth_failed
-  | Runtime_provider_network_error
-  | Runtime_provider_server_error
-  | Runtime_provider_endpoint_not_found
-  | Runtime_provider_http_error
-  | Runtime_provider_unknown_http_status
-  | Runtime_provider_skipped_cli
-  | Runtime_provider_skipped_native_auth
-  | Runtime_provider_invalid_endpoint
-  | Runtime_provider_invalid_execution_transport
-
-type runtime_probe_transport =
-  | Runtime_probe_http
-  | Runtime_probe_cli
-
-type runtime_provider_probe = {
-  rpp_runtime_id : string;
-  rpp_transport : runtime_probe_transport;
-  rpp_status : runtime_provider_status;
-  rpp_reachable : bool option;
-  rpp_http_status : int option;
-  rpp_latency_ms : float option;
-  rpp_error : string option;
-  rpp_checked_at : string;
-}
-
-type runtime_probe_summary = {
-  rpsu_runtimes : int;
-  rpsu_probed : int;
-  rpsu_reachable : int;
-  rpsu_failed : int;
-  rpsu_skipped : int;
-  rpsu_default_runtime_id : string option;
-}
-
-type runtime_probe_snapshot = {
-  rps_generated_at : string;
-  rps_refreshed_at_unix : float option;
-  rps_cache_ttl_sec : float;
-  rps_cache_age_sec : float option;
-  rps_cache_hit : bool;
-  rps_refresh_state : runtime_probe_refresh_state;
-  rps_status : runtime_probe_status;
-  rps_probe_ok : bool;
-  rps_checked_at : string;
-  rps_summary : runtime_probe_summary;
-  rps_providers : runtime_provider_probe list;
-  rps_errors : string list;
-  rps_observations : string list;
-  rps_limitations : string list;
-}
-
 (* One decoder-owned resolved runtime row shared by the Keeper picker and the
    Runtime surface. [ro_is_default] comes from the document's top-level
    [default_runtime], not the row's independent binding flag. *)
@@ -2391,6 +1940,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -2435,11 +1988,11 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_probe : runtime_provider_probe option;
+  rcr_probe : Tui_decode_runtime_probe.runtime_provider_probe option;
 }
 
 type runtime_surface_snapshot = {
-  rss_probe : runtime_probe_snapshot option;
+  rss_probe : Tui_decode_runtime_probe.runtime_probe_snapshot option;
   rss_probe_error : string option;
   rss_resolved : runtime_resolved_snapshot;
   rss_candidates : runtime_candidate_row list;
@@ -2666,70 +2219,6 @@ type memory_health_snapshot = {
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;
-}
-
-type memory_fact_retrieval =
-  | Never_retrieved
-  | Retrieved of { count : int; distinct_days : int; last_at : float }
-
-type memory_fact_events = {
-  mfe_retrieval : memory_fact_retrieval;
-  mfe_retracted_count : int;
-  mfe_revised_from : string list;
-}
-
-let no_memory_fact_events =
-  { mfe_retrieval = Never_retrieved
-  ; mfe_retracted_count = 0
-  ; mfe_revised_from = []
-  }
-
-type memory_fact = {
-  mf_claim : string;
-  mf_category : Keeper_memory_os_types.category;
-  mf_origin : string;
-  mf_first_seen : float;
-  mf_last_seen : float;
-  mf_memory_id : string;
-  mf_events : memory_fact_events;
-}
-
-type memory_source_fact = {
-  msf_claim : string;
-  msf_first_seen : float;
-  msf_path : string;
-  msf_sha256 : string;
-}
-
-type memory_invalidation = {
-  mi_source_path : string;
-  mi_invalidated_at : float;
-  mi_reason : string;
-}
-
-type 'a memory_store_reading =
-  | Memory_store_read_error of string
-  | Memory_store_absent
-  | Memory_store_present of 'a
-
-type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
-  mos_facts : memory_fact list;
-}
-
-type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
-  mss_facts : memory_source_fact list;
-  mss_invalidations : memory_invalidation list;
-}
-
-type memory_fact_snapshot = {
-  mfs_keeper : string;
-  mfs_ordinary : memory_ordinary_store memory_store_reading;
-  mfs_source : memory_source_store memory_store_reading;
-  mfs_events_read_error : string option;
 }
 
 type harness_verdict = {
@@ -4154,358 +3643,14 @@ let decode_connector_snapshot json =
   let* cs_active = required_int_field json "active_count" in
   Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
-let runtime_probe_refresh_state_to_string = function
-  | Runtime_probe_fresh -> "fresh"
-  | Runtime_probe_recent -> "recent"
-  | Runtime_probe_served_stale -> "served_stale"
-  | Runtime_probe_warming_up -> "warming_up"
-
-(* The word the wire uses, so the badge shows what the server said. This
-   spelled two of them "reachable" and "no_http_runtimes" while the producer
-   wrote "ok" and "idle", and the only caller is the status badge -- so the
-   screen would have named a reading the system never used. One vocabulary,
-   read and written. *)
-let runtime_probe_status_to_string = function
-  | Runtime_probe_reachable -> "ok"
-  | Runtime_probe_no_http_runtimes -> "idle"
-  | Runtime_probe_degraded -> "degraded"
-  (* The producer writes both "unavailable" and "unreachable" for this
-     reading; one of them has to be the one written back. *)
-  | Runtime_probe_unreachable -> "unreachable"
-  | Runtime_probe_warming -> "warming_up"
-
-let runtime_provider_status_to_string = function
-  | Runtime_provider_reachable -> "reachable"
-  | Runtime_provider_missing_auth -> "missing_auth"
-  | Runtime_provider_auth_failed -> "auth_failed"
-  | Runtime_provider_network_error -> "network_error"
-  | Runtime_provider_server_error -> "server_error"
-  | Runtime_provider_endpoint_not_found -> "endpoint_not_found"
-  | Runtime_provider_http_error -> "http_error"
-  | Runtime_provider_unknown_http_status -> "unknown_http_status"
-  | Runtime_provider_skipped_cli -> "skipped_cli"
-  | Runtime_provider_skipped_native_auth -> "skipped_native_auth"
-  | Runtime_provider_invalid_endpoint -> "invalid_endpoint"
-  | Runtime_provider_invalid_execution_transport ->
-      "invalid_execution_transport"
-
-let runtime_probe_refresh_state_of_string = function
-  | "fresh" -> Ok Runtime_probe_fresh
-  | "recent" -> Ok Runtime_probe_recent
-  | "served_stale" -> Ok Runtime_probe_served_stale
-  | "warming_up" -> Ok Runtime_probe_warming_up
-  | value -> Error (Printf.sprintf "unknown runtime probe refresh_state %S" value)
-
-(* The words the producer writes, not a list that grew beside it.
-
-   [Server_dashboard_http_runtime_info] fills this field from three places:
-   the live summary picks between [Health_status.Ok], [Idle], [Degraded] and
-   [Unavailable]; the failure envelope writes ["unreachable"]; the cold-start
-   envelope writes ["warming_up"]. Those six are the whole vocabulary.
-
-   This list had ["reachable"] and ["no_http_runtimes"] instead of ["ok"] and
-   ["idle"], and nothing has written those two -- searched for the literals
-   across lib/ and bin/. So every response failed the decode and the surface
-   drew "probe unavailable / read failed" with all twenty-nine candidates
-   reading "unobserved". A dead column that looks like an observation nobody
-   made is worse than an empty one: it answers the question wrongly instead
-   of declining to.
-
-   The variant names stay: they say what the reading means, and the meaning
-   did not drift -- only the spelling the wire uses. *)
-let runtime_probe_status_of_string = function
-  | "ok" -> Ok Runtime_probe_reachable
-  | "idle" -> Ok Runtime_probe_no_http_runtimes
-  | "degraded" -> Ok Runtime_probe_degraded
-  (* Two spellings for one reading, both live: the summary path writes
-     ["unavailable"] and the failure envelope writes ["unreachable"]. *)
-  | "unavailable" | "unreachable" -> Ok Runtime_probe_unreachable
-  | "warming_up" -> Ok Runtime_probe_warming
-  | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
-
-let runtime_provider_status_of_string = function
-  | "reachable" -> Ok Runtime_provider_reachable
-  | "missing_auth" -> Ok Runtime_provider_missing_auth
-  | "auth_failed" -> Ok Runtime_provider_auth_failed
-  | "network_error" -> Ok Runtime_provider_network_error
-  | "server_error" -> Ok Runtime_provider_server_error
-  | "endpoint_not_found" -> Ok Runtime_provider_endpoint_not_found
-  | "http_error" -> Ok Runtime_provider_http_error
-  | "unknown_http_status" -> Ok Runtime_provider_unknown_http_status
-  | "skipped_cli" -> Ok Runtime_provider_skipped_cli
-  | "skipped_native_auth" -> Ok Runtime_provider_skipped_native_auth
-  | "invalid_endpoint" -> Ok Runtime_provider_invalid_endpoint
-  | "invalid_execution_transport" ->
-      Ok Runtime_provider_invalid_execution_transport
-  | value -> Error (Printf.sprintf "unknown runtime provider status %S" value)
-
-let runtime_probe_transport_of_string = function
-  | "http" -> Ok Runtime_probe_http
-  | "cli" -> Ok Runtime_probe_cli
-  | value -> Error (Printf.sprintf "unknown runtime probe transport %S" value)
-
-let decode_runtime_provider_probe json =
-  let* rpp_runtime_id = required_string_field json "runtime_id" in
-  let* transport = required_string_field json "transport" in
-  let* rpp_transport = runtime_probe_transport_of_string transport in
-  let* status = required_string_field json "status" in
-  let* rpp_status = runtime_provider_status_of_string status in
-  let* rpp_reachable = required_nullable_bool_field json "reachable" in
-  let* rpp_http_status = required_nullable_int_field json "http_status" in
-  let* rpp_latency_ms = required_nullable_float_field json "latency_ms" in
-  let* rpp_error = required_nullable_string_field json "error" in
-  let* rpp_checked_at = required_string_field json "checked_at" in
-  let expected_reachable =
-    match rpp_status with
-    | Runtime_provider_reachable -> Some true
-    | Runtime_provider_skipped_cli | Runtime_provider_skipped_native_auth -> None
-    | Runtime_provider_missing_auth
-    | Runtime_provider_auth_failed
-    | Runtime_provider_network_error
-    | Runtime_provider_server_error
-    | Runtime_provider_endpoint_not_found
-    | Runtime_provider_http_error
-    | Runtime_provider_unknown_http_status
-    | Runtime_provider_invalid_endpoint
-    | Runtime_provider_invalid_execution_transport -> Some false
-  in
-  let* () =
-    if rpp_reachable = expected_reachable then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime %S status %S disagrees with reachable"
-           rpp_runtime_id status)
-  in
-  let* () =
-    match rpp_transport, rpp_status with
-    | Runtime_probe_cli, Runtime_provider_skipped_cli
-    | Runtime_probe_http,
-      ( Runtime_provider_reachable
-      | Runtime_provider_skipped_native_auth
-      | Runtime_provider_missing_auth
-      | Runtime_provider_auth_failed
-      | Runtime_provider_network_error
-      | Runtime_provider_server_error
-      | Runtime_provider_endpoint_not_found
-      | Runtime_provider_http_error
-      | Runtime_provider_unknown_http_status
-      | Runtime_provider_invalid_endpoint
-      | Runtime_provider_invalid_execution_transport ) -> Ok ()
-    | Runtime_probe_cli, _ ->
-        Error (Printf.sprintf "CLI runtime %S was not skipped" rpp_runtime_id)
-    | Runtime_probe_http, Runtime_provider_skipped_cli ->
-        Error (Printf.sprintf "HTTP runtime %S was marked skipped_cli" rpp_runtime_id)
-  in
-  let nonnegative name = function
-    | Some value when value < 0 ->
-        Error (Printf.sprintf "runtime %S has negative %s" rpp_runtime_id name)
-    | Some _ | None -> Ok ()
-  in
-  let* () = nonnegative "http_status" rpp_http_status in
-  let* () =
-    match rpp_latency_ms with
-    | Some value when value < 0.0 ->
-        Error (Printf.sprintf "runtime %S has negative latency_ms" rpp_runtime_id)
-    | Some _ | None -> Ok ()
-  in
-  Ok
-    { rpp_runtime_id
-    ; rpp_transport
-    ; rpp_status
-    ; rpp_reachable
-    ; rpp_http_status
-    ; rpp_latency_ms
-    ; rpp_error
-    ; rpp_checked_at
-    }
-
-let decode_runtime_probe_summary json =
-  let* rpsu_runtimes = required_int_field json "runtimes" in
-  let* rpsu_probed = required_int_field json "probed" in
-  let* rpsu_reachable = required_int_field json "reachable" in
-  let* rpsu_failed = required_int_field json "failed" in
-  let* rpsu_skipped = required_int_field json "skipped" in
-  let* rpsu_default_runtime_id =
-    required_nullable_string_field json "default_runtime_id"
-  in
-  let counts =
-    [ "runtimes", rpsu_runtimes
-    ; "probed", rpsu_probed
-    ; "reachable", rpsu_reachable
-    ; "failed", rpsu_failed
-    ; "skipped", rpsu_skipped
-    ]
-  in
-  match List.find_opt (fun (_, value) -> value < 0) counts with
-  | Some (name, _) -> Error (Printf.sprintf "runtime probe summary %s is negative" name)
-  | None ->
-      Ok
-        { rpsu_runtimes
-        ; rpsu_probed
-        ; rpsu_reachable
-        ; rpsu_failed
-        ; rpsu_skipped
-        ; rpsu_default_runtime_id
-        }
-
-let decode_runtime_probe_snapshot json =
-  let* rps_generated_at = required_string_field json "generated_at" in
-  let* rps_refreshed_at_unix =
-    required_nullable_float_field json "refreshed_at_unix"
-  in
-  let* rps_cache_ttl_sec = Json_util.require_float json "cache_ttl_sec" in
-  let* rps_cache_age_sec = required_nullable_float_field json "cache_age_sec" in
-  let* rps_cache_hit = required_bool_field json "cache_hit" in
-  let* refresh_state = required_string_field json "refresh_state" in
-  let* rps_refresh_state = runtime_probe_refresh_state_of_string refresh_state in
-  let* probe = required_object_field json "probe" in
-  let* source = required_string_field probe "source" in
-  let* () =
-    if String.equal source Config_dir_resolver.runtime_toml_filename then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime probe source is %S, expected %s" source
-           Config_dir_resolver.runtime_toml_filename)
-  in
-  let* status = required_string_field probe "status" in
-  let* rps_status = runtime_probe_status_of_string status in
-  let* rps_probe_ok = required_bool_field probe "probe_ok" in
-  let* rps_checked_at = required_string_field probe "checked_at" in
-  let* summary = required_object_field probe "summary" in
-  let* rps_summary = decode_runtime_probe_summary summary in
-  let* providers = required_list_field probe "providers" in
-  let* rps_providers =
-    decode_list "providers" decode_runtime_provider_probe providers
-  in
-  let* rps_errors = require_string_list probe "errors" in
-  let* rps_observations = require_string_list probe "observations" in
-  let* rps_limitations = require_string_list probe "limitations" in
-  let* () =
-    if rps_cache_ttl_sec <= 0.0 then Error "runtime probe cache_ttl_sec must be positive"
-    else
-      match rps_cache_age_sec with
-      | Some age when age < 0.0 -> Error "runtime probe cache_age_sec is negative"
-      | Some _ | None -> Ok ()
-  in
-  let* () =
-    match rps_refreshed_at_unix, rps_cache_age_sec with
-    | Some _, Some _ | None, None -> Ok ()
-    | Some _, None | None, Some _ ->
-        Error "runtime probe refreshed_at_unix and cache_age_sec disagree"
-  in
-  let* () =
-    match rps_refresh_state, rps_cache_hit with
-    | (Runtime_probe_fresh | Runtime_probe_recent), true
-    | (Runtime_probe_served_stale | Runtime_probe_warming_up), false -> Ok ()
-    | _ ->
-        Error
-          (Printf.sprintf "runtime probe refresh_state %S disagrees with cache_hit"
-             refresh_state)
-  in
-  let observed_reachable, observed_failed, observed_skipped =
-    List.fold_left
-      (fun (reachable, failed, skipped) provider ->
-         match provider.rpp_reachable with
-         | Some true -> reachable + 1, failed, skipped
-         | Some false -> reachable, failed + 1, skipped
-         | None -> reachable, failed, skipped + 1)
-      (0, 0, 0) rps_providers
-  in
-  let row_count = List.length rps_providers in
-  let* () =
-    if rps_summary.rpsu_runtimes <> row_count then
-      Error
-        (Printf.sprintf "runtime probe summary has %d runtimes but providers has %d rows"
-           rps_summary.rpsu_runtimes row_count)
-    else if rps_summary.rpsu_reachable <> observed_reachable then
-      Error "runtime probe reachable count disagrees with providers"
-    else if rps_summary.rpsu_failed <> observed_failed then
-      Error "runtime probe failed count disagrees with providers"
-    else if rps_summary.rpsu_skipped <> observed_skipped then
-      Error "runtime probe skipped count disagrees with providers"
-    else if rps_summary.rpsu_probed <> observed_reachable + observed_failed then
-      Error "runtime probe probed count disagrees with providers"
-    else Ok ()
-  in
-  let* () =
-    let seen = Hashtbl.create (max 1 row_count) in
-    let rec loop = function
-      | [] -> Ok ()
-      | row :: rest ->
-          if Hashtbl.mem seen row.rpp_runtime_id then
-            Error
-              (Printf.sprintf "duplicate runtime probe id %S" row.rpp_runtime_id)
-          else begin
-            Hashtbl.add seen row.rpp_runtime_id ();
-            loop rest
-          end
-    in
-    loop rps_providers
-  in
-  let* () =
-    match rps_summary.rpsu_default_runtime_id with
-    | None -> Ok ()
-    | Some default_id ->
-        if List.exists (fun row -> String.equal row.rpp_runtime_id default_id) rps_providers
-        then Ok ()
-        else Error (Printf.sprintf "default runtime %S is absent from providers" default_id)
-  in
-  let status_counts_valid =
-    match rps_status with
-    | Runtime_probe_reachable -> observed_failed = 0 && observed_reachable > 0
-    | Runtime_probe_no_http_runtimes ->
-        observed_failed = 0 && observed_reachable = 0
-    | Runtime_probe_degraded -> observed_failed > 0 && observed_reachable > 0
-    | Runtime_probe_unreachable ->
-        observed_reachable = 0 && (observed_failed > 0 || row_count = 0)
-    | Runtime_probe_warming -> row_count = 0
-  in
-  let* () =
-    if status_counts_valid then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime probe status %S disagrees with provider counts" status)
-  in
-  let expected_probe_ok =
-    match rps_status with
-    | Runtime_probe_reachable | Runtime_probe_no_http_runtimes -> true
-    | Runtime_probe_degraded | Runtime_probe_unreachable | Runtime_probe_warming -> false
-  in
-  let* () =
-    if rps_probe_ok = expected_probe_ok then Ok ()
-    else Error (Printf.sprintf "runtime probe status %S disagrees with probe_ok" status)
-  in
-  let* () =
-    match rps_refresh_state, rps_status, rps_refreshed_at_unix with
-    | Runtime_probe_warming_up, Runtime_probe_warming, None -> Ok ()
-    | Runtime_probe_warming_up, _, _ ->
-        Error "runtime probe warming_up refresh must carry a warming probe without a cache time"
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, Some _ ->
-        Ok ()
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, None ->
-        Error "runtime probe cached refresh is missing refreshed_at_unix"
-  in
-  Ok
-    { rps_generated_at
-    ; rps_refreshed_at_unix
-    ; rps_cache_ttl_sec
-    ; rps_cache_age_sec
-    ; rps_cache_hit
-    ; rps_refresh_state
-    ; rps_status
-    ; rps_probe_ok
-    ; rps_checked_at
-    ; rps_summary
-    ; rps_providers
-    ; rps_errors
-    ; rps_observations
-    ; rps_limitations
-    }
-
 let runtime_context_source_label = function
   | Runtime_context_override -> "override"
   | Runtime_context_capability -> "capability"
   | Runtime_context_clamped -> "override_clamped_by_capability"
+  | Runtime_context_provider_override -> "provider_override"
+  | Runtime_context_binding_override -> "binding_override"
+  | Runtime_context_provider_clamped -> "provider_override_clamped_by_capability"
+  | Runtime_context_binding_clamped -> "binding_override_clamped_by_capability"
 
 let runtime_reasoning_effort_label = Llm_provider.Reasoning_effort.to_string
 
@@ -4513,12 +3658,11 @@ let decode_runtime_context_source = function
   | "override" -> Ok Runtime_context_override
   | "capability" -> Ok Runtime_context_capability
   | "override_clamped_by_capability" -> Ok Runtime_context_clamped
+  | "provider_override" -> Ok Runtime_context_provider_override
+  | "binding_override" -> Ok Runtime_context_binding_override
+  | "provider_override_clamped_by_capability" -> Ok Runtime_context_provider_clamped
+  | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
-
-let runtime_probe_for_id snapshot ~runtime_id =
-  Option.bind snapshot.rss_probe (fun probe ->
-    List.find_opt (fun row -> String.equal row.rpp_runtime_id runtime_id)
-      probe.rps_providers)
 
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
@@ -4744,315 +3888,15 @@ let decode_runtime_resolved_snapshot json =
    provider account said about its own usage windows, as the server recorded
    it. Every word is closed here. A [state], window [kind] or [unit] this build
    cannot name fails the whole reading; it never becomes a neighbour's meaning. *)
-type provider_usage_window_kind =
-  | Window_five_hour
-  | Window_seven_day
-  | Window_duration_minutes of int
-  | Window_provider_label of string
-
-type provider_usage_utilization =
-  | Utilization_fraction of float
-  | Utilization_percent of int
-
-type provider_usage_window_role =
-  | Role_gates_model_calls
-  | Role_counts_other_use
-  | Role_unclassified_limit
-
-type provider_usage_window = {
-  puw_limit_id : string option;
-  puw_kind : provider_usage_window_kind;
-  puw_role : provider_usage_window_role;
-  puw_utilization : provider_usage_utilization;
-  puw_resets_at : float option;
-  puw_observed_at : float;
-}
-
-type provider_usage_state =
-  | Account_not_reported_since_start
-  | Account_reported of provider_usage_window * provider_usage_window list
-
-type provider_usage_provider = {
-  pup_id : string;
-  pup_display_name : string;
-}
-
-type provider_usage_account = {
-  pua_scope : string;
-  pua_scope_id : string;
-  pua_providers : provider_usage_provider list;
-  pua_state : provider_usage_state;
-}
-
-type provider_usage_windows = {
-  puws_since : float;
-  puws_accounts : provider_usage_account list;
-}
-
-let required_number_field json key =
-  match member key json with
-  | `Float value -> Ok value
-  | `Int value -> Ok (Float.of_int value)
-  | `Null -> missing_field key
-  | bad -> field_type_error key "a number" bad
-
-let decode_provider_usage_window_kind json =
-  let* kind = required_string_field json "kind" in
-  match kind with
-  | "five_hour" -> Ok Window_five_hour
-  | "seven_day" -> Ok Window_seven_day
-  | "duration_minutes" ->
-      let* minutes = required_int_field json "minutes" in
-      Ok (Window_duration_minutes minutes)
-  | "provider_label" ->
-      let* label = required_string_field json "label" in
-      Ok (Window_provider_label label)
-  | other -> Error (Printf.sprintf "unknown usage window kind %S" other)
-
-let decode_provider_usage_utilization json =
-  let* unit_word = required_string_field json "unit" in
-  match unit_word with
-  | "fraction" ->
-      let* value = required_number_field json "value" in
-      Ok (Utilization_fraction value)
-  | "percent" ->
-      let* value = required_int_field json "value" in
-      Ok (Utilization_percent value)
-  | other -> Error (Printf.sprintf "unknown usage unit %S" other)
-
-let decode_provider_usage_window_role json =
-  let* role = required_string_field json "role" in
-  match role with
-  | "gates_model_calls" -> Ok Role_gates_model_calls
-  | "counts_other_use" -> Ok Role_counts_other_use
-  | "unclassified_limit" -> Ok Role_unclassified_limit
-  | other -> Error (Printf.sprintf "unknown usage window role %S" other)
-
-let decode_provider_usage_window json =
-  let* limit_id = required_member json "limit_id" in
-  let* puw_limit_id =
-    match limit_id with
-    | `Null -> Ok None
-    | `String id -> Ok (Some id)
-    | bad -> field_type_error "limit_id" "a string or null" bad
-  in
-  let* kind = required_object_field json "window" in
-  let* puw_kind = decode_provider_usage_window_kind kind in
-  let* puw_role = decode_provider_usage_window_role json in
-  let* utilization = required_object_field json "utilization" in
-  let* puw_utilization = decode_provider_usage_utilization utilization in
-  let* resets_at = required_member json "resets_at" in
-  let* puw_resets_at =
-    match resets_at with
-    | `Null -> Ok None
-    | `Int at -> Ok (Some (Float.of_int at))
-    | `Float at -> Ok (Some at)
-    | bad -> field_type_error "resets_at" "a number or null" bad
-  in
-  let* puw_observed_at = required_number_field json "observed_at" in
-  Ok
-    { puw_limit_id
-    ; puw_kind
-    ; puw_role
-    ; puw_utilization
-    ; puw_resets_at
-    ; puw_observed_at
-    }
-
-let decode_provider_usage_account json =
-  let* pua_scope = required_string_field json "scope" in
-  let* pua_scope_id = required_string_field json "scope_id" in
-  let* provider_items = required_list_field json "providers" in
-  let* pua_providers =
-    decode_list "providers"
-      (fun provider ->
-        let* pup_id = required_string_field provider "id" in
-        let* pup_display_name = required_string_field provider "display_name" in
-        Ok { pup_id; pup_display_name })
-      provider_items
-  in
-  let* state = required_string_field json "state" in
-  let* window_items = required_list_field json "windows" in
-  let* windows = decode_list "windows" decode_provider_usage_window window_items in
-  let* pua_state =
-    match (state, windows) with
-    | "reported", first :: rest -> Ok (Account_reported (first, rest))
-    | "reported", [] ->
-        Error (Printf.sprintf "account %S is reported with no window" pua_scope)
-    | "not_reported_since_start", [] -> Ok Account_not_reported_since_start
-    | "not_reported_since_start", _ :: _ ->
-        Error
-          (Printf.sprintf "account %S carries windows but is not reported"
-             pua_scope)
-    | other, _ -> Error (Printf.sprintf "unknown usage state %S" other)
-  in
-  Ok { pua_scope; pua_scope_id; pua_providers; pua_state }
-
-let decode_provider_usage_windows json =
-  let* puws_since = required_number_field json "provider_usage_windows_since" in
-  let* items = required_list_field json "provider_usage_windows" in
-  let* puws_accounts =
-    decode_list "provider_usage_windows" decode_provider_usage_account items
-  in
-  Ok { puws_since; puws_accounts }
-
-type provider_usage_history_point = {
-  puhp_scope_id : string;
-  puhp_kind : string;
-  puhp_limit_id : string option;
-  puhp_unit : provider_usage_utilization;
-  puhp_observed_at : float;
-}
-
-type provider_usage_history = {
-  puh_days : int;
-  puh_generated_at : float;
-  puh_unreadable_reports : int;
-  puh_points : provider_usage_history_point list;
-}
-
-let decode_provider_usage_history_point json =
-  let* puhp_scope_id = required_string_field json "scope_id" in
-  let* puhp_kind = required_string_field json "kind" in
-  let* puhp_limit_id = required_nullable_string_field json "limit_id" in
-  let* puhp_observed_at = required_number_field json "observed_at" in
-  let* unit = required_string_field json "unit" in
-  let* puhp_unit =
-    match unit with
-    | "fraction" ->
-        let* value = required_number_field json "value" in
-        if Float.is_finite value then Ok (Utilization_fraction value)
-        else Error "provider usage history: non-finite fraction"
-    | "percent" ->
-        let* value = required_int_field json "value" in
-        Ok (Utilization_percent value)
-    | _ -> Error ("provider usage history: unknown unit " ^ unit)
-  in
-  Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
-
-let decode_provider_usage_history json =
-  let* puh_days = required_int_field json "days" in
-  if not (List.mem puh_days [ 1; 7; 14 ]) then
-    Error "provider usage history: unsupported day window"
-  else
-    let* puh_generated_at = required_number_field json "generated_at" in
-    let* sampling = required_string_field json "sampling" in
-    if sampling <> "latest_provider_report_per_utc_day" then
-      Error "provider usage history: unknown sampling contract"
-    else
-      let* puh_unreadable_reports =
-        required_int_field json "unreadable_reports"
-      in
-      let* points = required_list_field json "points" in
-      let* puh_points =
-        decode_list "points" decode_provider_usage_history_point points
-      in
-      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points }
-
-type keeper_usage_coverage =
-  | Keeper_usage_complete
-  | Keeper_usage_partial of int
-  | Keeper_usage_failed of string
-
-type keeper_usage_row = {
-  kur_name : string;
-  kur_turn_samples : int;
-  kur_tokens : int option;
-  kur_cost_usd : float option;
-  kur_tokens_reported : int;
-  kur_tokens_missing : int;
-  kur_cost_reported : int;
-  kur_cost_missing : int;
-  kur_coverage : keeper_usage_coverage;
-}
-
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
-
-let decode_keeper_usage_row json =
-  let* kur_name = required_string_field json "keeper_name" in
-  let* kur_turn_samples = required_int_field json "sample_count" in
-  let* kur_tokens = required_nullable_int_field json "total_tokens" in
-  let* kur_cost_usd = required_nullable_float_field json "total_cost_usd" in
-  let* kur_tokens_reported = required_int_field json "tokens_reported_samples" in
-  let* tokens_unreported = required_int_field json "tokens_unreported_samples" in
-  let* tokens_unread = required_int_field json "tokens_unread_samples" in
-  let* kur_cost_reported = required_int_field json "cost_reported_samples" in
-  let* cost_unreported = required_int_field json "cost_unreported_samples" in
-  let* cost_unread = required_int_field json "cost_unread_samples" in
-  let* metrics_read = required_object_field json "metrics_read" in
-  let* read_state = required_string_field metrics_read "state" in
-  let* kur_coverage =
-    match read_state with
-    | "read" ->
-        let* malformed = required_int_field metrics_read "malformed_rows" in
-        Ok (if malformed = 0 then Keeper_usage_complete
-            else Keeper_usage_partial malformed)
-    | "failed" ->
-        let* reason = required_string_field metrics_read "reason" in
-        Ok (Keeper_usage_failed reason)
-    | state -> Error ("unknown keeper usage read state: " ^ state)
-  in
-  Ok
-    { kur_name; kur_turn_samples; kur_tokens; kur_cost_usd;
-      kur_tokens_reported;
-      kur_tokens_missing = tokens_unreported + tokens_unread;
-      kur_cost_reported;
-      kur_cost_missing = cost_unreported + cost_unread;
-      kur_coverage }
-
-let decode_keeper_usage_window json =
-  let* cache = required_object_field json "cache" in
-  let* cache_word = required_string_field cache "state" in
-  let* cache_state =
-    match Dashboard_cache_wire.of_string cache_word with
-    | Some state -> Ok state
-    | None -> Error ("unknown keeper usage cache state: " ^ cache_word)
-  in
-  let* last_error = optional_string_field cache "last_error" in
-  match Json_util.assoc_member_opt "state" json, cache_state with
-  | Some (`String "loading"), Dashboard_cache_wire.Cache_warming ->
-      (match last_error with
-       | None -> Ok Keeper_usage_loading
-       | Some detail -> Error ("Keeper usage computation failed: " ^ detail))
-  | None, (Dashboard_cache_wire.Cache_fresh | Dashboard_cache_wire.Cache_stale_refreshing) ->
-      let* kuw_freshness =
-        match cache_state with
-        | Dashboard_cache_wire.Cache_fresh -> Ok Keeper_usage_fresh
-        | Dashboard_cache_wire.Cache_stale_refreshing ->
-            let* age_s = required_number_field cache "age_s" in
-            Ok (Keeper_usage_stale { age_s; last_error })
-        | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
-      in
-      let* kuw_generated_at = required_number_field json "generated_at" in
-      let* kuw_window_minutes = required_int_field json "window_minutes" in
-      let* rows = required_list_field json "keepers" in
-      let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in
-      Ok (Keeper_usage_window
-        { kuw_generated_at; kuw_window_minutes; kuw_rows; kuw_freshness })
-  | Some (`String state), _ -> Error ("unknown keeper usage state or cache: " ^ state ^ "/" ^ cache_word)
-  | Some _, _ -> Error "keeper usage state must be a string"
-  | None, Dashboard_cache_wire.Cache_warming -> Error "keeper usage warming cache has no loading placeholder"
-
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =
     match probe with
-    | Some snapshot -> snapshot.rps_providers
+    | Some snapshot -> snapshot.Tui_decode_runtime_probe.rps_providers
     | None -> []
   in
   let probe_by_runtime = Hashtbl.create (max 1 (List.length probe_rows)) in
   List.iter
-    (fun row -> Hashtbl.add probe_by_runtime row.rpp_runtime_id row)
+    (fun row -> Hashtbl.add probe_by_runtime row.Tui_decode_runtime_probe.rpp_runtime_id row)
     probe_rows;
   let runtime_by_id = Hashtbl.create (max 1 (List.length resolved.rrs_runtimes)) in
   List.iter
@@ -5098,7 +3942,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
   let rss_unassigned_probe_count =
     List.fold_left
       (fun count row ->
-         if Hashtbl.mem candidate_ids row.rpp_runtime_id then count else count + 1)
+         if Hashtbl.mem candidate_ids row.Tui_decode_runtime_probe.rpp_runtime_id then count else count + 1)
       0 probe_rows
   in
   Ok
@@ -5110,7 +3954,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
     }
 
 let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
-  match decode_runtime_probe_snapshot probe_json with
+  match Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
   | Error detail -> Error ("runtime probe decode failed: " ^ detail)
   | Ok probe ->
       (match decode_runtime_resolved_snapshot resolved_json with
@@ -5207,10 +4051,7 @@ let decode_repository_change_snapshot json =
 
    The wording follows the copy of this check in [Llm_provider.Types], which
    has printed all three groups since it was written: same keys, same
-   brackets, so one reader learns one shape. (Its function is not named here
-   on purpose -- scripts/ci/check_exact_field_decoder_preflight.py matches
-   that name against file text without stripping comments, so writing it in
-   prose registers this module as a decoder it is not. See #35471.)
+   brackets, so one reader learns one shape.
 
    Empty groups are left out rather than drawn as "[]" -- this message goes on
    a terminal row, where the surface cuts it. *)
@@ -5984,128 +4825,6 @@ let decode_memory_health_snapshot json =
     ; mhs_starving_keepers
     }
 
-(* The server computes these from the keeper's memory-events sidecar and
-   never stores them (RFC-0418). This side shows the record as it is. *)
-let decode_memory_fact_events json =
-  let* retrieved_count = required_int_field json "retrieved_count" in
-  let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
-  let* last_retrieved_at = optional_float_field json "last_retrieved_at" in
-  (* The server derives all three from one list of retrieval times
-     ([Keeper_memory_os_events.summary_for]): an empty list gives 0, 0 and
-     null, and a non-empty one gives a positive count, at least one day and
-     a clock. Any other combination is not a record this decoder knows, so it
-     is rejected here once instead of every reader drawing it. *)
-  let* mfe_retrieval =
-    match retrieved_count, retrieved_distinct_days, last_retrieved_at with
-    | 0, 0, None -> Ok Never_retrieved
-    | count, distinct_days, Some last_at when count > 0 && distinct_days > 0 ->
-        Ok (Retrieved { count; distinct_days; last_at })
-    | count, distinct_days, (None | Some _) ->
-        Error
-          (Printf.sprintf
-             "memory fact events disagree: retrieved_count %d, \
-              retrieved_distinct_days %d, last_retrieved_at %s"
-             count distinct_days
-             (match last_retrieved_at with
-              | None -> "null"
-              | Some at -> Float.to_string at))
-  in
-  let* mfe_retracted_count = required_int_field json "retracted_count" in
-  let* mfe_revised_from = require_string_list json "revised_from" in
-  Ok { mfe_retrieval; mfe_retracted_count; mfe_revised_from }
-
-let decode_memory_fact json =
-  let* mf_claim = required_string_field json "claim" in
-  let* raw_category = required_string_field json "category" in
-  let* mf_category =
-    (* The librarian taxonomy is a closed sum on the side that writes it
-       ([Keeper_memory_os_types.category]; the model's schema enum is built
-       from it and anything outside is rejected), so a word this build does
-       not know is a store written by something newer, not a category. *)
-    match Keeper_memory_os_types.category_of_string raw_category with
-    | Some category -> Ok category
-    | None -> Error (Printf.sprintf "unknown memory category %S" raw_category)
-  in
-  let* mf_origin = required_string_field json "origin" in
-  let* mf_first_seen = Json_util.require_float json "first_seen" in
-  let* mf_last_seen = Json_util.require_float json "last_seen" in
-  let* mf_memory_id = required_string_field json "memory_id" in
-  let* events_json = required_object_field json "events" in
-  let* mf_events = decode_memory_fact_events events_json in
-  Ok
-    { mf_claim
-    ; mf_category
-    ; mf_origin
-    ; mf_first_seen
-    ; mf_last_seen
-    ; mf_memory_id
-    ; mf_events
-    }
-
-let decode_memory_source_fact json =
-  let* msf_claim = required_string_field json "claim" in
-  let* msf_first_seen = Json_util.require_float json "first_seen" in
-  let* msf_path = required_string_field json "path" in
-  let* msf_sha256 = required_string_field json "sha256" in
-  Ok { msf_claim; msf_first_seen; msf_path; msf_sha256 }
-
-let decode_memory_invalidation json =
-  let* mi_source_path = required_string_field json "source_path" in
-  let* mi_invalidated_at = Json_util.require_float json "invalidated_at" in
-  let* mi_reason = required_string_field json "reason" in
-  Ok { mi_source_path; mi_invalidated_at; mi_reason }
-
-(* The server answers each store with exactly one of three shapes:
-   {"read_error"}, {"present": false}, or {"present": true, ...rows}. Read
-   by which field is there; anything else is a decode error, never an empty
-   store, so a broken reading cannot pass as "remembers nothing". *)
-let decode_memory_store_reading ~label decode_present json =
-  match Json_util.assoc_member_opt "read_error" json with
-  | Some (`String detail) -> Ok (Memory_store_read_error detail)
-  | Some other ->
-      Error
-        (Printf.sprintf "%s.read_error must be a string (received %s)" label
-           (Json_util.kind_name other))
-  | None ->
-      let* present = required_bool_field json "present" in
-      if not present then Ok Memory_store_absent
-      else
-        let* value = decode_present json in
-        Ok (Memory_store_present value)
-
-let decode_memory_ordinary_store json =
-  let* mos_revision = required_int_field json "revision" in
-  let* mos_updated_at = Json_util.require_float json "updated_at" in
-  let* facts_json = required_list_field json "facts" in
-  let* mos_facts = decode_list "facts" decode_memory_fact facts_json in
-  Ok { mos_revision; mos_updated_at; mos_facts }
-
-let decode_memory_source_store json =
-  let* mss_revision = required_int_field json "revision" in
-  let* mss_updated_at = Json_util.require_float json "updated_at" in
-  let* facts_json = required_list_field json "facts" in
-  let* mss_facts = decode_list "facts" decode_memory_source_fact facts_json in
-  let* invalidations_json = required_list_field json "invalidations" in
-  let* mss_invalidations =
-    decode_list "invalidations" decode_memory_invalidation invalidations_json
-  in
-  Ok { mss_revision; mss_updated_at; mss_facts; mss_invalidations }
-
-let decode_memory_fact_snapshot json =
-  let* mfs_keeper = required_string_field json "keeper" in
-  let* mfs_events_read_error = required_nullable_string_field json "events_read_error" in
-  let* ordinary_json = required_member json "ordinary" in
-  let* mfs_ordinary =
-    decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
-      ordinary_json
-  in
-  let* source_json = required_member json "source_bound" in
-  let* mfs_source =
-    decode_memory_store_reading ~label:"source_bound"
-      decode_memory_source_store source_json
-  in
-  Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
-
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in
   let* hv_task_title = required_string_field json "task_title" in
@@ -6171,90 +4890,6 @@ let decode_harness_overview json =
       Some { hov_evaluator_status = status }
   | _ -> None
 
-
-let merge_keeper_memory_facts ~now loads =
-  let tagged keeper_name ~sep text =
-    if String.starts_with ~prefix:(keeper_name ^ sep) text then text
-    else keeper_name ^ sep ^ text
-  in
-  let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
-    match load with
-    | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
-    | Ok snap ->
-      let event_errors =
-        match snap.mfs_events_read_error with
-        | None -> event_errors
-        | Some detail -> Printf.sprintf "%s: %s" keeper_name detail :: event_errors
-      in
-      let ord, unread =
-        match snap.mfs_ordinary with
-        | Memory_store_present store ->
-          ( List.rev_append
-              (List.map
-                 (fun (f : memory_fact) ->
-                   { f with mf_origin = tagged keeper_name ~sep:" \xc2\xb7 " f.mf_origin })
-                 store.mos_facts)
-              ord
-          , unread )
-        | Memory_store_read_error detail ->
-          ord, (keeper_name, "ordinary store: " ^ detail) :: unread
-        | Memory_store_absent -> ord, unread
-      in
-      let src, invals, unread =
-        match snap.mfs_source with
-        | Memory_store_present store ->
-          ( List.rev_append
-              (List.map
-                 (fun (f : memory_source_fact) ->
-                   { f with msf_path = tagged keeper_name ~sep:":" f.msf_path })
-                 store.mss_facts)
-              src
-          , List.rev_append
-              (List.map
-                 (fun (inv : memory_invalidation) ->
-                   { inv with mi_source_path = tagged keeper_name ~sep:":" inv.mi_source_path })
-                 store.mss_invalidations)
-              invals
-          , unread )
-        | Memory_store_read_error detail ->
-          src, invals, (keeper_name, "source-bound store: " ^ detail) :: unread
-        | Memory_store_absent -> src, invals, unread
-      in
-      ord, src, invals, event_errors, unread
-  in
-  let ord, src, invals, event_errors, unread =
-    List.fold_left step ([], [], [], [], []) loads
-  in
-  let snapshot =
-    { mfs_keeper = "*"
-    ; mfs_ordinary =
-        Memory_store_present
-          { mos_revision = 1; mos_updated_at = now; mos_facts = List.rev ord }
-    ; mfs_source =
-        Memory_store_present
-          { mss_revision = 1
-          ; mss_updated_at = now
-          ; mss_facts = List.rev src
-          ; mss_invalidations = List.rev invals
-          }
-    ; mfs_events_read_error =
-        (match List.rev event_errors with
-         | [] -> None
-         | errors -> Some (String.concat "; " errors))
-    }
-  in
-  let unread_summary =
-    match List.rev unread with
-    | [] -> None
-    | failures ->
-      Some
-        (Printf.sprintf "%d of %d keepers not read: %s"
-           (List.length (List.sort_uniq String.compare (List.map fst failures)))
-           (List.length loads)
-           (String.concat "; "
-              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
-  in
-  snapshot, unread_summary
 
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in
@@ -6827,8 +5462,9 @@ let decode_overview_goals json =
   let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
   Ok (List.concat nodes)
 
-let decode_keeper_runtime json =
+let decode_keeper_runtime ~candle_balance_milli json =
   let* kr_name = required_string_field json "name" in
+  let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
     match keeper_health_of_string raw_health with
@@ -6880,6 +5516,8 @@ let decode_keeper_runtime json =
   in
   Ok
     { kr_name
+    ; kr_portrait
+    ; kr_candle_balance_milli = candle_balance_milli
     ; kr_health
     ; kr_paused
     ; kr_next_action
@@ -6896,7 +5534,26 @@ let decode_keeper_runtime json =
    otherwise present a short list as the whole fleet. *)
 let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
-  let decode_row json =
+  let candle_rows =
+    let* candle = Candle_observation.of_json (member "candle" json) in
+    let decode_balance json =
+      let* balance = match Json_util.assoc_member_opt "candle_balance_milli" json with
+        | Some value -> Candle_observation.balance_of_json value
+        | None -> Error "missing required field candle_balance_milli" in
+      match candle, balance with
+      | Candle_observation.Ready _, Some _
+      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance)
+      | Candle_observation.Ready _, None
+      | (Candle_observation.Off | Candle_observation.Disabled _), Some _ ->
+        Error "Candle row balance disagrees with the envelope observation" in
+    let* rows = decode_list "keepers" decode_balance items in
+    Ok (candle, rows)
+  in
+  let candle, items = match candle_rows with
+    | Ok (candle, rows) -> Ok candle, rows
+    | Error detail -> Error detail, List.map (fun row -> row, None) items
+  in
+  let decode_row (json, candle_balance_milli) =
     match member "effective_meta_error" json with
     | `Null when member "status" json = `String "error" ->
         let* name = required_string_field json "name" in
@@ -6910,7 +5567,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:
@@ -6945,7 +5602,7 @@ let decode_keeper_runtime_list json =
     | bad -> field_type_error "truncated" "a bool or null" bad
   in
   let* total = int_field_or json "total" ~default:(List.length readings) in
-  Ok (rows, errors, truncated, total)
+  Ok (rows, errors, truncated, total, candle)
 
 let keeper_lane_phase_of_string raw =
   match keeper_phase_of_string raw with
@@ -10463,168 +9120,6 @@ let decode_lsp_answer json =
    surface that guessed would offer the operator a control the server refuses
    on submit. *)
 
-type ask_choice = {
-  ac_id : string;
-  ac_label : string;
-  ac_description : string option;
-}
-
-type ask_mode =
-  | Ask_single
-  | Ask_multi
-
-type ask_free_text =
-  | Ask_free_text_allowed of { aft_hint : string option }
-  | Ask_choices_only
-
-type ask_question = {
-  aq_id : string;
-  aq_header : string;
-  aq_prompt : string;
-  aq_mode : ask_mode;
-  aq_free_text : ask_free_text;
-  aq_choices : ask_choice list;
-}
-
-type ask_resolution =
-  | Ask_open
-  | Ask_answered of {
-      aa_answered_at : float;
-      aa_question_ids : string list;
-    }
-  | Ask_withdrawn of {
-      aw_reason : string;
-      aw_withdrawn_at : float;
-    }
-
-type ask_row = {
-  ar_keeper : string;
-  ar_id : string;
-  ar_asked_at : float;
-  ar_context : string option;
-  ar_questions : ask_question list;
-  ar_resolution : ask_resolution;
-}
-
-type asks_snapshot = {
-  asn_keeper : string option;
-  asn_open_count : int;
-  asn_rows : ask_row list;
-}
-
-let ( let* ) = Result.bind
-
-let ask_string json key =
-  match member key json with
-  | `String s -> Ok s
-  | `Null -> Error (Printf.sprintf "asks: '%s' is required" key)
-  | _ -> Error (Printf.sprintf "asks: '%s' must be a string" key)
-
-let ask_string_opt json key =
-  match member key json with `String s -> Some s | _ -> None
-
-let ask_float json key =
-  match member key json with
-  | `Float f -> Ok f
-  | `Int i -> Ok (float_of_int i)
-  | _ -> Error (Printf.sprintf "asks: '%s' must be a number" key)
-
-let ask_int json key =
-  match member key json with
-  | `Int i -> Ok i
-  | _ -> Error (Printf.sprintf "asks: '%s' must be an integer" key)
-
-let ask_list json key =
-  match member key json with
-  | `List items -> Ok items
-  | `Null -> Ok []
-  | _ -> Error (Printf.sprintf "asks: '%s' must be an array" key)
-
-let rec ask_map_results f = function
-  | [] -> Ok []
-  | x :: rest ->
-      let* y = f x in
-      let* ys = ask_map_results f rest in
-      Ok (y :: ys)
-
-let decode_ask_choice json =
-  let* ac_id = ask_string json "choice_id" in
-  let* ac_label = ask_string json "label" in
-  Ok { ac_id; ac_label; ac_description = ask_string_opt json "description" }
-
-let decode_ask_mode json =
-  let* label = ask_string json "mode" in
-  match label with
-  | "single" -> Ok Ask_single
-  | "multi" -> Ok Ask_multi
-  | other -> Error (Printf.sprintf "asks: unknown mode '%s'" other)
-
-let decode_ask_free_text json =
-  match member "free_text" json with
-  | `Null -> Ok Ask_choices_only
-  | free_text_json -> (
-      match member "allowed" free_text_json with
-      | `Bool false -> Ok Ask_choices_only
-      | `Bool true ->
-          Ok (Ask_free_text_allowed { aft_hint = ask_string_opt free_text_json "hint" })
-      | `Null -> Error "asks: free_text is missing 'allowed'"
-      | _ -> Error "asks: free_text.allowed must be a boolean")
-
-let decode_ask_question json =
-  let* aq_id = ask_string json "question_id" in
-  let* aq_header = ask_string json "header" in
-  let* aq_prompt = ask_string json "prompt" in
-  let* aq_mode = decode_ask_mode json in
-  let* aq_free_text = decode_ask_free_text json in
-  let* choice_items = ask_list json "choices" in
-  let* aq_choices = ask_map_results decode_ask_choice choice_items in
-  Ok { aq_id; aq_header; aq_prompt; aq_mode; aq_free_text; aq_choices }
-
-let decode_ask_resolution json =
-  let* state = ask_string json "state" in
-  match state with
-  | "open" -> Ok Ask_open
-  | "answered" ->
-      let* aa_answered_at = ask_float json "answered_at" in
-      let* id_items = ask_list json "answered_question_ids" in
-      let* aa_question_ids =
-        ask_map_results
-          (function
-            | `String id -> Ok id
-            | _ -> Error "asks: answered_question_ids must be strings")
-          id_items
-      in
-      Ok (Ask_answered { aa_answered_at; aa_question_ids })
-  | "withdrawn" ->
-      let* aw_reason = ask_string json "reason" in
-      let* aw_withdrawn_at = ask_float json "withdrawn_at" in
-      Ok (Ask_withdrawn { aw_reason; aw_withdrawn_at })
-  | other -> Error (Printf.sprintf "asks: unknown resolution state '%s'" other)
-
-let decode_ask_row json =
-  let* ar_keeper = ask_string json "keeper" in
-  let* ar_id = ask_string json "ask_id" in
-  let* ar_asked_at = ask_float json "asked_at" in
-  let* question_items = ask_list json "questions" in
-  let* ar_questions = ask_map_results decode_ask_question question_items in
-  let* ar_resolution = decode_ask_resolution (member "resolution" json) in
-  Ok
-    {
-      ar_keeper;
-      ar_id;
-      ar_asked_at;
-      ar_context = ask_string_opt json "context";
-      ar_questions;
-      ar_resolution;
-    }
-
-let decode_asks_snapshot json =
-  let asn_keeper = ask_string_opt json "keeper" in
-  let* asn_open_count = ask_int json "open_count" in
-  let* row_items = ask_list json "asks" in
-  let* asn_rows = ask_map_results decode_ask_row row_items in
-  Ok { asn_keeper; asn_open_count; asn_rows }
-
 (* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
    merges task/approval/keeper/goal events into one list of uniform
    six-field rows, and the TUI carries all six. It used to keep four, which
@@ -10830,508 +9325,6 @@ let decode_verification_evidence json =
        | _ -> Error "available evidence carries no items list")
   | `String other -> Error ("unknown evidence access state: " ^ other)
   | _ -> Error "evidence access state is missing"
-
-type skill_evidence_status =
-  | Skill_evidence_observed
-  | Skill_evidence_not_observed_in_retained_coverage
-
-type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
-  | Skill_evidence_composition_unavailable
-
-type skill_evidence_coverage =
-  { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
-  ; sec_composition_unavailable : string list
-  ; sec_activation_scope : string
-  ; sec_activation_sessions_inspected : int
-  ; sec_activation_ledgers_loaded : int
-  ; sec_activation_gap_count : int
-  ; sec_activation_owner_gap_count : int
-  }
-
-type skill_evidence_owner_claim =
-  { seo_keeper : string
-  ; seo_source : string
-  }
-
-type skill_evidence_activation_item =
-  { sea_trace_id : string
-  ; sea_owner_status : string
-  ; sea_owner_claims : skill_evidence_owner_claim list
-  ; sea_owner_gap_count : int
-  ; sea_activation : Yojson.Safe.t
-  }
-
-type skill_evidence_activation =
-  | Skill_evidence_most_recent_observed of skill_evidence_activation_item
-  | Skill_evidence_most_recent_observed_timestamp_tie of
-      skill_evidence_activation_item list
-
-type skill_evidence =
-  { se_status : skill_evidence_status
-  ; se_activation : skill_evidence_activation option
-  ; se_composition : Yojson.Safe.t option
-  ; se_coverage : skill_evidence_coverage
-  }
-
-let decode_skill_evidence_optional_object field json =
-  match json with
-  | `Assoc fields when not (List.mem_assoc field fields) ->
-    Error ("Skill evidence " ^ field ^ " is required")
-  | `Assoc _ ->
-    (match member field json with
-     | `Null -> Ok None
-     | `Assoc _ as value -> Ok (Some value)
-     | _ -> Error ("Skill evidence " ^ field ^ " must be an object or null"))
-  | _ -> Error "Skill evidence must be an object"
-;;
-
-let decode_skill_evidence_nonnegative_int field json =
-  match member field json with
-  | `Int value when value >= 0 -> Ok value
-  | _ -> Error ("Skill evidence coverage " ^ field ^ " must be nonnegative")
-;;
-
-let decode_skill_evidence_string_list field json =
-  match member field json with
-  | `List values ->
-    List.fold_left
-      (fun result value ->
-         let* reversed = result in
-         match value with
-         | `String value -> Ok (value :: reversed)
-         | _ -> Error ("Skill evidence " ^ field ^ " rows must be strings"))
-      (Ok [])
-      values
-    |> Result.map List.rev
-  | _ -> Error ("Skill evidence " ^ field ^ " must be a list")
-;;
-
-let skill_evidence_exact_fields expected fields =
-  let actual = List.map fst fields in
-  List.length actual = List.length expected
-  && List.sort_uniq String.compare actual = List.sort String.compare expected
-;;
-
-let skill_evidence_string_field field json =
-  match member field json with `String _ -> true | _ -> false
-;;
-
-let skill_evidence_positive_int_field field json =
-  match member field json with `Int value -> value > 0 | _ -> false
-;;
-
-let skill_evidence_manifest_cause = function
-  | `Assoc fields as cause ->
-    (match member "code" cause with
-     | `String "manifest_read_failed" ->
-       skill_evidence_exact_fields [ "code"; "detail" ] fields
-       && skill_evidence_string_field "detail" cause
-     | `String "manifest_empty" ->
-       skill_evidence_exact_fields [ "code" ] fields
-     | `String ("manifest_invalid_json" | "manifest_invalid_row") ->
-       skill_evidence_exact_fields [ "code"; "line_number"; "detail" ] fields
-       && skill_evidence_positive_int_field "line_number" cause
-       && skill_evidence_string_field "detail" cause
-     | `String "manifest_identity_mismatch" ->
-       skill_evidence_exact_fields
-         [ "code"; "line_number"; "observed_keeper"; "observed_trace" ]
-         fields
-       && skill_evidence_positive_int_field "line_number" cause
-       && skill_evidence_string_field "observed_keeper" cause
-       && skill_evidence_string_field "observed_trace" cause
-     | _ -> false)
-  | _ -> false
-;;
-
-let skill_evidence_owner_gap = function
-  | `Assoc fields as gap ->
-    (match member "code" gap with
-     | `String "keeper_catalog_unavailable" ->
-       skill_evidence_exact_fields [ "code"; "detail" ] fields
-       && skill_evidence_string_field "detail" gap
-     | `String "keeper_catalog_changed_during_resolution" ->
-       skill_evidence_exact_fields [ "code" ] fields
-     | `String "invalid_persisted_keeper_name" ->
-       skill_evidence_exact_fields [ "code"; "keeper" ] fields
-       && skill_evidence_string_field "keeper" gap
-     | `String "keeper_meta_name_mismatch" ->
-       skill_evidence_exact_fields [ "code"; "keeper"; "metadata_name" ] fields
-       && skill_evidence_string_field "keeper" gap
-       && skill_evidence_string_field "metadata_name" gap
-     | `String "keeper_meta_unavailable" ->
-       skill_evidence_exact_fields [ "code"; "keeper"; "detail" ] fields
-       && skill_evidence_string_field "keeper" gap
-       && skill_evidence_string_field "detail" gap
-     | `String "runtime_manifest_unreadable" ->
-       skill_evidence_exact_fields [ "code"; "keeper"; "cause" ] fields
-       && skill_evidence_string_field "keeper" gap
-       && skill_evidence_manifest_cause (member "cause" gap)
-     | _ -> false)
-  | _ -> false
-;;
-
-let skill_evidence_filesystem_gap expected_code = function
-  | `Assoc fields as gap ->
-    skill_evidence_exact_fields [ "code"; "operation"; "path"; "detail" ] fields
-    && member "code" gap = `String expected_code
-    && (match member "operation" gap with
-        | `String ("open_directory" | "read_directory" | "close_directory" | "stat_entry") -> true
-        | _ -> false)
-    && skill_evidence_string_field "path" gap
-    && skill_evidence_string_field "detail" gap
-  | _ -> false
-;;
-
-let skill_evidence_file_kind = function
-  | `String
-      ( "regular"
-      | "directory"
-      | "character_device"
-      | "block_device"
-      | "symbolic_link"
-      | "fifo"
-      | "socket" ) -> true
-  | _ -> false
-;;
-
-let skill_evidence_activation_gap = function
-  | `Assoc fields as gap ->
-    (match member "code" gap with
-     | `String ("trace_root_unavailable" as code)
-     | `String ("trace_entry_unreadable" as code) ->
-       skill_evidence_filesystem_gap code gap
-     | `String "trace_root_not_directory" ->
-       skill_evidence_exact_fields [ "code"; "kind" ] fields
-       && skill_evidence_file_kind (member "kind" gap)
-     | `String ("invalid_trace_directory" | "symlink_trace_entry") ->
-       skill_evidence_exact_fields [ "code"; "entry" ] fields
-       && skill_evidence_string_field "entry" gap
-     | `String "trace_entry_not_directory" ->
-       skill_evidence_exact_fields [ "code"; "trace_id"; "kind" ] fields
-       && skill_evidence_string_field "trace_id" gap
-       && skill_evidence_file_kind (member "kind" gap)
-     | `String
-         ( "trace_inventory_changed_during_discovery"
-         | "trace_root_changed_during_discovery" ) ->
-       skill_evidence_exact_fields [ "code" ] fields
-     | `String "ledger_changed_during_discovery" ->
-       skill_evidence_exact_fields [ "code"; "trace_id" ] fields
-       && skill_evidence_string_field "trace_id" gap
-     | `String "ledger_unreadable" ->
-       skill_evidence_exact_fields
-         [ "code"; "trace_id"; "cause_code"; "detail" ]
-         fields
-       && skill_evidence_string_field "trace_id" gap
-       && skill_evidence_string_field "cause_code" gap
-       && skill_evidence_string_field "detail" gap
-     | _ -> false)
-  | _ -> false
-;;
-
-let decode_skill_evidence_activation_item reference = function
-  | `Assoc _ as evidence ->
-    let* trace_id, sea_trace_id =
-      match member "trace_id" evidence with
-      | `String value ->
-        Keeper_id.Trace_id.of_string value
-        |> Result.map (fun trace_id -> trace_id, value)
-        |> Result.map_error (fun _ -> "Skill activation trace_id is invalid")
-      | _ -> Error "Skill activation trace_id is invalid"
-    in
-    let* sea_owner_status, sea_owner_claims, sea_owner_gap_count =
-      match member "owner" evidence with
-      | `Assoc _ as owner ->
-        let* status =
-          match member "status" owner with
-          | `String
-              ( "known"
-              | "not_claimed_in_retained_catalog"
-              | "conflicting"
-              | "incomplete"
-              | "catalog_unavailable" as value ) ->
-            Ok value
-          | _ -> Error "Skill activation owner status is invalid"
-        in
-        let* claims =
-          match member "claims" owner with
-          | `List claims ->
-            List.fold_left
-              (fun result claim ->
-                 let* reversed = result in
-                 match claim with
-                 | `Assoc _ as claim ->
-                   (match member "keeper" claim, member "source" claim with
-                    | ( `String keeper
-                      , `String ("current_meta" | "runtime_manifest" as source) )
-                      when String.trim keeper <> "" ->
-                      Ok ({ seo_keeper = keeper; seo_source = source } :: reversed)
-                    | _ -> Error "Skill activation owner claim is invalid")
-                 | _ -> Error "Skill activation owner claim must be an object")
-              (Ok [])
-              claims
-            |> Result.map List.rev
-          | _ -> Error "Skill activation owner claims must be a list"
-        in
-        let* gaps =
-          match member "gaps" owner with
-          | `List gaps when List.for_all skill_evidence_owner_gap gaps ->
-            Ok gaps
-          | _ -> Error "Skill activation owner gaps must be objects"
-        in
-        let owner_agrees =
-          match status with
-          | "known" -> List.length claims = 1 && gaps = []
-          | "not_claimed_in_retained_catalog" -> claims = [] && gaps = []
-          | "conflicting" -> List.length claims >= 2 && gaps = []
-          | "incomplete" -> gaps <> []
-          | "catalog_unavailable" -> claims = [] && gaps <> []
-          | _ -> false
-        in
-        if owner_agrees
-        then Ok (status, claims, List.length gaps)
-        else Error "Skill activation owner status disagrees with claims or gaps"
-      | _ -> Error "Skill activation owner must be an object"
-    in
-    let* sea_activation =
-      match member "activation" evidence with
-      | `Assoc _ as activation ->
-        (match
-           Keeper_skill_activation_ledger.activation_of_yojson
-             ~expected_trace_id:trace_id
-             activation
-         with
-         | Ok observed ->
-           let observed_reference =
-             Skill_reference.make
-               ~identity:observed.identity
-               ~content_revision:observed.content_revision
-           in
-           if Skill_reference.equal reference observed_reference
-           then Ok activation
-           else Error "Skill activation reference disagrees with envelope"
-         | Error _ -> Error "Skill activation payload is invalid")
-      | _ -> Error "Skill activation payload must be an object"
-    in
-    Ok
-      { sea_trace_id
-      ; sea_owner_status
-      ; sea_owner_claims
-      ; sea_owner_gap_count
-      ; sea_activation
-      }
-  | _ -> Error "Skill activation evidence must be an object"
-;;
-
-let decode_skill_evidence_activation reference json =
-  match json with
-  | `Assoc fields when not (List.mem_assoc "activation" fields) ->
-    Error "Skill evidence activation is required"
-  | _ ->
-  match member "activation" json with
-  | `Null -> Ok None
-  | `Assoc _ as activation ->
-    (match member "selection" activation, member "evidence" activation with
-     | `String "most_recent_observed", evidence ->
-       decode_skill_evidence_activation_item reference evidence
-       |> Result.map (fun evidence ->
-            Some (Skill_evidence_most_recent_observed evidence))
-     | `String "most_recent_observed_timestamp_tie", `List evidence ->
-       let* evidence =
-         List.fold_left
-           (fun result value ->
-              let* reversed = result in
-              let* evidence =
-                decode_skill_evidence_activation_item reference value
-              in
-              Ok (evidence :: reversed))
-           (Ok [])
-           evidence
-         |> Result.map List.rev
-       in
-       let parsed_timestamps =
-         evidence
-         |> List.filter_map (fun item ->
-              match member "activated_at" item.sea_activation with
-              | `String value -> Time_codec.parse_rfc3339_opt value
-              | _ -> None)
-         |> List.sort_uniq Float.compare
-       in
-       let distinct_traces =
-         evidence
-         |> List.map (fun item -> item.sea_trace_id)
-         |> List.sort_uniq String.compare
-       in
-       if
-         List.length evidence >= 2
-         && List.length parsed_timestamps = 1
-         && List.length distinct_traces = List.length evidence
-       then
-         Ok
-           (Some
-              (Skill_evidence_most_recent_observed_timestamp_tie evidence))
-       else Error "Skill activation timestamp tie is inconsistent"
-     | _ -> Error "Skill activation selection is invalid")
-  | _ -> Error "Skill evidence activation must be an object or null"
-;;
-
-let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v5"
-  then Error "Skill evidence schema is unsupported"
-  else
-    let* reference =
-      match Skill_reference.of_yojson (member "reference" json) with
-      | Ok reference -> Ok reference
-      | Error _ -> Error "Skill evidence reference is invalid"
-    in
-    let* se_activation = decode_skill_evidence_activation reference json in
-    let* se_composition = decode_skill_evidence_optional_object "composition" json in
-    let* () =
-      match se_composition with
-      | None -> Ok ()
-      | Some composition ->
-        (match Keeper_skill_composition_evidence.of_yojson composition with
-         | Ok evidence
-           when Skill_reference.equal
-                  reference
-                  (Keeper_skill_composition_evidence.reference evidence) ->
-           Ok ()
-         | Ok _ -> Error "Skill composition evidence reference disagrees with envelope"
-         | Error _ -> Error "Skill composition evidence record is invalid")
-    in
-    let observed = Option.is_some se_activation || Option.is_some se_composition in
-    let* se_status =
-      match member "status" json, observed with
-      | `String "observed", true -> Ok Skill_evidence_observed
-      | `String "not_observed_in_retained_coverage", false ->
-        Ok Skill_evidence_not_observed_in_retained_coverage
-      | `String ("observed" | "not_observed_in_retained_coverage"), _ ->
-        Error "Skill evidence status disagrees with its observations"
-      | _ -> Error "Skill evidence status is unsupported"
-    in
-    match member "coverage" json with
-    | `Assoc _ as coverage ->
-      let* () =
-        match member "coverage_complete" coverage with
-        | `Bool false -> Ok ()
-        | _ -> Error "Skill evidence coverage must remain incomplete"
-      in
-      let* sec_activation_scope =
-        match member "activation_scope" coverage with
-        | `String
-            ( "complete_retained_trace_snapshot"
-            | "incomplete_retained_trace_snapshot"
-            | "trace_store_unavailable" as value ) ->
-          Ok value
-        | _ -> Error "Skill evidence activation scope is unsupported"
-      in
-      let* sec_composition_scope =
-        match member "composition_scope" coverage with
-        | `String "exact_reference_latest_completed" ->
-          Ok Skill_evidence_exact_reference_latest_completed
-        | `String "unavailable" -> Ok Skill_evidence_composition_unavailable
-        | _ -> Error "Skill evidence composition scope is unsupported"
-      in
-      let* sec_composition_records_read =
-        decode_skill_evidence_nonnegative_int
-          "composition_records_read"
-          coverage
-      in
-      let* sec_composition_unavailable =
-        decode_skill_evidence_string_list "composition_unavailable" coverage
-      in
-      let* sec_activation_sessions_inspected =
-        decode_skill_evidence_nonnegative_int
-          "activation_sessions_inspected"
-          coverage
-      in
-      let* sec_activation_ledgers_loaded =
-        decode_skill_evidence_nonnegative_int
-          "activation_ledgers_loaded"
-          coverage
-      in
-      let* activation_gaps =
-        match member "activation_gaps" coverage with
-        | `List gaps when List.for_all skill_evidence_activation_gap gaps ->
-          Ok gaps
-        | _ -> Error "Skill evidence activation gaps must be objects"
-      in
-      let sec_activation_gap_count = List.length activation_gaps in
-      let* sec_activation_owner_gap_count =
-        decode_skill_evidence_nonnegative_int
-          "activation_owner_gap_count"
-          coverage
-      in
-      let* () =
-        match sec_composition_scope, se_composition, sec_composition_records_read with
-        | Skill_evidence_exact_reference_latest_completed, Some _, 1
-          when sec_composition_unavailable = [] ->
-          Ok ()
-        | Skill_evidence_exact_reference_latest_completed, None, 0
-          when sec_composition_unavailable = [] ->
-          Ok ()
-        | Skill_evidence_composition_unavailable, None, 0
-          when sec_composition_unavailable <> [] ->
-          Ok ()
-        | _ -> Error "Skill evidence composition coverage disagrees with its record"
-      in
-      let owner_gap_count =
-        match se_activation with
-        | None -> 0
-        | Some (Skill_evidence_most_recent_observed evidence) ->
-          evidence.sea_owner_gap_count
-        | Some (Skill_evidence_most_recent_observed_timestamp_tie evidence) ->
-          List.fold_left (fun total row -> total + row.sea_owner_gap_count) 0 evidence
-      in
-      let activation_count =
-        match se_activation with
-        | None -> 0
-        | Some (Skill_evidence_most_recent_observed _) -> 1
-        | Some (Skill_evidence_most_recent_observed_timestamp_tie evidence) ->
-          List.length evidence
-      in
-      let* () =
-        if
-          sec_activation_ledgers_loaded <= sec_activation_sessions_inspected
-          && activation_count <= sec_activation_ledgers_loaded
-          && owner_gap_count = sec_activation_owner_gap_count
-          &&
-          (match sec_activation_scope with
-           | "complete_retained_trace_snapshot" -> sec_activation_gap_count = 0
-           | "incomplete_retained_trace_snapshot" ->
-             sec_activation_gap_count > 0
-           | "trace_store_unavailable" ->
-             (match activation_gaps with
-              | [ gap ] ->
-                member "code" gap = `String "trace_root_unavailable"
-                || member "code" gap = `String "trace_root_not_directory"
-              | _ -> false)
-             && Option.is_none se_activation
-             && sec_activation_sessions_inspected = 0
-             && sec_activation_ledgers_loaded = 0
-             && sec_activation_owner_gap_count = 0
-           | _ -> false)
-        then Ok ()
-        else Error "Skill evidence activation coverage disagrees with snapshot"
-      in
-      Ok
-        { se_status
-        ; se_activation
-        ; se_composition
-        ; se_coverage =
-            { sec_composition_scope
-            ; sec_composition_records_read
-            ; sec_composition_unavailable
-            ; sec_activation_scope
-            ; sec_activation_sessions_inspected
-            ; sec_activation_ledgers_loaded
-            ; sec_activation_gap_count
-            ; sec_activation_owner_gap_count
-            }
-        }
-    | _ -> Error "Skill evidence coverage must be an object"
-;;
 
 (** Decoded durable async inventory. Malformed counters are errors, never zero.
     The active inventory contains queued, running and cancelling requests only. *)
@@ -11652,7 +9645,7 @@ let play_revoke_http_error ~status_code ~body =
     | exception Yojson.Json_error detail -> Error detail in
   match failure with
   | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
-      (sanitize_terminal_text detail) status_code
+      (Tui_terminal_text.sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
 
 (* The play routes refuse with [{error: <code>, message: <sentence>}] and add
@@ -11671,7 +9664,7 @@ let play_invite_refusal ~status_code ~body =
     | `Assoc fields ->
       let text_of = function
         | `String value when String.trim value <> "" ->
-          Some (sanitize_terminal_text (String.trim value))
+          Some (Tui_terminal_text.sanitize_terminal_text (String.trim value))
         | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
           None
       in

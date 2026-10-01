@@ -20,9 +20,27 @@ LINK = "https://play.example.test/play#fixture-secret"
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
 
 
+def assert_only_play_admin_requests(requests):
+    for path, body in requests:
+        if path in ("/api/v1/play/invites", "/api/v1/play/invites/guest1"):
+            continue
+        # The observer can initialize MCP while the TUI starts. It must not
+        # call a tool, submit a Keeper turn, or send an invite token elsewhere.
+        if path == "/mcp":
+            try:
+                message = json.loads(body)
+            except (ValueError, UnicodeDecodeError):
+                message = None
+            if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
+                    and message.get("method") in ("initialize", "notifications/initialized")):
+                continue
+        raise AssertionError(f"Play command caused a non-admin effect at {path!r}")
+
+
 def run(executable: str) -> None:
     requests: h.HttpRequests = []
     revoke_methods: list[str] = []
+    list_reads = []
     revokes = h.SequencedHttpResponse([
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
@@ -45,6 +63,7 @@ def run(executable: str) -> None:
             if payload != {"name": "guest1", "hours": 24}:
                 raise AssertionError(f"wrong invite request: {payload!r}")
             return 201, {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z", "link": LINK}
+        list_reads.append(True)
         return 200, {"invites": [
             {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z",
              "expired": False, "holds_controller": False},
@@ -65,8 +84,18 @@ def run(executable: str) -> None:
         def close_card() -> None:
             h.send_and_wait(process, master, output, b"\x1b", CHAT)
 
-        # The link is on the card, and the card is the only place it is drawn.
-        command(b"/play invite guest1 24", LINK.encode())
+        # The link is drawn only on its local invite card.
+        # Navigating and accepting the picker only changes the draft.
+        h.send_and_wait(process, master, output, b"/play ", b"Commands  1/4")
+        h.send_and_wait(process, master, output, b"\x1b[B", b"Commands  2/4")
+        h.send_and_wait(process, master, output, b"\r", h.composer_showing(b"/play invite"))
+        h.drain_until_quiet(process, master, output)
+        assert not list_reads and not revoke_methods, "selecting a Play action called the admin API"
+        assert not any(path.startswith("/api/v1/play/") for path, _ in requests), "accepting a suggestion executed a Play action"
+        assert_only_play_admin_requests(requests)
+        # Only an explicit expiry and a further Enter issue the invite.
+        h.send_and_wait(process, master, output, b" guest1 24", h.composer_showing(b"/play invite guest1 24"))
+        h.send_and_wait(process, master, output, b"\r", LINK.encode())
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites")
         close_card()
@@ -87,6 +116,7 @@ def run(executable: str) -> None:
         close_card()
         command(b"/play revoke guest1", b"is absent (no invite has that name)")
         command(b"/play link", b"No play link has been issued")
+        assert_only_play_admin_requests(requests)
         paths = [path for path, _ in requests]
         if paths.count("/api/v1/play/invites") != 2 or revokes.served != 4:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")

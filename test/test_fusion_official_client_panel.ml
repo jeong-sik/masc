@@ -932,7 +932,7 @@ let test_muse_framed_prompt_capacity_before_spawning () =
       | Error (Masc.Fusion_official_client.Muse_failure
           (Runtime_muse_serve.Invalid_config _)) -> ()
       | Error failure -> fail (Masc.Fusion_official_client.failure_detail
-          ~runtime_id:runtime.Runtime.id failure)
+          ~runtime_id:runtime.Runtime_instance.id failure)
       | Ok _ -> fail "oversized Muse input reached host" in
     refused runtime;
     check bool "an over-budget input never spawns" false

@@ -1,30 +1,75 @@
+<p align="center">
+  <img src="docs/assets/candle.svg" width="88" alt="MASC Keeper">
+</p>
+
 # Contributing to MASC
 
-MASC is a harness for running several coding agents against one repository:
-a workspace server over MCP, supervised Keepers, and a terminal UI, in one
-OCaml binary. This document is about changing this codebase, not about
-justifying its design.
+[First contribution](docs/guides/CONTRIBUTOR-WORKFLOW.md#1-make-a-first-contribution) · [AI sessions](docs/guides/CONTRIBUTOR-WORKFLOW.md#2-start-an-ai-development-session) · [Source map](#where-things-are) · [한국어 안내](docs/guides/CONTRIBUTOR-WORKFLOW.ko.md)
 
-Coding agents that work on MASC read [`AGENTS.md`](AGENTS.md) and
-`docs/constitution.xml` first. For them the constitution's execution protocol
-replaces the local-build and CI-wait advice below.
+Start here when changing MASC. You can contribute documentation without an
+OCaml toolchain, report a reproducible problem, or change a feature with evidence.
 
-## Quick start
+The [repository strategy and contributor workflow](docs/guides/CONTRIBUTOR-WORKFLOW.md)
+([한국어](docs/guides/CONTRIBUTOR-WORKFLOW.ko.md)) covers first contributions, AI
+sessions, Issue/Goal/Task/Board coordination, CI, review and handoff. Outside
+contributors can use a fork and public GitHub issues/PRs; private MASC access is
+not required to contribute.
+
+| Who is doing the work? | Start and validation path |
+|---|---|
+| Human contributor | Read the workflow, choose an issue, use a separate branch/worktree; local focused checks are available below |
+| External AI coding session | Read [AGENTS.md](AGENTS.md) and the full [constitution](docs/constitution.xml) first; no local Dune builds or CI wait loops |
+| Keeper development lane | Read the task contract and lane instructions; distinguish local observations, independent source review and full Release/Tag CI |
+
+> [!NOTE]
+> `execution_protocol` in the constitution owns coding-agent workflow where it
+> overrides the local-build guidance here. Keeper runtime prompts are separate.
+
+## Choose a contribution
+
+Start with a reproducible behavior gap, an incorrect instruction or a useful
+example. [The reliable-change roadmap](docs/RELIABLE-CHANGE-ROADMAP.md) describes
+current improvement goals; it is not a promise that every proposed feature fits.
+
+| What you found | Next step |
+|---|---|
+| Bug | Search issues and all PR states, reproduce on current source, then open/link an issue with expected and observed behavior |
+| Documentation gap | Identify the incorrect instruction and its source; a small docs PR is a useful first contribution |
+| New capability or architecture | Explain the user scenario and discuss the proposal in an issue before broad implementation |
+| Setup question | Use an inquiry issue with platform, version and redacted error output; do not assume it is a defect |
+
+See the workflow's [first contribution](docs/guides/CONTRIBUTOR-WORKFLOW.md#1-make-a-first-contribution)
+for fork setup and its [source map](docs/guides/CONTRIBUTOR-WORKFLOW.md#find-the-source-before-editing)
+for where to start reading. Use the issue taxonomy below when filing an issue.
+AI-assisted contributions are welcome; the author is responsible for understanding
+the result and distinguishing actual checks from generated claims.
+
+## Local development for human contributors
+
+Install the [source prerequisites](README.md#from-source) first.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
+opam init --bare                         # initialize a fresh opam installation
 opam switch create . ocaml-base-compiler.5.5.1 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
-opam install ./masc.opam --deps-only --locked
+opam install ./masc.opam --deps-only --locked --with-test
 
 scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
-./start-masc.sh --http --base-path "$HOME/masc-dev"   # server from the checkout
+mkdir -p "$HOME/masc-dev"
+env -u MASC_CONFIG_DIR scripts/run-local.sh --target-dir "$HOME/masc-dev" --port 9234
 ```
+
+Use an unused port in the launch command; `9234` is an example. The local launcher
+clears an inherited `MASC_CONFIG_DIR` for this command so config resolves under
+the separate target directory. It does not seed checked-in Keeper manifests by
+default; existing configuration in the target directory still applies. Browser access additionally needs the
+dashboard build described in README.
 
 `scripts/dune-local.sh` wraps Dune for a machine where several agents build at
 once: it serializes Dune inside one worktree, defaults concurrency to
@@ -34,7 +79,10 @@ running it.
 
 The hooks: `pre-commit` skips the `dune build` type-check for a commit that
 only touches docs and assets; `pre-push` refuses a push that adds Dune trace
-dumps, because those carry the environment.
+dumps, because those carry the environment. Code commits invoke a local Dune
+build through pre-commit. External AI sessions must use the
+[commit boundary procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#2-start-an-ai-development-session)
+when these hooks are active.
 
 ## Where things are
 
@@ -42,11 +90,11 @@ dumps, because those carry the environment.
 bin/
 ├── main_eio.ml                  server, CLI subcommands, and the hand-over to the TUI
 ├── main_stdio_eio.ml            stdio MCP entry point
-├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules (about 120 files)
+├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules
 ├── masc_exec_shim.ml            the shim a remote_ssh endpoint runs
 └── ...                          SSH bootstrap, browser host, cost and trace tools, probes
 
-lib/                             about 180 top-level modules and 147 directories, among them
+lib/                             subsystem modules and libraries
 ├── keeper/                      Keeper runtime, turn loop, tools, chat channels
 ├── server/                      HTTP routes, MCP transport, sidecars, gateways
 ├── workspace/                   tasks, claims, goals, board, verification
@@ -62,7 +110,7 @@ dashboard/                       TypeScript + Preact SPA
 config/                          seeds embedded into the binary: runtime.toml, prompts, tools/*.toml
 docs/                            manuals, runbooks, docs/spec, docs/rfc
 scripts/                         build, install, local operations; scripts/ci/ holds the lint suite
-test/                            Alcotest suites (about 1,200 files) and fixtures
+test/                            Alcotest suites, PTY scenarios and fixtures
 ```
 
 ## Code style
@@ -104,11 +152,15 @@ CI is manual and review comes first. Ordinary stacked PRs use independent
 function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
 remains and collect P3 issues for later. There is no PR/push/nightly CI.
 
-`pr-check.yml` provides explicit syntax/configuration/credential checks in a
-two-minute job. `ci.yml` builds only Core for the bottom of a stack, also
-within two minutes. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
-compile, typecheck, behavior and installation cycle. Tag publication waits
-for full checks and tests. See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
+The MASC leader selects current source-approved heads, prepares a combined
+candidate, then selects CI scopes. `leader-ci.yml` is dispatched on main with
+the exact candidate SHA and preparation receipt; general compile/test runners
+are reusable only. Release candidates retain explicit full verification.
+See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
+
+Prefer short, focused checks: the constitution's "about two minutes"
+describes their intended scale, not a timeout or a pass/fail threshold.
+Only an actual successful completion is build evidence.
 
 ## Commits
 
@@ -127,7 +179,8 @@ chore: bump version to 0.34.0
 
 1. Create a stack: the bottom PR targets `main`; each later PR targets the
    preceding stack branch.
-2. Write tests for new behaviour.
+2. Review the changed feature against its contract and concrete risks. Check
+   documentation claims and links against source; add behavior tests where useful.
 3. Review from independent perspectives. Request only minimal manual checks
    before release; do not wait or poll for CI. Full verification belongs to
    the Release/Tag boundary.
@@ -143,21 +196,41 @@ chore: bump version to 0.34.0
    `CHANGELOG.md`: `### Added`, `### Changed`, `### Fixed`, `### Removed` (or
    another heading `changelog.d/README.md` lists), then English bullets that
    each cite the pull request as `#<number>`. Two pull requests never write
-   the same file, so one merge does not make the others conflict. CI checks
-   the fragments and refuses a new bullet under `## [Unreleased]`; the release
+   the same file, so one merge does not make the others conflict. The release
    bump folds the fragments into `CHANGELOG.md`. Entries already under
    `## [Unreleased]` stay where they are.
-8. Pull requests are squash-merged. Never push to a branch whose pull request
-   has merged; open a new one.
-9. When the work is ready to verify, hand it over with typed evidence. Every
-   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a
-   producer-relative file opened and snapshotted on submission; the reviewer
-   reads that snapshot) or `note:<text>` (prose the reviewer reads but cannot
-   inspect); see RFC-0417. A PR URL, a commit, or a board post id inside a
-   `note:` is narrative until something opens it — pair it with an
-   `artifact:` entry, and never let a `note:` stand alone as completion
-   evidence. Submission moves the task to awaiting_verification; completion
-   requires the completion authority's verdict.
+8. Follow the [review and integration procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#5-review-and-integrate).
+   Ordinary stacks use current-head independent source review; Release/Tag PRs
+   additionally require full CI. Never push to a merged PR branch.
+9. For work tracked by a MASC Task, submit typed evidence when ready to verify.
+   `artifact:<producer-root-relative-path>` snapshots a bounded file at
+   submission; `note:<text>` carries narrative evidence. The current tool
+   schema also supports frozen `board:` and `fusion:` references. Public URLs in notes can be fetched by the verifier, but prose
+   alone is not a file snapshot. Save volatile evidence as an artifact. Submission
+   moves the task to awaiting_verification; completion requires the authority's verdict.
+
+## Review decisions and integration
+
+Review function, logic and code cleanliness on the current head. Approve when
+no P0, P1 or P2 issue remains; collect P3 findings for later. An author or a
+session that pushed the PR cannot independently approve it. State actual evidence
+and unverified behavior separately.
+
+The ordinary source-review verdict uses actual values:
+
+```text
+verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
+```
+
+`APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode
+checks review eligibility. Publishing an approval requires `--body` with the
+verdict and evidence.
+Release verdicts additionally cite `run: <full-CI-run-id>` for completed full
+verification of that head. Read current reviews and comments before integration;
+blocking reviews and later FAIL/HOLD decisions take precedence. Land stacks bottom
+first and re-review changes to base and head. See [the workflow](docs/CI-REVIEW-WORKFLOW.md)
+for admission through the review and merge scripts. A source approval does not
+claim that a build or runtime check ran.
 
 ## Issues
 
@@ -216,9 +289,8 @@ reproduce, expected versus actual behaviour, and the relevant log
 - `v2.*` tags are history and do not define the active line.
 - After a train bump lands on `main`, publish its tag before opening the next
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
-- Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
-  before a release review; the tag workflow runs the former and CI runs the
-  latter.
+- Run `bash scripts/check-version-truth.sh` before a release review and request
+  the full Release/Tag verification described in the CI workflow.
 - `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
   assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
   deletes them; move those entries into the version section before tagging.
@@ -241,8 +313,9 @@ shape.
 
 - Runtime state is filesystem-first under `<base-path>/.masc/`.
 - State files are JSON or JSONL where practical, so an operator can read them.
-- Nothing outside the binary is required to build, boot, or run a Keeper
-  turn. Graph and vector integrations exist for specific workflows only.
+- A binary install does not need the OCaml toolchain. Keeper turns still need
+  their model access and sandbox prerequisites. Graph and vector integrations
+  exist for specific workflows.
 - A change that stops reading a state file's existing rows is a hard cut. The
   code does not read or convert the old shape. The pull request's changelog
   fragment has a `### Fresh state required` entry that names the file and says

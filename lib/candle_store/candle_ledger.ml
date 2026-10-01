@@ -187,9 +187,15 @@ let append ~path cursor suffix =
 
 let encode events =
   List.fold_left
-    (fun acc event ->
+    (fun acc (event : Candle_event.t) ->
        Result.bind acc (fun lines ->
-         Result.map (fun line -> line :: lines) (Candle_event.to_line event)))
+         let admitted = match event.body with
+           | Candle_event.Paid payment -> Candle_payment.validate_for_append payment
+           | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+           | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+           | Candle_event.Purchased _ | Candle_event.Equipped _ -> Ok () in
+         Result.bind admitted (fun () ->
+           Result.map (fun line -> line :: lines) (Candle_event.to_line event))))
     (Ok [])
     events
   |> Result.map (fun lines ->

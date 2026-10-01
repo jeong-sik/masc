@@ -1,0 +1,1647 @@
+{
+  "scope": "Actual production Overview and KeeperDetailPage in Chromium via Vite dev. Currency is synthetic HTTP fixture JSON, not native ledger output or live server evidence. The actual execution fetch, decoder/store and production UI render every transition.",
+  "source_head": "ec4a71f4e77fcd135b4b275f00b3dea63645e525",
+  "source_dirty": false,
+  "source_hashes": {
+    "dashboard/src/components/candle-economy.ts": "b2579b77babc70b53569e88c6c9a6f08ea7f23252e4a6205b6436a30a89125d8",
+    "dashboard/src/components/overview/overview.ts": "942aaac6d770fe4cc18e8ba673715aa9222c99c7428b72dcbc0386399712b01c",
+    "dashboard/src/components/keeper-detail-page.ts": "7eb0e6ce49ebfd05007b20a5a9edc69b8b56570a7df3c1a6d1a469339cba3083",
+    "dashboard/src/components/keeper-detail-shell.ts": "bf8b5c5a52678ec1d6200da5f20596609d3ad4e495e404d4fd14c6ffb17bcff5",
+    "dashboard/src/components/keeper-detail-lifecycle.ts": "12be88b69eb7d0a247d792d0e863825365dc7472b96b86e1e6b478527ab21bc2",
+    "dashboard/src/api/schemas/candle-observation.ts": "b7f2be653dfb3972018b5f5b7f49302a75115e625819110cd4cdc9b24bc47316",
+    "dashboard/src/api/dashboard-execution.ts": "f2bd0c755ef86adcbf3e398200adbe26ae198ef381d0c3ac56b9b4a57a1e07be",
+    "dashboard/src/store.ts": "6254ebcf0e08f7b322d0eb08fd5f22c35c971f15a069c1009e8e2a28a8d95d91",
+    "dashboard/src/keeper-store-normalize.ts": "ea3a547ab07c5e850e12e13f5203e32b87e2efe35b6b5652b00543bee9895961",
+    "dashboard/src/main.ts": "fd52b9fca46e2f167db0abbe270dfcfe0b4c3ef92abc09d09f702cda677b64af",
+    "dashboard/vite.config.ts": "ee6d1c8814df4fc5d114e04ab3f82fd3546bda238cb68ce23651d931ca65e350",
+    "dashboard/pnpm-lock.yaml": "6490e6d920eae466291aafcafa6bafe4247734eac6a8435784aee6811d8514e9"
+  },
+  "requests": [
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/dashboard/execution?force=1",
+      "status": 200,
+      "body": {
+        "execution_publication_epoch": "candle-browser-evidence",
+        "execution_publication_generation": 1,
+        "generated_at": "2026-09-29T15:50:28.906Z",
+        "candle": {
+          "status": "ready",
+          "issued_milli": "18014398509481987",
+          "burned_milli": "9007199254740994",
+          "circulating_milli": "9007199254740993"
+        },
+        "status": {
+          "status": "running",
+          "project": "isolated-candle-browser-fixture"
+        },
+        "agents": [],
+        "tasks": [],
+        "messages": [],
+        "task_counts": {
+          "total": 0
+        },
+        "keepers": [
+          {
+            "name": "candle-browser-fixture",
+            "emoji": "◈",
+            "status": "active",
+            "health": "healthy",
+            "phase": "running",
+            "lifecycle_phase": "running",
+            "paused": false,
+            "keepalive_running": true,
+            "activation_mode": "autonomous",
+            "runtime_id": "fixture.model",
+            "pipeline_stage": "idle",
+            "runtime_blocker_summary": null,
+            "portrait": {
+              "state": "unavailable",
+              "reason": "Portrait PNG is outside this currency fixture"
+            },
+            "candle_balance_milli": "9007199254740993"
+          }
+        ]
+      },
+      "body_sha256": "60c5b14dd850820a520550a81a1f54a521ec6a2d6563a401a9f95c06858bac2c",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/providers",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/models/metrics?window=60",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/health?full=1",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "fixture_scope": "isolated UI only"
+      },
+      "body_sha256": "155dd9738dc5e728758560558e10c2eea134fee0b7441c59aa2c5638327f5aba",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/dashboard/scheduled-automation",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry?source=agent_core_event&since_ms=1790688628979&n=280",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry/summary",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/tool-approvals",
+      "status": 200,
+      "body": {
+        "approvals": []
+      },
+      "body_sha256": "e9a7583c1b202906a5e60289c8f47abcd06dfde19486cda09f4cf75212594bf0",
+      "authorization_matches_fixture": false
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/chat/history",
+      "status": 200,
+      "body": [],
+      "body_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/composite",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/runtime-trace?limit=200",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/config",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/transitions?limit=1",
+      "status": 200,
+      "body": {
+        "transitions": []
+      },
+      "body_sha256": "38d1298dc6352e552ee210338ce037d33f820685012e7dfbfee3b586278cab1b",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/waiting-inventory",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/tool-calls?limit=200",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/waiting-inventory",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "ready",
+      "method": "GET",
+      "url": "/api/v1/dashboard/fusion-runs",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/api/v1/dashboard/execution?force=1",
+      "status": 200,
+      "body": {
+        "execution_publication_epoch": "candle-browser-evidence",
+        "execution_publication_generation": 2,
+        "generated_at": "2026-09-29T15:50:30.678Z",
+        "candle": {
+          "status": "disabled",
+          "reason": "Controlled fixture: ledger unreadable"
+        },
+        "status": {
+          "status": "running",
+          "project": "isolated-candle-browser-fixture"
+        },
+        "agents": [],
+        "tasks": [],
+        "messages": [],
+        "task_counts": {
+          "total": 0
+        },
+        "keepers": [
+          {
+            "name": "candle-browser-fixture",
+            "emoji": "◈",
+            "status": "active",
+            "health": "healthy",
+            "phase": "running",
+            "lifecycle_phase": "running",
+            "paused": false,
+            "keepalive_running": true,
+            "activation_mode": "autonomous",
+            "runtime_id": "fixture.model",
+            "pipeline_stage": "idle",
+            "runtime_blocker_summary": null,
+            "portrait": {
+              "state": "unavailable",
+              "reason": "Portrait PNG is outside this currency fixture"
+            },
+            "candle_balance_milli": null
+          }
+        ]
+      },
+      "body_sha256": "6e9172f4b256a8338a94cc3343dcf3a3d6ca60a88c31ad849d080a5b12ee3cb3",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/api/v1/models/metrics?window=60",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry?source=agent_core_event&since_ms=1790688630762&n=280",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry/summary",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/health?full=1",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "fixture_scope": "isolated UI only"
+      },
+      "body_sha256": "155dd9738dc5e728758560558e10c2eea134fee0b7441c59aa2c5638327f5aba",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "disabled",
+      "method": "GET",
+      "url": "/api/v1/dashboard/scheduled-automation",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/dashboard/execution?force=1",
+      "status": 200,
+      "body": {
+        "execution_publication_epoch": "candle-browser-evidence",
+        "execution_publication_generation": 3,
+        "generated_at": "2026-09-29T15:50:30.814Z",
+        "candle": {
+          "status": "ready",
+          "issued_milli": "18014398509481987",
+          "burned_milli": "9007199254740994",
+          "circulating_milli": "9007199254740993"
+        },
+        "status": {
+          "status": "running",
+          "project": "isolated-candle-browser-fixture"
+        },
+        "agents": [],
+        "tasks": [],
+        "messages": [],
+        "task_counts": {
+          "total": 0
+        },
+        "keepers": [
+          {
+            "name": "candle-browser-fixture",
+            "emoji": "◈",
+            "status": "active",
+            "health": "healthy",
+            "phase": "running",
+            "lifecycle_phase": "running",
+            "paused": false,
+            "keepalive_running": true,
+            "activation_mode": "autonomous",
+            "runtime_id": "fixture.model",
+            "pipeline_stage": "idle",
+            "runtime_blocker_summary": null,
+            "portrait": {
+              "state": "unavailable",
+              "reason": "Portrait PNG is outside this currency fixture"
+            },
+            "candle_balance_milli": 9007199254740992
+          }
+        ]
+      },
+      "body_sha256": "c48d4757ddb6450307c251c454b3b2b2544379f9e845063202b01fe45760c9ff",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/tool-approvals",
+      "status": 200,
+      "body": {
+        "approvals": []
+      },
+      "body_sha256": "e9a7583c1b202906a5e60289c8f47abcd06dfde19486cda09f4cf75212594bf0",
+      "authorization_matches_fixture": false
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/composite",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/runtime-trace?limit=200",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/config",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/transitions?limit=1",
+      "status": 200,
+      "body": {
+        "transitions": []
+      },
+      "body_sha256": "38d1298dc6352e552ee210338ce037d33f820685012e7dfbfee3b586278cab1b",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/waiting-inventory",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/keepers/candle-browser-fixture/waiting-inventory",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "malformed",
+      "method": "GET",
+      "url": "/api/v1/dashboard/fusion-runs",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/api/v1/dashboard/execution?force=1",
+      "status": 200,
+      "body": {
+        "execution_publication_epoch": "candle-browser-evidence",
+        "execution_publication_generation": 4,
+        "generated_at": "2026-09-29T15:50:30.966Z",
+        "candle": {
+          "status": "off"
+        },
+        "status": {
+          "status": "running",
+          "project": "isolated-candle-browser-fixture"
+        },
+        "agents": [],
+        "tasks": [],
+        "messages": [],
+        "task_counts": {
+          "total": 0
+        },
+        "keepers": [
+          {
+            "name": "candle-browser-fixture",
+            "emoji": "◈",
+            "status": "active",
+            "health": "healthy",
+            "phase": "running",
+            "lifecycle_phase": "running",
+            "paused": false,
+            "keepalive_running": true,
+            "activation_mode": "autonomous",
+            "runtime_id": "fixture.model",
+            "pipeline_stage": "idle",
+            "runtime_blocker_summary": null,
+            "portrait": {
+              "state": "unavailable",
+              "reason": "Portrait PNG is outside this currency fixture"
+            },
+            "candle_balance_milli": null
+          }
+        ]
+      },
+      "body_sha256": "2b613237c5c21613e93c1d1e2d9922a7db1ffce3eb27f6d448cbb057a9dc3e10",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/api/v1/models/metrics?window=60",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry?source=agent_core_event&since_ms=1790688631047&n=280",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/api/v1/dashboard/telemetry/summary",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/health?full=1",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "fixture_scope": "isolated UI only"
+      },
+      "body_sha256": "155dd9738dc5e728758560558e10c2eea134fee0b7441c59aa2c5638327f5aba",
+      "authorization_matches_fixture": true
+    },
+    {
+      "phase": "off",
+      "method": "GET",
+      "url": "/api/v1/dashboard/scheduled-automation",
+      "status": 503,
+      "body": {
+        "error": "Auxiliary surface is outside the controlled currency fixture"
+      },
+      "body_sha256": "32c5ef269c99e08626dfb13fcde32dbb82a7d9c9f1e595cbb4a65d6f6219ec56",
+      "authorization_matches_fixture": true
+    }
+  ],
+  "screenshots": [
+    {
+      "name": "01-ready-overview",
+      "file": "01-ready-overview.png",
+      "sha256": "9db49a81d0cf5c9de86b03530610a1de70793c2a60aa23f5e853b8ffbf0cde3d"
+    },
+    {
+      "name": "02-ready-keeper",
+      "file": "02-ready-keeper.png",
+      "sha256": "c2bb05b31a645050cab6e1bc7bdbf2b724c7b8e9062040e1862255ddcd9091f7"
+    },
+    {
+      "name": "03-disabled-keeper",
+      "file": "03-disabled-keeper.png",
+      "sha256": "58f15f80f3758a0e0717d1940986860fe3c17d602cea6d1eaf4510b814ff3ad2"
+    },
+    {
+      "name": "04-disabled-overview",
+      "file": "04-disabled-overview.png",
+      "sha256": "b639dd6456f02ab4547c4ff23432576159fccba9a8bec9cbccb3d3dd05355243"
+    },
+    {
+      "name": "05-malformed-overview",
+      "file": "05-malformed-overview.png",
+      "sha256": "67928f238efc952907c83b9eabcd89437728f802ae66d2cc48cd61860a251655"
+    },
+    {
+      "name": "06-malformed-keeper",
+      "file": "06-malformed-keeper.png",
+      "sha256": "c7c175713a925d0cb54787bc02e53fd8b2224c801a4a669d87a249b6b4456570"
+    },
+    {
+      "name": "07-off-keeper",
+      "file": "07-off-keeper.png",
+      "sha256": "fb474b79b67ff0e568c7c63e7fe4f315d8794e748dff1a2b77f43eccb15f7f36"
+    },
+    {
+      "name": "08-off-overview",
+      "file": "08-off-overview.png",
+      "sha256": "dcddd2944c04ed454f83c57b6c84bc36f75d35d1403691148533dbc2c615c713"
+    }
+  ],
+  "browser_errors": [],
+  "console_diagnostics": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "warning",
+      "text": "[keeper] tool-call output hydration failed for candle-browser-fixture: GET /api/v1/keepers/candle-browser-fixture/tool-calls?limit=200: Auxiliary surface is outside the controlled currency fixture"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "warning",
+      "text": "[Fusion] runs fetch error: ApiRequestError: GET /api/v1/dashboard/fusion-runs: Auxiliary surface is outside the controlled currency fixture\n    at apiRequestErrorFromResponse (http://127.0.0.1:5173/dashboard/src/api/core.ts:375:10)\n    at async get (http://127.0.0.1:5173/dashboard/src/api/core.ts:545:11)\n    at async fetchFusionRuns (http://127.0.0.1:5173/dashboard/src/api/dashboard-fusion.ts:94:15)\n    at async refreshFusionRuns (http://127.0.0.1:5173/dashboard/src/store.ts:1147:18)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "warning",
+      "text": "[Fusion] runs fetch error: ApiRequestError: GET /api/v1/dashboard/fusion-runs: Auxiliary surface is outside the controlled currency fixture\n    at apiRequestErrorFromResponse (http://127.0.0.1:5173/dashboard/src/api/core.ts:375:10)\n    at async get (http://127.0.0.1:5173/dashboard/src/api/core.ts:545:11)\n    at async fetchFusionRuns (http://127.0.0.1:5173/dashboard/src/api/dashboard-fusion.ts:94:15)\n    at async refreshFusionRuns (http://127.0.0.1:5173/dashboard/src/store.ts:1147:18)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    }
+  ],
+  "blocked_external_requests": [],
+  "assertions": [
+    "Actual Overview shows all three synthetic totals exactly; actual KeeperDetailPage shows >JS53 balance and enabled lifecycle control",
+    "Disabled and malformed execution observations withdraw amounts while the same Keeper remains present and its lifecycle control remains enabled",
+    "Off hides currency panels while preserving the ordinary Keeper interface"
+  ],
+  "harness_sha256": "ee5f365d7e127070f17576a3c2cde00e2ecf9bbe67728f7e2c0796426c693e6a",
+  "browser": {
+    "name": "Chromium",
+    "version": "149.0.7827.55",
+    "viewport": {
+      "width": 1500,
+      "height": 1050
+    },
+    "device_scale_factor": 1
+  },
+  "observations": {
+    "reads": [
+      {
+        "raw": {
+          "execution_publication_epoch": "candle-browser-evidence",
+          "execution_publication_generation": 1,
+          "generated_at": "2026-09-29T15:50:28.906Z",
+          "candle": {
+            "status": "ready",
+            "issued_milli": "18014398509481987",
+            "burned_milli": "9007199254740994",
+            "circulating_milli": "9007199254740993"
+          },
+          "status": {
+            "status": "running",
+            "project": "isolated-candle-browser-fixture"
+          },
+          "agents": [],
+          "tasks": [],
+          "messages": [],
+          "task_counts": {
+            "total": 0
+          },
+          "keepers": [
+            {
+              "name": "candle-browser-fixture",
+              "emoji": "◈",
+              "status": "active",
+              "health": "healthy",
+              "phase": "running",
+              "lifecycle_phase": "running",
+              "paused": false,
+              "keepalive_running": true,
+              "activation_mode": "autonomous",
+              "runtime_id": "fixture.model",
+              "pipeline_stage": "idle",
+              "runtime_blocker_summary": null,
+              "portrait": {
+                "state": "unavailable",
+                "reason": "Portrait PNG is outside this currency fixture"
+              },
+              "candle_balance_milli": "9007199254740993"
+            }
+          ]
+        },
+        "accepted": true,
+        "reading": {
+          "status": "ready",
+          "issued_milli": "18014398509481987",
+          "burned_milli": "9007199254740994",
+          "circulating_milli": "9007199254740993"
+        },
+        "keeper": {
+          "name": "candle-browser-fixture",
+          "runtime_class": "keeper",
+          "pipeline_stage": "idle",
+          "pipeline_stage_detail": null,
+          "lifecycle_phase": "Running",
+          "phase": "Running",
+          "paused": false,
+          "emoji": "◈",
+          "keeper_id": null,
+          "active_model_label": null,
+          "next_model_hint": null,
+          "runtime_id": "fixture.model",
+          "runtime_ref": null,
+          "runtime_canonical": null,
+          "selected_runtime_canonical": null,
+          "declaration_only": false,
+          "preparation_requirements": [],
+          "portrait": {
+            "state": "unavailable",
+            "reason": "Portrait PNG is outside this currency fixture"
+          },
+          "candle_balance_milli": "9007199254740993",
+          "status": "active",
+          "keepalive_running": true,
+          "keeper_keepalive_interval_s": null,
+          "activation_mode": "autonomous",
+          "pause_state": null,
+          "runtime_blocker_state": null,
+          "runtime_blocker_class": null,
+          "runtime_blocker_summary": null,
+          "stop_cause": null,
+          "needs_attention": null,
+          "attention_reason": null,
+          "next_human_action": null,
+          "config_error": null,
+          "trust": null,
+          "sandbox_profile": null,
+          "sandbox_target": null,
+          "keeper_last_error": null,
+          "blocked_task_count": null,
+          "goal_progress": null,
+          "last_proactive_reason": null,
+          "last_activity_at": null,
+          "last_activity_source": null,
+          "live_activity": null,
+          "current_gate": null,
+          "last_proactive_preview": null,
+          "runtime_warning_ctx_ratio": null,
+          "context_ratio": null,
+          "context_tokens": null,
+          "context_max": null,
+          "context_source": null,
+          "context_metrics_unavailable": null,
+          "last_turn_usage": null,
+          "recent_input_preview": null,
+          "recent_output_preview": null,
+          "recent_tool_names": [],
+          "latest_tool_names": [],
+          "latest_tool_call_count": null,
+          "tool_audit_source": null,
+          "tool_audit_at": null,
+          "diagnostic": null,
+          "provider_health": null
+        }
+      },
+      {
+        "raw": {
+          "execution_publication_epoch": "candle-browser-evidence",
+          "execution_publication_generation": 2,
+          "generated_at": "2026-09-29T15:50:30.678Z",
+          "candle": {
+            "status": "disabled",
+            "reason": "Controlled fixture: ledger unreadable"
+          },
+          "status": {
+            "status": "running",
+            "project": "isolated-candle-browser-fixture"
+          },
+          "agents": [],
+          "tasks": [],
+          "messages": [],
+          "task_counts": {
+            "total": 0
+          },
+          "keepers": [
+            {
+              "name": "candle-browser-fixture",
+              "emoji": "◈",
+              "status": "active",
+              "health": "healthy",
+              "phase": "running",
+              "lifecycle_phase": "running",
+              "paused": false,
+              "keepalive_running": true,
+              "activation_mode": "autonomous",
+              "runtime_id": "fixture.model",
+              "pipeline_stage": "idle",
+              "runtime_blocker_summary": null,
+              "portrait": {
+                "state": "unavailable",
+                "reason": "Portrait PNG is outside this currency fixture"
+              },
+              "candle_balance_milli": null
+            }
+          ]
+        },
+        "accepted": true,
+        "reading": {
+          "status": "disabled",
+          "reason": "Controlled fixture: ledger unreadable"
+        },
+        "keeper": {
+          "name": "candle-browser-fixture",
+          "runtime_class": "keeper",
+          "pipeline_stage": "idle",
+          "pipeline_stage_detail": null,
+          "lifecycle_phase": "Running",
+          "phase": "Running",
+          "paused": false,
+          "emoji": "◈",
+          "keeper_id": null,
+          "active_model_label": null,
+          "next_model_hint": null,
+          "runtime_id": "fixture.model",
+          "runtime_ref": null,
+          "runtime_canonical": null,
+          "selected_runtime_canonical": null,
+          "declaration_only": false,
+          "preparation_requirements": [],
+          "portrait": {
+            "state": "unavailable",
+            "reason": "Portrait PNG is outside this currency fixture"
+          },
+          "candle_balance_milli": null,
+          "status": "active",
+          "keepalive_running": true,
+          "keeper_keepalive_interval_s": null,
+          "activation_mode": "autonomous",
+          "pause_state": null,
+          "runtime_blocker_state": null,
+          "runtime_blocker_class": null,
+          "runtime_blocker_summary": null,
+          "stop_cause": null,
+          "needs_attention": null,
+          "attention_reason": null,
+          "next_human_action": null,
+          "config_error": null,
+          "trust": null,
+          "sandbox_profile": null,
+          "sandbox_target": null,
+          "keeper_last_error": null,
+          "blocked_task_count": null,
+          "goal_progress": null,
+          "last_proactive_reason": null,
+          "last_activity_at": null,
+          "last_activity_source": null,
+          "live_activity": null,
+          "current_gate": null,
+          "last_proactive_preview": null,
+          "runtime_warning_ctx_ratio": null,
+          "context_ratio": null,
+          "context_tokens": null,
+          "context_max": null,
+          "context_source": null,
+          "context_metrics_unavailable": null,
+          "last_turn_usage": null,
+          "recent_input_preview": null,
+          "recent_output_preview": null,
+          "recent_tool_names": [],
+          "latest_tool_names": [],
+          "latest_tool_call_count": null,
+          "tool_audit_source": null,
+          "tool_audit_at": null,
+          "diagnostic": null,
+          "provider_health": null
+        }
+      },
+      {
+        "raw": {
+          "execution_publication_epoch": "candle-browser-evidence",
+          "execution_publication_generation": 3,
+          "generated_at": "2026-09-29T15:50:30.814Z",
+          "candle": {
+            "status": "ready",
+            "issued_milli": "18014398509481987",
+            "burned_milli": "9007199254740994",
+            "circulating_milli": "9007199254740993"
+          },
+          "status": {
+            "status": "running",
+            "project": "isolated-candle-browser-fixture"
+          },
+          "agents": [],
+          "tasks": [],
+          "messages": [],
+          "task_counts": {
+            "total": 0
+          },
+          "keepers": [
+            {
+              "name": "candle-browser-fixture",
+              "emoji": "◈",
+              "status": "active",
+              "health": "healthy",
+              "phase": "running",
+              "lifecycle_phase": "running",
+              "paused": false,
+              "keepalive_running": true,
+              "activation_mode": "autonomous",
+              "runtime_id": "fixture.model",
+              "pipeline_stage": "idle",
+              "runtime_blocker_summary": null,
+              "portrait": {
+                "state": "unavailable",
+                "reason": "Portrait PNG is outside this currency fixture"
+              },
+              "candle_balance_milli": 9007199254740992
+            }
+          ]
+        },
+        "accepted": true,
+        "reading": {
+          "status": "unavailable",
+          "reason": "Candle row balances disagree with the envelope observation"
+        },
+        "keeper": {
+          "name": "candle-browser-fixture",
+          "runtime_class": "keeper",
+          "pipeline_stage": "idle",
+          "pipeline_stage_detail": null,
+          "lifecycle_phase": "Running",
+          "phase": "Running",
+          "paused": false,
+          "emoji": "◈",
+          "keeper_id": null,
+          "active_model_label": null,
+          "next_model_hint": null,
+          "runtime_id": "fixture.model",
+          "runtime_ref": null,
+          "runtime_canonical": null,
+          "selected_runtime_canonical": null,
+          "declaration_only": false,
+          "preparation_requirements": [],
+          "portrait": {
+            "state": "unavailable",
+            "reason": "Portrait PNG is outside this currency fixture"
+          },
+          "status": "active",
+          "keepalive_running": true,
+          "keeper_keepalive_interval_s": null,
+          "activation_mode": "autonomous",
+          "pause_state": null,
+          "runtime_blocker_state": null,
+          "runtime_blocker_class": null,
+          "runtime_blocker_summary": null,
+          "stop_cause": null,
+          "needs_attention": null,
+          "attention_reason": null,
+          "next_human_action": null,
+          "config_error": null,
+          "trust": null,
+          "sandbox_profile": null,
+          "sandbox_target": null,
+          "keeper_last_error": null,
+          "blocked_task_count": null,
+          "goal_progress": null,
+          "last_proactive_reason": null,
+          "last_activity_at": null,
+          "last_activity_source": null,
+          "live_activity": null,
+          "current_gate": null,
+          "last_proactive_preview": null,
+          "runtime_warning_ctx_ratio": null,
+          "context_ratio": null,
+          "context_tokens": null,
+          "context_max": null,
+          "context_source": null,
+          "context_metrics_unavailable": null,
+          "last_turn_usage": null,
+          "recent_input_preview": null,
+          "recent_output_preview": null,
+          "recent_tool_names": [],
+          "latest_tool_names": [],
+          "latest_tool_call_count": null,
+          "tool_audit_source": null,
+          "tool_audit_at": null,
+          "diagnostic": null,
+          "provider_health": null
+        }
+      },
+      {
+        "raw": {
+          "execution_publication_epoch": "candle-browser-evidence",
+          "execution_publication_generation": 4,
+          "generated_at": "2026-09-29T15:50:30.966Z",
+          "candle": {
+            "status": "off"
+          },
+          "status": {
+            "status": "running",
+            "project": "isolated-candle-browser-fixture"
+          },
+          "agents": [],
+          "tasks": [],
+          "messages": [],
+          "task_counts": {
+            "total": 0
+          },
+          "keepers": [
+            {
+              "name": "candle-browser-fixture",
+              "emoji": "◈",
+              "status": "active",
+              "health": "healthy",
+              "phase": "running",
+              "lifecycle_phase": "running",
+              "paused": false,
+              "keepalive_running": true,
+              "activation_mode": "autonomous",
+              "runtime_id": "fixture.model",
+              "pipeline_stage": "idle",
+              "runtime_blocker_summary": null,
+              "portrait": {
+                "state": "unavailable",
+                "reason": "Portrait PNG is outside this currency fixture"
+              },
+              "candle_balance_milli": null
+            }
+          ]
+        },
+        "accepted": true,
+        "reading": {
+          "status": "off"
+        },
+        "keeper": {
+          "name": "candle-browser-fixture",
+          "runtime_class": "keeper",
+          "pipeline_stage": "idle",
+          "pipeline_stage_detail": null,
+          "lifecycle_phase": "Running",
+          "phase": "Running",
+          "paused": false,
+          "emoji": "◈",
+          "keeper_id": null,
+          "active_model_label": null,
+          "next_model_hint": null,
+          "runtime_id": "fixture.model",
+          "runtime_ref": null,
+          "runtime_canonical": null,
+          "selected_runtime_canonical": null,
+          "declaration_only": false,
+          "preparation_requirements": [],
+          "portrait": {
+            "state": "unavailable",
+            "reason": "Portrait PNG is outside this currency fixture"
+          },
+          "candle_balance_milli": null,
+          "status": "active",
+          "keepalive_running": true,
+          "keeper_keepalive_interval_s": null,
+          "activation_mode": "autonomous",
+          "pause_state": null,
+          "runtime_blocker_state": null,
+          "runtime_blocker_class": null,
+          "runtime_blocker_summary": null,
+          "stop_cause": null,
+          "needs_attention": null,
+          "attention_reason": null,
+          "next_human_action": null,
+          "config_error": null,
+          "trust": null,
+          "sandbox_profile": null,
+          "sandbox_target": null,
+          "keeper_last_error": null,
+          "blocked_task_count": null,
+          "goal_progress": null,
+          "last_proactive_reason": null,
+          "last_activity_at": null,
+          "last_activity_source": null,
+          "live_activity": null,
+          "current_gate": null,
+          "last_proactive_preview": null,
+          "runtime_warning_ctx_ratio": null,
+          "context_ratio": null,
+          "context_tokens": null,
+          "context_max": null,
+          "context_source": null,
+          "context_metrics_unavailable": null,
+          "last_turn_usage": null,
+          "recent_input_preview": null,
+          "recent_output_preview": null,
+          "recent_tool_names": [],
+          "latest_tool_names": [],
+          "latest_tool_call_count": null,
+          "tool_audit_source": null,
+          "tool_audit_at": null,
+          "diagnostic": null,
+          "provider_health": null
+        }
+      }
+    ],
+    "errors": []
+  },
+  "production_module_requests": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/app-shell-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/approvals-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/board-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/chat-blocks-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/cockpit-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/connectors-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/craft-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/fusion-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/ide-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/indicators-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-asks-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-memory-health-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/memory-inspector-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/memory-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/primitives-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/runtime-editor-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/skin-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/surfaces-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/telemetry-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/work-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/ds-theme-tokens.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/primitives.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/layout.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/layers.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/kpi.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/rail.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/deck.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/drawer.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/swimlanes.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/code.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/styleseed-theme.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/styleseed-base.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/global.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/tokens.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/paper-theme.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-workspace.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/copilot-dock.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/states.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/ss-keeper-v2-bridge.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/colors_and_type.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/surfaces.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/dock.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/craft.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/inspector.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/perf.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/fleet.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/logs.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/keeper-config.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/fusion.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/memory.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/schedule.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/runtime.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/ops-cluster.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/prompt-book.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/verify.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/registry.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/monitor.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/lanes.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/keeper-v2/tempered.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/styles/mobile-operator-targets.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/overview/overview.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-page.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/router.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-execution.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/core.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/config/navigation.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/cockpit-entrypoints.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-config-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-utils.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-detail-resolution.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-recency.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-runtime-display.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/keeper.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/toast.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/confirm-dialog.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-helpers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-hooks.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-evidence-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-lifecycle.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-shell.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-workspace-roster.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-workspace-chat.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-workspace-rail.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-workspace-pane-resize.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/ring.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/tweaks-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-body.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-config-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/dashboard-actor.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/async-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/dashboard-session-actor.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/config/constants.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/type-guards.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/operator-action.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/candle-economy.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/overview/agent-avatar.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/overview/runtime-stats.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/v2/schedule-constants.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/core.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/now-signal.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-predicates.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-attention-labels.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/agent-status.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-operational-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/fleet-tone.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/format-string.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/runtime-counts.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/dashboard-composite-health.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/gate-signals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/schedule/schedule-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/dashboard-full-health-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/candle-observation.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/goal-proof.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/keeper-lifecycle.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-hot.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/sse.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-store-normalize.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/agent-motion.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/keeper-identity.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/collection.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/signal-utils.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/fetch-scheduler.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/warm-retry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/normalize.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dev-token.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/board-metrics.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/namespace-truth-signals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/namespace-truth-normalizers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/goal-tree-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-goals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/work-copy.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/store-normalizers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/ring-buffer.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-workspace.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-mission.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/board.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-fusion.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/error.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/gate.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/dashboard-execution.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/dashboard-mission.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/goal-store-unavailable.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/sse.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/types/agent-core.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-stream-contract.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-delivery-provenance.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/mcp.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/tool-call-output-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-stream.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-chat-operations-local.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/keeper-chat-delivery-provenance.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/keeper-runtime-trace.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/keeper-chat-history.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/keeper-transitions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/keeper-composite.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/sse-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-mobile-pane-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/time-ago.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-phase-indicator.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-badge.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-portrait.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-runtime-trace-refresh.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/auto-refresh.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/composite-signals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/button.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-action-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/dialog.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/input.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/checkbox.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-classifiers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/persistent-signal.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/chat-view-prefs.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/gate-observation-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/sigil-chip.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-runtime.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/runtime-catalog-resource.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/route-link.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/tool-host-failure.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-verification-runs.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-goal-verification-runs.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-exact-lane-runs.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-standalone-lanes.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-shared.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-agent.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-provider-input.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-gate.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-schedule.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-cost.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-tools-prompts.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-scheduled-automation.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-config.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-trajectory.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-tool-stats.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-tool-calls.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-turn-records.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-telemetry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-misc.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/format-number.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/journal-entry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/session-trace-live-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/session-trace-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/live-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/schemas/sse-event-payload.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/sse-event-type.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/agent-core-runtime-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-runtime.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/keeper-portrait.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-activation-mode.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/runtime-blocker-class.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-runtime-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/stop-cause.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/goal-store-unavailable-labels.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/pending-confirm.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/config/env.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/shared-ticker.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/truncate.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/format-time.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/json-coerce.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-blocker-reason.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/core-parsers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/broadcast-composer.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-composite-lookup.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-runtime-projection.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/virtual-list.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-workspace-shared.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/v2/keeper-fsm.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-shared.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/v2/primitives-v2.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-turn-inspector-drawer.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/artifact-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/runtime-provider-summary.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-waiting-inventory-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-lane-strip.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/lanes/lane-queue-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/goals/task-detail-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/memory-inspector.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-delivery.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/font-stacks.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-message.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/chat-blocks.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/dashboard-ws-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/namespace-truth-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/operator-normalizers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/operator-signals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-approval-audit.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/agent-core-telemetry-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/schemas/sse.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/refresh-scope.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/transport-health.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/tab-refresh.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/error-notification.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/runtime-defaults.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/runtime-resolved.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/agent-timeline.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/agent-relations.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-approval-decision.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/runtime-probe.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/config/context-thresholds.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/exhaustive.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/schemas/sse_event_generated.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-fiber-alive.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/utils/fps-adaptive.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/agent-failure.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/markdown.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-chat-access.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/dashboard-auth-access.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-last-seen.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/attachments.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/primitives.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/status-chip.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/tools/keeper-waiting-inventory-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/json-viewer.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-workspace/keeper-lane-event-actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-derivations.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/schedule/queue-drain-status.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/lanes/lane-queue-model.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/namespace-truth-actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/html-escape.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/goals/task-detail-selection.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/status-label.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/goals/goal-helpers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keeper-chat-stream-contract.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/inline-spinner.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/markdown-renderer.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/pill.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-lane-analysis.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-types.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/tool-output-lookup.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/edit-evidence.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/dompurify.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/chat-linkify.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/unread-divider.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/message-context-scope.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/copyable-code.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/tool-call-shared.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/voice-input.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/keyboard.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/keeper-chat-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/suggestion-chip.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/status-dot.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/use-in-view.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/markdown-cue.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/fusion-meta.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/v2/fusion-constants.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/shiki-highlighter.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/mermaid-graph.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/markdown-blocks.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/token-revision.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/admin-required.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/verified-tool-blob.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/edit-snapshots.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/edit-snapshot-view.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/voice-wav.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/tool-blob.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/chat/edit-snapshot-diff.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/drift-error.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/section-header.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/collapsible.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/panel-card.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-charts.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-ctx-composition.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-debug.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-kpi.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-lists.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-telemetry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-runtime.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-history.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-state-diagram.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/agent-detail-journal.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/session-trace-view.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-tool-telemetry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-eval-quality.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-tool-call-inspector.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-turn-inspector.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-supervisor-diagnostics.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-runtime-model-editor.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-conditions-divergent.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-activity-summary.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-alert-strip.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-comms.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-fusion.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-sandbox-live.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/sparkline-config.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/progress-bar.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/eyebrow.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-ctx-utils.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/stat-tile.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-outcomes.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/feedback-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/cytoscape-fsm.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/filter-chips.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-fsm-specs.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/turn-fsm-detail-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/phase-conditions-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/use-managed-async-resource.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/section-cap.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/source-health.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-sse-match.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/agent-detail-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/session-trace-entry.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/session-trace-filter.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/session-trace/process-critic.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-secrets.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/distribution-bars.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/counter-format.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/operator-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/tool-audit.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-source.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/tool-blob-marker.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/copy-id-button.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/ide/ide-context-lens.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/runtime-resolved-resource.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-supervisor-helpers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/turn-usage-scope.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-detail-primitives.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/gate-keepers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/effect-http.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/use-global-shortcut.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/kbd.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-pipeline-panels.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-timeline-panels.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-health-panels.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/sparkline.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/lib/lru-cache.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/mermaid-loader.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/agent-detail-selection.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/mission-store.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/mission-signals.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/operator-actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/badge.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/cytoscape-loader.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/schemas/gate-keepers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/mission-actions.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/fsm-hub-invariant-analysis.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/cost/cost-types.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/ide/ide-state.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/ide/ide-activity-file-context.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/dashed-notice.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/button-filled-base.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/common/expandable-textarea.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-github-identity-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-identity-panel.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/keeper-config-v2-blocks.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/setup-guide-card.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/mission-normalizers.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-github.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/api/dashboard-keeper-identity.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/components/connector-setup-guides.ts",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/candle-economy-observation-20260930/dashboard/src/mission-normalizers-entities.ts"
+  ],
+  "source_head_after": "ec4a71f4e77fcd135b4b275f00b3dea63645e525",
+  "status": "passed"
+}

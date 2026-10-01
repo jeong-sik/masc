@@ -5932,6 +5932,9 @@ type state = {
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_retired: Masc_tui_keeper_chat_projection.request list;
+  (** Dispatched requests whose visible receipts were withdrawn by control.
+      They remain in [keeper_run_next_inflight] until their actual callback. *)
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -7525,8 +7528,11 @@ let begin_keeper_chat_control state keeper_name =
   state.keeper_run_next_receipts <- List.filter (fun (request, _) ->
     not (String.equal request.Masc_tui_keeper_chat_projection.keeper_name keeper_name))
     state.keeper_run_next_receipts;
-  state.keeper_run_next_inflight <- List.filter (fun (request : Masc_tui_keeper_chat_projection.request) ->
-    not (String.equal request.keeper_name keeper_name)) state.keeper_run_next_inflight;
+  state.keeper_run_next_retired <- List.fold_left (fun retired request ->
+    if String.equal request.Masc_tui_keeper_chat_projection.keeper_name keeper_name
+       && not (List.exists (Masc_tui_keeper_chat_projection.same_request_identity request) retired)
+    then request :: retired else retired)
+    state.keeper_run_next_retired state.keeper_run_next_inflight;
   state.keeper_auto_priority_pending <- List.filter
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
@@ -7534,6 +7540,29 @@ let begin_keeper_chat_control state keeper_name =
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
   generation
+
+type keeper_run_next_completion =
+  | Run_next_untracked
+  | Run_next_retired
+  | Run_next_received
+
+let settle_keeper_run_next state request result =
+  let same = Masc_tui_keeper_chat_projection.same_request_identity request in
+  if not (List.exists same state.keeper_run_next_inflight) then Run_next_untracked
+  else begin
+    state.keeper_run_next_inflight <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_inflight;
+    let retired = List.exists same state.keeper_run_next_retired in
+    state.keeper_run_next_retired <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_retired;
+    let current = not retired && List.exists (fun (entry : inflight) ->
+      same entry.sent_request) state.msg_inflight in
+    if current then begin
+      state.keeper_run_next_receipts <- (request, result) ::
+        List.filter (fun (old, _) -> not (same old)) state.keeper_run_next_receipts;
+      Run_next_received
+    end else Run_next_retired
+  end
 
 let finish_keeper_chat_control state keeper_name ~generation =
   if generation <> keeper_chat_control_generation state keeper_name
@@ -8359,6 +8388,7 @@ let create_state
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
+  keeper_run_next_retired = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -12089,7 +12119,7 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_visible_status_rows (state : state) live ~now =
+let keeper_message_unfolded_status_rows (state : state) live ~now =
   let rows = Masc_tui_keeper_chat_transcript.status_rows ~now live in
   let rows = match state.msg_tool_visibility with
     | Tools_full -> rows
@@ -12097,6 +12127,10 @@ let keeper_message_visible_status_rows (state : state) live ~now =
         match kind with
         | Masc_tui_keeper_chat_transcript.Progress -> false
         | Answer_needed | Attention | Approval _ -> true) rows in
+  rows
+
+let keeper_message_visible_status_rows (state : state) live ~now =
+  let rows = keeper_message_unfolded_status_rows state live ~now in
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
@@ -12104,12 +12138,12 @@ let keeper_message_visible_status_rows (state : state) live ~now =
       rows
   else rows
 
-(* How many rows the fold took, which the folded progress line reports so the
-   count is never a thing the reader has to notice is missing. *)
+(* Count rows hidden by folding after the diagnostic mode has selected its
+   rows. Full progress and the compact summary report this same count. *)
 let keeper_message_folded_status_count (state : state) live ~now =
   if not state.msg_turn_folded then 0
   else
-    List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
+    List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
 let keeper_observed_turn (state : state) keeper_name =
@@ -12429,10 +12463,17 @@ let keeper_message_activity_rows (state : state) =
           String.equal name keeper_name && match intervention with
           | Retained_after_stop -> true | Awaiting_control _ -> false)
           state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume";
+      let folded = match state.msg_live with
+        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
+        | Some _ | None -> 0 in
+      let keys =
+        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
+        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
       match List.rev !urgent @ List.rev !clauses with
-      | [] -> []
+      | [] when folded = 0 -> []
       | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-          rest = ""; keys = (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단") }]
+          rest = ""; keys }]
 ;;
 
 let keeper_message_activity_needs_attention (state : state) =

@@ -15363,22 +15363,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_run_next_done (request, result) ->
-      if List.exists (Keeper_chat.same_request_identity request)
-           state.keeper_run_next_inflight then begin
-        state.keeper_run_next_inflight <- List.filter
-          (fun inflight -> not (Keeper_chat.same_request_identity inflight request))
-          state.keeper_run_next_inflight;
-        if List.exists (fun (entry : inflight) ->
-            Keeper_chat.same_request_identity entry.sent_request request) state.msg_inflight then
-          state.keeper_run_next_receipts <- (request, result) ::
-          List.filter (fun (old, _) -> not (Keeper_chat.same_request_identity old request))
-            state.keeper_run_next_receipts;
-        (match result with
-         | Ok _ -> ()
-         | Error detail -> append_chat_history state request Message_error
-             ("다음 순서 접수 실패: " ^ detail));
-        dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name
-      end
+      (match settle_keeper_run_next state request result with
+       | Run_next_untracked -> ()
+       | (Run_next_received | Run_next_retired) as completion ->
+           (match completion, result with
+            | Run_next_received, Error detail ->
+                append_chat_history state request Message_error
+                  ("다음 순서 접수 실패: " ^ detail)
+            | (Run_next_untracked | Run_next_retired), _
+            | Run_next_received, Ok _ -> ());
+           dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name)
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
       let current = keeper_chat_control_result_current state keeper_name ~generation in
       if finish_keeper_chat_control state keeper_name ~generation then launch_keeper_turns_load state ~mailbox;

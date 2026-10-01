@@ -3118,9 +3118,18 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
+        let keys = match state.msg_tool_visibility, state.msg_live with
+          | (Tools_compact | Tools_results), Some live
+            when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
+              && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
+                   ~now:(Unix.gettimeofday ()) > 0 ->
+              row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
+          | (Tools_full | Tools_compact | Tools_results), _ -> row.keys in
         let lead_room = max 0 (framed_inner_width chat_cols - 2
-          - Message_layout.display_width row.keys) in
-        let lead = fit_width row.lead lead_room in
+          - Message_layout.display_width keys) in
+        let lead =
+          if Message_layout.display_width row.lead <= lead_room then row.lead
+          else fit_width row.lead lead_room in
         let room = lead_room - Message_layout.display_width lead in
         let rest =
           if Message_layout.display_width row.rest <= room then row.rest
@@ -3132,7 +3141,7 @@ let render_keeper_message (state : state) =
               | Tools_compact | Tools_results ->
                   if Masc_tui_types.keeper_message_activity_needs_attention state
                   then Theme.warn () else Theme.recede ()) lead Ansi.reset
-             (Theme.recede ()) rest row.keys Ansi.reset))
+             (Theme.recede ()) rest keys Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);

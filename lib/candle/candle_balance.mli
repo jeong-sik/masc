@@ -7,6 +7,8 @@ type error =
   | Duplicate_payment of string
   | Balance_overflow of string
   | Negative_purchase of string
+  | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
+  | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
       { keeper : string
       ; item : Keeper_portrait_item.t
@@ -41,3 +43,9 @@ val purchase
 (** Replay payments and purchases in file order. A repeated purchase, negative
     amount, overspend, duplicate payment or overflow rejects the whole fold. *)
 val of_events : Candle_event.t list -> (t, error) result
+
+val selection : t -> keeper:string -> slot:Keeper_portrait_item.slot -> Candle_event.equipment_choice
+val equipment : t -> keeper:string -> Keeper_portrait_look.equipment
+val equip : t -> keeper:string -> slot:Keeper_portrait_item.slot -> choice:Candle_event.equipment_choice -> (t, error) result
+(** Equipment is applied only after ownership was established in file order.
+    Default removes the explicit choice for that slot. *)

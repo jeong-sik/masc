@@ -1,3 +1,4 @@
+import { KeeperPortraitSchema } from './keeper-portrait'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
@@ -14,6 +15,7 @@ const KeeperMetaWireSchema = Schema.Struct({
 // echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
   status: Schema.NonEmptyString,
@@ -41,6 +43,7 @@ const GateKeeperDirectoryIssueWireSchema = Schema.Struct({
 const GateKeeperIssueBaseWireSchema = Schema.Struct({
   status: Schema.Literal('error'),
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
   name: Schema.NonEmptyString,
   keepalive_running: Schema.Boolean,
   effective_meta_error: GateKeeperDirectoryIssueWireSchema,

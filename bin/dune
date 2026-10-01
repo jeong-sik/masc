@@ -1306,6 +1306,12 @@
  (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
+ (name masc_tui_keeper_items)
+ (wrapped false)
+ (modules masc_tui_keeper_items)
+ (libraries yojson masc.keeper_portrait))
+
+(library
  (name masc_tui_keeper_sandbox)
  (wrapped false)
  (modules masc_tui_keeper_sandbox)
@@ -1421,10 +1427,12 @@
   masc_tui_keeper_control
   masc_tui_keeper_selection
   masc_tui_keeper_sandbox
+  masc_tui_keeper_items
   masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector
+  masc_tui_observation_layout
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
@@ -1760,6 +1768,8 @@
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
+  masc_tui_keeper_items
+  masc.keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
@@ -2118,7 +2128,7 @@
  (name masc_tui_chat_portrait)
  (wrapped false)
  (modules masc_tui_chat_portrait)
- (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+ (libraries masc.keeper_portrait masc_tui_keeper_portrait masc_tui_portrait_view
   masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview

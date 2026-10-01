@@ -880,6 +880,7 @@ let run_keeper_cycle
                  { turn_state with last_execution = Some initial_execution }
                in
                let observation_token = Keeper_turn_observation_token.fresh () in
+               let event_scope = Keeper_turn_scope.create ~keeper_turn_id in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
                    ?event_bus
@@ -893,9 +894,10 @@ let run_keeper_cycle
                        meta.name
                        ~count)
                    ~keeper_name:meta.name
-                   ~turn_id:keeper_turn_id
+                   ~scope:event_scope
                    ()
                in
+               let event_bus = Keeper_unified_turn_event_bus.publishing_bus turn_event_bus_state in
                (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
          retry path. [outcome=drained] when at least one event was
@@ -1054,6 +1056,7 @@ let run_keeper_cycle
                        start_background_turn_event_bus_drain ~clock;
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
+                           ~event_scope
                            ~observation_token
                            { base_dir
                            ; build_turn_prompt

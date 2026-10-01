@@ -75,15 +75,37 @@ The consulted Keeper lane also reports no OCaml/Dune/Opam toolchain; it cannot
 supply runtime evidence. Native GitHub stack membership was observed for #40524
 and #40530 after initial PR creation; direct base alone is not merge scope.
 
+## Fourth change: execution-scoped event intake
+
+The Agent Core bus now supports an exact typed caller-scope filter at subscription
+admission. Keeper scopes contain a fresh entropy-backed execution identity plus
+the display turn counter; the counter alone can repeat. Autonomous subscription
+and producer share the same scope and the exact captured bus, even if the global
+fallback slot later changes. Direct turns mint their own scope. Explicit foreign
+producer scopes remain intact and are excluded, never overwritten.
+
+The subscription combines Keeper name and execution scope before queue admission.
+Foreign events therefore cannot fill B's queue, corrupt its tool tracker, or cause
+B's drain to emit tool-wait FSM transitions. The regression runs the real shared
+bus/drain with A and B using the same Keeper and display turn number, checks actual
+FSM audit output, and floods foreign traffic beyond the queue capacity while B's
+completion is pending. The bridge still decodes the display turn counter from the
+strict new structured scope; malformed/duplicate/extra fields are rejected.
+
+This fixes intake ownership. FSM audit rows and dwell metrics still use Keeper
+name/display counter, so full execution identity in the emitted audit/read model
+remains follow-up. The tracker still matches tools within one execution using its
+existing semantics. Scope is an in-process event boundary, not durable recovery
+ownership. No Owner concurrency, session-store cutover or runtime proof is claimed.
+
 ## Remaining stack order
 
 1. Partition lifecycle measurement production and displayed execution selection
    by space. Registry callback mutation and preview writers have owned executions.
 2. Partition provider history/checkpoints and official-client session stores by
    execution space, preserving existing CAS, effect and continuation contracts.
-3. Scope event subscriptions and emitted events by execution identity. The current
-   subscription filters only keeper name, so distinct callback ownership alone
-   cannot distinguish concurrent A/B tool events.
+3. Carry execution identity into FSM audit rows/dwell metrics and their read
+   models. Event subscription and producer scope are now connected.
 4. Replace Owner's singleton child/slot/cancel handle with owned executions;
    completion and stop must identify their exact execution before releasing it.
 5. Connect Jev's fast semantic routing to these independent spaces. Typed tool

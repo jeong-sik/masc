@@ -1571,16 +1571,24 @@ type tool_approval_answer =
   ; remembered : bool
   }
 
-let post_keeper_tool_approval ~(host : string) ~(port : int)
+let post_keeper_tool_approval ?expected_workspace ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
     (tool_approval_answer, string) result =
+  let expected_fields =
+    match expected_workspace with
+    | None -> []
+    | Some (expected : Tui_decode.server_identity) ->
+      [ ("expected_workspace", `Assoc
+           [ ("base_path", `String expected.sid_base_path)
+           ; ("masc_root", `String expected.sid_masc_root) ]) ]
+  in
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("name", `String keeper_name)
-         ; ("tool_call_id", `String tool_call_id)
-         ; ("decision", `String (if allow then "approve" else "deny"))
-         ])
+         ([ ("name", `String keeper_name)
+          ; ("tool_call_id", `String tool_call_id)
+          ; ("decision", `String (if allow then "approve" else "deny"))
+          ] @ expected_fields))
   in
   match post_json ~host ~port ~path:keeper_tool_approval_path ~body with
   | Error detail -> Error detail

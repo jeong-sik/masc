@@ -2540,7 +2540,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
           try
             let ( let* ) = Result.bind in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
-            Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+            Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
               ~tool_call_id ~allow
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3312,7 +3312,9 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot decide: workspace identity is unverified"
-  else begin
+  else match state.server_identity with
+  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
@@ -3320,7 +3322,9 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   let run () =
     let result =
       try
-        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+        let ( let* ) = Result.bind in
+        let* () = probe_expected_workspace ~host ~port expected_workspace in
+        Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
           ~tool_call_id ~allow
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3338,7 +3342,6 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
       enqueue_async mailbox
         (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error "Eio switch is unavailable"))
-  end
 
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)

@@ -68,10 +68,11 @@ def accepted_but_pending(executable, *, followed_by_held=False):
     held_item = cards.held("call-after-receipt", "new-held-decision")
 
     def answer_held(body):
-        assert json.loads(body) == {
-            "name": held_item["keeper"],
-            "tool_call_id": "call-after-receipt", "decision": "approve",
-        }
+        payload = json.loads(body)
+        assert payload["name"] == held_item["keeper"]
+        assert payload["tool_call_id"] == "call-after-receipt"
+        assert payload["decision"] == "approve"
+        assert "expected_workspace" in payload
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 

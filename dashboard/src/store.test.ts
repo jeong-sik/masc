@@ -234,6 +234,19 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     return { promise, resolve }
   }
 
+  it('rejects a delayed pre-purchase overlay within the same execution generation', async () => {
+    const store = await import('./store')
+    const snapshot = execution(1)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, candle: { status: 'off' }, candle_observation_sequence: 2 })).toBe(true)
+    const candle = store.candleObservation.peek()
+    const authority = store.executionWorkspaceAuthority.peek()
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, candle: { status: 'disabled', reason: 'old failure' }, candle_observation_sequence: 1 })).toBe(false)
+    expect(store.candleObservation.peek()).toBe(candle)
+    expect(store.executionWorkspaceAuthority.peek()).toBe(authority)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, candle_observation_sequence: 2 })).toBe(true)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, candle_observation_sequence: 3 })).toBe(true)
+  })
+
   it('refreshes independent deletion receipts when execution reconciliation fails', async () => {
     const fetch = vi.fn(async (input: string) => {
       if (input.includes('/dashboard/execution')) return json({ error: 'execution unavailable' }, 503)

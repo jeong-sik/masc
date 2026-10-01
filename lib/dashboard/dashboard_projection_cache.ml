@@ -37,10 +37,33 @@ let with_snapshot_publication_generation f =
     f (Atomic.get snapshot_invalidation_generation_ref))
 ;;
 
+(* Order read admission, independently of metadata cache invalidation. A slow
+   older read keeps its older identity even when it finishes after a new read.
+   Equal immutable observations reuse their identity, preserving encoded-cache
+   reuse when neither ledger state nor clock-derived balances changed. *)
+let candle_read_sequence = Atomic.make 0
+let candle_observation_mu = Stdlib.Mutex.create ()
+let candle_observations = Hashtbl.create 4
+
+let candle_observation_sequence ~base_path ~request_sequence observation =
+  Stdlib.Mutex.protect candle_observation_mu (fun () ->
+    match Hashtbl.find_opt candle_observations base_path with
+    | Some (latest_request, sequence, previous) when request_sequence > latest_request ->
+      let sequence = if observation = previous then sequence else request_sequence in
+      Hashtbl.replace candle_observations base_path (request_sequence, sequence, observation);
+      sequence
+    | Some _ -> request_sequence
+    | None ->
+      Hashtbl.add candle_observations base_path (request_sequence, request_sequence, observation);
+      request_sequence)
+
 let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
      Equipment, balances and supply share one fresh ledger view per response. *)
+  let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
   let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+  let observation_sequence = candle_observation_sequence
+    ~base_path:config.base_path ~request_sequence candle in
   let equipment = Candle_observe.equipment candle in
   let revisions = Hashtbl.create 16 in
   let account_revision keeper =
@@ -87,6 +110,7 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
           | "keepers", `List rows -> "keepers", `List (List.map row rows)
           | field -> field) fields)
       | field -> field) fields in
+    let projected = set "candle_observation_sequence" (`Int observation_sequence) projected in
     (match List.assoc_opt "keepers" fields with
      | Some (`Assoc _) -> `Assoc projected
      | _ -> `Assoc (set "candle" summary projected))

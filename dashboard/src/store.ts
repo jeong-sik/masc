@@ -1041,6 +1041,7 @@ let executionReconnectPreviousEpoch: string | null = null
 let executionReconnectAwaitingHttp = false
 const executionReconnectInvalidationFloors = new Map<string, number>()
 let executionPublicationGenerationWatermark = -1
+let candleObservationSequenceWatermark = -1
 let executionHydrationRequestGeneration = 0
 const retiredExecutionPublicationEpochs = new Set<string>()
 
@@ -1120,6 +1121,7 @@ export function invalidateExecutionSnapshotGeneration(
       retireExecutionPublicationEpoch(previousEpoch)
     }
     executionPublicationEpoch = epoch
+    candleObservationSequenceWatermark = -1
     acceptedExecutionWorkspace.value = null
     executionReconnectPreviousEpoch = null
     executionPublicationGenerationWatermark = generation
@@ -1136,6 +1138,7 @@ export function resetExecutionSnapshotGeneration(): void {
   executionReconnectPreviousEpoch = executionPublicationEpoch
   executionPublicationEpoch = null
   executionPublicationGenerationWatermark = -1
+  candleObservationSequenceWatermark = -1
   executionReconnectAwaitingHttp = true
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
@@ -1183,8 +1186,14 @@ export function hydrateExecutionSnapshot(
   ) {
     return false
   }
+  const candleSequence = data.candle_observation_sequence
+  if (candleSequence !== undefined && (!Number.isSafeInteger(candleSequence) || candleSequence < 0)) return false
+  if (identity !== null && identity.epoch === executionPublicationEpoch
+    && candleObservationSequenceWatermark >= 0
+    && (candleSequence === undefined || candleSequence < candleObservationSequenceWatermark)) return false
   if (identity !== null) {
     if (executionPublicationEpoch === null) {
+      candleObservationSequenceWatermark = -1
       if (
         executionReconnectPreviousEpoch !== null
         && executionReconnectPreviousEpoch !== identity.epoch
@@ -1201,6 +1210,7 @@ export function hydrateExecutionSnapshot(
       identity.generation,
     )
   }
+  if (candleSequence !== undefined) candleObservationSequenceWatermark = candleSequence
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   // Read the current response only. mergeServerStatus may retain an old root
   // for presentation; that root cannot admit account reads in this response.
@@ -1290,6 +1300,7 @@ async function doFetchExecution(): Promise<void> {
   const requestGeneration = executionSnapshotRequestGeneration()
   const requestEpoch = executionPublicationEpoch
   const requestPublicationGeneration = executionPublicationGenerationWatermark
+  const requestCandleSequence = candleObservationSequenceWatermark
   executionLoading.value = true
   executionError.value = null
   try {
@@ -1298,7 +1309,8 @@ async function doFetchExecution(): Promise<void> {
     if (isInitializingExecutionPayload(data)) {
       if (requestGeneration !== executionHydrationRequestGeneration
         || requestEpoch !== executionPublicationEpoch
-        || requestPublicationGeneration !== executionPublicationGenerationWatermark) {
+        || requestPublicationGeneration !== executionPublicationGenerationWatermark
+      || requestCandleSequence !== candleObservationSequenceWatermark) {
         throw new ExecutionRefreshUnavailable('Execution initialization was superseded by a newer observation')
       }
       acceptedExecutionWorkspace.value = null
@@ -1315,7 +1327,8 @@ async function doFetchExecution(): Promise<void> {
     if (err instanceof ExecutionRefreshUnavailable) throw err
     if (requestGeneration !== executionHydrationRequestGeneration
       || requestEpoch !== executionPublicationEpoch
-      || requestPublicationGeneration !== executionPublicationGenerationWatermark) {
+      || requestPublicationGeneration !== executionPublicationGenerationWatermark
+      || requestCandleSequence !== candleObservationSequenceWatermark) {
       throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
     }
     console.warn('[Dashboard] execution fetch error:', err)

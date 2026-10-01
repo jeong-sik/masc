@@ -3396,15 +3396,18 @@ crown = %d
   in
   write_policy 0;
   Candle_status.install_appraiser_check (fun () -> Ok ());
+  let observation_sequence = ref (-1) in
   let row () =
     let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
     let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    observation_sequence := Yojson.Safe.Util.(projected |> member "candle_observation_sequence" |> to_int);
     match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
     | [row] -> row
     | _ -> fail "Item revision projection lost the Keeper"
   in
   let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
   let first = row () in
+  let first_sequence = !observation_sequence in
   let owner = match Keeper_id.Keeper_name.of_string keeper with
     | Ok owner -> owner | Error reason -> fail reason in
   let item = match Keeper_portrait_item.of_id "crown" with
@@ -3413,6 +3416,8 @@ crown = %d
    | Ok _ -> ()
    | Error error -> fail (Candle_shop.error_to_string error));
   let purchased = row () in
+  check bool "purchase advances fresh overlay publication identity" true
+    (!observation_sequence > first_sequence);
   check bool "free purchase changes Item account revision" false
     (String.equal (revision first) (revision purchased));
   check bool "free purchase preserves observed balance" true

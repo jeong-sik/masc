@@ -159,7 +159,7 @@ let ended ?(trace = trace_id) ~line ~turn position : int * (Boundaries.record, B
       { Boundaries.recorded_at = Float.of_int line
       ; event =
           Boundaries.Turn_ended
-            { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+            { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
             ; history_at_start = Boundaries.Continued_history
             ; position
             }

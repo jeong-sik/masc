@@ -29,6 +29,7 @@ type history_at_start =
 type event =
   | Turn_ended of
       { turn_ref : Ids.Turn_ref.t
+      ; task_context : Keeper_turn_task_context.t
       ; history_at_start : history_at_start
       ; position : position
       }
@@ -76,6 +77,7 @@ let field_recorded_at = "recorded_at"
 let field_turn_ref = "turn_ref"
 let field_history_at_start = "history_at_start"
 let field_position = "position"
+let field_task_context = "task_context"
 let field_end_atom = "end_atom"
 let field_last_atom_digest = "last_atom_digest"
 let field_start_atom = "start_atom"
@@ -92,7 +94,7 @@ let token_fresh_history = "fresh"
 let token_continued_history = "continued"
 
 let turn_ended_fields =
-  [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position ]
+  [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position; field_task_context ]
 ;;
 
 let history_restarted_fields = [ field_kind; field_recorded_at; field_trace_id ]
@@ -138,7 +140,7 @@ let validate (r : record) =
     else W.wire_fail [ W.Wire_field field_recorded_at ] W.Not_finite
   in
   match r.event with
-  | Turn_ended { turn_ref; history_at_start; position } ->
+  | Turn_ended { turn_ref; task_context; history_at_start; position } ->
     let* () =
       let printed = Ids.Turn_ref.to_string turn_ref in
       match Ids.Turn_ref.of_string printed with
@@ -152,6 +154,8 @@ let validate (r : record) =
         (validate_history_at_start history_at_start)
     in
     let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
+    let* _ = W.wire_at (W.Wire_field field_task_context)
+      (Keeper_turn_task_context.of_json (Keeper_turn_task_context.to_json task_context)) in
     Ok r
   | History_restarted { trace_id } ->
     if non_blank trace_id
@@ -184,13 +188,14 @@ let history_at_start_to_json = function
 
 let record_to_json (r : record) =
   match r.event with
-  | Turn_ended { turn_ref; history_at_start; position } ->
+  | Turn_ended { turn_ref; task_context; history_at_start; position } ->
     `Assoc
       [ field_kind, `String kind_turn_ended
       ; field_recorded_at, `Float r.recorded_at
       ; field_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
       ; field_history_at_start, history_at_start_to_json history_at_start
       ; field_position, position_to_json position
+      ; field_task_context, Keeper_turn_task_context.to_json task_context
       ]
   | History_restarted { trace_id } ->
     `Assoc
@@ -278,7 +283,10 @@ let record_of_json (json : Yojson.Safe.t) =
       let* position =
         W.wire_at (W.Wire_field field_position) (position_of_json position_json)
       in
-      validate { recorded_at; event = Turn_ended { turn_ref; history_at_start; position } })
+      let* task_context_json = W.wire_json_field field_task_context assoc in
+      let* task_context = W.wire_at (W.Wire_field field_task_context)
+        (Keeper_turn_task_context.of_json task_context_json) in
+      validate { recorded_at; event = Turn_ended { turn_ref; task_context; history_at_start; position } })
     else if String.equal kind kind_history_restarted
     then (
       let* () = W.exact_field_names_result history_restarted_fields assoc in

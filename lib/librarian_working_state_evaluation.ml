@@ -93,7 +93,7 @@ let evaluate_case ~generate ~judge ~judge_endpoint ~judge_model ~snapshot_path ~
     | Work_ready generation ->
       Some (let* position = B.position_of_messages case.prefix in
         let lines = [1, Ok { B.recorded_at = 0.; event = B.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id:case.trace_id ~absolute_turn:case.absolute_turn;
+          { task_context = Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:case.trace_id ~absolute_turn:case.absolute_turn;
             history_at_start = B.Fresh_history; position } }] in
         let* snapshot = S.capture ~trace_id:case.trace_id ~lines ~messages:case.prefix
           ~working_state:generation.response.text |> Result.map_error S.error_to_string in

@@ -2999,9 +2999,22 @@ let test_an_ascii_text_is_not_kept () =
     (Printf.sprintf "laying it out again allocates the same (%.0f then %.0f bytes)" first again)
     true (Float.equal first again)
 
+let test_scrolled_styled_meter_rows () =
+  let warning = "\027[33m" and reset = "\027[0m" in
+  let plain = "▕██        ▏  quota unavailable 한한" in
+  let rows = Layout.split_styled_cells ~max_cells:12 (warning ^ plain ^ reset) in
+  check string "quota blanks and all evidence survive physical splitting" plain
+    (String.concat "" (List.map Masc_tui_theme.strip_sgr rows));
+  List.iter (fun row ->
+    check bool "each independently scrolled row restores warning" true
+      (String.starts_with ~prefix:warning row);
+    check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
+    check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
+
 let () =
   run "tui_message_layout"
     [
+      ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );
       ( "layout across frames"
       , [ test_case "a text laid out again keeps its layout" `Quick
             test_a_text_laid_out_again_keeps_its_layout

@@ -4073,7 +4073,7 @@ for line in sys.stdin:
     let boundary : Keeper_turn_boundaries.record =
       { recorded_at = 1.
       ; event = Keeper_turn_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
           ; history_at_start = Fresh_history
           ; position = Atom_history
               { end_atom = 4; last_atom_digest = Option.get (digest_at 3) }

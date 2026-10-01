@@ -1392,6 +1392,9 @@ status: reference
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
   최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
+  대기 작업이 있으면 durable 이력 처리와 continuity 따라잡기는 커밋한 단위 뒤에서
+  반복을 멈춰 다음 단계와 대기 작업에 실행 기회를 준다. 읽은 위치는 저장되어 다음
+  작업이 이어 읽는다. `yielded_to_waiting_unit`은 처리 완료나 실패를 뜻하지 않는다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
 
 **Composition**
@@ -1408,7 +1411,7 @@ status: reference
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 **Identity Row State (Identity 행 상태)**
-: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_types.identity_row_state`).
+: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_identity_model.identity_row_state`).
   `Identity_not_attached`(선언이 없거나 도구 목록이 `None` — 한 번도 붙지 않음)·
   `Identity_attached_without_tools`(붙었으나 제공하는 도구가 빈 목록)·
   `Identity_switch_unreadable`(스위치 저장소를 읽지 못함)·`Identity_switched_off`(운영자가

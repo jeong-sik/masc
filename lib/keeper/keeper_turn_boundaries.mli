@@ -156,6 +156,10 @@ type event =
       { turn_ref : Ids.Turn_ref.t
             (** The finished turn. Its trace id is the keeper trace id, which
                 is also the session id of the checkpoint. *)
+      ; task_context : Keeper_turn_task_context.t
+          (** Immutable admission observation for this turn reference only.
+              It does not describe earlier turns covered by a history span.
+              Missing context is malformed, never [No_task]. *)
       ; history_at_start : history_at_start
       ; position : position
       }

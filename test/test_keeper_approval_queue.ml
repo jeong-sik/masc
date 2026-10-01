@@ -2028,7 +2028,7 @@ let test_consumed_delivery_recovers_unapplied_rule_intent () =
       AQ.For_testing.reset_runtime_state ();
       let failed = install_exn ~base_path in
       Alcotest.(check bool) "failed rule recovery is visible" true
-        (List.exists (fun failure -> String.equal failure.AQ.approval_id id)
+        (List.exists (fun failure -> String.equal failure.Masc.Keeper_approval_queue_result.approval_id id)
            failed.delivery_replay_failures);
       let retained = read_pending_snapshot ~base_path |> member "deliveries" |> to_list in
       Alcotest.(check int) "unapplied intent survives retirement" 1 (List.length retained);

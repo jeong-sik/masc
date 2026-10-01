@@ -101,6 +101,26 @@ let files_under dir ~keep =
     |> List.map (Filename.concat dir)
 ;;
 
+(* A missing chat directory is an empty store. Once it exists, an inventory
+   failure means the preflight has not read the transcripts the server uses. *)
+let transcript_files_under dir =
+  let error detail = Error (dir ^ ": " ^ detail) in
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (code, call, argument) ->
+    error (call ^ " " ^ argument ^ ": " ^ Unix.error_message code)
+  | stat when stat.Unix.st_kind <> Unix.S_DIR -> error "not a directory"
+  | _ ->
+    (match Sys.readdir dir with
+     | exception Sys_error detail -> error detail
+     | entries ->
+       Ok
+         (Array.to_list entries
+          |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+          |> List.sort String.compare
+          |> List.map (Filename.concat dir)))
+;;
+
 (* The runtime writes keeper stores under the cluster's keepers directory; reading
    the default cluster's instead finds nothing on any other cluster and passes
    without having read a row. *)
@@ -720,27 +740,11 @@ let keeper_chat_transcript_store =
        server stopped, back up the file and repair or remove the named line"
   ; scan =
       (fun ~base_path ->
-         let dir = Keeper_chat_store.chat_dir base_path in
-         let* entries =
-           try
-             match Fs_compat.exact_path_kind ~follow:false dir with
-             | Fs_compat.Exact_missing -> Ok [||]
-             | Fs_compat.Exact_kind Unix.S_DIR -> Ok (Sys.readdir dir)
-             | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
-               Error ("transcript directory cannot be inspected safely: " ^ dir)
-           with
-           | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
-             Error (dir ^ ": " ^ Printexc.to_string exn)
-         in
-         let paths =
-           Array.to_list entries
-           |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
-           |> List.sort String.compare
-           |> List.map (Filename.concat dir)
-         in
+         let* paths = transcript_files_under (Keeper_chat_store.chat_dir base_path) in
          Ok
-           (scan_files ~paths ~decode:(fun ~path:_ contents ->
-              Keeper_chat_store.transcript_provenance_readable contents)))
+           (scan_files ~paths
+              ~decode:(fun ~path:_ contents ->
+                Keeper_chat_store.transcript_provenance_readable contents)))
   }
 ;;
 

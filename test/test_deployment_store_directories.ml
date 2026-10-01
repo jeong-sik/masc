@@ -57,6 +57,30 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+let test_transcript_inventory_failure_stops_preflight exe () =
+  with_workspace (fun root _keepers _traces ->
+    let dir = Keeper_chat_store.chat_dir root in
+    write dir "not a directory";
+    let status, output = invoke exe root in
+    check bool ("a file cannot pass as an empty transcript store: " ^ output) true
+      (status <> Unix.WEXITED 0);
+    check bool ("the scan failure names the store: " ^ output) true
+      (String_util.contains_substring output "keeper chat transcripts scan_failed=");
+    check bool ("the scan failure names the path and reason: " ^ output) true
+      (String_util.contains_substring (diagnostic_words output)
+         (diagnostic_words (dir ^ ": not a directory")));
+    check string "failed inventory is untouched" "not a directory" (read dir);
+    Unix.unlink dir;
+    Unix.mkdir dir 0o700;
+    Fun.protect ~finally:(fun () -> Unix.chmod dir 0o700) (fun () ->
+      Unix.chmod dir 0o000;
+      if Unix.geteuid () <> 0 then (
+        let status, output = invoke exe root in
+        check bool ("unreadable transcript inventory must stop deployment: " ^ output)
+          true (status <> Unix.WEXITED 0);
+        check bool ("unreadable directory is named: " ^ output) true
+          (String_util.contains_substring output (dir ^ ":")))))
+
 (* Every Memory write for a keeper reconciles its range receipt ledger before
    it builds, so a ledger this build cannot decode must stop the rollout here,
    not every Memory write after it. *)
@@ -192,6 +216,8 @@ let () =
   run "deployment store directories"
     ["live layout", ([test_case "regular journals and locks are not stores" `Quick (test_regular_siblings exe);
       test_case "real decoder failures remain visible" `Quick (test_real_store_refusals exe);
+      test_case "transcript inventory failure stops deployment" `Quick
+        (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
       test_case "range receipt ledger is read before rollout" `Quick
         (test_range_receipt_ledger exe);

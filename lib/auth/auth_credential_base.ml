@@ -1083,7 +1083,8 @@ let credential_prune_snapshot_in_transaction ((Credential_transaction config) as
     | (stored, credential) :: rest ->
       let* authority = credential_prune_authority config credential.agent_name stored credential in
       let alias_names = List.filter_map (fun (alias, target, resolved) ->
-        if not (String.equal alias credential.agent_name) && resolved = credential
+        if not (String.equal (credential_file config alias) (credential_file config credential.agent_name))
+           && resolved = credential
            && authority.uuid_target = Some target
         then Some alias else None) snapshot.aliases
         |> List.sort_uniq String.compare in

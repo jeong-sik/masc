@@ -190,9 +190,9 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
-  check string "mosaic keeps the server equipment in compact pixels"
-    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let equipped_pixels = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  check string "mosaic keeps all equipped slots visible"
+    equipped_pixels.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);
@@ -255,6 +255,21 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
   check bool "removing the outfit restores the cached compact body" true
     (restored.Portrait.image == bare.Portrait.image)
 
+let test_mosaic_previews_every_catalog_accessory () =
+  let cache = Portrait.cache () in
+  let bare = Option.get (band ~cache ()) in
+  let full_bare = Draw.render (Look.body_of_name alpha) Look.bare bare.Portrait.box.View.size in
+  List.iter (fun item ->
+    let equipment = Keeper_portrait_item.preview item Look.bare in
+    let shown = Option.get (band ~cache ~equipment ()) in
+    let id = Keeper_portrait_item.id item in
+    check bool (id ^ " changes the Mosaic portrait") false
+      (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
+    (* Switching drawing style alone must not pass an accessory test. *)
+    check bool (id ^ " remains visible beyond a full empty portrait") false
+      (String.equal full_bare.Draw.rgba shown.Portrait.image.Draw.rgba))
+    Keeper_portrait_item.all
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
@@ -275,5 +290,6 @@ let () =
             test_the_picture_leaves_with_the_detail
         ] )
     ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded;
-        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels ])
+        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels;
+        test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory ])
     ]

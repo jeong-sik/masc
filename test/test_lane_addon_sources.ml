@@ -444,7 +444,8 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
         let change_reason marker = Fusion_run_registry.mark_completed registry ~run_id
           ~outcome:(Fusion_run_registry.Failed {reason=String.make 4096 marker;code="fixture"}) in
         change_reason 'a';
-        let read cap = require (Sources.acquire ~store ~package:(package dir cap)
+        let read cap = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          ~store ~package:(package dir cap)
           ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]])) in

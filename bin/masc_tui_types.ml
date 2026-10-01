@@ -10563,6 +10563,30 @@ type runtime_pick_fact =
 
 (* A runtime whose provider is refusing work right now: its quota window is
    exhausted or this process holds an active rate limit. *)
+(* Read the account window from the same resolved snapshot as the runtime.
+   These are account observations, not proof that this model call was refused.
+   A reset timestamp or a successful endpoint probe cannot clear the report. *)
+let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
+    (runtime : Tui_decode.runtime_option) =
+  let open Masc.Tui_decode_usage in
+  match resolved.rrs_usage, runtime.ro_quota_scope with
+  | Error detail, _ -> Error detail
+  | Ok _, None -> Error "account usage scope unavailable"
+  | Ok usage, Some scope ->
+    match List.find_opt (fun account -> String.equal account.pua_scope scope)
+            usage.puws_accounts with
+    | None -> Error "account usage not reported"
+    | Some { pua_state = Account_not_reported_since_start; _ } ->
+        Error "account usage not reported since server start"
+    | Some { pua_state = Account_reported (first, rest); _ } ->
+        Ok (List.filter (fun window ->
+          match window.puw_role with
+          | Role_counts_other_use | Role_unclassified_limit -> false
+          | Role_gates_model_calls ->
+              match window.puw_utilization with
+              | Utilization_fraction value -> Float.compare value 1.0 >= 0
+              | Utilization_percent value -> value >= 100) (first :: rest))
+
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 

@@ -10076,12 +10076,21 @@ let runtime_overall_badge status =
   in
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
-let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
+let runtime_usage_badge state runtime =
+  match state.runtime_surface with
+  | None -> Some (Ansi.dim ^ "usage unknown" ^ Ansi.reset)
+  | Some snapshot ->
+      match runtime_spent_usage snapshot.rss_resolved runtime with
+      | Error _ -> Some (Ansi.dim ^ "usage unknown" ^ Ansi.reset)
+      | Ok [] -> None
+      | Ok (_ :: _) -> Some (Theme.warn () ^ "account limit spent" ^ Ansi.reset)
+
+let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   match
     List.filter_map Fun.id
-      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime ]
+      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime; runtime_usage_badge state runtime ]
   with
-  | [] -> (Theme.info ()) ^ "ready" ^ Ansi.reset
+  | [] -> (Theme.info ()) ^ "no refusal" ^ Ansi.reset
   | badges -> String.concat " " badges
 
 let runtime_probe_badge = function
@@ -10105,8 +10114,8 @@ let runtime_probe_badge = function
       let label = runtime_probe_status_label probe.rpp_status in
       style ^ label ^ Ansi.reset
 
-let runtime_route_probe_badge runtime probe =
-  runtime_route_badge runtime ^ " / " ^ runtime_probe_badge probe
+let runtime_route_probe_badge state runtime probe =
+  runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge probe
 
 let runtime_probe_detail = function
   | None -> []
@@ -10427,7 +10436,29 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let usage_lines =
+        match state.runtime_surface with
+        | None -> runtime_detail_field ~width ~style:Ansi.dim "Account usage" "unavailable"
+        | Some snapshot ->
+          match runtime_spent_usage snapshot.rss_resolved runtime with
+          | Error detail -> runtime_detail_field ~width ~style:Ansi.dim "Account usage"
+              (Terminal_text.single_line detail)
+          | Ok [] -> []
+          | Ok windows ->
+            runtime_detail_field ~width ~style:(Theme.warn ()) "Account usage"
+              "A model-call limit is spent; this account report does not identify which models are refused."
+            @ List.concat_map (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
+                let limit = match window.puw_limit_id with
+                  | Some id -> Terminal_text.single_line id
+                  | None -> "account" in
+                let tm = Unix.localtime window.puw_observed_at in
+                let observed = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+                    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+                    tm.Unix.tm_hour tm.Unix.tm_min in
+                runtime_detail_field ~width ~style:(Theme.warn ()) "Spent limit"
+                  (limit ^ " (observed " ^ observed ^ ")")) windows
+      in
+      fields @ candidate @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10841,7 +10872,7 @@ let render_runtime (state : state) =
                  (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
                    ~candidate:(Terminal_text.single_line runtime.ro_id)
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
-                   ~status:(runtime_route_probe_badge runtime
+                   ~status:(runtime_route_probe_badge state runtime
                      (Option.bind state.runtime_surface (fun snapshot ->
                        Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
@@ -10876,7 +10907,7 @@ let render_runtime (state : state) =
               (runtime.ro_provider ^ " / " ^ runtime.ro_model)
           in
           let route_probe =
-            runtime_route_probe_badge runtime candidate.rcr_probe
+            runtime_route_probe_badge state runtime candidate.rcr_probe
           in
           let lane_keepers = keepers_for_lane state candidate.rcr_lane_id in
           let assignment_fact =

@@ -789,6 +789,7 @@ type runtime_resolved_lane = {
 }
 
 type runtime_resolved_snapshot = {
+  rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;

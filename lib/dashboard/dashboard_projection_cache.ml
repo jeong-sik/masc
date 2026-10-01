@@ -46,14 +46,22 @@ let candle_observation_mu = Stdlib.Mutex.create ()
 let candle_observations = Hashtbl.create 4
 
 let candle_observation_sequence ~base_path ~request_sequence observation =
+  let previous = Stdlib.Mutex.protect candle_observation_mu (fun () ->
+    Hashtbl.find_opt candle_observations base_path) in
+  (* Comparing immutable ledger observations may traverse their event history.
+     Do that outside the short publication lock, then confirm the same memo. *)
+  let unchanged_request = match previous with
+    | Some (latest_request, _, previous)
+      when request_sequence = latest_request + 1 && observation = previous ->
+      Some latest_request
+    | Some _ | None -> None in
   Stdlib.Mutex.protect candle_observation_mu (fun () ->
     match Hashtbl.find_opt candle_observations base_path with
-    | Some (latest_request, sequence, previous) when request_sequence > latest_request ->
+    | Some (latest_request, sequence, _) when request_sequence > latest_request ->
       (* A gap may hide an older in-flight read of different state. Reusing an
          earlier identity would let that read outrank this newer observation. *)
       let sequence =
-        if request_sequence = latest_request + 1 && observation = previous
-        then sequence else request_sequence in
+        if unchanged_request = Some latest_request then sequence else request_sequence in
       Hashtbl.replace candle_observations base_path (request_sequence, sequence, observation);
       sequence
     | Some _ -> request_sequence

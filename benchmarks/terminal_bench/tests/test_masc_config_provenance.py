@@ -1,8 +1,7 @@
 """The provenance of a rendered config: what it was made from, said as digests and a commit.
 
-These hold the digests (same bytes, same digest; any change, a different one),
-the git reading (a commit, a clean or dirty tree, and unknown when git cannot
-say), and that each trial observes fresh checkout state.
+These cover recorded config identity, unknown checkout state, and changes
+between trial renders. Agent installation tests verify the uploaded bytes.
 """
 import hashlib
 import os
@@ -48,25 +47,6 @@ def config_tree(root: Path, **files: str) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
     return root
-
-
-def test_the_same_files_have_the_same_digest_wherever_they_are(tmp_path):
-    files = {"runtime.toml": "a = 1\n", "keepers__bench-1.toml": "name = 'x'\n"}
-    first = config_tree(tmp_path / "one", **files)
-    second = config_tree(tmp_path / "two" / "deeper", **files)
-    assert provenance.tree_sha256(first) == provenance.tree_sha256(second)
-
-
-def test_a_changed_byte_a_renamed_file_or_an_added_file_changes_the_digest(tmp_path):
-    base = provenance.tree_sha256(config_tree(
-        tmp_path / "base", **{"runtime.toml": "a = 1\n", "skills__s.md": "text\n"}))
-    changed = provenance.tree_sha256(config_tree(
-        tmp_path / "changed", **{"runtime.toml": "a = 2\n", "skills__s.md": "text\n"}))
-    renamed = provenance.tree_sha256(config_tree(
-        tmp_path / "renamed", **{"runtime.toml": "a = 1\n", "skills__t.md": "text\n"}))
-    added = provenance.tree_sha256(config_tree(
-        tmp_path / "added", **{"runtime.toml": "a = 1\n", "skills__s.md": "text\n", "extra": ""}))
-    assert len({base, changed, renamed, added}) == 4
 
 
 def test_the_runtime_toml_digest_is_the_digest_of_that_file(tmp_path):

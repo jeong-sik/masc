@@ -316,6 +316,50 @@ let project_result
     externalization_tool_error ~recoverable:false error
 ;;
 
+(* An applied effect cannot be projected again after its manifest failed.
+   Bound this recovery envelope directly, using the caller's typed policy. *)
+let post_effect_failure_content ~model_projection ~failure_class ~effect_disposition
+    ~data ~references =
+  let ceiling = max 0 (Tool_output.inline_ceiling_bytes model_projection) in
+  let fields =
+    [ "message", `String "The effect was applied, but result manifest storage failed. Read the recorded artifacts or current target; do not repeat the effect."
+    ; "masc.tool_disposition", `String "failed"
+    ; "effect_disposition", `String (Tool_result.failure_effect_disposition_to_string effect_disposition)
+    ; "failure_class", `String failure_class
+    ] in
+  let encode fields = Yojson.Safe.to_string (`Assoc fields) in
+  let full = encode (fields @ ["data", data;
+    "artifact_refs", `List (List.map Tool_output.normalized_artifact_ref_to_json references)]) in
+  if String.length full <= ceiling then full
+  else
+    let total = List.length references in
+    let bounded selected count = encode (fields @
+      [ "data_omitted", `Bool true
+      ; "artifact_refs", `List (List.rev selected)
+      ; "artifact_refs_omitted", `Int (total - count)
+      ]) in
+    let empty = bounded [] 0 in
+    if String.length empty > ceiling then (
+      (* A custom policy may not even admit the fixed envelope. The typed error
+         still remains non-recoverable; never spill or create another artifact. *)
+      let notice = "Effect applied; do not repeat. Read current target." in
+      String.sub notice 0 (min ceiling (String.length notice)))
+    else
+      let selected, count = List.fold_left (fun (selected, count) reference ->
+        let admit reference =
+          let next = Tool_output.normalized_artifact_ref_to_json reference :: selected in
+          if String.length (bounded next (count + 1)) <= ceiling
+          then Some (next, count + 1) else None in
+        match admit reference with
+        | Some next -> next
+        | None ->
+          (* Preview is descriptive text, not blob identity or a domain
+             descriptor. Preserve the canonical retrieval handle if it fits. *)
+          (match admit (Tool_output.with_preview reference "") with
+           | Some next -> next | None -> selected, count)) ([], 0) references in
+      bounded selected count
+;;
+
 let to_agent_core_typed_result
       ?base_path
       ?(model_projection = Tool_output.default_model_projection)
@@ -417,21 +461,10 @@ let to_agent_core_typed_result
     let references = Tool_output.normalized_artifact_refs_in_json data in
     match effect_disposition, references, artifact_manifest_from_metadata metadata with
     | Tool_result.Proven_post_effect, (_ :: _), Error _ ->
-      (* This is an error result for an already-applied effect. A second
-         manifest projection would erase that evidence with a generic storage
-         error. Preserve the enclosing producer payload as well: a bare blob
-         handle cannot reconstruct a domain recovery descriptor (for example,
-         a peer artifact's filename and purpose). Never repeat projection or
-         turn the already-applied failure into Ok. *)
       make_tool_error ~recoverable:false
         ~error_class:(agent_core_error_class_of_tool_failure_class class_)
-        (Yojson.Safe.to_string (`Assoc [
-          "message", `String "The effect was applied, but result manifest storage failed. Read the recorded artifacts or current target; do not repeat the effect.";
-          "masc.tool_disposition", `String "failed";
-          "effect_disposition", `String (Tool_result.failure_effect_disposition_to_string effect_disposition);
-          "failure_class", `String failure_class;
-          "data", data;
-          "artifact_refs", `List (List.map Tool_output.normalized_artifact_ref_to_json references)]))
+        (post_effect_failure_content ~model_projection ~failure_class
+           ~effect_disposition ~data ~references)
     | _ ->
     project_result
       ~stored_preview

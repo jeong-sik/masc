@@ -647,6 +647,75 @@ let test_post_effect_peer_artifact_remains_delegatable () =
     | Ok actual -> Alcotest.(check string) "reuse original durable bytes" bytes actual
     | Error detail -> Alcotest.fail detail)
 
+let test_post_effect_manifest_failure_respects_each_projection () =
+  List.iter (fun model_projection ->
+    with_temp_base_path (fun base_path ->
+      let store = Tool_blob_store.create ~base_path in
+      let blob = Tool_blob_store.put_durable store ~bytes:"applied recovery bytes" ~mime:"text/plain" in
+      let ceiling = O.inline_ceiling_bytes model_projection in
+      let reference = O.normalized_artifact_ref_to_json blob in
+      let shortest = Tool_blob_store.put_durable store ~bytes:"0" ~mime:"text/plain"
+        |> O.normalized_artifact_ref_to_json in
+      let reference_bytes = String.length (Yojson.Safe.to_string shortest) in
+      let many = List.init (ceiling / reference_bytes + 1) (fun index ->
+        Tool_blob_store.put_durable store ~bytes:(string_of_int index) ~mime:"text/plain"
+        |> O.normalized_artifact_ref_to_json) in
+      let large_preview = O.with_preview blob (String.make (ceiling + 1) 'p')
+        |> O.normalized_artifact_ref_to_json in
+      List.iter (fun (name, data, expect_omitted) ->
+        let exported = Tool_result.make_ok ~tool_name:"keeper_ide_annotate"
+          ~start_time:(Tool_timing.start ()) ~data () in
+        let root = Tool_blob_store.root_dir store in
+        let retained = root ^ ".retained" in
+        Unix.rename root retained;
+        Fun.protect ~finally:(fun () ->
+          if Sys.file_exists root then Unix.unlink root;
+          Unix.rename retained root) (fun () ->
+            let blocked = open_out_bin root in close_out blocked;
+            match B.attach_artifact_manifest ~base_path exported with
+            | Error { kind = B.Artifact_storage_failure; _ } -> ()
+            | Error _ -> Alcotest.fail "expected actual manifest storage failure"
+            | Ok _ -> Alcotest.fail "blocked manifest unexpectedly succeeded");
+        let failed = Tool_result.make_err ~tool_name:"keeper_ide_annotate"
+          ~class_:Tool_result.Runtime_failure ~start_time:(Tool_timing.start ()) ~data
+          ~effect_disposition:Tool_result.Proven_post_effect "Already applied" in
+        match B.to_agent_core_typed_result ~base_path ~model_projection
+          ~on_externalization_error:(fun _ -> Alcotest.fail "must not repeat projection") failed with
+        | Ok _ -> Alcotest.fail "applied failure became success"
+        | Error { message; recoverable; _ } ->
+          Alcotest.(check bool) (name ^ " stays within the typed ceiling") true
+            (String.length message <= ceiling);
+          Alcotest.(check bool) (name ^ " forbids replay") false recoverable;
+          let response = Yojson.Safe.from_string message in
+          let open Yojson.Safe.Util in
+          Alcotest.(check string) "applied effect remains explicit" "proven_post_effect"
+            (response |> member "effect_disposition" |> to_string);
+          Alcotest.(check bool) "raw producer payload explicitly omitted" true
+            (response |> member "data_omitted" |> to_bool);
+          Alcotest.(check bool) "raw producer data is absent" true
+            (member "data" response = `Null);
+          Alcotest.(check bool) "current target fallback and no-repeat instruction remain" true
+            (String_util.contains_substring message "current target"
+             && String_util.contains_substring message "do not repeat");
+          Alcotest.(check bool) "omitted handle count is explicit" expect_omitted
+            (response |> member "artifact_refs_omitted" |> to_int > 0);
+          let recovered = response |> member "artifact_refs" |> to_list in
+          Alcotest.(check bool) "at least one canonical recovery handle survives" true
+            (recovered <> []);
+          List.iter (fun json ->
+            match O.normalized_artifact_ref_of_json json with
+            | O.Decoded_normalized_artifact_ref reference ->
+              (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+               | Ok (Some _) -> ()
+               | _ -> Alcotest.fail "bounded handle cannot retrieve original bytes")
+            | _ -> Alcotest.fail "bounded handle is not normalized") recovered)
+        [ "large inserted body", `Assoc ["inserted", `String
+            (String.make (2 * O.inline_ceiling_bytes O.agent_core_model_projection) 'i');
+            "edit_snapshots", `List [reference]], false
+        ; "many handles", `Assoc ["artifacts", `List many], true
+        ; "large handle preview", `Assoc ["artifact", large_preview], false
+        ])) [O.default_model_projection; O.agent_core_model_projection]
+
 let test_bounded_read_page_is_not_nested () =
   with_temp_base_path (fun _dir ->
     let request : Masc.Keeper_artifact_read.request =
@@ -824,6 +893,8 @@ let () =
             test_externalize_with_temp_base_path;
           Alcotest.test_case "post-effect peer artifact remains delegatable" `Quick
             test_post_effect_peer_artifact_remains_delegatable;
+          Alcotest.test_case "post-effect manifest failure respects both projection budgets" `Quick
+            test_post_effect_manifest_failure_respects_each_projection;
           Alcotest.test_case "bounded read page is not nested" `Quick
             test_bounded_read_page_is_not_nested;
           Alcotest.test_case "store failure is typed" `Quick

@@ -207,7 +207,8 @@ describe('MemoryInspector current snapshot', () => {
 
     const text = container.querySelector('.mem-compo-sub')?.textContent ?? ''
     expect(text).toContain('18.0k provider tok')
-    expect(text).toContain('131.1k')
+    expect(text).toContain('설정 131,072')
+    expect(text).toContain('클라이언트 보고 미측정')
     expect(text).toContain(String(record.request_runtime_profile))
     if (record.usage_scope === 'per_request') {
       expect(text).toContain('14%')

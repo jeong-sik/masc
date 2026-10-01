@@ -16,6 +16,9 @@ import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
+    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
     "bin/masc_tui_loader.ml",
 )
@@ -232,9 +235,13 @@ def each_failed_source_keeps_other_cards(executable):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             h.wait_for_output(process, fd, output, known, start=0, timeout=10)
             note = b"Approvals and questions: " + failed_label + b" not fully read"
-            # Match the sole-source label through the end of its drawn row,
-            # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            # Match the sole-source label through the end of its drawn row.
+            # The last changed row ends the frame without another row cursor.
+            settled = re.compile(
+                re.escape(note)
+                + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m"
+                + rb"(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)"
+            )
             h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),
@@ -349,12 +356,14 @@ def planning_link_failure_has_own_diagnostic(executable):
         h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
         visible = frame(process, fd, output, "primary-work-with-unavailable-goal-links")
         assert b"Work:" in visible and b"Work: reading unavailable" not in visible, visible
-        # Enter the palette only after it owns input, then navigate by name.
+        # Enter the palette only after it owns input. The 80-column Goal list
+        # truncates titles, so use its selected ID before opening full detail.
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output, b"go Work", b"go Work")
-        h.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
+        h.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
         h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
         unavailable = h.screen_text(bytes(output))
+        assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable
         assert b"task-777" not in unavailable, unavailable
         path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"

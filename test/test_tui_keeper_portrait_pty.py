@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import hashlib
-import json
 import copy
 import threading
 import json
@@ -201,6 +200,13 @@ def open_alpha_detail(process, fd, output) -> None:
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
     h.drain_until_quiet(process, fd, output)
+
+
+def reopen_alpha_items(process, fd, output, balance: bytes) -> None:
+    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+    h.select_keeper_row(process, fd, output, b"alpha")
+    # Workspace withdrawal returns to the list but retains the chosen detail tab.
+    h.send_and_wait(process, fd, output, b"\r", balance)
 
 
 def portrait_follows_the_terminal_height(binary: str) -> None:
@@ -554,17 +560,21 @@ def item_account_follows_workspace_authority(binary: str) -> None:
                            for row in last_frame_rows(output).values()), "a pending reread retained its account"
             items.served_base_path = str(Path(items.base_path, "other-workspace"))
             phase[0] = "b"
-            await_frame(process, fd, output, b"No keeper selected.")
+            await_frame(process, fd, output, b"[workspace mismatch]")
+            assert not any(b"Balance " in row or b"1.000 owned" in row
+                           for row in last_frame_rows(output).values())
             items.served_base_path = items.base_path
+            reads = len(health_reads)
             phase[0] = "a"
-            await_frame(process, fd, output, "Loading Item account…".encode())
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(health_reads) >= reads + 2, timeout=10.0)
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
+            start = len(output)
             held.release.set()
             assert h.wait_for_fixture_state(process, fd, output, held.completed.is_set, timeout=10.0)
             h.drain_until_quiet(process, fd, output)
-            assert not any(b"Balance 90.000" in row for row in last_frame_rows(output).values()), \
+            assert b"Balance 90.000" not in output[start:], \
                 "late first-A account became current after A/B/A"
-            os.write(fd, b"r")
-            await_frame(process, fd, output, b"Balance 13.000 Candle")
             # Repeated successful probes for the same canonical workspace do
             # not invalidate the current account or manufacture another read.
             reads = len(health_reads)
@@ -574,17 +584,17 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             assert any(b"Balance 13.000" in row for row in last_frame_rows(output).values())
             assert held.calls == 2
             phase[0] = "unread"
-            await_frame(process, fd, output, b"Account unavailable: Server workspace identity is unavailable")
+            await_frame(process, fd, output, b"MASC Keepers")
             assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
                            for row in last_frame_rows(output).values()), "unread health retained account authority"
             os.write(fd, b"r")
-            await_frame(process, fd, output, b"Account unavailable:")
             h.drain_until_quiet(process, fd, output)
             assert held.calls == 2, "unconfirmed workspace launched an Item request"
+            reads = len(health_reads)
             phase[0] = "a"
-            await_frame(process, fd, output, "Loading Item account…".encode())
-            os.write(fd, b"r")
-            await_frame(process, fd, output, b"Balance 13.000 Candle")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(health_reads) >= reads + 2, timeout=10.0)
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             capture_item_screen(output, "workspace-authority-recovered")
             os.write(fd, b"q")
         finally:
@@ -777,15 +787,15 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             frame(process, fd, output, lambda text:
-                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+                  b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
             recover(process, fd, output)
             balance[0] = "13000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             arm[0] = True
             os.write(fd, b"r")
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
-            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
             recover(process, fd, output)
             # Release before any new Item read: otherwise the new read's
             # generation alone would supersede this response and hide a
@@ -798,11 +808,11 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                 lambda: identity["probes"] >= probes + 2, timeout=10)
             assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            assert b"Account unavailable:" in text
+            assert b"MASC Keepers" in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
             balance[0] = "14000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            reopen_alpha_items(process, fd, output, b"Balance 14.000 Candle")
             os.write(fd, b"q")
         finally:
             release.set()

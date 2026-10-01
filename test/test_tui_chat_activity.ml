@@ -364,7 +364,26 @@ let test_compact_keeps_uncovered_execution_problems () =
     (Live.Run_failed {message="fixture failure"});
   state.msg_inflight <- [active; uncovered];
   check bool "another execution failure remains named while one works" true
-    (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()))
+    (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()));
+  let waiting = inflight ~request_id:"waiting" ~at:5. () in
+  state.msg_live <- None;
+  state.msg_inflight <- [{waiting with phase=Tui.Turn_reconciling}];
+  state.keeper_turns_error <- Some "fixture poll unavailable";
+  let local : Chat.request =
+    { request_id="local"; keeper_name="alpha"; message="held-next"
+    ; attachments=[]; references=[] } in
+  (match Queue.push state.msg_queued ~submitted_at:6. local with
+   | Ok (queue, _) -> state.msg_queued <- queue
+   | Error error -> fail error);
+  let rows = texts (Tui.keeper_message_activity_rows state) in
+  check (list string) "pending delivery evidence has one owner and exact counts"
+    ["현재 작업 확인 불가 · 내 메시지 2건 대기 · 1건 전송 전 · 1건 전달 재확인 중"] rows;
+  List.iter (fun terminal_cols ->
+    check bool "pending delivery evidence fits without clipping" true
+      (List.for_all (fun row ->
+        Masc_tui_message_layout.display_width row <=
+          Masc_tui_frame.inner_width ~cols:terminal_cols) rows))
+    [80; 100]
 
 (* The foreign turn's stop command is operator input, so shortening the
    Keeper identity would offer a command for an identity that does not exist. *)

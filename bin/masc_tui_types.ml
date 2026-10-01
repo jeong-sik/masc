@@ -3273,6 +3273,22 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+type code_lsp_query = {
+  clq_scope : code_workspace_scope;
+  clq_file : string Masc_tui_fetched.request;
+  clq_question : string;
+  clq_symbol : string;
+  clq_line : int;
+}
+
+let code_lsp_query_equal left right =
+  left.clq_scope = right.clq_scope
+  && Masc_tui_fetched.same_request ~equal:String.equal left.clq_file right.clq_file
+  && String.equal left.clq_question right.clq_question
+  && String.equal left.clq_symbol right.clq_symbol
+  && Int.equal left.clq_line right.clq_line
+;;
+
 (* Scope and path together name one thing to fetch. The same relative path
    under two scopes is two different things -- two histories, two directory
    listings -- so a request and the reply that comes back for it are the same
@@ -6327,6 +6343,7 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
   (* Where a definition jump left from, newest first: scope, directory,
      open file (if any), its cursor and scroll. B walks back through it.
      Bounded so a long session cannot grow it without limit. *)
@@ -7830,8 +7847,18 @@ let apply_workspace_activity_read state request result =
   state.workspace_activity_cursor <- (match retained with Some index -> index | None -> cursor);
   if Option.is_none retained then state.workspace_activity_context_scroll <- None
 
+let set_code_scope state scope =
+  if state.code_scope <> scope then begin
+    state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
+    state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_lsp_note <- None;
+    state.code_target_line <- None
+  end;
+  state.code_scope <- scope
+;;
+
 let enter_keeper_code_file state ~keeper ~path =
-  state.code_scope <- Code_scope_keeper keeper;
+  set_code_scope state (Code_scope_keeper keeper);
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
@@ -8569,6 +8596,7 @@ let create_state
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
+  code_lsp_query = Masc_tui_fetched.initial;
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;

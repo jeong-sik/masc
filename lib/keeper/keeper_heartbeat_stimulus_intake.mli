@@ -152,7 +152,7 @@ type spent_selection_reconciliation =
   | Spent_grant_replay_acknowledged
   | Absent_grant_retired of
       { approval_id : string
-      ; absence : Keeper_approval_queue.resolution_absence
+      ; absence : Keeper_approval_queue_result.resolution_absence
       }
       (** the store has no resolution behind the queued approval; the entry
           was acknowledged without a turn *)
@@ -168,7 +168,7 @@ val reconcile_spent_selection
     monotonic, so a consumed state cannot revert to usable. A read error leaves
     the selection actionable rather than discarding a possibly live grant. A
     store answer that says nothing stands behind the entry
-    ([Keeper_approval_queue.resolution_absence]) retires it as
+    ([Keeper_approval_queue_result.resolution_absence]) retires it as
     [Absent_grant_retired]: reading again cannot change that answer, and a
     turn spent on it fails at the same replay lookup every cycle. *)
 

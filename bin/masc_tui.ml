@@ -366,7 +366,7 @@ let identity_query (state : state) =
 
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
-  Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
+  Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
     ~cols:columns
 
 (* A row cursor over a plain listing: the keypress moves the cursor and the
@@ -554,9 +554,17 @@ let save_message_draft state =
           state.msg_drafts
       in
       let text = Buffer.contents state.msg_input in
+      let draft =
+        { draft_text = text
+        ; draft_attachments = state.msg_attachments
+        ; draft_references = state.msg_references
+        ; draft_attachments_since = state.msg_attachments_since
+        }
+      in
       state.msg_drafts <-
-        if String.equal text "" then other_drafts
-        else (keeper_name, text) :: other_drafts
+        if String.equal text "" && draft.draft_attachments = []
+           && draft.draft_references = [] then other_drafts
+        else (keeper_name, draft) :: other_drafts
 
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
@@ -822,8 +830,16 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
-  List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input);
+  (match List.assoc_opt keeper_name state.msg_drafts with
+   | None ->
+       state.msg_attachments <- [];
+       state.msg_references <- [];
+       state.msg_attachments_since <- None
+   | Some draft ->
+       Buffer.add_string state.msg_input draft.draft_text;
+       state.msg_attachments <- draft.draft_attachments;
+       state.msg_references <- draft.draft_references;
+       state.msg_attachments_since <- draft.draft_attachments_since);
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -858,15 +874,18 @@ let clear_current_message_draft state =
 let consume_dispatched_message_draft state request =
   state.msg_drafts <-
     List.filter
-      (fun (keeper_name, text) ->
+      (fun (keeper_name, draft) ->
         not
           (String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal text request.message))
+           && String.equal draft.draft_text request.message
+           && draft.draft_attachments = request.attachments
+           && draft.draft_references = request.references))
       state.msg_drafts;
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
          && String.equal (Buffer.contents state.msg_input) request.message
+         && state.msg_attachments = [] && state.msg_references = []
          && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
@@ -944,6 +963,36 @@ let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input text
 
+let image_session_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> state.msg_history
+  | Some keeper_name ->
+      List.filter
+        (fun entry -> String.equal entry.me_keeper_name keeper_name)
+        state.msg_history
+
+(* Image discovery includes queued messages and rows drawn by held turn logs.
+   Those presentation filters must not remove an attachment from Ctrl-O. *)
+let image_conversation_rows (state : state) =
+  let loaded =
+    match state.msg_target_keeper_name, state.msg_loaded_keeper with
+    | Some keeper_name, Some loaded_keeper
+      when String.equal keeper_name loaded_keeper -> state.msg_loaded
+    | Some _, Some _ | Some _, None | None, _ -> []
+  in
+  chat_timeline ~loaded ~session:(image_session_rows state)
+    ~queued_request_ids:[] |> chat_timeline_rows
+
+(* Session rows record arrivals observed by this pane. Loading older history
+   after a paste is not evidence of a new arrival. When that ordering is no
+   longer available, prefer the image the operator still has in the draft. *)
+let note_attachment_staged (state : state) =
+  state.msg_attachments_since <-
+    (match List.rev (image_session_rows state) with
+     | newest :: _ -> Some (msg_anchor newest)
+     | [] -> None)
+;;
+
 (* The draft is put aside on the first step back and handed over on the way
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
@@ -970,11 +1019,8 @@ let recall_land (state : state) entries at =
   in
   state.msg_attachments <- attachments;
   state.msg_references <- references;
-  state.msg_attachments_since <-
-    (if attachments = [] then None
-     else match List.rev state.msg_history with
-       | newest :: _ -> Some (msg_anchor newest)
-       | [] -> None)
+  if attachments = [] then state.msg_attachments_since <- None
+  else note_attachment_staged state
 
 let recall_older (state : state) =
   let sent = own_typed_messages state in
@@ -1027,19 +1073,6 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
           (String.equal entry.me_request_id request.Keeper_chat.request_id
            && match entry.me_role with Message_user _ -> true | _ -> false))
       state.msg_history
-;;
-
-(* Staged images belong to the draft, so the batch and its recency marker move
-   together: staging marks the history row that was newest at that moment (or
-   [None] when the history was empty, which makes any row it later holds the
-   newer one), and clearing takes the marker with the batch. The anchor, not
-   the row's position, is what survives: transcript loads replace session rows
-   and paging rewrites the list, both of which move positions. *)
-let note_attachment_staged (state : state) =
-  state.msg_attachments_since <-
-    (match List.rev state.msg_history with
-     | newest :: _ -> Some (msg_anchor newest)
-     | [] -> None)
 ;;
 
 let clear_staged_attachments (state : state) =
@@ -1156,6 +1189,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | ("\t" | "\r") when Option.is_some command_menu ->
     (match command_menu with Some menu -> accept_command_menu menu | None -> false)
+  (* A visible menu consumes Esc before interrupting a turn or leaving chat. *)
   | "esc" when Option.is_some command_menu ->
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Buffer.contents state.msg_input);
     true
@@ -5333,6 +5367,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -8002,40 +8037,50 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* Read the newest typed image in this Keeper's loaded conversation. Display
-   labels are never parsed as paths. The row index preserves staging order. *)
-let newest_named_image state =
-  let in_this_chat entry =
-    match state.msg_target_keeper_name with
-    | None -> true
-    | Some name -> String.equal entry.me_keeper_name name
-  in
-  let length = List.length state.msg_history in
-  List.rev state.msg_history
-  |> List.find_mapi (fun from_newest entry ->
-         if not (in_this_chat entry) then None
-         else
-           match entry.me_image with
-           | Masc_tui_image_preview.No_image -> None
-           | image -> Some (length - 1 - from_newest, image))
+(* Read in observation order before considering the historical timeline:
+   server and client timestamps need not share a clock. Display labels are
+   never parsed as paths. *)
+let newest_named_image rows =
+  List.rev rows
+  |> List.find_map (fun entry ->
+         match entry.me_image with
+         | Masc_tui_image_preview.No_image -> None
+         | image -> Some image)
 
-(* Both a named path and a staged attachment: which is newer. The marker left
-   by [note_attachment_staged] anchors the row that was newest when the newest
-   attachment entered the composer, so the naming row sitting at or behind it
-   means the paste came after the name. A marker that no longer matches any
-   row -- its row was since replaced by the transcript -- orders nothing, and
-   the named path keeps the key, which is the answer it gave before the marker
-   existed. *)
-let named_vs_staged_order state ~named_index =
-  match state.msg_attachments_since with
-  | None -> Masc_tui_image_preview.Named_is_newer
-  | Some since -> (
-    match msg_index_of_anchor state.msg_history since with
-    | None -> Masc_tui_image_preview.Unordered
-    | Some staged_since_index ->
-      if named_index <= staged_since_index
-      then Masc_tui_image_preview.Staged_is_newer
-      else Masc_tui_image_preview.Named_is_newer)
+let image_request_is_active state entry =
+  let matches request =
+    String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
+    && String.equal request.request_id entry.me_request_id
+  in
+  (match Chat_queue.find state.msg_queued ~request_id:entry.me_request_id with
+   | Some item -> matches item.request
+   | None -> false)
+  || List.exists (fun (inflight : inflight) ->
+       matches inflight.sent_request
+       && match Masc_tui_keeper_chat_transcript.phase inflight.log.tl_transcript with
+          | Waiting | Working -> true
+          | Stream_ended | Stream_failed _ -> false)
+       state.msg_inflight
+
+(* Active local inputs precede loaded history even across clock skew. Once
+   settled, a local row follows the canonical timeline: a bounded history
+   response may omit that row forever while including newer images.
+   Only an image observed after staging can supersede the draft; a delayed
+   history load alone supplies no such observation. *)
+let conversation_image state =
+  let session = image_session_rows state in
+  let observed =
+    match state.msg_attachments, state.msg_attachments_since with
+    | [], _ -> Some (List.filter (image_request_is_active state) session)
+    | _ :: _, None -> Some session
+    | _ :: _, Some since -> msg_entries_after_anchor session since
+  in
+  match Option.bind observed newest_named_image with
+  | Some image -> image, Masc_tui_image_preview.Named_is_newer
+  | None ->
+      match newest_named_image (image_conversation_rows state) with
+      | Some image -> image, Masc_tui_image_preview.Staged_is_newer
+      | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 
 (* Fetch retained wire bytes through the authenticated artifact endpoint. No
    local filename or reference-supplied URL is ever opened. The render fiber
@@ -8051,15 +8096,18 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     let view = state.view in
     let run () =
       let result =
-        Eio_guard.run_in_systhread ~label:"tui-sent-image-bytes" (fun () ->
-          let response = Masc_tui_http.get_json ~host:server_peer_host ~port
-              ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) in
-          Result.bind response (function
-            | `Assoc fields ->
-                (match List.assoc_opt "content" fields with
-                 | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
-                 | Some _ | None -> Error "sent image response has no payload")
-            | _ -> Error "invalid sent image response"))
+        (* The authenticated HTTP client needs the fiber's Eio handlers.
+           Only JSON/base64 decoding belongs on a system thread. *)
+        match Masc_tui_http.http_get ~host:server_peer_host ~port
+            ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) with
+        | Error _ as error -> error
+        | Ok (status_code, body) when not (Tui_decode.is_success_http_status status_code) ->
+            (* Refusal wording reads the shared credential refresh state. *)
+            Error (Masc_tui_http.refusal ~status_code ~body)
+        | Ok (status_code, body) ->
+            Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
+              let response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
+              Result.bind response (Masc_tui_image_preview.decode_artifact reference))
       in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in
@@ -8070,12 +8118,7 @@ let open_stored_image state ~mailbox ~notice ~name reference =
 
 let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let conversation, order =
-    match newest_named_image state with
-    | Some (named_index, image) ->
-        image, named_vs_staged_order state ~named_index
-    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
-  in
+  let conversation, order = conversation_image state in
   match
     Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with
@@ -8546,7 +8589,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      state.about_open <- true
+      state.about_open <- true;
+      state.emblem_frame <-
+        (if state.about_reduce_motion then Masc_tui_emblem_screen.final_frame else 0)
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -9249,7 +9294,7 @@ let apply_asks_load state = function
        | Ask_browsing -> ()
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
-                    (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+                    (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
             | None -> Masc_tui_home.clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
@@ -10430,7 +10475,7 @@ let selected_ask_row state =
   match state.ask_answer_mode with
   | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
-      List.find_opt (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
+      List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
 let selected_ask_question state =
@@ -12745,15 +12790,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok snapshot ->
+           let selected_name = selected_preset_for_state state
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           let cursor = match Option.bind selected_name (fun name ->
+               List.find_mapi (fun index row ->
+                 if String.equal row.Tui_decode.pm_name name then Some index else None)
+                 snapshot.Tui_decode.pss_presets) with
+             | Some index -> index
+             | None -> max 0 (min state.presets_cursor
+                 (List.length snapshot.Tui_decode.pss_presets - 1))
+           in
+           let next_name = List.nth_opt snapshot.Tui_decode.pss_presets cursor
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           if not (Option.equal String.equal selected_name next_name) then begin
+             state.config_scroll <- 0;
+             state.preset_restore_armed <- None
+           end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
-           state.presets_cursor <-
-             max 0
-               (min state.presets_cursor
-                  (List.length snapshot.Tui_decode.pss_presets - 1));
-           (* The listing just changed, so whatever the cursor now points at
-              is a fresh question. *)
-           state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+           state.presets_cursor <- cursor;
+           (* Ask again while retaining the keyed reading. Clearing it first
+              shortens the document to its loading rows and clamps a reader
+              at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
   | Preset_contents_shown (sink, result) ->
@@ -15234,6 +15292,8 @@ let main
        (match Masc_tui_emblem_screen.style_of_string value with
         | Some style -> Masc_tui_emblem_screen.set_style style
         | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
+  state.about_reduce_motion <-
+    (match tui_settings.reduce_motion with Some enabled -> enabled | None -> false);
 
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
@@ -15564,23 +15624,19 @@ let main
         ~invalidate_before:(damaged || authority_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented repaint ->
+    | Frame_presenter.Presented _ as presented ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal, and
-           again over any row the frame erased and wrote: a full redraw
-           cleared them all, a row it rewrote may have taken one's cells. *)
-        Masc_tui_portrait_view.flush
-          ~rewritten:
-            (match repaint with
-             | Frame_presenter.Whole_screen -> fun _ -> true
-             | Frame_presenter.Rows rows -> fun row -> List.mem row rows)
-          ~write:write_to_terminal
-    | Frame_presenter.Unchanged ->
+        (* The frame's pictures go over it once it is on the terminal: sent
+           again after a full redraw, whose clear took them, and put back
+           from the pixels the terminal holds over a row the frame erased
+           and wrote. *)
+        Masc_tui_portrait_view.flush presented ~write:write_to_terminal
+    | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
-        Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+        Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -16875,7 +16931,7 @@ and is loaded on demand through keeper_skill.
           state.keeper_sandbox_view_error <- None;
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
-  let handle_keeper_create () =
+  let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
@@ -16885,31 +16941,73 @@ and is loaded on demand through keeper_skill.
          is what went wrong: this form carried two fields across the whole
          time [sandbox_profile] was required, and every keeper made through
          it came back 400. *)
-      let stem = Masc.Keeper_turn_up_args.creation_stem in
+      let stem =
+        match state.keeper_creation_draft with
+        | Some declaration -> declaration
+        | None -> Masc.Keeper_turn_up_args.creation_stem
+      in
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
+        state.keeper_creation_draft <- Some declaration;
+        let refuse detail =
+          goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
+          report_action state "error"
+            (detail ^ " · press a to edit the retained declaration")
+        in
         let declared_name =
           match Yojson.Safe.from_string declaration with
+          | exception Yojson.Json_error detail ->
+              Error ("Keeper declaration is not JSON: " ^ detail)
           | `Assoc fields -> (
             match List.assoc_opt "name" fields with
-            | Some (`String value) -> String.trim value
-            | _ -> "")
-          | _ -> ""
+            | Some (`String value) ->
+                Keeper_id.Keeper_name.of_string (String.trim value)
+                |> Result.map Keeper_id.Keeper_name.to_string
+            | Some _ | None -> Error "declaration needs a non-empty name string")
+          | _ -> Error "Keeper declaration must be a JSON object"
         in
-        if String.length declared_name = 0 then
-          report_action state "error"
-            "declaration needs a non-empty \"name\" string; nothing was created"
-        else
-          match
+        match declared_name with
+        | Error detail -> refuse detail
+        | Ok declared_name ->
+          (match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
               ~declaration_json:declaration
           with
-          | Ok _ -> report_action state "system" (declared_name ^ ": keeper created")
-          | Error detail -> report_action state "error" detail))
+          | Error detail -> refuse detail
+          | Ok receipt ->
+            (* This is the lifecycle route's typed JSON boundary. A 200
+               alone cannot bind the composer to the submitted Keeper. *)
+            let member key =
+              match receipt with
+              | `Assoc fields -> List.assoc_opt key fields
+              | _ -> None
+            in
+            (match
+               member "ok", member "action", member "name"
+             with
+             | Some (`Bool true), Some (`String "up"), Some (`String name)
+               when String.equal name declared_name ->
+                 state.keeper_creation_draft <- None;
+                 load_local_workspace_if_safe state base_path;
+                 open_message_for_keeper ~return_to
+                   state declared_name ~drain_queue:(fun () -> ());
+                 set_msg_scroll state 0;
+                 state.view <- Keepers Keeper_message;
+                 launch_keeper_history_load state ~mailbox:async_messages
+                   ~keeper_name:declared_name;
+                 start_http_refresh state ~host ~port ~intent:Revalidate
+                   ~refresh_inflight:http_refresh_inflight
+                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                   ~scoped_refresh_followup ~mailbox:async_messages;
+                 report_action state "system"
+                   (declared_name ^ ": declaration accepted · write the first request")
+             | _ ->
+                 refuse
+                   "Creation response did not confirm this Keeper; inspect the roster before retrying"))))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -17015,6 +17113,11 @@ and is loaded on demand through keeper_skill.
            ~post:(fun body_json ->
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))
+  in
+  let reconcile_chat_focus () =
+    let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
+    reconcile_keeper_message_focus state ~cols
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
@@ -17285,6 +17388,7 @@ and is loaded on demand through keeper_skill.
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+      reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -17574,7 +17678,7 @@ and is loaded on demand through keeper_skill.
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
-       | Some (Pasted paste) when Option.is_some state.lane_addons ->
+       | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
                 state.lane_addons <- Some {view with installer=Some
@@ -17859,8 +17963,9 @@ and is loaded on demand through keeper_skill.
                the compact fallback further down owns every remaining one, so
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
-            (compact_viewport
-            || quit_key_allowed_for (text_input_target state ~compact_viewport))
+            (not state.about_open)
+            && (compact_viewport
+               || quit_key_allowed_for (text_input_target state ~compact_viewport))
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
@@ -18058,7 +18163,7 @@ and is loaded on demand through keeper_skill.
                 | "\r" | "\n" | "enter" ->
                     launch_voice_agent_voice_save state ~mailbox:async_messages session
                 | _ -> ()))
-       | Some key when Option.is_some state.lane_addons ->
+       | Some key when Option.is_some state.lane_addons && not state.palette_open ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
             | None -> ()
@@ -18186,7 +18291,12 @@ and is loaded on demand through keeper_skill.
                           | Ok installer -> invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0}
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
-                     | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
+                     | ":" ->
+                         state.palette_open <- true;
+                         state.palette_mode <- Palette_jump;
+                         state.palette_query <- "";
+                         state.palette_cursor <- 0
+                     | "A" -> update { view with draft = Some ""; naming=false; scroll = 0 }
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
@@ -18231,7 +18341,7 @@ and is loaded on demand through keeper_skill.
                            | Ok next -> update next
                            | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "t" ->
-                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; :act submits one"}
+                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; A opens a command, then act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" ->
                          (match Addons.selected_instance view with
@@ -18266,7 +18376,10 @@ and is loaded on demand through keeper_skill.
                                | Some configuration -> update {view with configuration_cursor=max 0
                                    (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
                           | Some snapshot, Addons.Overview, _ ->
-                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                              let cursor = max 0 (min (Addons.overview_count snapshot - 1)
+                                (view.instance_cursor + delta)) in
+                              if cursor <> view.instance_cursor then
+                                update {view with instance_cursor=cursor; scroll=0}
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
                           | Some _, Addons.Detail _, Addons.Rows ->
                               update (Addons.move_record view delta)
@@ -18579,6 +18692,19 @@ and is loaded on demand through keeper_skill.
                           state.fusion_scroll <- 0;
                           start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
+       (* A visible arrival consumes its first key. Esc leaves the overlay; every
+          other key reaches the final frame without also activating a shortcut
+          below it. In particular q cannot arm quit while skipping motion. *)
+       | Some "esc" when state.about_open ->
+           state.about_open <- false;
+           state.emblem_frame <- -1;
+           state.quit_armed <- false
+       | Some _ when state.about_open
+                     && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
+                     && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
+           state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
+           state.quit_armed <- false;
+           Render_schedule.request render_schedule Render_schedule.Force
        (* [quit_key] is already false while anything is taking typed text, the
           row search and the Board draft among them, so this asks nothing more
           than that. It used to restate those two by hand and let a compact
@@ -18606,17 +18732,17 @@ and is loaded on demand through keeper_skill.
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
            (match
-              Masc_tui_roster_pane.toggle_hidden
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+              Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
+                ~in_chat:(state.view = Keepers Keeper_message) ~cols:terminal_columns
             with
             | None ->
                 report_action state "system"
                   (Printf.sprintf
                      "Keeper roster needs %d columns; preference unchanged"
                      Masc_tui_roster_pane.threshold_cols)
-            | Some hidden ->
-                state.roster_pane_hidden <- hidden;
-                if hidden then state.keeper_message_focus <- Right_pane;
+            | Some preference ->
+                state.roster_pane_preference <- preference;
+                reconcile_chat_focus ();
                 Render_schedule.request render_schedule Render_schedule.Force)
        | Some k when String.equal k toggle_acting_pane_key ->
            (match toggle_acting_pane state with
@@ -18981,7 +19107,7 @@ and is loaded on demand through keeper_skill.
           screen that is describing it. Quit stays global above. *)
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
-          no surface binding fires under it. Quit stays global above. *)
+          no surface binding or global quit fires under it. *)
        | Some k when state.about_open ->
            (match k with
             | "esc" -> state.about_open <- false
@@ -19022,6 +19148,31 @@ and is loaded on demand through keeper_skill.
                   | _ -> ())
                | _ -> ())
             | _ -> ())
+       | Some k when Option.is_some state.client_detail ->
+           if k = "esc" then (
+             state.client_detail <- None;
+             state.client_detail_scroll <- 0)
+           else if not compact_viewport then (
+             let page = max 1 (surface_page_rows state - 1) in
+             let delta = match k with
+               | "j" | "down" -> 1 | "k" | "up" -> -1
+               | "pagedown" -> page | "pageup" -> -page | _ -> 0 in
+             match k with
+             | "g" | "home" -> state.client_detail_scroll <- 0
+             | "G" | "end" -> state.client_detail_scroll <- max_int
+             | _ -> state.client_detail_scroll <-
+                 (if delta > 0 then scroll_down_from state.client_detail_scroll ~by:delta
+                  else max 0 (state.client_detail_scroll + delta)))
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Clients && not compact_viewport && not (modal_owns_keys state)
+              && not state.palette_open && not state.answering_open
+              && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match state.clients_surface with
+            | None -> ()
+            | Some snapshot ->
+                state.client_detail <- List.nth_opt snapshot.Masc.Tui_decode.cls_clients state.clients_surface_cursor;
+                state.client_detail_scroll <- 0)
        | Some k when state.help_open && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
@@ -19380,38 +19531,22 @@ and is loaded on demand through keeper_skill.
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
+           let typed_question =
+             match state.palette_mode with
+             | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
+             | Palette_choice _ -> None
+           in
+           let move_palette by =
+             let last = max 0 (List.length (Masc_tui_palette.palette_matches state) - 1) in
+             let current = max 0 (min state.palette_cursor last) in
+             state.palette_cursor <- max 0 (min last (current + by))
+           in
            (match k with
             | "esc" -> close ()
-            | "\r" when
-                (let q = String.trim state.palette_query in
-                 List.exists
-                   (fun (prefix, _) -> String.starts_with ~prefix q)
-                   Masc_tui_palette.lsp_question_prefixes) ->
-                (* A typed command, not an entry: the argument is the symbol
-                   the language-server question is asked about, on the Code
-                   pane's cursor line. *)
-                let q = String.trim state.palette_query in
-                let question, symbol =
-                  match String.index_opt q ' ' with
-                  | Some i ->
-                      ( String.sub q 0 i,
-                        String.trim
-                          (String.sub q (i + 1) (String.length q - i - 1)) )
-                  | None -> (q, "")
-                in
-                (* The typed word back to the question it names, through the
-                   same table the entries were built from. *)
-                let question =
-                  match
-                    List.find_opt
-                      (fun (prefix, _) ->
-                        String.equal (String.trim prefix) question)
-                      Masc_tui_palette.lsp_question_prefixes
-                  with
-                  | Some (_, canonical) -> canonical
-                  | None -> question
-                in
-                if String.equal symbol "" then begin
+            | "\r" when Option.is_some typed_question ->
+                (match typed_question with
+                 | None -> ()
+                 | Some (question, None) ->
                   (* Bare "def " or "hover ": run the highlighted candidate
                      entry -- the cursor line's names ride the palette list,
                      so Enter alone picks the one in view. *)
@@ -19423,16 +19558,15 @@ and is loaded on demand through keeper_skill.
                             (List.length matches - 1)))
                   in
                   close ();
-                  match chosen with
+                  (match chosen with
                   | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
                       Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail) ~question ~symbol
                   | Some _ | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
-                       ^ " <name>")
-                end
-                else begin
+                       ^ " <name>"))
+                 | Some (question, Some symbol) ->
                   close ();
                   if state.view <> Code || Option.is_none (Masc_tui_fetched.current_key state.code_file)
                   then
@@ -19441,8 +19575,7 @@ and is loaded on demand through keeper_skill.
                        Code surface"
                   else
                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail)
-                      ~question ~symbol
-                end
+                      ~question ~symbol)
             | "\r" ->
                 let matches = Masc_tui_palette.palette_matches state in
                 let chosen =
@@ -19450,6 +19583,11 @@ and is loaded on demand through keeper_skill.
                     (max 0 (min state.palette_cursor (List.length matches - 1)))
                 in
                 close ();
+                (match chosen, state.lane_addons with
+                 | Some _, Some view ->
+                     state.lane_addons_cached <- view;
+                     state.lane_addons <- None
+                 | Some _, None | None, (Some _ | None) -> ());
                 (match chosen with
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      hide_browser_lane state
@@ -19533,8 +19671,11 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail)
                        ~question ~symbol
                  | None -> ())
-            | "down" -> state.palette_cursor <- state.palette_cursor + 1
-            | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
+            | "down" | "\014" -> move_palette 1
+            | "up" | "\016" -> move_palette (-1)
+            | "home" -> state.palette_cursor <- 0
+            | "end" -> state.palette_cursor <- max 0 (List.length (Masc_tui_palette.palette_matches state) - 1)
+            | "\021" -> state.palette_query <- ""; state.palette_cursor <- 0
             | "\127" | "\b" ->
                 state.palette_query <-
                   Masc_tui_message_layout.drop_last_utf8_scalar
@@ -20252,7 +20393,7 @@ and is loaded on demand through keeper_skill.
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            let count = List.length (Masc_tui_fusion_model.selected_keeper_runs state) in
            let delta = if move = "j" || move = "down" then 1 else -1 in
@@ -20261,7 +20402,7 @@ and is loaded on demand through keeper_skill.
        | Some ("\r" | "\n" | "right")
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            (match Masc_tui_fusion_model.selected_keeper_run state with
             | None -> ()
@@ -20917,7 +21058,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
            Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
-       | Some "p" when state.view = Overview ->
+       | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match Masc_tui_home.home_selected_action state with
@@ -20946,7 +21087,7 @@ and is loaded on demand through keeper_skill.
                           state.approval_detail_scroll <- 0)
                  | Home_question ask_id ->
                      (match List.find_index
-                              (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
+                              (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                               (open_ask_rows state) with
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->
@@ -21351,16 +21492,11 @@ and is loaded on demand through keeper_skill.
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
        | Some "shift-left"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:(-1)
        | Some "shift-right"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <-
-             min
-               (max 0 (state.code_file_max_width - 1))
-               (state.code_file_hscroll + 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:1
        | Some "B" when state.view = Code ->
            (* Walk back through the definition jumps, newest first. The
               stack holds where each jump left from; an empty stack says so
@@ -21926,8 +22062,11 @@ and is loaded on demand through keeper_skill.
                the key reached only prompts: a preset longer than its pane
                showed its first screen and nothing past it. *)
             | Config
-              when state.config_pane = Config_prompts
-                   || state.config_pane = Config_presets ->
+              when state.config_pane = Config_presets ->
+                let count, height = Masc_tui_render.presets_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.config_scroll <- move ~count ~height state.config_scroll
+            | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_voice ->
@@ -22057,15 +22196,23 @@ and is loaded on demand through keeper_skill.
                         else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
                       move_list_by_rows state ~delta:(direction * page))
-             (* No row list to page. Overview's two panes and Activity's ring
-                are built by the frame out of text the frame formats, so the
-                count a page needs does not exist at the keypress; Config's
-                five panes each carry a cursor of their own meaning. Activity
-                goes to the newest with g, Tools with Home and End. Left named
-                rather than folded into the arm above, so the day one of them
-                gains a row list this reads as a lie rather than as silence
-                (#35305). *)
-             | Overview | Acting | Config | Tools -> ())
+             | Tools ->
+                 (match scrolled_surface state Tools with
+                  | None -> ()
+                  | Some scrolled ->
+                      let height =
+                        surface_body_height ~rows:(surface_rows state) scrolled
+                      in
+                      state.tools_scroll <-
+                        (if direction > 0 then
+                           Masc_tui_scroll.page_down
+                             ~count:scrolled.sc_count ~height state.tools_scroll
+                         else
+                           Masc_tui_scroll.page_up
+                             ~count:scrolled.sc_count ~height state.tools_scroll))
+             (* Overview's two panes and Activity's ring have no counted row
+                list to page; Config's panes carry cursors of their own. *)
+             | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which
@@ -22651,7 +22798,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-
@@ -23017,7 +23164,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-
@@ -24835,12 +24982,11 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The /about candle steps on its own
-         clock while the last frame drew it. When no frame does, nothing here
-         asks for a repaint, and the next time it is drawn it starts from the
-         first step. *)
+      (* /about has a finite arrival. A closed overlay and a final frame
+         schedule no further candle work, even when the previous frame drew
+         motion immediately before the reader left. *)
       (match Masc_tui_emblem_screen.drawn () with
-       | Masc_tui_emblem_screen.Moving ->
+       | Masc_tui_emblem_screen.Moving when state.about_open ->
            if
              Int64.compare
                (Int64.sub now_ns !emblem_last_step_ns)
@@ -24849,11 +24995,13 @@ and is loaded on demand through keeper_skill.
            then begin
              emblem_last_step_ns := now_ns;
              state.emblem_frame <-
-               (if state.emblem_frame < 0 || state.emblem_frame = max_int then 0
-                else state.emblem_frame + 1);
+               min Masc_tui_emblem_screen.final_frame (state.emblem_frame + 1);
              Render_schedule.request render_schedule Render_schedule.Background
            end
-       | Masc_tui_emblem_screen.Absent -> state.emblem_frame <- -1);
+       | Masc_tui_emblem_screen.Moving
+       | Masc_tui_emblem_screen.Still
+       | Masc_tui_emblem_screen.Absent ->
+           if not state.about_open then state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
@@ -25008,8 +25156,11 @@ and is loaded on demand through keeper_skill.
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
-           Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
        | Render_schedule.Render ->
+           (* Keys and async updates can change the pane reservation after
+              the interaction snapshot. Store the focus the next frame shows. *)
+           reconcile_chat_focus ();
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
@@ -25027,7 +25178,9 @@ and is loaded on demand through keeper_skill.
                       if Option.is_none state.home_selected
                          && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
-                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      (* The persistent requests link owns the first body row. *)
+                      let budget = max 0
+                          (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
                       let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());

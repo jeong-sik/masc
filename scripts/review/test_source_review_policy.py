@@ -302,21 +302,47 @@ class SourceReviewPolicy(unittest.TestCase):
                 self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 2)
 
     def test_missing_objects_fetch_uses_gh_credentials_without_prompting(self):
-        # Use a real empty repository and real object fetches. Only the remote
+        self.assert_authenticated_object_fetch('shallow')
+
+    def test_missing_root_and_nested_trees_use_isolated_authenticated_fetch(self):
+        for kind in ('tree:0', 'tree:1'):
+            with self.subTest(kind=kind):
+                self.assert_authenticated_object_fetch(kind)
+
+    def assert_authenticated_object_fetch(self, kind):
+        # Use a real filtered repository and real object fetches. Only the remote
         # transport is redirected to our local fixture; no network is contacted.
         original = self.git_root
-        empty = self.root / 'empty'
-        subprocess.run(['git', 'clone', '--quiet', '--depth=1', '--no-local', str(original), str(empty)], check=True)
-        before_shallow = (empty/'.git/shallow').read_bytes()
+        self.calls.write_text('')
+        self.env.update(GUARD_GH=str(self.fake), GUARD_REPO_ROOT=str(original), PATH=os.environ['PATH'])
+        if kind != 'shallow':
+            global HEAD
+            (original / 'nested').mkdir(exist_ok=True)
+            self.commit_file('nested/feature.txt', kind)
+            HEAD = self.git('rev-parse', 'HEAD')
+            self.state['head'] = HEAD
+            self.digest = self.identity(self.base)
+        empty = self.root / kind.replace(':', '-')
         subprocess.run(['git', '-C', str(original), 'config', 'uploadpack.allowFilter', 'true'], check=True)
-        helper_dir = self.root / "credential helper's directory"
+        clone_args = ['--depth=1'] if kind == 'shallow' else ['--no-checkout', '--filter='+kind]
+        subprocess.run(['git', 'clone', '--quiet', *clone_args, '--no-local', str(original), str(empty)], check=True)
+        shallow = empty / '.git/shallow'
+        before_shallow = shallow.read_bytes() if shallow.exists() else None
+        subprocess.run(['git', '-C', str(empty), 'remote', 'set-url', 'origin', str(self.root/'unavailable')], check=True)
+        before_config = (empty / '.git/config').read_bytes()
+        if kind != 'shallow':
+            for commit in (self.base, HEAD):
+                subprocess.run(['git', '--no-lazy-fetch', '-C', str(empty), 'cat-file', '-e', commit], check=True)
+            missing_tree = subprocess.run(['git', '--no-lazy-fetch', '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True)
+            self.assertNotEqual(missing_tree.returncode, 0, 'fixture must contain commits but lack required trees')
+        helper_dir = self.root / ("credential helper's directory " + kind.replace(':', '-'))
         helper_dir.mkdir()
         helper = helper_dir / 'gh'
         helper.write_text(FAKE)
         helper.chmod(0o755)
-        commands = self.root / 'git-commands.jsonl'
+        commands = empty / 'git-commands.jsonl'
         real_git = shutil.which('git')
-        wrapper_dir = self.root / 'bin'
+        wrapper_dir = empty / 'bin'
         wrapper_dir.mkdir()
         wrapper = wrapper_dir / 'git'
         wrapper.write_text("#!/usr/bin/env python3\n" +
@@ -347,6 +373,7 @@ class SourceReviewPolicy(unittest.TestCase):
                         'raw diff fetch needs trees and exact commits, not file contents')
         for call in fetched:
             self.assertIn('--no-replace-objects', call['args'])
+            self.assertIn('--no-lazy-fetch', call['args'])
             fetched_root = Path(call['args'][call['args'].index('-C')+1])
             self.assertNotEqual(fetched_root, empty)
             self.assertIn('--depth=1', call['args'])
@@ -355,9 +382,11 @@ class SourceReviewPolicy(unittest.TestCase):
             self.assertEqual(call['env'], {'GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'false',
                                           'SSH_ASKPASS':'false','GCM_INTERACTIVE':'Never'})
         self.assertEqual(self.calls.read_text().splitlines().count('CREDENTIAL'), 2)
-        self.assertEqual((empty/'.git/shallow').read_bytes(), before_shallow)
-        missing_base = subprocess.run([real_git, '-C', str(empty), 'cat-file', '-e', self.base], capture_output=True)
-        self.assertNotEqual(missing_base.returncode, 0, 'isolated fetch must not deepen caller history')
+        self.assertEqual(shallow.read_bytes() if shallow.exists() else None, before_shallow)
+        self.assertEqual((empty / '.git/config').read_bytes(), before_config)
+        missing_args = ['cat-file', '-e', self.base] if kind == 'shallow' else ['ls-tree', '-r', HEAD]
+        still_missing = subprocess.run([real_git, '--no-lazy-fetch', '-C', str(empty), *missing_args], capture_output=True)
+        self.assertNotEqual(still_missing.returncode, 0, 'isolated fetch must not hydrate or deepen caller history')
         persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
                                     '--get-all', 'credential.helper'], capture_output=True)
         self.assertEqual(persisted.returncode, 1)

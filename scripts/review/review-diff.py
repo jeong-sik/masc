@@ -31,10 +31,13 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     ).strip()
     if re.fullmatch(r"[0-9a-f]{40}", merge_base) is None:
         raise ValueError("GitHub did not return a complete merge base")
-    git = ["git", "--no-replace-objects", "-C", str(root)]
+    git = ["git", "--no-replace-objects", "--no-lazy-fetch", "-C", str(root)]
     commits = (merge_base, head)
+    # Commit presence alone is insufficient in tree-filtered partial clones.
+    # Traverse every required tree without hydrating the caller's promisor
+    # objects; blobs are not needed for the raw identity below.
     missing = any(subprocess.run(
-        [*git, "cat-file", "-e", f"{commit}^{{commit}}"],
+        [*git, "ls-tree", "-r", "-t", f"{commit}^{{commit}}"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     ).returncode for commit in commits)
     # Fetch into an isolated object store: --depth must not change the caller's
@@ -42,7 +45,7 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="masc-review-objects-") as directory:
         if missing:
             subprocess.run(["git", "init", "--bare", "--quiet", directory], check=True)
-            git = ["git", "--no-replace-objects", "-C", directory]
+            git = ["git", "--no-replace-objects", "--no-lazy-fetch", "-C", directory]
             for commit in commits:
                 subprocess.run(
                     [*git, "-c", "credential.helper=",

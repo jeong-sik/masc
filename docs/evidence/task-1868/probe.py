@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
+# Parent of the original diff-binding change, reachable from this PR's history.
+baseline = "1f1cd345b3f81459004371b53ca647433df31dce"
 spec = importlib.util.spec_from_file_location("policy", root / "scripts/review/test_source_review_policy.py")
 assert spec and spec.loader
 policy = importlib.util.module_from_spec(spec)
@@ -15,7 +17,7 @@ records = {}
 with tempfile.TemporaryDirectory() as temp:
     old = Path(temp)
     for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh"):
-        data = subprocess.check_output(["git", "-C", str(root), "show", f"b9a0cb5998f191c05a5629763e8f6d68b3818cfa:scripts/review/{name}"])
+        data = subprocess.check_output(["git", "--no-replace-objects", "-C", str(root), "show", f"{baseline}:scripts/review/{name}"])
         (old / name).write_bytes(data)
     fixture = policy.SourceReviewPolicy()
     fixture.setUp()
@@ -32,7 +34,7 @@ with tempfile.TemporaryDirectory() as temp:
         fixture.fixture.write_text(json.dumps(fixture.state))
         consumed = subprocess.run([*args, "--merge-check", "--receipt-json"], env=fixture.env, text=True, capture_output=True, check=False)
         assert consumed.returncode == 0, consumed.stderr
-        records["old"] = {"source": "b9a0cb5998f191c05a5629763e8f6d68b3818cfa",
+        records["old"] = {"source": baseline,
             "head":policy.HEAD, "reviewed_base":fixture.base, "retargeted_base":policy.OTHER,
             "old_diff":fixture.digest, "changed_diff":fixture.identity(policy.OTHER),
             "approval_body":old_body, "exit":consumed.returncode, "stdout":consumed.stdout,

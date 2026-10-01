@@ -7,6 +7,7 @@
 
 
 
+
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
@@ -18,6 +19,7 @@
 - DOS checkpoints saved before this release are refused on restore: the DOS core now writes machine snapshots in format 3 and does not read format 2. Start the DOS game again (#39944).
 - Prepare `goals.json` and `goals.json.last-good` without `owner`, `notified_refuted_key`, and `notified_overdue_key`, preserving the remaining Goal data. The closed decoder rejects those fields; a rejected row makes the entire store unavailable. (#39975)
 - If `<base-path>/.masc/keeper_chat/<sanitized-keeper-name>.jsonl` contains a row whose `delivery_key.kind` is `goal_notification`, remove that row's `delivery_key` and `transcript_slot` together while preserving its message body and other fields. Otherwise the unsupported identity blocks strict append-once delivery, including unrelated chat deliveries. Prepare data with writers stopped, backups, and atomic replacement; this change performs no data cleanup. (#39975)
+- Configure an explicit `half_life` in the resolved Candle TOML. If monetary records lack preceding `HalfLifeSet` facts, delete `<base-path>/.masc/candle-ledger.jsonl` with writers stopped to start fresh. This removes prior Candle balances, ownership and equipment; there is no automatic conversion. This PR does not change live state. #40392
 
 ### Added
 
@@ -433,6 +435,69 @@
 - Preserve Librarian working-context artifacts through blob GC, repair missing or corrupt snapshots, and prevent stale readers from replacing newer retention pins (#40557).
 - Use the actual roster visibility accessor when reserving chat status rows and in the existing activity test, restoring the main TUI build after the roster preference migration. #40559
 - Fix TUI compilation and the chat activity regression test by reading effective roster visibility through the existing preference helper. (#40561)
+- Reserve Work task state, assignee and priority space before abbreviating long titles, including Korean titles, on narrow terminals (#40089).
+- Wrap TUI Usage rows before calculating the scroll window so metric coverage remains reachable on narrow terminals and after resizing (#40091).
+- Play invite creation checks and publishes the credential in one Auth transaction, so an invite cannot overwrite a concurrently renewed credential. Revoking a present unreadable or mismatched credential now refuses the request and preserves its controller. Controller recovery uses the same file-presence authority and keeps the holder when the name is a dangling symlink or cannot be checked. (#40136)
+- Credentials now reject malformed expiry timestamps and normalize RFC3339 offsets and fractions to UTC whole seconds. Static bearer checks, OAuth bootstrap checks, Play seats and token inventory share one expiry rule, keeping a credential valid throughout its expiry second and out of the prune set until that second ends. Malformed in-memory inventory entries are reported as invalid and retained for repair. #40171
+- Retain persisted malformed expiry and credential read failures in token inventory and Play invite listings; invalid Player records return a typed HTTP 503 instead of disappearing. (#40171)
+- Preserve credential-directory access failures, reject alias fallback for unreadable exact credentials, and allow explicit retirement of malformed named records. (#40171)
+- Refuse revocation through redirect aliases while allowing malformed-expiry canonical owners, and unlink dangling named credential paths instead of reporting a false success. (#40171)
+- Retain and validate embedded UUID retirement targets even when the canonical owner has malformed expiry; refuse foreign targets before any deletion. (#40171)
+- Token prune discovers and retires current credentials in one Auth transaction, preserving concurrent renewals and ambiguous redirect files. Preview reports no effects; failed or partial deletion is reported separately from successful retirement. #40174
+- Read prune credential JSON through the owned regular-file reader, refusing special files and symbolic links before deletion without waiting for a FIFO writer under the shared credential transaction. (#40174)
+- Preserve canonical retirement authority through cleanup failures, include validated redirect aliases, serialize raw-token publication with pruning, and keep absent-store previews free of filesystem writes. (#40174)
+- Exclude the canonical credential by its stored path when retiring aliases, preserving retry authority for normalized Keeper names. (#40174)
+- Shared credential token rotation reads and publishes under one Auth transaction, preserving concurrent renewals and revocations. Rotation validates all credential write targets before publication and reports partial raw-token and credential effects explicitly. #40182
+- Detect shared groups across all current owners before selecting rotation targets, reject UUID targets shared with unselected owners, and serialize Keeper and supplied-token publishers with rotation. (#40182)
+- Preserve recoverable supplied tokens after a failed credential write, allow retry of same-owner UUID partial publication, refuse noncanonical UUID filenames and share one admitted token index across startup Keeper sync. (#40182)
+- Publish the replacement named authority before retiring its prior UUID payload, and use the observed paired-publication recovery for Keeper, supplied-token and rotation writers. (#40182)
+- Reuse verified nonblocking credential reads for diagnostic listing, and accept redirect objects with additional fields consistently with authentication. (#40182)
+- Use nonblocking descriptor-verified reads for paired publication snapshots/observation and Keeper preflight, refusing special files before the admitted operation can wait on them. (#40182)
+- Index only exact named credential owners, so partial or retired UUID payloads cannot grant bearer authority; validate unselected UUID owners before scoped rotation on case-insensitive stores. (#40182)
+- Preserve normalized credential owners in bearer lookup, remint every selected initial sharer, and rebuild admitted authority after a failed Keeper before continuing unrelated batch entries. (#40182)
+- Keeper, operator and CLI login credentials publish their recoverable bearer and credential under the same Auth transaction, preserving current ownership, opaque token bytes, and explicit bootstrap and lifetime policies. (#40214)
+- Reject whitespace and ASCII control bytes before file-backed bearer publication or matching Keeper reuse, without normalizing accepted bytes or changing direct token APIs. (#40214)
+- Refuse nonregular credential and raw-token targets before opening them under admission, preserving symlinks to regular files. (#40214)
+- Recheck every current bearer owner under admission before Keeper reuse; a colliding bearer is replaced without rewriting the unselected owner. (#40214)
+- Restore the previous raw bearer after failed paired publication only when the named authority is unchanged and the new credential is not current; otherwise retain the matching new bearer and report observed publication state. (#40214)
+- Preserve regular symlink compatibility in file-backed admission and Keeper batch lookup using a nonblocking verified descriptor; prune and rotation retain their stricter owned-leaf reader. (#40214)
+- Verify generic Auth/OAuth reads on a nonblocking opened descriptor and reject replacement during the read; refresh current source/evidence hash manifests (#40256).
+- Auth and OAuth metadata readers reject nonregular files without waiting for a FIFO writer, and credential publishers refuse unreadable configuration before effects while retaining secure defaults for genuinely absent configuration. (#40256)
+- Credential diagnostic listings use the same regular-file boundary for direct entries and redirect targets, preserving typed unreadable rows without opening a FIFO. (#40256)
+- Static bearer authentication uses each owner's current named credential after cold or stale-cache rebuilds. Intact old UUID payloads remain readable as data while losing authority after the named credential is removed, unreadable or replaced; current roles and supported aliases are preserved. (#40259)
+- Token verification and permission checks through a UUID or stored alias also require the full credential to match its current named owner; surviving old payloads do not retain Admin authority. (#40259)
+- Calculate Candle payout shares with exact intermediate arithmetic and validate durable Goal/request/verifier evidence before admitting payments. #40392
+- Replay explicit historical half-life facts with deterministic integer decay; keep purchases, equipment and current observations within the existing ledger CAS. #40392
+- Re-read explicit item pricing on every purchase CAS attempt, require the complete Snapshot-linked task proof before payout, and decode the emitted Candle summary and portrait observations in strict Keeper lists (#40392).
+- Classify balance policy synchronization as a serial mutation, keep portrait browsing independent of payout availability with an explicit unavailable-equipment fallback, and scope Dashboard Item instructions to the UI child. (#40392)
+- Keep read-authorized Candle/Item/portrait observations from publishing half-life policy changes, and retry clock-dependent settlement failures while retaining malformed-history rejection. (#40392)
+- Persist per-task Keeper eligibility with Candidates and require settlement recipients to agree with that frozen classification. (#40392)
+- Keep other Keepers’ balances off the shared roster, retry finite-half-life overflow after decay, and preserve portrait reads across wall-clock rollback. (#40392)
+- Bind Item balance, ownership, catalog and equipment views to one observed Candle revision and captured workspace; withdraw obsolete account values during refresh and workspace changes. #40393
+- Match portrait cache reads to observed equipment and use current outfits in the TUI chat and About gallery while retaining registration names when pictures are unavailable. #40393
+- Keep About outfit observations current through the existing roster refresh owner, including when the overlay hides the ordinary Keeper pane. #40393
+- Bind Dashboard Item requests to captured workspace authority, retain and compare TUI account revisions with current roster observations, and accept emitted revision fields in strict Gate row schemas (#40393).
+- Preserve newer Candle observations after late HTTP failures, refresh visible Item accounts when roster revision changes, and publish canonical workspace identity consistently with Item admission. (#40393)
+- Adopt newer same-workspace Item observations after refresh supersession, reconcile deletion receipts despite execution failures, match scoped browser fixture URLs, and re-read open TUI Items when passive decay changes the observed balance. (#40393)
+- Preserve prepared execution bytes for unchanged Candle observations, bind TUI roster reads to the captured workspace, and remove duplicate Home summary rows and test registration. (#40393)
+- Keep shared Keeper discovery free of currency while adding fresh balances and account revisions only to operator-authorized Gate responses; retain connector discovery and align disabled Item revisions. (#40393)
+- Resolve Play participants and control authority from current canonical credential bindings, propagate authority read failures, and serialize departures with credential changes. #40395
+- Use Pad fallback only for an absent override; reject malformed, unreadable, dangling or nonregular sources before applying input or state changes, including FIFO replacement during open. #40395
+- Validate the invite redirect’s exact owner and UUID binding inside credential admission before deletion, preserving unrelated credentials and controller effects on refusal (#40395).
+- Preserve current named Play authority while integrating strict Auth readers, retryable prune and rotation fixes; invalid current Player expiry remains a typed refusal while stale UUID diagnostics cannot override a healthy current owner. (#40395)
+- Keep macOS Keychain fixture C sources out of Linux compilation while retaining the native Keychain integration test. (#40395)
+- Retain Lane Add-on publication evidence and reserved sequence after rename uncertainty without replaying effects; reject invalid producer phases and confirmed receipts without result objects. #40396
+- Confirm the exact observation/cursor file and directory durability before accepting a receipt; permit reconfirmation of the exact current cursor without consuming another sequence. #40396
+- Preserve original publication errors during descriptor cleanup and perform blocking transactions outside the Eio domain. #40396
+- Reject malformed matching owner peers and recover observation high-water after failed binding persistence. (#40396)
+- Keep confirmed Candle payout obligations pending after permanent appraisal request, authentication or configuration refusals without repeating model stages on maintenance pulses; retry on a new payout event. #40566
+- Preserve pulse recovery for temporary server, connection, timeout, quota and interrupted-provider failures, and retain refusal evidence across unsuccessful fallbacks and receipt errors. #40566
+- Retry payout appraisal after transient Exact flow bookkeeping failures while retaining the terminal flow boundary and typed permanent refusal suppression. (#40566)
+- Verify exact retained Lane action receipt bytes, file identity and parent directory durability before reporting status or accepting a repeated request, including after detachment or restart. #40573
+- Retain live uncertainty and received package results when both terminal receipt publication and the finalizer fallback fail, without repeating the action. #40573
+- Publish hot action uncertainty before receipt reconfirmation and sync action directory ancestors before accepting queued receipts. (#40573)
+- Keep Play handoff participant discovery, departed-holder recovery and the actual DOS controller change under one Auth credential admission so a target cannot be revoked between its eligibility check and handoff. #40577
+- Use the shared admitted handoff through HTTP, MCP, Keeper descriptor and Keeper fallback dispatch, while publishing queued Board notices after the Auth lock is released. #40577
 
 ### Performance
 

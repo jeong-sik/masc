@@ -109,8 +109,7 @@ def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
                               needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
                                       needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            screen = h.screen_text(frame)
-            print("STUDIO_CAPTURE=" + json.dumps({
+            print("STUDIO_CAPTURE=" + json.dumps({"suite": "test_tui_board_heading_width",
                 "name": name + ("-no-color" if no_color else ""),
                 "rows": rows, "columns": columns, "provenance": "CI fixture PTY",
                 "frame_b64": base64.b64encode(frame).decode(),

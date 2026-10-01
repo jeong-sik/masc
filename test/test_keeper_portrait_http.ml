@@ -332,11 +332,18 @@ type reply = { status : int; headers : (string * string) list; body : string }
 
 let get ~router ?if_none_match ?token path =
   let output = Buffer.create 4096 in
-  let authority = require_ok (fun `Malformed -> "invalid fixture authority")
-      (Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935) in
+  let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
+    (Server_request_authority.make_trust_policy
+       ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None) in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Server_request_authority.with_current authority (fun () ->
-      Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)) in
+    let request = Httpun.Reqd.request reqd in
+    match Server_request_authority.classify_http1_request ~trust_policy request with
+    | Server_request_authority.Single authority ->
+      Server_request_authority.with_current authority (fun () ->
+        Http.Router.dispatch router request reqd)
+    | Server_request_authority.Missing | Server_request_authority.Multiple
+    | Server_request_authority.Malformed | Server_request_authority.Untrusted ->
+      fail "fixture request did not pass HTTP authority admission") in
   let optional name = Option.fold ~none:"" ~some:(fun value -> name ^ ": " ^ value ^ "\r\n") in
   let raw_request =
     Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Length: 0\r\n\r\n" path
@@ -474,6 +481,20 @@ let test_gate_account_revision_uses_current_candle_reading () =
       let response = get ~router ~token "/api/v1/gate/keepers?detailed=true" in
       check int "authorized Gate discovery succeeds" 200 response.status;
       Yojson.Safe.from_string response.body in
+    let compact = get ~router ~token:operator "/api/v1/gate/keepers?detailed=false" in
+    check int "operator compact roster succeeds" 200 compact.status;
+    let compact = Yojson.Safe.from_string compact.body in
+    (match compact with
+     | `Assoc fields ->
+       List.iter (fun key -> check int (key ^ " appears once") 1
+         (List.length (List.filter (fun (name, _) -> name = key) fields))) ["keepers"; "items"]
+     | _ -> fail "compact roster is not an object");
+    check (list string) "compact name list survives projection" [keeper]
+      Yojson.Safe.Util.(compact |> member "keepers" |> to_list |> List.map to_string);
+    let compact_rows = Yojson.Safe.Util.(compact |> member "items" |> to_list) in
+    check int "compact row survives projection" 1 (List.length compact_rows);
+    check bool "compact row receives account revision" true
+      (Json_util.assoc_member_opt "candle_account_revision" (List.hd compact_rows) = Some `Null);
     let broken = require_ok Fun.id
       (Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "broken"])) in
     require_ok Fun.id (Keeper_meta_store.replace_snapshot config broken);

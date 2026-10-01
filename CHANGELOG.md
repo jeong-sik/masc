@@ -458,6 +458,8 @@
 - Reserve Work task state, assignee and priority space before abbreviating long titles, including Korean titles, on narrow terminals (#40089).
 - Wrap TUI Usage rows before calculating the scroll window so metric coverage remains reachable on narrow terminals and after resizing (#40091).
 - #40106 Reload an open TUI Item account when the server account revision changes, including free purchases and price-only edits; repeated unchanged roster ticks preserve a pending read.
+- Preserve shared Keeper-list currency privacy and strict Item admission when integrating the newer Candle policy; currency-unavailable Gate observations retain lifecycle controls (#40106).
+- Restore compilation after integrating main: keep strict memory-object validation with its decoder and handle reasoning-effort admission failure before turn dispatch (#40106).
 - Withdraw Keeper detail and Item balances, prices and ownership when server workspace authority changes; invalidate pending detail reads so late replies cannot cross that boundary. (#40111)
 - Project the authoritative Item account revision through the public Keeper roster and retry a settled transient Item read on ordinary refresh even when that revision is unchanged. (#40111)
 - Draw selected Item accessories in Mosaic previews and observed accessories in Info while retaining the compact bare Keeper portrait. (#40111)

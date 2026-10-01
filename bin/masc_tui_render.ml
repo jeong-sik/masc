@@ -5978,8 +5978,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       providers
   in
   let started =
-    match state.identity_login with
-    | Some login when String.equal login.ils_keeper k.k_name ->
+    List.concat_map (fun (login : Masc_tui_types.identity_login_started) ->
         (* Wrapped, not truncated. The URL is about nine hundred characters
            and a pane cuts it at its own width; a cut URL cannot be selected
            or copied, so the login stopped there. The TUI opens it as well --
@@ -5999,7 +5998,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ [ Ansi.dim
             ^ "  Nothing is written to this keeper until you come back."
             ^ Ansi.reset ]
-    | Some _ | None -> []
+    ) (Masc_tui_types.identity_logins_for_keeper state k.k_name)
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what
@@ -6942,11 +6941,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          rows first, so a Keeper whose schedules are terminal or further down
          was absent from it and the tab said none existed. The page it asks for
          can still truncate, which is why the absence reading stays. *)
-      match state.keeper_schedules_error, state.keeper_schedules with
-      | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  "
-            ^ Terminal_text.single_line err ^ Ansi.reset ]
-      | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
+      let error_lines =
+        match state.keeper_schedules_error with
+        | Some (keeper_name, err) when String.equal keeper_name k.k_name ->
+            let stale = match state.keeper_schedules with
+              | Some (name, _) when String.equal name k.k_name -> "STALE · "
+              | Some _ | None -> ""
+            in
+            [ (Theme.bad ()) ^ "  " ^ stale ^ Terminal_text.single_line err ^ Ansi.reset ]
+        | Some _ | None -> []
+      in
+      let snapshot_lines = match state.keeper_schedules with
+      | Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
           if not (String.equal snapshot.scs_status "ok") then
             [ (Theme.bad ())
@@ -7010,8 +7016,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
                     } : Layout.automation_schedule_row))
                 rows)
-      | _, _ ->
-          [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
+      | Some _ | None ->
+          if error_lines <> [] then []
+          else [ tab_loading_row "loading this Keeper's schedules" ]
+      in
+      error_lines @ snapshot_lines
     in
     let run_lines () =
       let failure detail =

@@ -1916,7 +1916,7 @@ type async_msg =
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
+  | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -2007,10 +2007,10 @@ type async_msg =
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of string * identity_login_result
+  | Identity_login_started of identity_login_request * identity_login_result
   | Identity_refreshed of string * (unit, string) result
-  | Identity_app_saved of string * (int, string) result
-      (** provider id, then how many scopes were recorded *)
+  | Identity_app_saved of string option * string * (int, string) result
+      (** presentation Keeper, provider id, then recorded scope count *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
   (* A removal's answer keeps what is known about its effect: removed, declined
@@ -3344,23 +3344,19 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
 let launch_keeper_schedules_load state ~mailbox ~keeper_name =
-  match state.keeper_schedules_inflight with
-  | Some inflight when String.equal inflight keeper_name -> ()
-  | Some _ | None ->
-      state.keeper_schedules_inflight <- Some keeper_name;
-      let host = server_peer_host in
-      let port = state.port in
-      let payload_target = "keeper:" ^ keeper_name in
-      Masc_tui_async_read.launch
-        ~source:Masc_tui_async_read.Keeper_schedule
-        ~on_not_run:(fun () ->
-          if Option.equal String.equal state.keeper_schedules_inflight
-               (Some keeper_name)
-          then state.keeper_schedules_inflight <- None)
-        ~deliver:(fun result ->
-          enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result)))
-        (fun () ->
-          Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
+  (* Tab entry is an explicit read. Reopening supersedes a pending answer,
+     while the request ledger retains the original elapsed interval. *)
+  let request = Masc_tui_types.mark_detail_read_started state
+    ~tab:Detail_automation ~keeper:keeper_name ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  let host = server_peer_host in
+  let port = state.port in
+  let payload_target = "keeper:" ^ keeper_name in
+  Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Keeper_schedule
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
+    (fun () ->
+      Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.schedules_read in
@@ -4505,6 +4501,8 @@ let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
    sentence saying whether it took, in the place they are already reading. *)
 let launch_identity_app_save state ~mailbox
       ~(form : Masc_tui_types.identity_app_form) =
+  let keeper_name = Option.map (fun (keeper : keeper) -> keeper.k_name)
+    (selected_keeper state) in
   let host = server_peer_host in
   let port = state.port in
   let provider_id = form.Masc_tui_types.iaf_provider in
@@ -4527,7 +4525,7 @@ let launch_identity_app_save state ~mailbox
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Identity_app_saved (provider_id, result))
+    enqueue_async mailbox (Identity_app_saved (keeper_name, provider_id, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4536,9 +4534,10 @@ let launch_identity_app_save state ~mailbox
       `Stop_daemon)
   | None ->
     enqueue_async mailbox
-      (Identity_app_saved (provider_id, Error "Eio switch is unavailable"))
+      (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable"))
 
 let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
+  let request = start_identity_login_request state ~keeper_name ~provider_id in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4585,7 +4584,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Login_failed (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Identity_login_started (keeper_name, result))
+    enqueue_async mailbox (Identity_login_started (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4595,7 +4594,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   | None ->
       enqueue_async mailbox
         (Identity_login_started
-           (keeper_name, Login_failed "Eio switch is unavailable"))
+           (request, Login_failed "Eio switch is unavailable"))
 
 (* Ask every attached service again what tools it has. An operator action
    rather than a timer: a stale catalog is visible and fixable, while a timer
@@ -10928,7 +10927,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
          not the fleet list. *)
-      state.keeper_schedules <- None;
+      (match state.keeper_schedules with
+       | Some (name, _) when String.equal name keeper.k_name -> ()
+       | Some _ | None -> state.keeper_schedules <- None);
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
@@ -11329,12 +11330,12 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        (not was_booting)
        && state.view = Keepers Keeper_detail
        && state.detail_tab = Detail_identity
-       && state.identity_login <> None
      then
        match selected_keeper state with
-       | Some keeper when Option.is_none
-           (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
-              ~keeper:keeper.k_name) ->
+       | Some keeper when identity_logins_for_keeper state keeper.k_name <> []
+           && Option.is_none
+             (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
+                ~keeper:keeper.k_name) ->
            launch_identity_view state ~mailbox keeper.k_name
        | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
@@ -13187,6 +13188,16 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     end
   end
 
+(* A server action belongs to the Keeper that submitted it even when its
+   completion arrives after navigation. Keep offscreen outcomes in the action
+   record; they cannot replace the selected Keeper's notice. *)
+let present_identity_notice state ~keeper_name (kind, text) =
+  match keeper_name with
+  | Some name when keeper_detail_target_matches state name ->
+      state.identity_attempt_error <- Some (kind, text)
+  | Some name -> report_action state "system" (name ^ ": " ^ text)
+  | None -> report_action state "system" text
+
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
@@ -14628,59 +14639,51 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (if enabled then "on" else "off"));
            (* Re-read rather than patch what is on screen: the switch the
               server just wrote is the answer. *)
-           launch_identity_view state ~mailbox keeper_name
+           if keeper_detail_target_matches state keeper_name then
+             launch_identity_view state ~mailbox keeper_name
        | Error detail ->
-           state.identity_attempt_error <-
-             Some
-               ( Masc_tui_types.Notice_bad
-               , Printf.sprintf "switch %s: %s" provider_id detail ))
+           present_identity_notice state ~keeper_name:(Some keeper_name)
+             ( Masc_tui_types.Notice_bad
+             , Printf.sprintf "switch %s: %s" provider_id detail ))
   | Identity_providers_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
-      in
-      if current && still_selected then
+      if current then
+        (match result with
+         | Ok providers -> retire_identity_logins state ~keeper_name ~providers
+         | Error _ -> ());
+      if current && keeper_detail_target_matches state keeper_name then
         match result with
         | Ok providers ->
             state.identity_view <- Some (keeper_name, providers);
-            state.identity_view_error <- None;
-            (* The login this TUI started has landed once the service it was
-               for reports tools. Clearing it is what stops the tick from
-               asking again -- a poll with no end condition is a poll that
-               runs for the life of the process. *)
-            (match state.identity_login with
-             | Some login
-               when Masc_tui_types.identity_login_landed ~providers ~login ->
-                 state.identity_login <- None
-             | Some _ | None -> ())
-        | Error detail ->
-            state.identity_view_error <- Some detail)
-  | Identity_login_started (keeper_name, result) -> (
-      match result with
-      | Login_started { provider_id; label; url } ->
-          state.identity_login <-
-            Some
-              { ils_keeper = keeper_name
-              ; ils_provider = provider_id
-              ; ils_label = label
-              ; ils_url = url
-              };
-          state.identity_attempt_error <- None
-      (* Shown on the tab rather than swallowed: the operator pressed a key
-         and has to learn that nothing is going to open. Beside the list
-         rather than instead of it -- one provider refusing is not a reason
-         to take the others off the screen, and the message that matters
-         most here is the one telling them what to do about it. *)
-      | Login_attached msg ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
-      | Login_failed detail ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
-  | Identity_app_saved (provider_id, result) ->
-    state.identity_attempt_error <-
-      Some
+            state.identity_view_error <- None
+        | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_login_started (request, result) ->
+      let keeper_name = request.ilr_keeper in
+      let current = finish_identity_login_request state request in
+      if current then
+        (match result with
+         | Login_started { provider_id; label; url } ->
+             remember_identity_login state
+               { ils_keeper = keeper_name; ils_provider = provider_id
+               ; ils_label = label; ils_url = url };
+             if keeper_detail_target_matches state keeper_name then
+               state.identity_attempt_error <- None;
+             report_action state "system"
+               (Printf.sprintf "%s: %s login started" keeper_name provider_id)
+         | Login_attached msg ->
+             forget_identity_login state ~keeper_name ~provider_id:request.ilr_provider;
+             present_identity_notice state ~keeper_name:(Some keeper_name)
+               (Masc_tui_types.Notice_ok, msg)
+         | Login_failed detail ->
+             present_identity_notice state ~keeper_name:(Some keeper_name)
+               (Masc_tui_types.Notice_bad, detail))
+      else
+        report_action state "system"
+          (Printf.sprintf "%s: previous %s login response received; newer attempt retained"
+             keeper_name request.ilr_provider)
+  | Identity_app_saved (keeper_name, provider_id, result) ->
+      present_identity_notice state ~keeper_name
         (match result with
          | Ok 0 ->
            ( Masc_tui_types.Notice_ok
@@ -14694,16 +14697,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                provider_id count (if count = 1 then "" else "s") )
          | Error detail ->
            (Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail))
-  | Identity_refreshed (keeper_name, result) -> (
-      match result with
-      (* Re-read rather than patch what is on screen: the catalog the server
-         just wrote is the answer, and building a second copy of it here is
-         how the two come to disagree. *)
-      | Ok () ->
-          state.identity_view <- None;
-          state.identity_view_error <- None;
-          launch_identity_view state ~mailbox keeper_name
-      | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_refreshed (keeper_name, result) ->
+      (* The action still completed for its original Keeper. A delayed result
+         cannot clear the reading or file its error under a new selection. *)
+      if keeper_detail_target_matches state keeper_name then
+        (match result with
+         | Ok () ->
+             state.identity_view <- None;
+             state.identity_view_error <- None;
+             launch_identity_view state ~mailbox keeper_name
+         | Error detail -> state.identity_view_error <- Some detail)
+      else
+        report_action state "system"
+          (match result with
+           | Ok () -> Printf.sprintf "%s: identity refreshed" keeper_name
+           | Error detail -> Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail)
   | Account_login_event (view, generation, event) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -14862,21 +14870,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
-  | Keeper_schedules_loaded (keeper_name, result) ->
-      (match state.keeper_schedules_inflight with
-       | Some inflight when String.equal inflight keeper_name ->
-           state.keeper_schedules_inflight <- None
-       | Some _ | None -> ());
-      (* A page that arrived for a keeper the cursor has left is not this tab's
-         answer; filing it would show one Keeper's schedules under another's
-         name. *)
-      (match result with
-       | Ok snapshot ->
-           state.keeper_schedules <- Some (keeper_name, snapshot);
-           state.keeper_schedules_error <- None
-       | Error err ->
-           state.keeper_schedules <- None;
-           state.keeper_schedules_error <- Some (keeper_name, err))
+  | Keeper_schedules_loaded (request, result) ->
+      apply_keeper_schedules_read state request result
   | Schedule_cancel_done (schedule_id, result) -> (
       match result with
       | Ok message ->
@@ -21738,7 +21733,6 @@ and is loaded on demand through keeper_skill.
                        state.identity_cursor
                    with
                    | Some (provider_id, label) ->
-                     state.identity_login <- None;
                      state.identity_attempt_error <- None;
                      launch_identity_login state ~mailbox:async_messages
                        ~keeper_name:keeper.k_name ~provider_id ~label
@@ -22531,7 +22525,6 @@ and is loaded on demand through keeper_skill.
                    (* Left where the operator pressed, so the marker and the
                       arrows carry on from the row they just started. *)
                    state.identity_cursor <- wanted;
-                   state.identity_login <- None;
                    state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
@@ -25192,7 +25185,6 @@ and is loaded on demand through keeper_skill.
                    state.identity_cursor
                with
                | Some (provider_id, label) ->
-                   state.identity_login <- None;
                    state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label

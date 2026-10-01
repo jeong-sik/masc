@@ -1296,7 +1296,6 @@ let planning_proof_rows ~width lines =
     | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) lines
 
 let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_goal) =
-  let open Masc_tui_fetched in
   let width = max 1 (framed_inner_width cols - 2) in
   let field ?(tone = Planning_detail.Note) label text =
     let prefix = "  " ^ label ^ ": " in
@@ -1394,7 +1393,6 @@ let planning_detail_viewport (state : state) =
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
-  let open Masc_tui_fetched in
   let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
     ~after:(Printf.sprintf "  %s %s"
       (bracketed ~max_cells:planning_phase_column (planning_phase_label goal.pg_phase))

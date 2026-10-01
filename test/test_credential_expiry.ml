@@ -191,8 +191,11 @@ let test_persisted_invalid_invite_reaches_diagnostic_projections () =
          (Inventory.error_row (Auth.Invalid_credential_expiry { agent_name; role; timestamp }))
      | _ -> fail "named and UUID-backed corruption must each produce exactly one diagnostic");
     (match Invite.list ~base_path ~now:(Time_compat.now ()) with
-     | Error (Auth.Invalid_credential_expiry { timestamp = "not-a-timestamp"; _ }) -> ()
-     | Error error -> fail (Auth.credential_listing_error_to_string error)
+     | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp "not-a-timestamp")) -> ()
+     | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp stamp)) ->
+         fail ("unexpected invalid expiry: " ^ stamp)
+     | Error (Invite.Credentials_unavailable error) ->
+         fail (Masc_domain.masc_error_to_string error)
      | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
     [ false; true ]
 
@@ -288,13 +291,52 @@ let test_dangling_credential_directory_is_unreadable () =
    | [ Error (Auth.Unreadable_credential _) ] -> ()
    | _ -> fail "a dangling agents directory is a storage failure, not an empty store");
   (match Invite.list ~base_path ~now:(Time_compat.now ()) with
-   | Error (Auth.Unreadable_credential _) -> ()
+   | Error (Invite.Credentials_unavailable _) -> ()
    | _ -> fail "Play must preserve credential directory failures")
+
+let test_nonregular_inventory_entries_are_unreadable () =
+  List.iter (fun kind ->
+    with_workspace @@ fun base_path _ ->
+    let _, regular = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"regular" ~role:Masc_domain.Player) in
+    let named = Auth.credential_file base_path "blocked" in
+    let fifo, diagnostic_path = match kind with
+      | `Direct -> named, named
+      | `Symlink ->
+          let fifo = Filename.concat base_path "credential-fifo" in
+          Unix.symlink fifo named;
+          fifo, named
+      | `Redirect ->
+          let id = Masc_domain.Credential_id.generate () in
+          let target = Masc_domain.Credential_id.to_string id ^ ".json" in
+          Auth.save_private_text_file named
+            (Yojson.Safe.to_string (`Assoc ["redirect_to", `String target]));
+          let fifo = Filename.concat (Filename.dirname named) target in
+          fifo, fifo
+    in
+    Unix.mkfifo fifo 0o600;
+    (* No writer opens the FIFO: inventory must reject its descriptor before
+       any read, including through a symlink or credential redirect. *)
+    Fun.protect ~finally:(fun () -> Unix.unlink fifo) (fun () ->
+      let entries = Auth.list_credential_results base_path in
+      check (list string) "ordinary credentials remain visible" [regular.agent_name]
+        (List.filter_map (function Ok credential -> Some credential.Masc_domain.agent_name
+          | Error _ -> None) entries);
+      (match List.filter_map (function Error error -> Some error | Ok _ -> None) entries with
+       | [Auth.Unreadable_credential {path;_}] ->
+           check string "inventory retains the failed path" diagnostic_path path
+       | _ -> fail "a nonregular entry must be one unreadable diagnostic");
+      (match Invite.list ~base_path ~now:(Time_compat.now ()) with
+       | Error (Invite.Credentials_unavailable _) -> ()
+       | _ -> fail "Play must refuse an unreadable credential store")))
+    [`Direct; `Symlink; `Redirect]
 
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "malformed direct owner revokes only its verified UUID" `Quick test_malformed_direct_owner_revokes_verified_uuid
+      [ test_case "nonregular inventory entries do not wait for FIFO writers" `Quick
+          test_nonregular_inventory_entries_are_unreadable
+      ; test_case "malformed direct owner revokes only its verified UUID" `Quick test_malformed_direct_owner_revokes_verified_uuid
       ; test_case "redirect aliases cannot revoke canonical owners" `Quick test_alias_revocation_preserves_canonical_owner
       ; test_case "revoke actually unlinks dangling named paths" `Quick test_revoke_unlinks_dangling_named_path
       ; test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick

@@ -1,6 +1,7 @@
 module Acting = Masc_tui_acting
 module Layout = Masc_tui_message_layout
 module Reading = Masc.Tui_decode
+module Terminal_text = Masc_tui_ansi.Terminal_text
 
 (* ── Width ───────────────────────────────────────────────────────────────
 
@@ -196,6 +197,7 @@ type input = {
   scope : scope;
   feed : feed;
   keepers : keeper list option;
+  trace_unavailable : (string * string) list;
   keepers_error : string option;
   selected : string option;
   approvals : approval list;
@@ -392,6 +394,8 @@ type response_place =
   | Closes
 
 type logical_row =
+  | Trace_unavailable of string * string
+  | Trace_unavailable_summary of string
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
@@ -1370,6 +1374,14 @@ let window ~below ~scroll ~overview body =
    scope folds to. Split out of [fleet_lines] so the heading above them can
    be decided from what they are: the column names belong over rows that use
    the columns, and beside the roster there may be none. *)
+let trace_summary count = Printf.sprintf
+  "Trace unavailable: %d Keepers · details in Keeper Info / Metadata" count
+
+let trace_unavailable_summary unavailable =
+  match unavailable with
+  | [] -> None
+  | _ :: _ -> Some (trace_summary (List.length unavailable))
+
 let fleet_body input =
   let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
@@ -1381,7 +1393,7 @@ let fleet_body input =
     | None -> []
   in
   let fleet_row_of keeper = Fleet_row (keeper, Hashtbl.find_opt newest keeper.name) in
-  match input.scope with
+  let body, overview = match input.scope with
   | Selected_only ->
       (* Beside the roster every fleet row is a roster row said twice, except
          a keeper waiting on the reader: the roster does not say who is
@@ -1415,9 +1427,39 @@ let fleet_body input =
            | _ :: _ -> Rule :: focus_rows)
       in
       (body, fun ~below -> overview_rows ~below fleet_rows focus focus_rows)
+  in
+  let notices = input.trace_unavailable
+    |> List.filter (fun (name, _) -> match input.scope, input.selected with
+        | Selected_only, Some selected -> String.equal name selected
+        | Selected_only, None -> false
+        | Whole_fleet, _ -> true)
+    |> List.map (fun (name, reason) -> Trace_unavailable (name, reason)) in
+  (notices @ body, fun ~below ->
+     match notices with
+     | [] -> overview ~below
+     | _ :: _ when below <= 1 -> overview ~below
+     | [notice] -> notice :: overview ~below:(below - 1)
+     | _ :: _ :: _ ->
+         Trace_unavailable_summary (trace_summary (List.length notices))
+         :: overview ~below:(below - 1))
 
 let fleet_lines ~below ~scroll (body, overview) =
-  window ~below ~scroll body ~overview:(fun () -> overview ~below)
+  match body with
+  | Trace_unavailable _ :: _ when below > 0
+      && (below = 1 || List.length body > below) ->
+      (* The folded overview is a synthetic first page, not body[0].
+         The first positive position must expose that first factual row. *)
+      let room = if below = 1 then 1 else below - 1 in
+      let scroll_max = max 0 (List.length body - room) + 1 in
+      let scroll = max 0 (min scroll scroll_max) in
+      let visible =
+        if scroll = 0 then overview ~below
+        else if below = 1 then
+          List.filteri (fun index _ -> index = scroll - 1) body
+        else scrolled_rows ~below ~scroll:(scroll - 1) body
+      in
+      visible, scroll_max
+  | _ -> window ~below ~scroll body ~overview:(fun () -> overview ~below)
 
 (* A row that spends the pane's four columns -- state, tool, calls and tokens.
    The column names sit over these. A focus header with no record of its own
@@ -1428,7 +1470,7 @@ let fleet_lines ~below ~scroll (body, overview) =
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
   | Focus_header _ | Approval_row _ | Calls_heading _ | Call_detail _ | Rule | More _
-  | Indicator _ | File_row _ | Formatted_status _ -> false
+  | Indicator _ | File_row _ | Formatted_status _ | Trace_unavailable _ | Trace_unavailable_summary _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -1534,6 +1576,11 @@ let changes_lines ~cols ~below ~scroll input =
   window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
 
 let materialize_row ~cols input = function
+  | Trace_unavailable_summary summary ->
+      fit_line ~cols (with_border [{text = summary; tone = Warn}]), Target_none
+  | Trace_unavailable (name, reason) ->
+      let notice = "Trace unavailable: " ^ name ^ " · " ^ reason in
+      fit_line ~cols (with_border [{text = Terminal_text.single_line notice; tone = Warn}]), Target_none
   | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
   | Focus_header (name, current, health) ->
       focus_header_line ~cols ~now:input.now ~health name current, Target_none

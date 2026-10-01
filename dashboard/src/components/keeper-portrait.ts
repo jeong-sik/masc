@@ -33,12 +33,13 @@ export const PORTRAIT_MAX_PX = 512
 // Pixels requested per CSS pixel, so the portrait stays sharp on a 2x screen.
 const DEVICE_PIXELS_PER_CSS_PIXEL = 2
 
-export function keeperPortraitUrl(name: string, cssPx: number, expectedEquipment?: KeeperEquipment): string {
+export function keeperPortraitUrl(name: string, cssPx: number, expectedEquipment?: KeeperEquipment, previewItem?: string): string {
   const px = Math.min(
     PORTRAIT_MAX_PX,
     Math.max(PORTRAIT_MIN_PX, Math.round(cssPx * DEVICE_PIXELS_PER_CSS_PIXEL)),
   )
   return `/api/v1/keepers/${encodeURIComponent(name)}/portrait.png?size=${px}`
+    + (previewItem === undefined ? '' : `&preview=${encodeURIComponent(previewItem)}`)
     + (expectedEquipment === undefined ? '' : `&expected_equipment=${encodeURIComponent(JSON.stringify(expectedEquipment))}`)
 }
 
@@ -69,6 +70,8 @@ type Portrait =
   | { kind: 'failed'; identity: string; message: string }
 
 export interface KeeperPortraitProps {
+  /** An accessory to draw in place of its slot, without changing equipment. */
+  previewItem?: string
   name: string
   reading: KeeperPortraitReading
   /** Drawn width and height in CSS pixels; fixed so nothing shifts while it loads. */
@@ -77,8 +80,8 @@ export interface KeeperPortraitProps {
   fallback: VNode
 }
 
-export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortraitProps) {
-  const path = keeperPortraitUrl(name, sizePx, reading.state === 'ready' ? reading.equipment : undefined)
+export function KeeperPortrait({ name, reading, sizePx, fallback, previewItem }: KeeperPortraitProps) {
+  const path = keeperPortraitUrl(name, sizePx, reading.state === 'ready' ? reading.equipment : undefined, previewItem)
   const equipmentKey = reading.state === 'ready' ? keeperEquipmentKey(reading.equipment) : null
   const identity = JSON.stringify([path, equipmentKey])
   const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', identity })

@@ -68,9 +68,9 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
      | false, _ | _, None -> result)
 ;;
 
-(* Catalog-driven reasoning-effort clamping lives on the shared
-   official-client host so Codex and Claude Code treat the same declared
-   effort identically; see [Keeper_official_client_host.effective_reasoning_effort]. *)
+(* Codex admits explicit effort against the selected account's model/list
+   inside the app-server connection. The shared catalog clamp is for clients
+   without that discovery contract. *)
 
 let project_messages messages =
   let rec loop developer history = function
@@ -591,7 +591,8 @@ let codex_error_to_core_error = function
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_connection_closed
          { runtime_id = "codex_app_server"; detail; turn_accepted })
-  | Runtime_codex_app_server.Turn_input_write_failed _ as error ->
+  | (Runtime_codex_app_server.Turn_input_write_failed _
+    | Runtime_codex_app_server.Reasoning_effort_admission_failed _) as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"
@@ -668,6 +669,8 @@ let codex_error_to_core_error = function
 ;;
 
 let recovery_failure_of_client_error = function
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _ ->
+    Keeper_official_client_session_store.Pre_dispatch_failed
   | Runtime_codex_app_server.Spawn_failed _ ->
     Keeper_official_client_session_store.Transient_spawn_failed
   | Runtime_codex_app_server.Turn_interrupted
@@ -965,18 +968,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
       |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
-    (* Snap the operator-declared effort into the catalog's accepted set so a
-       per-model cap (e.g. [Max] unsupported on a model that tops out at
-       [XHigh]) does not fail the turn. The same value feeds the raw_trace
-       start record and the request so observation matches the wire. *)
-    let effective_reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-    in
+    (* Preserve the declaration until the selected account admits it. The raw
+       run start records this request; the admission hook records the wire
+       effort after live negotiation, including on every resumed turn. *)
+    let requested_reasoning_effort = prepared.reasoning_effort in
     (* A Resume sends none of the conversation: the thread holds it and
        compacts it itself. What changes per turn or per operation -- the
        context carrier, the Librarian working state and the historical task
@@ -1199,7 +1194,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             ?reasoning_effort:
               (Option.map
                  Llm_provider.Reasoning_effort.to_string
-                 effective_reasoning_effort)
+                 requested_reasoning_effort)
             ())
     in
     let* host_dynamic_tools =
@@ -1447,7 +1442,25 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools
-         ?reasoning_effort:effective_reasoning_effort
+         ?reasoning_effort:requested_reasoning_effort
+         ~on_reasoning_effort_resolved:(fun ~model ~requested ~effective ->
+           let wire effort = match effort with
+             | None -> `Null
+             | Some value -> `String (Llm_provider.Reasoning_effort.to_string value) in
+           (match requested, effective with
+            | Some asked, Some admitted when Llm_provider.Reasoning_effort.compare asked admitted <> 0 ->
+              Log.Keeper.info ~keeper_name
+                "Codex reasoning effort clamped to account metadata: model=%s asked=%s effective=%s"
+                model (Llm_provider.Reasoning_effort.to_string asked)
+                (Llm_provider.Reasoning_effort.to_string admitted)
+            | _ -> ());
+           Option.iter (fun active ->
+             (* See Host.observe_raw_trace: it already logs trace errors without changing admission. *)
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Reasoning_effort (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_reasoning_effort" ~hook_decision:"admitted"
+                 ~hook_detail:(Yojson.Safe.to_string (`Assoc [
+                   "model", `String model; "requested", wire requested; "effective", wire effective])) ()))) raw_trace_run)
          ~thread_mode
          ~history
          ~developer_context

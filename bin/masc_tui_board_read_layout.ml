@@ -1,7 +1,7 @@
 type source = {
   post : Masc_tui_types.board_post;
   detail :
-    (Masc_tui_types.board_post * Masc_tui_types.board_comment list)
+    (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option)
       Masc_tui_board_detail.view;
   related_posts : Masc_tui_types.board_post list;
   keeper_names : string list;
@@ -10,14 +10,14 @@ type source = {
   table_frame : bool;
 }
 
-type rows = { body : string array; comments : string array }
+type rows = { body : string array; comments : string array; initial_comment_offset : (string * int) option }
 type t = { mutable retained : (source * rows) option }
 let create () = { retained = None }
 
 let get cache ~source ~render =
   let refresh () =
-    let body, comments = render () in
-    let rows = { body = Array.of_list body; comments = Array.of_list comments } in
+    let body, comments, initial_comment_offset = render () in
+    let rows = { body = Array.of_list body; comments = Array.of_list comments; initial_comment_offset } in
     cache.retained <- Some (source, rows);
     rows
   in
@@ -39,3 +39,8 @@ let body_line_count rows = Array.length rows.body
 let comment_line_count rows = Array.length rows.comments
 let body_line rows index = rows.body.(index)
 let comment_line rows index = rows.comments.(index)
+
+let initial_comment_offset rows ~comment_id =
+  match rows.initial_comment_offset with
+  | Some (id, offset) when String.equal id comment_id -> Some offset
+  | Some _ | None -> None

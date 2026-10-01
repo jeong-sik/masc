@@ -11,7 +11,9 @@ SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml")
 def run(executable):
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    health = h.GatedHttpResponse((200, {}), subsequent_response=(200, {}))
+    health = h.GatedHttpResponse(
+        (200, {}), subsequent_response=(200, {}), hold_seconds=20.0
+    )
     fixtures["/health"] = health
 
     def interact(process, master, _slave, output, _base):
@@ -24,6 +26,17 @@ def run(executable):
             # the initial authority reading is still held by the fixture.
             assert h.wait_for_fixture_event(
                 process, master, output, health.subsequent_requested, timeout=3.0
+            )
+            h.wait_for_output(
+                process,
+                master,
+                output,
+                b"Workspace identity changed or is unavailable",
+                start=0,
+                timeout=3.0,
+            )
+            assert not health.completed.is_set(), (
+                "initial health escaped the fixture gate"
             )
             health.release.set()
             h.wait_for_output(

@@ -656,11 +656,15 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       ; "payout_owed",goal_id,first_verdict.request_id
       ; "candidates",goal_id,first_verdict.request_id
       ; "paid",goal_id,first_verdict.request_id ] (rows config);
-    (match ledger_events config with
+    let payout_events = List.filter (fun (event : Candle_event.t) -> match event.body with
+      | Candle_event.Half_life_set _ -> false
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+      | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+      | Candle_event.Purchased _ | Candle_event.Equipped _ -> true) (ledger_events config) in
+    (match payout_events with
      | [ {Candle_event.body=Candle_event.Snapshot snapshot;_}
        ; {Candle_event.body=Candle_event.Payout_owed owed;_}
        ; {Candle_event.body=Candle_event.Candidates candidates;_}
-       ; {Candle_event.body=Candle_event.Half_life_set Candle_decay.Off;_}
        ; {Candle_event.body=Candle_event.Paid _;_} ] ->
        check (list string) "the Snapshot captured the real Goal link" [task_id] snapshot.linked_task_ids;
        check (list string) "every preparation row keeps the verified run"
@@ -679,7 +683,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
           check bool "completion precedes or equals confirmation" true
             (Candle_time.compare done_task.completed_at owed.confirmed_at <= 0)
         | _ -> fail "the production Candidates lost the persisted Done Task")
-     | _ -> fail "the positive lifecycle did not retain its four Goal facts and explicit policy boundary");
+     | _ -> fail "the positive lifecycle did not retain its four authoritative facts");
     check_payment ();
     Candle_payout_worker.pulse ();
     idle ();

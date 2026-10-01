@@ -114,35 +114,6 @@ let append_raw base_path text =
     Out_channel.output_string oc text)
 ;;
 
-let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
-  let identity = payment.identity in
-  let task_keepers = List.map2 (fun (relation : Candle_appraisal.task_relation)
-      (allocation : Candle_payment.allocation) -> relation.task_id, allocation.keeper)
-      payment.relations payment.allocations in
-  let task_ids = List.map fst task_keepers in
-  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
-  ; {Candle_event.at;body=Candle_event.Snapshot
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
-       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
-         | Ok value -> value | Error detail -> Alcotest.fail detail);
-       due_date=None;title="Completed funding fixture";metric=Some "completed";
-       target_value=Some "1";linked_task_ids=task_ids}}
-  ; {Candle_event.at;body=Candle_event.Payout_owed
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
-  ; {Candle_event.at;body=Candle_event.Candidates
-      {goal_id=identity.goal_id;request_id=identity.request_id;
-       verification_run_id=identity.verification_run_id;
-       tasks=List.map (fun (id, keeper) -> id, Candle_event.Found
-         {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_keepers;
-       candidate_task_ids=task_ids;candidate_keepers=List.map snd task_keepers;
-       candidate_task_keepers=List.map (fun (id, keeper) -> id, Some keeper) task_keepers}}
-  ; {Candle_event.at;body=Candle_event.Paid payment}
-  ]
-;;
-
 (* Persisted receipt fixtures, intentionally independent of [make]. The first
    records nearest rounding; the second gives a tied remainder to the last
    name. They simulate older arithmetic choices in the same row format. The
@@ -170,21 +141,46 @@ let balance_of_view view =
   | Error error -> Alcotest.fail (Candle_balance.error_to_string error)
 ;;
 
+(* A receipt remains tied to the frozen contributing tasks, even when its
+   historical arithmetic differs from the current append formula. *)
+let payment_prerequisites (row : E.t) =
+  let payment = payment_of_event row in
+  let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
+  let task_keepers = List.map2
+    (fun (relation : Candle_appraisal.task_relation) (allocation : Candle_payment.allocation) ->
+      relation.task_id, allocation.keeper) payment.relations payment.allocations in
+  let ids = List.map fst task_keepers in
+  [ { E.at = row.at; body = E.Snapshot {
+        goal_id; request_id; verification_run_id; criterion_revision = "receipt-fixture";
+        passed_at = row.at; goal_created_at = at "2026-09-28T00:00:00Z";
+        due_date = None; title = "Recorded payout"; metric = None; target_value = None;
+        linked_task_ids = ids } }
+  ; { E.at = row.at; body = E.Payout_owed {
+        goal_id; request_id; verification_run_id; passed_at = row.at; confirmed_at = row.at } }
+  ; { E.at = row.at; body = E.Candidates {
+        goal_id; request_id; verification_run_id;
+        tasks = List.map (fun (id, keeper) -> id, E.Found {
+          title = id; assignee = Some keeper; status = E.Done {completed_at = row.at} }) task_keepers;
+        candidate_task_ids = ids; candidate_keepers = List.map snd task_keepers;
+        candidate_task_keepers = List.map (fun (id, keeper) -> id, Some keeper) task_keepers } }
+  ]
+;;
+
+let event_lines rows =
+  String.concat "" (List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") rows)
+;;
+
 let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   with_base_path @@ fun base_path ->
-  let with_admission line =
-    let row = ok_or_fail (E.of_line line) in
-    let prefix = funding_rows row.at (payment_of_event row)
-      |> List.filter (fun (event : E.t) -> match event.body with E.Paid _ -> false | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-        | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ -> true)
-      |> List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") in
-    String.concat "" prefix ^ line ^ "\n" in
-  let bytes = with_admission stored_rounded_payment ^ with_admission stored_tied_payment in
+  let receipts = List.map (fun line -> ok_or_fail (E.of_line line))
+      [stored_rounded_payment; stored_tied_payment] in
+  let policy : E.t = {at = at "2026-09-29T06:00:00Z"; body = E.Half_life_set Candle_decay.Off} in
+  let bytes = event_lines [policy] ^ String.concat "" (List.map2
+    (fun row line -> event_lines (payment_prerequisites row) ^ line ^ "\n")
+    receipts [stored_rounded_payment; stored_tied_payment]) in
   append_raw base_path bytes;
   let view = read_ok base_path in
   let stored = Candle_ledger.events view in
-  let payments = List.filter (fun (event : E.t) -> match event.body with E.Paid _ -> true | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-        | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ -> false) stored in
   let balance = balance_of_view view in
   Alcotest.(check int) "stored rounded amount and first tie share are credited"
     1734 (Candle_balance.balance balance ~keeper:"keeper-a");
@@ -212,8 +208,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
        | Ok () -> Alcotest.fail "old arithmetic was accepted for a new payment");
       Alcotest.(check string) "read and refused append never rewrite history"
         bytes (file_text base_path))
-    payments;
-  let rounded = payment_of_event (List.hd payments) in
+    receipts;
+  let rounded = payment_of_event (List.hd receipts) in
   let current =
     Candle_payment.make
       ~identity:{ rounded.identity with goal_id = "new-current" }
@@ -228,7 +224,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   in
   Alcotest.(check (list int)) "new payment still uses today's floor rule"
     [1400] (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) current.allocations);
-  update_ok base_path (fun _ -> Ok (funding_rows (at "2026-09-30T00:00:00Z") current, ()));
+  let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
+  update_ok base_path (fun _ -> Ok (payment_prerequisites current_row @ [current_row], ()));
   Alcotest.(check bool) "valid new payment appends after unchanged history" true
     (String.starts_with ~prefix:bytes (file_text base_path));
   let after = balance_of_view (read_ok base_path) in

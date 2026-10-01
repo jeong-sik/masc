@@ -8153,11 +8153,17 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
        | Some detail -> [Theme.bad (), "  Verdict action failed: " ^ Terminal_text.single_line detail])
     |> judgement_detail_rows ~width
   in
-  (* Top, title, divider, bottom and footer: the five rows the Task Review
-     sidebar beside this pane also subtracts. Six left this pane one body row
-     short of the sidebar it is drawn next to. *)
+  let verdict_action = "  a twice: approve; x: reject with reason" in
+  let verdict_action_rows =
+    if Message_layout.display_width verdict_action <= width then
+      [ verdict_action ]
+    else [ "  a twice: approve"; "  x: reject with reason" ]
+  in
+  (* The position and action rows are fixed chrome; subtract exactly what
+     this pane draws so the reported window matches the visible body. *)
   let fixed_rows =
-    1 + (if Option.is_some armed_note then 1 else 0)
+    1 + List.length verdict_action_rows
+      + (if Option.is_some armed_note then 1 else 0)
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
   let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
@@ -8177,15 +8183,17 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     (fun err -> box_line_styled buf cols ~style:(Theme.bad ())
       (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
     state.verification_verdict_error;
-  box_line_styled buf cols ~style:(Theme.warn ())
-    "  a twice:approve x:reject";
+  (* This reading has its own pane row: pinned footer keys can consume the
+     whole footer at 30 and 40 columns, leaving its trailing position cut. *)
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  [rows %s]"
+       (Masc_tui_scroll.window_text ~scroll ~height:content_height
+          (List.length lines)));
+  List.iter
+    (box_line_styled buf cols ~style:(Theme.warn ()))
+    verdict_action_rows;
   box_bottom buf cols;
-  (* A position, not a key: handed to the footer's position slot as the
-     Verdicts detail does, so narrow widths drop key items before it. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  scroll
 ;;
 
 (* The queue stays beside the request under review. Opening one used to hide the others, and the others
@@ -8195,7 +8203,7 @@ let render_verification_detail (state : state) request =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, position =
+  let scroll =
     if cols < keeper_split_threshold_cols then
       verification_detail_pane state ~rows ~cols request buf
     else begin
@@ -8236,7 +8244,7 @@ let render_verification_detail (state : state) request =
     end
   in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ?position
+    (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)

@@ -32,6 +32,8 @@ SOURCE_MODULES = (
     'test/test_keeper_portrait_http.ml',
     'test/tui_keyboard_chat.py',
     'test/tui_keyboard_harness.py',
+    'test/tui_keyboard_observer.py',
+    'test/tui_keyboard_tools.py',
 )
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"

@@ -13,6 +13,13 @@
     search guidance. If retrieval is unavailable, readable ordinary facts and
     verified source facts are included inline without a truncation cap.
     Callers supply both tool capabilities from the selected runtime surface.
+    Before publication, each snapshot reference is persisted structurally in
+    the keeper runtime tree. The latest published snapshot has a current pin;
+    historical references follow the existing dated Keeper history retention
+    policy. Replacing memory or the latest prompt capture does not release
+    snapshots while their dated reference history remains retained.
+    A failed pin write uses the same readable-store fallback as publication
+    failure, without publishing an unowned artifact link.
 
     Each store is rendered as present, authoritatively empty/absent, or
     unavailable. Empty and absent states explicitly supersede earlier current
@@ -25,7 +32,8 @@
     invalidations and per-pass source readability. Snapshot commit revisions
     and update times remain in the durable stores and tools; identical facts
     recommitted by a later Librarian tick render identically. The wall clock
-    passed as [now] drives revalidation only and never appears in the text. *)
+    passed as [now] drives revalidation and dates retention history; it never
+    appears in the text. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)

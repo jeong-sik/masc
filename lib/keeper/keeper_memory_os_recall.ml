@@ -45,6 +45,38 @@ let ordinary_text = function
 
 let block sections = "--- Memory OS Recall ---\n" ^ String.concat "\n\n" sections
 
+let retain_artifact ~config ~keeper_id ~now (artifact : Tool_output.artifact_ref) =
+  (* Prompt text is not a structured GC root, and latest-prompt captures are
+     overwritten. Historical pins use the same dated retention owner as turn
+     records and provider inputs. The latest pin also protects paused keepers
+     after dated history expires, until a new snapshot is published. *)
+  let keeper_dir = Filename.concat (Workspace.keepers_runtime_dir config) keeper_id in
+  let json = Tool_output.normalized_artifact_ref_to_json artifact in
+  let base_dir = Filename.concat keeper_dir
+      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
+  let path = (Jsonl_writer.dated_path ~base_dir ~ts:now).path in
+  let payload = Yojson.Safe.to_string json in
+  let retained =
+    match Fs_compat.append_private_jsonl_durable_locked_result path (payload ^ "\n") with
+    | Fs_compat.Private_file_succeeded () -> Ok ()
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+      Log.Keeper.warn "memory os recall retention committed keeper=%s; descriptor cleanup failed: %s"
+        keeper_id (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      Ok ()
+    | Fs_compat.Private_file_failed error ->
+      Error (Fs_compat.private_jsonl_append_error_to_string error)
+    | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Error (Printf.sprintf "%s; descriptor cleanup failed: %s"
+        (Fs_compat.private_jsonl_append_error_to_string error)
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)) in
+  (* The historical row and its parent directory must survive a crash before
+     replacement of the previous current pin can release its reference. *)
+  Result.bind retained (fun () ->
+  Fs_compat.save_file_atomic_strict
+    (Filename.concat keeper_dir "memory-recall-current.json")
+    payload)
+;;
+
 let render_context ~keepers_dir ~keeper_id () =
   block [ordinary_text (read_ordinary ~keepers_dir ~keeper_id)]
 ;;
@@ -95,7 +127,7 @@ let render_with_source_revalidation ~memory_search_available ~artifact_reader_av
       Unavailable
     | Ok { snapshot = None; _ } -> Absent
     | Ok projection -> Available projection in
-  (* [now] drives source revalidation only. Stable stored state and readability
+  (* [now] dates artifact retention and drives source revalidation. Stored state and readability
      produce stable text; a recovery changes the state back even when the facts
      are byte-identical to those delivered before an unavailable turn. *)
   let ordinary_state = read_ordinary ~keepers_dir ~keeper_id in
@@ -141,9 +173,13 @@ let render_with_source_revalidation ~memory_search_available ~artifact_reader_av
   else
     let body = block [ordinary_text ordinary_state; source_text source_state] in
     let publication =
-      try Ok (Tool_blob_store.put_durable_reuse
-        (Tool_blob_store.create ~base_path:config.Workspace.base_path)
-        ~bytes:body ~mime:"text/plain") with
+      try
+        let artifact = Tool_blob_store.put_durable_reuse
+          (Tool_blob_store.create ~base_path:config.Workspace.base_path)
+          ~bytes:body ~mime:"text/plain" in
+        Result.map (fun () -> artifact)
+          (retain_artifact ~config ~keeper_id ~now artifact)
+      with
       | Eio.Cancel.Cancelled _ as error -> raise error
       | exn -> Error (Printexc.to_string exn) in
     match publication with

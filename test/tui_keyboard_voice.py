@@ -21,6 +21,7 @@ from tui_keyboard_harness import (
     drain_until_quiet,
     escape_to_keeper_detail,
     overview_event_http_fixtures,
+    press_and_settle,
     read_available,
     run_terminal_scenario,
     screen_text,
@@ -289,29 +290,6 @@ def voice_wizard_http_fixtures() -> HttpFixtures:
         else (200, VOICE_SETUP_FIXTURE)
     )
     return fixtures
-
-
-def press_and_settle(
-    process: "subprocess.Popen[bytes]",
-    master_fd: int,
-    output: bytearray,
-    data: bytes,
-    cap: float = 3.0,
-) -> bytes:
-    """Send [data] and answer everything drawn once the drawing stops.
-
-    Not send_and_wait: each keystroke in a typed word repaints the whole
-    screen, so a word arrives across as many frames as it has letters and a
-    single needle wait judges a frame that is still half a word behind. The
-    press is judged after its output stops, the way tab_until judges a
-    surface switch.
-    """
-    read_available(master_fd, output)
-    start = len(output)
-    write_all(master_fd, output, data)
-    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=5.0)
-    drain_until_quiet(process, master_fd, output, cap=cap)
-    return CSI_RE.sub(b"", bytes(output[start:]))
 
 
 def open_the_voice_pane(

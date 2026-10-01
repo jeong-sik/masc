@@ -1416,12 +1416,14 @@ let run_eio_with_http_pool f =
 
 (* Jev is on for [f] and asks the server at [endpoint]. *)
 let with_jev
+      ?(excluded_keepers = [])
       ~endpoint
       f
   =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
+        excluded_keepers;
         destinations =
           ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
           , [] )
@@ -1918,6 +1920,91 @@ let test_jev_choice_outside_the_question_is_judged_again () =
 (* The adapter alone, against the same stand-in: the request offers the two
    decisions under their labels, and a not-relevant answer decodes to
    [Not_relevant] rather than an error. *)
+let test_jev_event_fanout_settles_and_defers () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout" @@ fun base_path ->
+    let first = candidate "shared-event" in
+    let make_keeper keeper_name =
+      { first with Candidate.keeper_name
+      ; candidate_id = Candidate.candidate_id_of_signal ~keeper_name first.signal
+      ; keeper_context = `Assoc
+          [ "lane_keeper_name", `String keeper_name
+          ; "board_interests", `List [`String "runtime"] ] }
+    in
+    let second = make_keeper "beta" in
+    let third = make_keeper "gamma" in
+    let relevant = make_keeper "delta" in
+    let excluded = make_keeper "excluded" in
+    let missing = make_keeper "missing" in
+    let answer choice confidence =
+      `Assoc [ "type", `String "choice"; "choice", `String choice
+             ; "probabilities", `Assoc ["relevant", `Float 0.1; "not_relevant", `Float 0.8; "uncertain", `Float 0.1]
+             ; "confidence", `Float confidence ]
+    in
+    let response = Yojson.Safe.to_string (`Assoc
+      [ "model", `String "jev-latest"
+      ; "answers", `Assoc
+          [first.candidate_id, answer "not_relevant" 1.0
+          ;second.candidate_id, answer "uncertain" 1.0
+          ;third.candidate_id, answer "not_relevant" 0.0
+          ;relevant.candidate_id, answer "relevant" 1.0] ]) in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+    with_jev ~excluded_keepers:["excluded"] ~endpoint:jev.base_url (fun () ->
+      List.iter (fun c -> match Candidate.record ~base_path c with
+        | Candidate.Recorded _ -> ()
+        | Candidate.Duplicate _ | Candidate.Record_error _ -> Alcotest.fail "record failed")
+        [first; second; third; relevant; excluded; missing];
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [first; second; third; relevant; excluded; missing]);
+      let load c = match Candidate.load_candidates ~base_path ~keeper_name:c.Candidate.keeper_name with
+        | Ok [c] -> c
+        | _ -> Alcotest.fail "candidate ledger missing" in
+      (match (load first).status with
+       | Candidate.Consumed { delivery = Candidate.Not_relevant; judgment; _ } ->
+         (match judgment.source with
+          | Candidate.Vendor_system_one _ -> ()
+          | _ -> Alcotest.fail "wrong judgment source")
+       | _ -> Alcotest.fail "confident answer did not settle");
+      List.iter (fun c ->
+        (match (load c).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "review candidate consumed");
+        match Keeper_board_attention_partition.load ~base_path ~keeper_name:c.keeper_name with
+        | Ok [{ state = Keeper_board_attention_partition.Ready; _ }] -> ()
+        | _ -> Alcotest.fail "review partition not returned to worker") [second; third; missing];
+      (match (load excluded).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "excluded candidate judged");
+      (match (load relevant).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "relevant delivery bypassed owner");
+      (match Partition.load ~base_path ~keeper_name:relevant.keeper_name with
+       | Ok [{ state = Partition.Completed _; _ }] -> ()
+       | _ -> Alcotest.fail "relevant completion not durable");
+      match Fixture.request_bodies jev with
+      | [body] ->
+        let json = Yojson.Safe.from_string body in
+        let questions = Yojson.Safe.Util.(json |> member "questions" |> to_assoc) in
+        Alcotest.(check int) "one request carries eligible questions" 5 (List.length questions);
+        Alcotest.(check bool) "excluded keeper is not sent" false (List.mem_assoc excluded.candidate_id questions);
+        Alcotest.(check bool) "signal-only state" true
+          (Yojson.Safe.Util.member "state" json = `Assoc ["signal", Candidate.signal_to_yojson first.signal])
+      | _ -> Alcotest.fail "event did not make exactly one request"))
+;;
+
+let test_jev_event_fanout_failure_releases_claim () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout-failure" @@ fun base_path ->
+    let c = candidate "failed-event" in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match Candidate.record ~base_path c with
+       | Candidate.Recorded _ -> ()
+       | _ -> Alcotest.fail "record failed");
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Candidate.load_candidates ~base_path ~keeper_name:c.keeper_name with
+       | Ok [{ status = Candidate.Pending _; _ }] -> ()
+       | _ -> Alcotest.fail "failed batch changed the pending candidate");
+      match Partition.load ~base_path ~keeper_name:c.keeper_name with
+      | Ok [{ state = Partition.Ready; _ }] -> ()
+      | _ -> Alcotest.fail "failed batch stranded a claimed partition"))
+;;
+
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
@@ -2412,7 +2499,11 @@ let () =
             test_flow_bookkeeping_failures_are_not_provider_exhaustion
         ] )
     ; ( "jev first"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
+            test_jev_event_fanout_settles_and_defers
+        ; Alcotest.test_case "failed event fanout releases the claim" `Quick
+            test_jev_event_fanout_failure_releases_claim
+        ; Alcotest.test_case
             "a relevant Jev answer is kept"
             `Quick
             test_jev_relevant_is_kept

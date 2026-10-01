@@ -175,3 +175,24 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 라이브러리안 레인(`librarian_exact`)의 첫 슬롯인 `ollama_cloud` deepseek-v4-1-flash 는 Ollama 계정의 주간 한도가 다 차서
 (`seven_day = 1.0`, 2026-09-30 06:33 KST부터) 한 건도 답하지 못한다†. 그래서 호출 대부분이 CLI 대체 슬롯인
 `claude-sonnet-5-5-high`(약 60%)와 `codex-gpt-6-1-sol-low` 로 간다†. CLI 대체가 성공하면 앞선 429 가 로그에 남지 않는다.
+
+## 8. Push 구현 (2026-10-01)
+
+`keeper_board_attention_fanout`은 push 경로가 새로 저장한 후보들을 서버 switch의
+별도 fiber에서 한 요청으로 판정한다. 후보는 모델 호출 전에 Pending으로 영속화하고,
+기존 singleton partition의 Ready 세대를 먼저 claim한다. 기존 워커나 시작 복구가
+소유권을 바꾸면 CAS가 오래된 결과의 적용을 막는다. 이미 존재하는 후보는 기존 워커가 맡는다.
+
+확신 있는 답은 Vendor_system_one 출처로 Completed partition에 기록한다.
+관련 없음은 바로 소비하고, 관련 있음은 owner의 Attention_result 경로로 전달한다.
+낮은 확신·uncertain·누락된 답·호출 오류는 claim을 Ready로 돌리고 기존 워커를 깨운다.
+excluded_keepers는 외부 요청에 포함하지 않는다. 서버 clock을 넘겨 기존 HTTP timeout을 적용한다.
+재시작은 기존 partition 복구를 사용하며, 원장에 기록된 후보를 유실하지 않는다.
+
+기존 post_created owner cursor 경로는 유지한다. push의 댓글·수정 및 초기 cursor 예외만
+묶는다. 따라서 모든 Board 이벤트가 반드시 한 호출만 발생한다는 보장은 하지 않는다.
+워커 대체 경로와 destination failover도 추가 호출을 만들 수 있다.
+
+소스 검증용 HTTP fixture는 한 요청의 다중 질문, owner를 거치는 관련 있음,
+관련 없음 소비, uncertain·낮은 확신·누락 답의 Ready 복귀 및 제외 Keeper를 확인한다.
+배포 및 운영 효과 측정은 별도 증거가 필요하다.

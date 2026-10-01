@@ -126,3 +126,53 @@ let judge_candidate ?clock ~destinations ~candidate () =
     ; confidence = decided.Typesafeai_types.confidence
     }
 ;;
+
+let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_candidate.candidate list) () =
+  match candidates with
+  | [] -> Ok []
+  | first :: _ ->
+    let* choices = relevance_choices in
+    let signal = Keeper_board_attention_candidate.signal_to_yojson first.signal in
+    let rec questions seen = function
+      | [] -> Ok []
+      | candidate :: rest ->
+        let id = candidate.Keeper_board_attention_candidate.candidate_id in
+        if List.mem id seen then Error "typesafeai: duplicate candidate identity"
+        else if Keeper_board_attention_candidate.signal_to_yojson candidate.signal <> signal
+        then Error "typesafeai: event batch contains different signals"
+        else
+          let* interests = Keeper_board_attention_candidate.board_interests candidate in
+          let* tail = questions (id :: seen) rest in
+          Ok ((id, relevance_question ~choices ~interests candidate) :: tail)
+    in
+    let* questions = questions [] candidates in
+    let* evaluated =
+      Typesafeai_client.evaluate ?clock ~destinations
+        ~state:(`Assoc ["signal", signal]) ~questions ()
+      |> Result.map_error Typesafeai_client.failure_to_string
+    in
+    let response = evaluated.Typesafeai_client.response in
+    let provenance =
+      { Keeper_board_attention_candidate.destination_uri = evaluated.destination.destination_uri
+      ; answering_model_id = response.model
+      ; request_body_sha256 = evaluated.request_body_sha256
+      }
+    in
+    let decode candidate =
+      let* answer =
+        match List.assoc_opt candidate.Keeper_board_attention_candidate.candidate_id response.answers with
+        | Some answer -> Ok answer
+        | None -> Error "typesafeai: response missing candidate answer"
+      in
+      let* decided = Typesafeai_types.decode_choice choices answer in
+      Ok
+        { assessment =
+            (match decided.Typesafeai_types.choice with
+             | Settled decision -> Decided { Judgment.decision; rationale = rationale decided }
+             | Uncertain -> Needs_review (rationale decided))
+        ; provenance
+        ; confidence = decided.confidence
+        }
+    in
+    Ok (List.map (fun candidate -> candidate, decode candidate) candidates)
+;;

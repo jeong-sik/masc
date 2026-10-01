@@ -17133,7 +17133,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
 
     def interact(process, master_fd, slave_fd, output, _base):
-        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose browser \xc2\xb7 separate sessions do not share login")
         if reads:
             raise AssertionError("unselected multi-client view sent a browser read")
         os.write(master_fd, b"j")
@@ -17143,10 +17143,16 @@ def run_browser_client_picker_regression(executable: str) -> None:
             raise AssertionError("Zen choice did not pin its client ID")
         read_available(master_fd, output)
         chooser_start = len(output)
-        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        send_and_wait(process, master_fd, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
         wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=bytes(output).rfind(b"Firefox", chooser_start))
+        picker = screen_text(bytes(output))
+        for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
+            if option not in picker:
+                raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
         if reads[-1] != {"lane": "live", "clientId": firefox}:
             raise AssertionError("browser switch reused the old browser's tab ID")

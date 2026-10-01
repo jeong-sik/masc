@@ -375,12 +375,17 @@ let save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token
 let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
   : (agent_credential, masc_error) result
   =
-  match save_raw_token_credential config ~agent_name ~role ~raw_token with
+  match validate_raw_token raw_token with
   | Error _ as error -> error
-  | Ok cred ->
+  | Ok () ->
+    let auth_cfg = load_auth_config config in
+    let cred = raw_token_credential ~agent_name ~role ~raw_token
+        ~expires_at:(expires_at_for_auth_config auth_cfg) in
     (try
-       persist_raw_token config ~agent_name raw_token;
-       Ok cred
+       with_credential_transaction config (fun transaction ->
+         save_credential_in_transaction transaction cred;
+         persist_raw_token config ~agent_name raw_token;
+         cred)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -492,9 +497,10 @@ let save_rotated_raw_token config (cred : agent_credential) ~raw_token
       }
     in
     (try
-       persist_raw_token config ~agent_name:rotated.agent_name raw_token;
-       save_credential config rotated;
-       Ok rotated
+       with_credential_transaction config (fun transaction ->
+         persist_raw_token config ~agent_name:rotated.agent_name raw_token;
+         save_credential_in_transaction transaction rotated;
+         rotated)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

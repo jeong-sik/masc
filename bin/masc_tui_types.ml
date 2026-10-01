@@ -5414,11 +5414,16 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
+  mutable keeper_sandbox_logs_origin: Tui_decode.server_identity option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5913,6 +5918,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -6404,6 +6410,33 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* Pending reads and post-action offers belong to the workspace that admitted
+   them. A successful health response with missing paths is still unread;
+   only comparable paths can confirm that an origin has been replaced. *)
+let reconcile_detail_intent_origins (state : state) reading =
+  match reading with
+  | Error _ -> ()
+  | Ok (current : Tui_decode.server_identity) ->
+      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let foreign = function
+          | None -> false
+          | Some (origin : Tui_decode.server_identity) ->
+              not (String.equal (canonical_path origin.sid_base_path)
+                     (canonical_path current.sid_base_path)
+                   && String.equal (canonical_path origin.sid_masc_root)
+                        (canonical_path current.sid_masc_root))
+        in
+        if foreign state.connector_unbind_offer_origin then begin
+          state.connector_unbind_offer_pending <- [];
+          state.connector_unbind_offer_origin <- None
+        end;
+        if foreign state.keeper_sandbox_logs_origin then begin
+          state.keeper_sandbox_logs_requested <- None;
+          state.keeper_sandbox_logs_origin <- None
+        end
+      end
+
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -8035,11 +8068,14 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
+  keeper_sandbox_logs_origin = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -8290,6 +8326,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;

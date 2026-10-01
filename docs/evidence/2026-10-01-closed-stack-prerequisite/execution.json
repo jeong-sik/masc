@@ -1,0 +1,36 @@
+{
+  "tested_source": "19b773c67e605dc53ed16ac286f4754a379fd43e",
+  "transport": "isolated fake GitHub; no real API writes",
+  "before": {
+    "scope": "new closed-unmerged lower test, check and fake-write modes",
+    "exit_code": 1,
+    "tests": 1,
+    "failed_subtests": 2,
+    "seconds": 27.247,
+    "output": "before.output",
+    "implementation_source": "b6b606199a2e407f96d5a6ed2acfec067ffeaed5",
+    "fixture_source": "19b773c67e605dc53ed16ac286f4754a379fd43e"
+  },
+  "after": {
+    "command": "python3 scripts/review/test_source_review_policy.py SourceReviewPolicy.test_native_closed_unmerged_lower_member_prevents_write SourceReviewPolicy.test_native_closed_unmerged_upper_member_is_outside_scope SourceReviewPolicy.test_native_custom_base_and_merged_lower_member SourceReviewPolicy.test_native_middle_admits_lower_and_selected_without_upper_review SourceReviewPolicy.test_bottom_stack_merges_without_actions",
+    "exit_code": 0,
+    "tests": 5,
+    "seconds": 69.757,
+    "output": "after.output",
+    "source": "19b773c67e605dc53ed16ac286f4754a379fd43e"
+  },
+  "source_sha256": {
+    "scripts/review/stack-scope.py": "735d43f9764265e4af338234859e145b762b1da0aef0976e60a98dfb913d99a7",
+    "scripts/review/test_source_review_policy.py": "06d5f492474b4c05bea684a922a7753186561bb26bc7c3c8e3add5a1cc5f94e4"
+  },
+  "output_sha256": {
+    "after.output": "8a9008338ddbf22c5ec385f02198e84b163c856d539ad3c1c476c4df087516e6",
+    "before.output": "44ead2dc25bfe2161b6e9cded4ffd269a02a647834faf465b8c2f3298e38142d"
+  },
+  "main_integration": {
+    "head": "b25b57c07c81b477519eb41fec72aca141c76dba",
+    "scripts_review_tree_oid": "7b2abc18db7956f8d5c64e5a8b63d7052e6019ce",
+    "matches_tested_source": true,
+    "new_execution": false
+  }
+}

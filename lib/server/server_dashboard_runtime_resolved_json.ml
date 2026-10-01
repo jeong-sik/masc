@@ -4,7 +4,7 @@
    - #15: max-context previously diverged across three sources (runtime.toml
      override, AGENT_CORE hardcoded defaults, AGENT_CORE capability catalog cap). This
      document reports the one value [Runtime_instance.max_context_of_runtime] resolves,
-     plus which of [override]/[capability]/[override_clamped_by_capability]
+     plus the binding/provider/model declaration or capability that
      produced it ([Runtime_instance.resolve_max_context_of_runtime]).
    - #14: the settings panel previously rendered only explicit
      [\[runtime.assignments\]] entries. [assignments] here joins every

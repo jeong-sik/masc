@@ -81,6 +81,7 @@ parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--binary', type=Path, required=True)
 parser.add_argument('--dashboard', type=Path, required=True)
 parser.add_argument('--source-sha', required=True)
+parser.add_argument('--capture-browser', action='store_true')
 args = parser.parse_args()
 root = args.output.resolve()
 # A fresh output root prevents accidental reuse of a real workspace or ledger.
@@ -98,9 +99,14 @@ if source != args.source_sha:
     raise SystemExit('native probe source differs from prepared dashboard')
 base = root / 'workspace'
 repo = Path(__file__).resolve().parents[1]
+fixture_paths = [('runtime.toml', 'config/runtime.toml'),
+                 ('candle.toml', 'config/candle.toml'),
+                 ('keeper.toml', 'config/keepers/item-runtime-probe.toml'),
+                 ('keeper.json', 'keepers/item-runtime-probe.json')]
 input_paths = ['scripts/item-http-acceptance.py'] + [
-    f'test/fixtures/item-http/{name}'
-    for name in ('runtime.toml', 'candle.toml', 'keeper.toml', 'keeper.json')]
+    f'test/fixtures/item-http/{name}' for name, _ in fixture_paths]
+if args.capture_browser:
+    input_paths.append('dashboard/e2e/item-server.mjs')
 verified_inputs = {}
 for relative in input_paths:
     expected = subprocess.check_output(['git', '-C', str(repo), 'show', f'{source}:{relative}'])
@@ -109,10 +115,7 @@ for relative in input_paths:
     verified_inputs[relative] = actual
 harness_sha256 = hashlib.sha256(verified_inputs['scripts/item-http-acceptance.py']).hexdigest()
 config_hashes = {}
-for src, dst in [('runtime.toml', 'config/runtime.toml'),
-                 ('candle.toml', 'config/candle.toml'),
-                 ('keeper.toml', 'config/keepers/item-runtime-probe.toml'),
-                 ('keeper.json', 'keepers/item-runtime-probe.json')]:
+for src, dst in fixture_paths:
     target = base / '.masc' / dst
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(verified_inputs[f'test/fixtures/item-http/{src}'])
@@ -354,6 +357,12 @@ with (root / 'server.log').open('wb') as log:
         validate_portrait(equipped_png, 96)
         require(equipped_png != png, 'equipment did not change the served portrait')
         (root / 'portrait-equipped.png').write_bytes(equipped_png)
+        if args.capture_browser:
+            browser_script = repo / 'dashboard/e2e/item-server.mjs'
+            subprocess.run(['node', str(browser_script)], input=json.dumps({
+                'origin': origin, 'token': token, 'output': str(root),
+                'sourceSha': source, 'keeper': 'item-runtime-probe', 'ownedItem': item,
+            }), text=True, check=True, cwd=browser_script.parent, env=env)
         restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
         require(restored['equipment'] == starting, restored)
         status, restored_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
@@ -365,7 +374,7 @@ with (root / 'server.log').open('wb') as log:
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
-            requests=records, tool_calls=tool_records, passed=True)
+            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Isolated Item HTTP acceptance: PASS')
     finally:

@@ -112,7 +112,7 @@ let visibility_of_fields fields =
   | ["keeper", `String keeper; "kind", `String "keeper"] when String.trim keeper <> "" -> Ok (Keeper_only keeper)
   | _ -> Error "invalid retained read visibility"
 let caller_access ?access _caller =
-  Option.value ~default:Lane_addon_sources.Unauthenticated access
+  Option.value access ~default:Lane_addon_sources.Unauthenticated
 let can_read access = function
   | Shared -> true
   | Operator_only -> (match access with Lane_addon_sources.Operator_configuration -> true

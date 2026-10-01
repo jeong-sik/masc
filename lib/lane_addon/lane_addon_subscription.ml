@@ -158,7 +158,7 @@ let configuration_snapshot ~access ~caller config subscriptions revision =
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
 let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.protect mutex (fun () ->
-  let access = Option.value ~default:Lane_addon_sources.Unauthenticated access in
+  let access = Option.value access ~default:Lane_addon_sources.Unauthenticated in
   let* subscriptions,revision = load config in
   match operation with
   | Inspect -> let* ()=exact [] args in

@@ -26,6 +26,8 @@ val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ 
 (** Omitted [access] is unauthenticated; [caller] carries attribution only. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
+(** [caller] is provenance. An omitted [access] is [Unauthenticated]; a trusted
+    host must pass verified Keeper or operator authority explicitly. *)
 (** No I/O and no package callback. Runs on the root-switch owner domain: a
     caller on another domain (the HTTP serving domain, a pool worker) is
     carried there and waits until the hint is recorded. Only sources
@@ -63,6 +65,8 @@ val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> co
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
+(** Declaration reads and writes use the same explicit authority boundary as
+    [dispatch]; an omitted [access] grants no private authority. *)
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
     its receipt never claims that a worker has already applied the change. *)

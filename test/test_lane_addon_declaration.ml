@@ -4,6 +4,10 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
+  let read_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
+    Lane_addon_runtime.read_declaration ?caller ~access ~config args
+  let save_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
+    Lane_addon_runtime.save_declaration ?caller ~access ~config args
   let dispatch ?caller ?access ~config ~operation args =
     let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration

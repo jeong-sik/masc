@@ -48,11 +48,13 @@ let with_machine f =
       f (Workspace.default_config base_path) token expired)
 
 let recover config =
-  Keeper_dos_controller.before_call ~config ~who:"operator" ~name:"masc_dos_step"
+  Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_step"
     ~args:(`Assoc [ "steps", `Int 1; "until_ready", `Bool false ])
+    ~run:(fun () -> None)
 
 let recovered = function
-  | Ok () -> ()
+  | Ok None -> ()
+  | Ok (Some _) -> fail "the recovery-only callback returned a tool result"
   | Error (Keeper_dos_controller.Refused detail | Keeper_dos_controller.Seats_unknown detail) -> fail detail
 
 let renew config = auth_ok
@@ -166,6 +168,107 @@ let check_status expected (actual, body) =
 let renew_as_admin config = auth_ok
     (Auth.create_token_expiring_in config.Workspace.base_path
        ~agent_name:"player" ~role:Masc_domain.Admin ~hours:1)
+
+let issue config =
+  let name = match Play_invite.Name.of_string "player" with
+    | Ok name -> name | Error detail -> fail detail in
+  Play_invite.issue ~base_path:config.Workspace.base_path
+    ~public_base_url:(Some "https://play.example.test") ~keeper_names:(Ok []) ~name ~hours:1
+
+let test_renewal_before_issue_preserves_current_credential () =
+  with_machine @@ fun config old_token _ ->
+  Auth.delete_credential config.base_path "player";
+  ignore (Auth.find_static_credential_by_token config.base_path ~token:old_token);
+  let (admin_token, admin), invitation = interleave config
+      (fun () -> renew_as_admin config) (fun () -> issue config) in
+  (match invitation with
+   | Error (Play_invite.Name_taken Play_invite.Credential) -> ()
+   | Ok _ | Error _ -> fail "a queued invitation must refuse the newly published Admin name");
+  let current = auth_ok (Auth.find_static_credential_by_token config.base_path ~token:admin_token) in
+  check string "the Admin bearer, not a replacement Player, owns the name"
+    "admin" (Masc_domain.agent_role_to_string current.role);
+  check string "the exact published credential survives" admin.token current.token;
+  check (option string) "issue refusal does not release the turn" (Some "player") (controller ())
+
+let test_competing_issues_publish_only_one_invite () =
+  with_machine @@ fun config _ _ ->
+  Auth.delete_credential config.base_path "player";
+  let first, second = interleave config (fun () -> issue config) (fun () -> issue config) in
+  let issued = match first with
+    | Ok issued -> issued | Error _ -> fail "the admitted invitation must be published" in
+  (match second with
+   | Error (Play_invite.Name_taken Play_invite.Credential) -> ()
+   | Ok _ | Error _ -> fail "the second invitation must refuse the occupied name");
+  let token = match String.index_opt issued.link '#' with
+    | Some offset -> String.sub issued.link (offset + 1) (String.length issued.link - offset - 1)
+    | None -> fail "the invitation link must contain its bearer" in
+  check string "the first invite's bearer still authenticates" "player"
+    (auth_ok (Auth.find_static_credential_by_token config.base_path ~token)).agent_name
+
+let unreadable_name_fixtures =
+  [ "invalid JSON", (fun path -> Out_channel.with_open_text path (fun channel -> output_string channel "{"))
+  ; "missing redirect target", (fun path -> Out_channel.with_open_text path
+      (fun channel -> output_string channel {|{"redirect_to":"absent.json"}|}))
+  ; "dangling symlink", (fun path -> Unix.unlink path; Unix.symlink (path ^ ".absent") path)
+  ; "directory", (fun path -> Unix.unlink path; Unix.mkdir path 0o700)
+  ]
+
+let test_unreadable_revoke_preserves_effects () =
+  List.iter (fun (label, corrupt) ->
+    with_machine @@ fun config _ _ ->
+    let path = Auth.credential_file config.base_path "player" in
+    corrupt path;
+    let name = match Play_invite.Name.of_string "player" with
+      | Ok name -> name | Error detail -> fail detail in
+    let callback_ran = ref false in
+    (match Play_invite.revoke ~base_path:config.base_path ~name
+        ~after_revoke:(fun _ -> callback_ran := true) with
+     | Error Play_invite.Credential_unreadable -> ()
+     | Ok () | Error _ -> fail (label ^ ": an unreadable name must be refused"));
+    check bool (label ^ ": no callback") false !callback_ran;
+    let status, body = revoke config in
+    check_status `Service_unavailable (status, body);
+    check string (label ^ ": explicit route error") "credential_unreadable"
+      Yojson.Safe.Util.(member "code" body |> to_string);
+    check (option string) (label ^ ": the turn survives") (Some "player") (controller ());
+    ignore (Unix.lstat path)) unreadable_name_fixtures
+
+let test_unreadable_recovery_preserves_controller () =
+  List.iter (fun (label, corrupt) ->
+    with_machine @@ fun config _ _ ->
+    let path = Auth.credential_file config.base_path "player" in
+    corrupt path;
+    recovered (recover config);
+    check (option string) (label ^ ": recovery keeps the ambiguous holder")
+      (Some "player") (controller ());
+    (match Dos_lane.step ~who:"operator" ~steps:1 ~until_ready:false with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail (label ^ ": another participant moved after ambiguous recovery"));
+    ignore (Unix.lstat path)) unreadable_name_fixtures
+
+let test_mismatched_revoke_preserves_effects () =
+  List.iter (fun role ->
+    with_machine @@ fun config _ credential ->
+    let path = Auth.credential_file config.base_path "player" in
+    let mismatched = { credential with agent_name = "other"; role } in
+    let json = Masc_domain.agent_credential_to_yojson mismatched |> Yojson.Safe.to_string in
+    Out_channel.with_open_text path (fun channel -> output_string channel json);
+    let name = match Play_invite.Name.of_string "player" with
+      | Ok name -> name | Error detail -> fail detail in
+    let callback_ran = ref false in
+    (match Play_invite.revoke ~base_path:config.base_path ~name
+        ~after_revoke:(fun _ -> callback_ran := true) with
+     | Error (Play_invite.Credential_identity_mismatch "other") -> ()
+     | Ok () | Error _ -> fail "a name resolving to another owner must be refused");
+    check bool "a mismatched identity invokes no callback" false !callback_ran;
+    let status, body = revoke config in
+    check_status `Service_unavailable (status, body);
+    check string "the route reports identity ambiguity" "credential_identity_mismatch"
+      Yojson.Safe.Util.(member "code" body |> to_string);
+    check string "the mismatched credential is not deleted" json (In_channel.with_open_text path In_channel.input_all);
+    check (option string) "the held turn is not released" (Some "player") (controller ()))
+    [ Masc_domain.Player; Masc_domain.Worker; Masc_domain.Admin ]
 
 let test_renewal_before_revoke_preserves_current_role () =
   List.iter (fun initially_present ->
@@ -318,7 +421,7 @@ let test_failed_admission_moves_nothing () =
   (match recover config with
    | Error (Keeper_dos_controller.Seats_unknown _) -> ()
    | Error (Keeper_dos_controller.Refused detail) -> fail detail
-   | Ok () -> fail "recovery ran without the credential transaction");
+   | Ok _ -> fail "recovery ran without the credential transaction");
   check (option string) "an unavailable credential lock preserves the holder" (Some "player") (controller ());
   let status, _ = Server_routes_http_routes_dos.press_into ~config ~who:"operator"
       ~saves_name:"spin.com" ~keys:[ "x" ] in
@@ -329,14 +432,139 @@ let test_failed_admission_moves_nothing () =
     (Option.is_some (Auth.load_credential config.base_path "player"));
   check (option string) "the refused pad call cannot release ownership" (Some "player") (controller ())
 
+let operator_holds config =
+  ignore (auth_ok (Auth.create_token config.Workspace.base_path
+    ~agent_name:"operator" ~role:Masc_domain.Admin));
+  ignore (dos_ok (Dos_lane.pass ~who:"player" ~to_:(Some "operator") ~announce:ignore))
+
+let hand_to config target =
+  Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_pass"
+    ~args:(`Assoc ["to",`String target])
+    ~run:(fun () -> fail "handoff must use its admitted lane effect, not the unguarded callback")
+
+let handed = function
+  | Ok (Some result) when Tool_result.is_success result -> result
+  | Ok (Some result) -> fail (Tool_result.message result)
+  | Ok None -> fail "handoff returned no actual lane result"
+  | Error (Keeper_dos_controller.Refused detail | Keeper_dos_controller.Seats_unknown detail) -> fail detail
+
+let refused_target label = function
+  | Error (Keeper_dos_controller.Refused _) -> ()
+  | Error (Keeper_dos_controller.Seats_unknown detail) -> fail (label ^ ": " ^ detail)
+  | Ok _ -> fail (label ^ ": target was assigned despite its current standing")
+
+let test_target_revoke_before_handoff_refuses_without_moving () =
+  with_machine @@ fun config _ _ ->
+  ignore (renew config);
+  operator_holds config;
+  let response, handoff = interleave config (fun () -> revoke config)
+    (fun () -> hand_to config "player") in
+  check_status `OK response;
+  check bool "revoke did not release the operator's existing turn" false
+    Yojson.Safe.Util.(member "released_controller" (snd response) |> to_bool);
+  refused_target "revoke admitted first" handoff;
+  check (option string) "refused handoff preserves the actual holder" (Some "operator") (controller ());
+  check bool "revoked target remains absent" true
+    (Option.is_none (Auth.load_credential config.base_path "player"))
+
+let test_handoff_before_target_revoke_completes_inside_admission () =
+  with_machine @@ fun config _ _ ->
+  ignore (renew config);
+  operator_holds config;
+  let handoff, response = interleave config (fun () -> hand_to config "player")
+    (fun () -> revoke config) in
+  let result = handed handoff in
+  check (option string) "handoff result captures the target before revoke" (Some "player")
+    Yojson.Safe.Util.(member "controller" (Tool_result.data result) |> to_string_option);
+  check_status `OK response;
+  check bool "later revoke observed and released the already-handed target" true
+    Yojson.Safe.Util.(member "released_controller" (snd response) |> to_bool);
+  check (option string) "revoke leaves no retired target holding the machine" None (controller ());
+  check bool "revoke finishes deleting that target" true
+    (Option.is_none (Auth.load_credential config.base_path "player"))
+
+let test_handoff_uses_same_name_reissue_current_role () =
+  List.iter (fun role ->
+    with_machine @@ fun config _ _ ->
+    let old_token, _ = renew config in
+    operator_holds config;
+    let old_current = auth_ok
+        (Auth.find_static_credential_by_token config.base_path ~token:old_token) in
+    check string "the old bearer is live before replacement" "player" old_current.agent_name;
+    check bool "the old live bearer belongs to a Player" true
+      (old_current.role = Masc_domain.Player);
+    let (token, current), handoff = interleave config
+      (fun () -> auth_ok (Auth.create_token_expiring_in config.base_path
+        ~agent_name:"player" ~role ~hours:1))
+      (fun () -> hand_to config "player") in
+    check bool "same-name publication retires the old bearer" true
+      (Result.is_error (Auth.find_static_credential_by_token config.base_path ~token:old_token));
+    check bool "handoff cannot alter the published credential role" true
+      ((auth_ok (Auth.find_static_credential_by_token config.base_path ~token)).role = current.role);
+    match role with
+    | Masc_domain.Player | Masc_domain.Admin ->
+      ignore (handed handoff);
+      check (option string) "current live seat can receive the controller" (Some "player") (controller ())
+    | Masc_domain.Worker ->
+      refused_target "current Worker is not a seat" handoff;
+      check (option string) "prior Player identity cannot authorize a Worker handoff" (Some "operator") (controller ()))
+    [Masc_domain.Player;Masc_domain.Admin;Masc_domain.Worker]
+
+let test_handoff_expired_target_and_unreadable_binding_preserve_holder () =
+  with_machine (fun config _ _ ->
+    operator_holds config;
+    refused_target "expired Player" (hand_to config "player");
+    check (option string) "expired target leaves the operator's turn intact" (Some "operator") (controller ());
+    ignore (renew config);
+    ignore (handed (hand_to config "player"));
+    check (option string) "renewed target can receive a later explicit handoff" (Some "player") (controller ()));
+  List.iter (fun (label, corrupt) ->
+    with_machine @@ fun config _ _ ->
+    ignore (renew config);
+    operator_holds config;
+    let credential = match Auth.load_credential config.base_path "player" with
+      | Some value -> value | None -> fail "target credential is missing" in
+    (* Keep the UUID payload intact so discovery knows the target's owner;
+       its broken current named binding must be unavailable, not omitted. *)
+    Auth.save_credential config.base_path {credential with id=Some (Masc_domain.Credential_id.generate ())};
+    let path = Auth.credential_file config.base_path "player" in
+    corrupt path;
+    let before = Unix.lstat path in
+    (match hand_to config "player" with
+     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
+     | Error (Keeper_dos_controller.Refused detail) -> fail (label ^ ": unreadable is not absent: " ^ detail)
+     | Ok _ -> fail (label ^ ": unreadable named authority admitted a handoff"));
+    check (option string) (label ^ ": uncertain target cannot change the holder") (Some "operator") (controller ());
+    let after = Unix.lstat path in
+    check bool (label ^ ": handoff does not delete or repair the target evidence") true
+      (before.Unix.st_ino=after.Unix.st_ino && before.st_kind=after.st_kind)) unreadable_name_fixtures
+
+let test_self_declared_handoff_still_runs_the_actual_lane_effect () =
+  with_machine @@ fun config _ _ ->
+  operator_holds config;
+  Auth.save_auth_config config.base_path {Masc_domain.default_auth_config with enabled=false};
+  ignore (handed (hand_to config "unregistered-player"));
+  check (option string) "auth-disabled mode still permits the declared target"
+    (Some "unregistered-player") (controller ())
+
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
-      [ test_case "renewal before recovery preserves the turn" `Quick test_completed_renewal_preserves_the_controller
+      [ test_case "target revoke before admitted handoff preserves the holder" `Quick test_target_revoke_before_handoff_refuses_without_moving
+      ; test_case "admitted handoff completes before waiting target revoke" `Quick test_handoff_before_target_revoke_completes_inside_admission
+      ; test_case "handoff uses the current role after same-name reissue" `Quick test_handoff_uses_same_name_reissue_current_role
+      ; test_case "expired and unreadable targets cannot take the holder" `Quick test_handoff_expired_target_and_unreadable_binding_preserve_holder
+      ; test_case "self-declared handoff performs the actual lane effect" `Quick test_self_declared_handoff_still_runs_the_actual_lane_effect
+      ; test_case "renewal before recovery preserves the turn" `Quick test_completed_renewal_preserves_the_controller
       ; test_case "recovery before renewal has one order" `Quick test_recovery_before_renewal_has_one_order
       ; test_case "cold index publication cannot undo renewal" `Quick test_cold_index_cannot_restore_credentials_after_renewal
       ; test_case "a cancelled delete releases admission" `Quick test_cancelled_delete_leaves_credential_and_releases_admission
       ; test_case "renewal before revoke preserves the current role" `Quick test_renewal_before_revoke_preserves_current_role
+      ; test_case "renewal before issue preserves the current credential" `Quick test_renewal_before_issue_preserves_current_credential
+      ; test_case "competing issues publish one invitation" `Quick test_competing_issues_publish_only_one_invite
+      ; test_case "unreadable revoke preserves callbacks and controller" `Quick test_unreadable_revoke_preserves_effects
+      ; test_case "unreadable recovery preserves the controller" `Quick test_unreadable_recovery_preserves_controller
+      ; test_case "mismatched revoke preserves callbacks and controller" `Quick test_mismatched_revoke_preserves_effects
       ; test_case "revoke finishes before a renewed turn" `Quick test_revoke_before_renewal_finishes_its_controller_effect
       ; test_case "revoke callback excludes renewal after deletion" `Quick test_revoke_callback_holds_credential_admission
       ; test_case "revoke preserves a credentialless Keeper" `Quick test_revoke_preserves_a_credentialless_keeper

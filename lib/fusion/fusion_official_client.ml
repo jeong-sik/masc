@@ -114,7 +114,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   }
 ;;
 
-let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
+let codex_config ~runtime ~runtime_id ~system_prompt ~override_s ~output_schema
   (execution : Runtime_execution.codex_app_server)
   : Runtime_codex_app_server.config
   =
@@ -122,6 +122,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   ; account_home = execution.account_home
   ; isolated_home = None
   ; model = execution.model
+  ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
   ; native = Runtime_native_tools.codex_default
   ; developer_instructions = system_prompt
   ; admission_timeout_s = execution.timeout_s
@@ -410,13 +411,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         | Error error -> claude_failed ~admission:false error))
   | Runtime_execution.Codex_app_server execution ->
     let config =
-      codex_config ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
+      codex_config ~runtime ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
     (* Fresh-thread totals are snapshots. A window fill replaces the vendor
        counter, so retain the last observed spend and ignore later reset totals. *)
     let observed_usage = ref Fusion_types.zero_usage in
     let counter_replaced = ref false in
     (match Runtime_codex_app_server.run_turn
+       ?reasoning_effort:runtime.model.reasoning_effort
        ~on_stream_event:(function
          | Runtime_codex_app_server.Usage_reported {frame=Counted {thread_total; _}; _}
            when not !counter_replaced ->

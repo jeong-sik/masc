@@ -216,8 +216,8 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       (resolution_suffix resolution)
   | Max_context_absent { runtime_id; execution_model; declared_model } ->
     Printf.sprintf
-      "%s: runtime %S (model=%s) has no [models.%s].max-context override \
-       and no AGENT_CORE capability catalog max-context; set the override or add \
+      "%s: runtime %S (model=%s) has no binding/provider max-context or [models.%s].max-context default \
+       and no AGENT_CORE capability catalog max-context; set a scoped declaration or add \
        the model to the capability catalog (no silent default — \
        RFC-0206 §2.1)"
       config_path

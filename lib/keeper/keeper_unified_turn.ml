@@ -763,8 +763,7 @@ let run_keeper_cycle
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the
-                  layer stays absent — the keeper_status tool still carries
-                  the full typed answer. *)
+                  layer stays absent. *)
                let repository_freshness =
                  match
                    Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
@@ -880,6 +879,8 @@ let run_keeper_cycle
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
+               let observation_token = Keeper_turn_observation_token.fresh () in
+               let event_scope = Keeper_turn_scope.create ~keeper_turn_id in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
                    ?event_bus
@@ -888,13 +889,15 @@ let run_keeper_cycle
                     active tool execution from the no-progress window. *)
                    ~on_pending_count_change:(fun count ->
                      Keeper_registry.record_turn_tool_inflight
+                       ~observation_token
                        ~base_path:config.base_path
                        meta.name
                        ~count)
                    ~keeper_name:meta.name
-                   ~turn_id:keeper_turn_id
+                   ~scope:event_scope
                    ()
                in
+               let event_bus = Keeper_unified_turn_event_bus.publishing_bus turn_event_bus_state in
                (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
          retry path. [outcome=drained] when at least one event was
@@ -922,7 +925,7 @@ let run_keeper_cycle
          so the composite observer can surface live in-turn states like
          [`Executing`]. The matching [mark_turn_finished] in the finally
          block clears the field, preventing stale state on idle keepers. *)
-               Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
+               Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake meta.name;
                (* Refresh from the committed owner projection, then put the
                   TOML back on. The projection is durable keeper JSON, which
                   omits the TOML-owned fields on purpose
@@ -970,12 +973,14 @@ let run_keeper_cycle
                  | Error _ -> meta
                in
                Keeper_registry.mark_turn_measurement
+                 ~observation_token:(Some observation_token)
                  ~base_path:config.base_path
                  meta.name;
                (match Keeper_registry.get ~base_path:config.base_path meta.name with
                 | Some { current_turn_observation = Some { measurement = Some _; _ }; _ }
                   ->
                   Keeper_registry.set_turn_decision_stage
+                    ~observation_token:(Some observation_token)
                     ~base_path:config.base_path
                     meta.name
                     Keeper_registry.Decision_active_guard_ok
@@ -1028,6 +1033,7 @@ let run_keeper_cycle
                    try
                      Eio.Cancel.protect (fun () ->
                        Keeper_registry.mark_turn_finished
+                         ~observation_token
                          ~base_path:config.base_path
                          meta.name)
                    with
@@ -1050,6 +1056,8 @@ let run_keeper_cycle
                        start_background_turn_event_bus_drain ~clock;
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
+                           ~event_scope
+                           ~observation_token
                            { base_dir
                            ; build_turn_prompt
                            ; channel

@@ -7,6 +7,18 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_approvals_model.ml",
+    "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_surface_navigation.ml",
+    "bin/masc_tui_surface_navigation.mli",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render_prim.mli",
+    "bin/masc_tui_render_code.ml",
+    "bin/masc_tui_render_code.mli",
+    "bin/masc_tui_code_results.ml",
+    "bin/masc_tui_code_results.mli",
+    "bin/masc_tui_palette.ml",
+    "bin/masc_tui_palette.mli",
     "lib/tui_terminal_text.ml",
     "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",

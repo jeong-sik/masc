@@ -29,6 +29,7 @@ let execution_smoke_fixture_json () =
   `Assoc
     [
       ("generated_at", `String generated_at);
+      ("candle", Candle_observation.to_json Candle_observation.Off);
       ( "status",
         `Assoc
           [
@@ -227,6 +228,8 @@ let execution_smoke_fixture_json () =
               [
                 ("name", `String "dm-keeper");
                 ("portrait", portrait);
+                ("candle_balance_milli", `Null);
+                ("candle_account_revision", `Null);
                 ("status", `String "active");
                 ("tone", `String "bad");
                 ("state", `String "critical");
@@ -384,6 +387,8 @@ let execution_smoke_fixture_json () =
               [
                 ("name", `String "dm-keeper");
                 ("portrait", portrait);
+                ("candle_balance_milli", `Null);
+                ("candle_account_revision", `Null);
                 ("status", `String "active");
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);

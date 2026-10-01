@@ -363,7 +363,7 @@ let test_every_detail_block_starts_its_values_in_one_column () =
       columns
 ;;
 
-let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
+let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
   ; mkh_updated_at = Some 1700000000.
@@ -380,7 +380,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some Decode.Pass_drained
+      { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -446,7 +446,7 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "the body leaves the fleet key to the footer" false
     (contains "Fleet Memory Search" (lines unread))
 ;;
-let make_fleet_health keeper : Decode.memory_health_snapshot =
+let make_fleet_health keeper : Masc.Tui_decode_memory_health.memory_health_snapshot =
   { mhs_generated_at = 1000.0
   ; mhs_keepers = [ keeper ]
   ; mhs_refused_keepers = []
@@ -505,7 +505,7 @@ let body_lines ~cols ~budget state =
 let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
   let keeper =
     { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
-      Decode.mkh_librarian_failures = 3
+      Masc.Tui_decode_memory_health.mkh_librarian_failures = 3
     }
   in
   let state = make_state () in
@@ -589,13 +589,13 @@ let test_refused_keeper_rows_stay_inside_the_memory_budget () =
   in
   let refused =
     List.init 40 (fun index ->
-      { Decode.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
+      { Masc.Tui_decode_memory_health.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
       ; mkr_reason = "unsupported snapshot state"
       })
   in
   state.memory_health <- Some
     { (make_fleet_health (List.hd keepers)) with
-      Decode.mhs_keepers = keepers
+      Masc.Tui_decode_memory_health.mhs_keepers = keepers
     ; mhs_refused_keepers = refused
     };
   state.memory_health_cursor <- 2;
@@ -644,7 +644,7 @@ let test_the_memory_filter_bar_names_the_query_it_counted () =
             ~snapshot_bytes:1024 in
          let other = make_keeper_health ~keeper_id:"beta" ~facts:4
              ~snapshot_bytes:512 in
-         { Decode.mhs_generated_at = 1000.0
+         { Masc.Tui_decode_memory_health.mhs_generated_at = 1000.0
          ; mhs_keepers = [ keeper; other ]
          ; mhs_total_facts = 14
          ; mhs_total_observed_facts = 14
@@ -716,9 +716,9 @@ let test_render_memory_body_with_keepers () =
        trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
        range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
      mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
-       mcp_input = Decode.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
+       mcp_input = Masc.Tui_decode_memory_health.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
        mcp_request_bytes = 2048}}} in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -779,14 +779,14 @@ let test_render_memory_body_with_keepers () =
 (* A populated fleet: one keeper whose continuity lag the server could not
    take, one that is three atoms behind. Every count in it is a single digit,
    which is what makes the header's width the header's own doing. *)
-let fleet_health : Decode.memory_health_snapshot =
-  let with_lag (keeper : Decode.memory_keeper_health) lag =
+let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
+  let with_lag (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) lag =
     { keeper with
-      mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
+      mkh_librarian = { keeper.mkh_librarian with Masc.Tui_decode_memory_health.mlh_continuity_unread_atoms = lag } }
   in
   let unmeasured = with_lag (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) None in
   let behind = with_lag (make_keeper_health ~keeper_id:"beta" ~facts:4 ~snapshot_bytes:512) (Some 3) in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ unmeasured; behind ]
     ; mhs_refused_keepers = []
@@ -852,17 +852,17 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
 let test_the_librarian_line_names_a_stalled_gap () =
   let with_beta stalled =
     { fleet_health with
-      Decode.mhs_keepers =
+      Masc.Tui_decode_memory_health.mhs_keepers =
         List.map
-          (fun (keeper : Decode.memory_keeper_health) ->
+          (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
              if String.equal keeper.mkh_keeper_id "beta"
              then
                { keeper with
-                 mkh_librarian = { keeper.mkh_librarian with Decode.mlh_stalled = Some stalled } }
+                 mkh_librarian = { keeper.mkh_librarian with Masc.Tui_decode_memory_health.mlh_stalled = Some stalled } }
              else keeper)
           fleet_health.mhs_keepers }
   in
-  let render ?(stalled = Decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
+  let render ?(stalled = Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
       cursor =
     let state = make_state () in
     state.memory_health <- Some (with_beta stalled);
@@ -889,14 +889,14 @@ let test_the_librarian_line_names_a_stalled_gap () =
        (String.split_on_char '\n' (render 1)));
   check bool "a gap of one atom names that atom, not a range" true
     (contains "Librarian stalled · atom 5 is in neither the request nor memory"
-       (render ~stalled:(Decode.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
+       (render ~stalled:(Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
   (* A file the gap is read from that did not read is drawn, and drawn as
      not measured: a silent row would read as no gap. *)
   let unmeasured =
     render
       ~stalled:
-        (Decode.Stalled_unmeasured
-           { mls_cause = Decode.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
+        (Masc.Tui_decode_memory_health.Stalled_unmeasured
+           { mls_cause = Masc.Tui_decode_memory_health.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
       1
   in
   check bool "an unreadable read position is drawn as not measured" true
@@ -972,11 +972,11 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
     { base with
       mkh_librarian =
         { base.mkh_librarian with
-          Decode.mlh_state = Some librarian_state
-        ; mlh_last_failure_kind = Some Decode.Failure_exact_execution
+          Masc.Tui_decode_memory_health.mlh_state = Some librarian_state
+        ; mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution
         } }
   in
-  let health keeper : Decode.memory_health_snapshot =
+  let health keeper : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -1015,14 +1015,14 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
     String.concat "\n" !lines
   in
   let render keeper = render_health (health keeper) in
-  let stopped = render (keeper (Decode.Pass_stopped "the range could not be read")) in
+  let stopped = render (keeper (Masc.Tui_decode_memory_health.Pass_stopped "the range could not be read")) in
   check bool "a stopped pass reads as words" true (contains "Librarian · stopped on an error" stopped);
   check bool "the stopped pass draws its cause" true
     (contains "Librarian cause · the range could not be read" stopped);
   check bool "the failure kind reads as words" true
     (contains "last failure model call failed" stopped);
   check bool "no wire word reaches the row" false (contains "exact_execution_failure" stopped);
-  let uncommitted = render (keeper Decode.Pass_not_committed) in
+  let uncommitted = render (keeper Masc.Tui_decode_memory_health.Pass_not_committed) in
   check bool "an uncommitted pass reads as words" true
     (contains "Librarian · last pass saved nothing" uncommitted);
   check bool "an ending without a cause draws no cause row" false
@@ -1031,9 +1031,9 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
      keeper that decoded is still drawn. *)
   let with_refused =
     render_health
-      { (health (keeper Decode.Pass_drained)) with
-        Decode.mhs_refused_keepers =
-          [ { Decode.mkr_keeper_id = Some "ghost"
+      { (health (keeper Masc.Tui_decode_memory_health.Pass_drained)) with
+        Masc.Tui_decode_memory_health.mhs_refused_keepers =
+          [ { Masc.Tui_decode_memory_health.mkr_keeper_id = Some "ghost"
             ; mkr_reason = "keepers[1]: unsupported librarian state: paused"
             } ] }
   in
@@ -1047,7 +1047,7 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
 let test_render_memory_body_cursor_clamping () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:5 ~snapshot_bytes:512 in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -1584,7 +1584,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
     let texts = Option.get (Types.surface_row_texts state Types.Memory) in
     let effective = Types.surface_search_query Types.Memory query in
     check int "cursor matcher reaches every filtered row" expected
-      (List.length (List.filter (Types.palette_contains ~needle:effective) texts))
+      (List.length (List.filter (Masc_tui_pick_list.lowercase_contains ~needle:effective) texts))
   in
   List.iter (fun typing ->
     List.iter (fun query -> verify ~typing query 1)
@@ -1785,7 +1785,7 @@ let test_render_memory_body_sorting () =
   let state = make_state () in
   let k1 = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:2048 in
   let k2 = make_keeper_health ~keeper_id:"beta" ~facts:50 ~snapshot_bytes:1024 in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ k1; k2 ]
     ; mhs_refused_keepers = []
@@ -1822,7 +1822,7 @@ let test_render_memory_body_sorting () =
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
   check bool "render completed" true (List.length !lines > 0);
-  let selected () = Option.map (fun k -> k.Decode.mkh_keeper_id) (Types.selected_memory_keeper state) in
+  let selected () = Option.map (fun k -> k.Masc.Tui_decode_memory_health.mkh_keeper_id) (Types.selected_memory_keeper state) in
   check (option string) "Enter opens the first visible fact-sorted row" (Some "beta") (selected ());
   check bool "total facts are readable" true (List.exists (contains "Total 60 facts") !lines);
   check bool "ready state has a mark" true (List.exists (contains "+") !lines);
@@ -1853,7 +1853,7 @@ let test_render_memory_overflow_selection () =
         { keeper with
           mkh_source_read_error = Some "unreadable source snapshot"
         ; mkh_alerts =
-            [{ ma_code = Decode.Source_snapshot_read_error
+            [{ ma_code = Masc.Tui_decode_memory_health.Source_snapshot_read_error
              ; ma_label = "source"
              ; ma_message = "unreadable source snapshot"
              }]
@@ -2096,8 +2096,8 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
   let base =
     let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
     { keeper with
-      Decode.mkh_librarian =
-        { keeper.Decode.mkh_librarian with Decode.mlh_last_success_at = Some 1_775_000_000.0 }
+      Masc.Tui_decode_memory_health.mkh_librarian =
+        { keeper.Masc.Tui_decode_memory_health.mkh_librarian with Masc.Tui_decode_memory_health.mlh_last_success_at = Some 1_775_000_000.0 }
     }
   in
   let render ~detail keeper =
@@ -2142,16 +2142,16 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
     ];
   let unread =
     { base with
-      Decode.mkh_librarian =
-        { base.Decode.mkh_librarian with Decode.mlh_unread_atom_turns = None }
+      Masc.Tui_decode_memory_health.mkh_librarian =
+        { base.Masc.Tui_decode_memory_health.mkh_librarian with Masc.Tui_decode_memory_health.mlh_unread_atom_turns = None }
     }
   in
   check bool "a lag that did not read is an action, not a zero" true
     (contains "unread ?" (joined (render ~detail:false unread)));
-  let failing = { base with Decode.mkh_librarian_failures = 3 } in
+  let failing = { base with Masc.Tui_decode_memory_health.mkh_librarian_failures = 3 } in
   check bool "Librarian failures are an action" true
     (contains "failed 3 since server start" (joined (render ~detail:false failing)));
-  let unreadable = { base with Decode.mkh_read_error = Some "EACCES on facts.jsonl" } in
+  let unreadable = { base with Masc.Tui_decode_memory_health.mkh_read_error = Some "EACCES on facts.jsonl" } in
   check bool "a read error is an action" true
     (contains "ordinary read error: EACCES on facts.jsonl"
        (joined (render ~detail:false unreadable)))

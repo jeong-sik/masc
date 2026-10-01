@@ -10,7 +10,7 @@
     the same cause -- the panel and the keys treated "a cursor exists" and
     "the operator is answering" as one state. *)
 
-let render = "bin/masc_tui_render.ml"
+let render = "bin/masc_tui_render_approvals.ml"
 let render_prim = "bin/masc_tui_render_prim.ml"
 let executable = "bin/masc_tui.ml"
 
@@ -18,7 +18,7 @@ let executable = "bin/masc_tui.ml"
    way and no other does" has to read all of them, or a label answers by
    moving between them rather than by changing. *)
 let render_family =
-  [ render; render_prim; "bin/masc_tui_render_chat.ml" ]
+  [ render; "bin/masc_tui_render.ml"; render_prim; "bin/masc_tui_render_chat.ml" ]
 
 let literals_in_the_drawing ~needle =
   List.fold_left
@@ -87,7 +87,7 @@ let test_the_reader_reaches_its_own_ends () =
      text ends rather than counting the lines a second time. *)
   Alcotest.(check int) "both movers ask the renderer for the end" 2
     (Ast_grep.count_calls ~module_path:executable
-       ~callee:"Masc_tui_render.ask_question_scroll_limit");
+       ~callee:"Masc_tui_render_approvals.ask_question_scroll_limit");
   Alcotest.(check int) "the reader names the ends it answers" 1
     (literals_in_the_drawing ~needle:"Home/End: top/bottom");
   Alcotest.(check int) "and the page it already answered" 1
@@ -142,10 +142,10 @@ let test_the_editor_opens_saves_and_abandons () =
 let test_leaving_the_mode_closes_the_editor () =
   Alcotest.(check int) "leaving delegates to the shared answering cleanup" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:executable
-       ~binding_name:"leave_ask_answering" ~callee:"clear_ask_answering");
+       ~binding_name:"leave_ask_answering" ~callee:"Masc_tui_home.clear_ask_answering");
   List.iter (fun field_name ->
     Alcotest.(check int) (field_name ^ " is cleared by that cleanup") 1
-      (Ast_grep.count_field_clears_to_none ~module_path:"bin/masc_tui_types.ml"
+      (Ast_grep.count_field_clears_to_none ~module_path:"bin/masc_tui_home.ml"
          ~binding_name:"clear_ask_answering" ~field_name))
     ["ask_text_entry"; "ask_draft"; "pending_ask_submit"]
 ;;
@@ -210,11 +210,9 @@ let test_the_panel_draws_against_a_budget () =
    two rows apart, and it is the reading an operator picks the next ask by. *)
 let test_a_folded_ask_says_how_long_it_has_waited () =
   Alcotest.(check int) "the row reads the ask's clock" 1
-    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-       ~binding_name:"ask_summary_line" ~field_name:"ar_asked_at");
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"ask_summary_line" ~field_name:"ar_asked_at");
   Alcotest.(check int) "and spells it with the shared ladder" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"ask_summary_line" ~callee:"Message_layout.age_text");
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"ask_summary_line" ~callee:"Message_layout.age_text");
   (* [age_text] names both ends. Subtracting the two times here instead would
      let the difference be taken the wrong way round -- [span_text] floors at
      zero, so every row would read "0s" and the two rows would be alike
@@ -222,8 +220,7 @@ let test_a_folded_ask_says_how_long_it_has_waited () =
      the source cannot see a reversed subtraction; forbidding the subtraction
      is what it can see. *)
   Alcotest.(check int) "and does not do the arithmetic itself" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"ask_summary_line" ~callee:"Message_layout.span_text")
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"ask_summary_line" ~callee:"Message_layout.span_text")
 ;;
 
 let () =

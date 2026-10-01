@@ -149,6 +149,25 @@ describe('FetchScheduler', () => {
     expect(scheduler.fetching).toBe(false)
   })
 
+  it('requestNowAndWait queues and awaits a fresh fetch after an in-flight read', async () => {
+    const completes: Array<() => void> = []
+    const fetchFn = vi.fn(() => new Promise<void>(resolve => completes.push(resolve)))
+    const scheduler = new FetchScheduler(fetchFn)
+    scheduler.requestNow()
+    let finished = false
+    const refresh = scheduler.requestNowAndWait().then(() => { finished = true })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    completes[0]!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(finished).toBe(false)
+    completes[1]!()
+    await refresh
+    expect(finished).toBe(true)
+    scheduler.dispose()
+  })
+
   it('inflightPromise is accessible for await-based callers', async () => {
     let resolveFn!: () => void
     const fetchFn = vi.fn().mockImplementation(
@@ -183,4 +202,57 @@ describe('FetchScheduler', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
+  it('settles urgent requested completion from its own follow-up, not the old fetch', async () => {
+    let finishOld!: () => void
+    let finishForced!: () => void
+    const old = new Promise<void>(resolve => { finishOld = resolve })
+    const forced = new Promise<void>(resolve => { finishForced = resolve })
+    const fetchFn = vi.fn().mockReturnValueOnce(old).mockReturnValueOnce(forced)
+    const scheduler = new FetchScheduler(fetchFn)
+    const oldCompletion = scheduler.requestNow()
+    const forcedCompletion = scheduler.requestNow()
+    const coalescedCompletion = scheduler.requestNow()
+    const settled = vi.fn()
+    void forcedCompletion.then(settled)
+    finishOld()
+    await oldCompletion
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(settled).not.toHaveBeenCalled()
+    finishForced()
+    await Promise.all([forcedCompletion, coalescedCompletion])
+    expect(settled).toHaveBeenCalledTimes(1)
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports the actual requested fetch error and safely observes ignored completions', async () => {
+    const failure = new Error('source unavailable')
+    const fetchFn = vi.fn().mockRejectedValueOnce(failure).mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(undefined)
+    const scheduler = new FetchScheduler(fetchFn)
+    await expect(scheduler.requestNow()).rejects.toBe(failure)
+    // Same public path when a background caller intentionally ignores completion.
+    void scheduler.requestNow()
+    await vi.advanceTimersByTimeAsync(0)
+    await scheduler.requestNow()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it('dispose rejects an urgent pending completion while preserving the active fetch', async () => {
+    let finish!: () => void
+    const fetchFn = vi.fn().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+      .mockResolvedValueOnce(undefined)
+    const scheduler = new FetchScheduler(fetchFn)
+    const active = scheduler.requestNow()
+    const pending = scheduler.requestNow()
+    scheduler.dispose()
+    await expect(pending).rejects.toThrow('Pending refresh was cancelled')
+    finish()
+    await active
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await scheduler.requestNow()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
 })

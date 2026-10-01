@@ -46,8 +46,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(executable, description="Work task rows preserve state on resize",
-                            interact=interact, prepare_workspace=prepare,
-                            terminal_rows=32)
+                            interact=interact, prepare_workspace=prepare)
 
 
 if __name__ == "__main__":

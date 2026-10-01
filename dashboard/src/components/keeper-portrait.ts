@@ -1,7 +1,9 @@
-import { keeperEquipmentKey, type KeeperPortraitReading } from '../api/schemas/keeper-portrait'
+import { keeperEquipmentKey, type KeeperEquipment, type KeeperPortraitReading } from '../lib/keeper-portrait'
 // Keeper portrait: the name's body wearing the server-observed equipment.
 //
-// GET /api/v1/keepers/:name/portrait.png?size=N is authorised like the
+// GET /api/v1/keepers/:name/portrait.png?size=N&expected_equipment=JSON
+// binds the bytes to the observed equipment using the existing strict codec.
+// A changed current outfit is refused before PNG/304 publication. It is authorised like the
 // keeper's other reads: open on a loopback server, a token once HTTP auth is
 // strict. A bare <img src> cannot send the dashboard's token, so the PNG is
 // fetched with authHeaders() and shown through an object URL, the way
@@ -31,12 +33,13 @@ export const PORTRAIT_MAX_PX = 512
 // Pixels requested per CSS pixel, so the portrait stays sharp on a 2x screen.
 const DEVICE_PIXELS_PER_CSS_PIXEL = 2
 
-export function keeperPortraitUrl(name: string, cssPx: number): string {
+export function keeperPortraitUrl(name: string, cssPx: number, expectedEquipment?: KeeperEquipment): string {
   const px = Math.min(
     PORTRAIT_MAX_PX,
     Math.max(PORTRAIT_MIN_PX, Math.round(cssPx * DEVICE_PIXELS_PER_CSS_PIXEL)),
   )
   return `/api/v1/keepers/${encodeURIComponent(name)}/portrait.png?size=${px}`
+    + (expectedEquipment === undefined ? '' : `&expected_equipment=${encodeURIComponent(JSON.stringify(expectedEquipment))}`)
 }
 
 /** The PNG at [path], asked for with the dashboard's token. Throws
@@ -63,7 +66,7 @@ export async function fetchKeeperPortrait(
 type Portrait =
   | { kind: 'loading'; identity: string }
   | { kind: 'shown'; identity: string; objectUrl: string }
-  | { kind: 'failed'; identity: string }
+  | { kind: 'failed'; identity: string; message: string }
 
 export interface KeeperPortraitProps {
   name: string
@@ -75,7 +78,7 @@ export interface KeeperPortraitProps {
 }
 
 export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortraitProps) {
-  const path = keeperPortraitUrl(name, sizePx)
+  const path = keeperPortraitUrl(name, sizePx, reading.state === 'ready' ? reading.equipment : undefined)
   const equipmentKey = reading.state === 'ready' ? keeperEquipmentKey(reading.equipment) : null
   const identity = JSON.stringify([path, equipmentKey])
   const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', identity })
@@ -96,8 +99,11 @@ export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortra
         objectUrl = URL.createObjectURL(blob)
         setPortrait({ kind: 'shown', identity, objectUrl })
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setPortrait({ kind: 'failed', identity })
+      .catch(error => {
+        if (!controller.signal.aborted) setPortrait({ kind: 'failed', identity,
+          message: error instanceof ApiRequestError && error.status === 409
+            ? '초상화 장비 관측이 변경되었습니다. 최신 Keeper 관측이 필요합니다.'
+            : '초상화를 읽지 못했습니다.' })
       })
     return () => {
       controller.abort()
@@ -112,7 +118,7 @@ export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortra
   const current: Portrait = portrait.identity === identity ? portrait : { kind: 'loading', identity }
   switch (current.kind) {
     case 'failed':
-      return fallback
+      return html`<span title=${current.message} data-testid="keeper-portrait-refused">${fallback}</span>`
     case 'loading':
       return html`<span
         class="block shrink-0 rounded-full"
@@ -130,7 +136,7 @@ export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortra
         decoding="async"
         class="block shrink-0 rounded-full"
         data-testid="keeper-portrait"
-        onError=${() => setPortrait({ kind: 'failed', identity })}
+        onError=${() => setPortrait({ kind: 'failed', identity, message: '초상화 이미지가 유효하지 않습니다.' })}
       />`
   }
 }

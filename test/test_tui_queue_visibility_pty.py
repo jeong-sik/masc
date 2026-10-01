@@ -124,6 +124,7 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
     def interact(process, fd, _slave_fd, output, _base_path):
         try:
             h.open_atomic_chat(process, fd, output)
+            h.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
             h.send_and_wait(process, fd, output, b"queued-one", h.composer_showing(b"queued-one"))
             os.write(fd, b"\r")
             if not h.wait_for_fixture_event(process, fd, output, fixture.first_post_received, timeout=5):
@@ -267,6 +268,7 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
 
         try:
             h.open_atomic_chat(process, fd, output)
+            h.send_and_wait(process, fd, output, b"\x04\x04", CHAT)
             h.send_and_wait(process, fd, output, b"accepted-before-cut", h.composer_showing(b"accepted-before-cut"))
             h.send_and_wait(process, fd, output, b"\r", b"1 queued at Keeper")
             accepted = capture(output, "accepted-before-disconnect")
@@ -349,10 +351,85 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
     )
 
 
+def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_priority=False) -> None:
+    fixture = h.AtomicChatFixture()
+    priority_seen = threading.Event()
+    priority_release = threading.Event()
+    priority_calls = []
+
+    def priority(body):
+        request = json.loads(body)
+        assert request.get("interrupt_token") is None, "priority must not interrupt existing work"
+        priority_calls.append(request)
+        priority_seen.set()
+        assert priority_release.wait(timeout=15), "priority receipt fixture was not released"
+        if fail_priority and len(priority_calls) == 2:
+            return 503, {"error": "fixture priority refused"}
+        return 200, {"request_id": request["request_id"], "prioritized": True,
+                     "signalled": False, "detail": "fixture priority confirmed"}
+
+    fixture.fixtures["/api/v1/keepers/turn/run-next"] = h.RequestHttpResponse(priority)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Info")
+            h.send_and_wait(process, fd, output, b"m", CHAT)
+            h.wait_for_output(process, fd, output, "기존 작업 처리 중".encode(), start=0, timeout=10)
+            h.send_and_wait(process, fd, output, b"/priority on", h.composer_showing(b"/priority on"))
+            h.send_and_wait(process, fd, output, b"\r", b"User input auto-next priority: ON")
+            for message in (b"compact-one", b"compact-two"):
+                h.send_and_wait(process, fd, output, message, h.composer_showing(message))
+                os.write(fd, b"\r")
+            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            assert h.wait_for_fixture_event(process, fd, output, priority_seen, timeout=5)
+            pending = h.resize_and_wait(process, fd, output, rows=30, columns=80,
+                needle="내 메시지 2건 대기".encode(), controls=(h.FULL_REDRAW,))
+            text = h.screen_text(pending)
+            assert "다음 순서로 접수됨".encode() not in text, "unconfirmed priority shown as confirmed"
+            priority_release.set()
+            expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 접수됨"
+            h.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
+            # A changed geometry owns a redraw; repeated 80x30 does not.
+            h.resize_and_wait(process, fd, output, rows=30, columns=100,
+                needle=expected.encode(), controls=(h.FULL_REDRAW,))
+            final = h.resize_and_wait(process, fd, output, rows=30, columns=80,
+                needle=expected.encode(), controls=(h.FULL_REDRAW,))
+            text = h.screen_text(final)
+            rows = h.screen_rows(final)
+            status = [row for row in rows if "내 메시지 2건 대기".encode() in row]
+            assert len(status) == 1, "pending input has duplicate status owners"
+            assert expected.encode() in status[0], "receipt evidence clipped from composite status"
+            assert "Esc:중단".encode() in status[0], "the actual stop action was clipped"
+            for old in (b"Current direct conversation", b"Queue (", b"Requesting priority", b"(waiting", b"(running"):
+                assert old not in text, f"obsolete repeated status remained: {old!r}"
+            assert not fixture.interrupt_requests and not fixture.release.is_set(), "message submission stopped existing work"
+            if evidence_dir:
+                evidence_dir.mkdir(parents=True, exist_ok=True)
+                name = "compact-refused" if fail_priority else "compact-confirmed"
+                (evidence_dir / f"{name}-80x30.ansi").write_bytes(bytes(output))
+                (evidence_dir / f"{name}-80x30.txt").write_bytes(text)
+            fixture.release.set()
+            h.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
+            os.write(fd, b"q")
+        finally:
+            priority_release.set()
+            fixture.release.set()
+            fixture.release_interrupt.set()
+
+    h.run_terminal_scenario(executable,
+        description="Compact chat pending input priority refusal" if fail_priority else "Compact chat pending input confirmed priority",
+        interact=interact, http_fixtures=fixture.fixtures, refresh=0.2,
+        extra_env={"NO_COLOR": "1"})
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable")
     parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
+    run_compact(os.path.abspath(args.executable), args.evidence_dir)
+    run_compact(os.path.abspath(args.executable), args.evidence_dir, fail_priority=True)
     run(os.path.abspath(args.executable), args.evidence_dir)
     print("queue remains visible across admission: PASS")

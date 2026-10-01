@@ -14,7 +14,6 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     runtime: { state: 'idle' },
     measurement: { captured: false },
     invariants: {
-      no_runtime_before_measurement: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -44,7 +43,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
 describe('invariantRows', () => {
   it('returns one row per current invariant', () => {
     const rows = invariantRows(makeSnapshot())
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(2)
   })
 
   it('marks all invariants as ok when all true', () => {
@@ -55,19 +54,17 @@ describe('invariantRows', () => {
   it('marks broken invariant as not ok', () => {
     const rows = invariantRows(makeSnapshot({
       invariants: {
-        no_runtime_before_measurement: false,
-        event_priority_monotone: true,
+        event_priority_monotone: false,
         phase_derivation_agreement: true,
       },
     }))
-    expect(rows.filter(r => r.ok).length).toBe(2)
+    expect(rows.filter(r => r.ok).length).toBe(1)
   })
 
   it('includes labels for each invariant', () => {
     const rows = invariantRows(makeSnapshot())
     const labels = rows.map(r => r.label)
-    expect(labels).toContain('Runtime 순서')
-    expect(labels).toContain('이벤트 우선순위')
+    expect(labels).toContain('Measurement 소유권')
     expect(labels).toContain('Phase 유도 일치')
   })
 
@@ -93,8 +90,7 @@ describe('deriveOperationalInsight', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
         invariants: {
-          no_runtime_before_measurement: false,
-          event_priority_monotone: true,
+          event_priority_monotone: false,
           phase_derivation_agreement: true,
         },
       }),

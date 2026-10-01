@@ -7,6 +7,7 @@ open Alcotest
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module EB = Masc.Keeper_unified_turn_event_bus
+module Scope = Masc.Keeper_turn_scope
 
 let dummy_event payload =
   { Agent_core.Event_bus.meta =
@@ -98,7 +99,8 @@ let test_record_fsm_tool_transitions_is_pure () =
 
 let test_drain_cancel_exchange () =
   let open EB.For_testing in
-  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
   check
     bool
     "cancel starts Inactive"
@@ -125,7 +127,8 @@ let test_drain_cancel_exchange () =
 
 let test_unsubscribe_closes_lifecycle_before_fiber_claims () =
   let open EB.For_testing in
-  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
   (* Simulate [unsubscribe] running before a freshly-forked background fiber
      reaches [Atomic.compare_and_set]. The lifecycle must be [Closed] so the
      late fiber sees it and exits instead of leaking a polling loop. *)
@@ -145,7 +148,8 @@ let test_unsubscribe_closes_lifecycle_before_fiber_claims () =
 
 let test_state_pending_count_integrity_under_concurrent_updates () =
   let open EB.For_testing in
-  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
   let n = 100 in
   let domains =
     List.init 4 (fun _ ->
@@ -182,7 +186,8 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
   let captured_bus = Agent_core.Event_bus.create () in
   let later_bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper captured_bus;
-  let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"a" ~scope () in
   let unsubscribed = ref false in
   let unsubscribe_once () =
     if not !unsubscribed
@@ -196,8 +201,11 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
       Event_bus_slots.set_keeper captured_bus)
     (fun () ->
        Event_bus_slots.set_keeper later_bus;
-       Agent_core.Event_bus.publish captured_bus (tool_called "captured");
-       Agent_core.Event_bus.publish later_bus (tool_called "later");
+       let publisher = match EB.publishing_bus t with
+         | Some publisher -> Scope.bus publisher ~scope
+         | None -> fail "captured subscriber lost its publishing bus" in
+       Agent_core.Event_bus.publish publisher (tool_called "captured");
+       Agent_core.Event_bus.publish (Scope.bus later_bus ~scope) (tool_called "later");
        let summary = EB.drain ~site:"test_creation_bus" t in
        check int "captured bus only" 1 summary.event_count;
        check
@@ -213,7 +221,7 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
          1
          (EB.pending_tool_count t);
        unsubscribe_once ();
-       Agent_core.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
+       Agent_core.Event_bus.publish (Scope.bus captured_bus ~scope) (tool_called "after-unsubscribe");
        let summary_after_unsubscribe =
          EB.drain ~site:"test_after_unsubscribe" t
        in
@@ -229,14 +237,15 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
   let injected_bus = Agent_core.Event_bus.create () in
   let fallback_bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper fallback_bus;
-  let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~scope () in
   Fun.protect
     ~finally:(fun () ->
       EB.unsubscribe t;
       Event_bus_slots.set_keeper fallback_bus)
     (fun () ->
-       Agent_core.Event_bus.publish fallback_bus (tool_called "fallback");
-       Agent_core.Event_bus.publish injected_bus (tool_called "injected");
+       Agent_core.Event_bus.publish (Scope.bus fallback_bus ~scope) (tool_called "fallback");
+       Agent_core.Event_bus.publish (Scope.bus injected_bus ~scope) (tool_called "injected");
        let summary = EB.drain ~site:"test_injected_bus" t in
        check int "injected bus only" 1 summary.event_count;
        check
@@ -248,7 +257,8 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
 
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
-  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
   set_drain_cancel t (Active (Obj.magic 42));
   (* The previous [unsubscribe] reconstructed [Active cc] as the CAS [seen]
      value; physical inequality made the CAS fail forever and the close loop
@@ -277,7 +287,8 @@ let test_background_drain_continues_across_multiple_polls () =
   @@ fun () ->
   let bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper bus;
-  let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"a" ~scope () in
   let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
   let rec wait_for_event_count expected attempts =
     if (EB.For_testing.get_state t).summary.event_count >= expected
@@ -294,13 +305,76 @@ let test_background_drain_continues_across_multiple_polls () =
       | None -> ()
       | Some cc -> Eio.Cancel.cancel cc (Failure "background_drain_test_done"))
     (fun () ->
-       Agent_core.Event_bus.publish bus (tool_called "first");
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "first");
        EB.start_background_drain ~clock:env#clock t;
        check bool "first event drained" true (wait_for_event_count 1 20);
-       Agent_core.Event_bus.publish bus (tool_called "second");
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "second");
        check bool "second event drained" true (wait_for_event_count 2 20);
-       Agent_core.Event_bus.publish bus (tool_called "third");
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "third");
        check bool "background drain keeps polling" true (wait_for_event_count 3 20))
+;;
+
+let test_execution_scope_isolates_queue_tracker_and_fsm () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-scope-fsm-" ".jsonl" in
+  let previous = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG" in
+  Unix.putenv "MASC_KEEPER_TRANSITION_LOG" path;
+  Fun.protect ~finally:(fun () ->
+    (match previous with
+     | Some value -> Unix.putenv "MASC_KEEPER_TRANSITION_LOG" value
+     | None -> Unix.unsetenv "MASC_KEEPER_TRANSITION_LOG");
+    Sys.remove path) (fun () ->
+    let bus = Agent_core.Event_bus.create () in
+    let scope_a = Scope.create ~keeper_turn_id:1 in
+    let scope_b = Scope.create ~keeper_turn_id:1 in
+    let published_a = Scope.bus bus ~scope:scope_a in
+    let published_b = Scope.bus bus ~scope:scope_b in
+    let a_counts = ref [] and b_counts = ref [] in
+    let a = EB.create ~event_bus:bus ~keeper_name:"a" ~scope:scope_a
+        ~on_pending_count_change:(fun count -> a_counts := count :: !a_counts) () in
+    let b = EB.create ~event_bus:bus ~keeper_name:"a" ~scope:scope_b
+        ~on_pending_count_change:(fun count -> b_counts := count :: !b_counts) () in
+    let evidence () = In_channel.with_open_bin path In_channel.input_all in
+    Fun.protect ~finally:(fun () -> EB.unsubscribe a; EB.unsubscribe b) (fun () ->
+      Agent_core.Event_bus.publish published_b (tool_called "b-tool");
+      ignore (EB.drain b);
+      check int "B starts its own pending tool" 1 (EB.pending_tool_count b);
+      let before = evidence () in
+      check bool "actual B drain emitted FSM evidence" true (String.length before > 0);
+      Agent_core.Event_bus.publish published_a (tool_called "a-tool");
+      Agent_core.Event_bus.publish published_a (tool_completed "a-tool");
+      Agent_core.Event_bus.publish bus (tool_completed "unscoped");
+      (* A producer-owned foreign scope survives publishing via B's handle. *)
+      let foreign = tool_completed "foreign" in
+      let foreign_scope = match Agent_core.Caller_scope.of_string "foreign" with
+        | Ok scope -> scope | Error message -> fail message in
+      Agent_core.Event_bus.publish published_b
+        { foreign with meta = { foreign.meta with caller_scope = Some foreign_scope } };
+      Agent_core.Event_bus.publish published_b
+        (dummy_event (Agent_core.Event_bus.ToolCalled
+          { invocation = invocation "other-agent"; agent_name = "other"
+          ; tool_name = "other-agent"; input = `Null }));
+      let b_summary = EB.drain b in
+      check int "A/foreign/unscoped input never enters B tracker" 1 b_summary.event_count;
+      check int "late A completion cannot release B tool" 1 (EB.pending_tool_count b);
+      check (list int) "B count callback is untouched" [1] !b_counts;
+      check string "B drain emits no FSM evidence for A" before (evidence ());
+      ignore (EB.drain a);
+      check int "A drains its own pair" 1 (EB.tool_completed_count a);
+      check int "A own pair settles" 0 (EB.pending_tool_count a);
+      check bool "A pair has no integrity error" true (EB.integrity_error a = None);
+      Agent_core.Event_bus.publish published_b (tool_completed "b-tool");
+      (* Subscription capacity is 256; foreign traffic above that boundary
+         must not evict the B completion already waiting in B's queue. *)
+      for _ = 1 to 257 do
+        Agent_core.Event_bus.publish published_a (tool_called "flood")
+      done;
+      ignore (EB.drain b);
+      check int "foreign flood cannot evict B completion" 0 (EB.pending_tool_count b);
+      check int "B records its own completion" 1 (EB.tool_completed_count b);
+      check (list int) "B gets exactly own count changes" [0; 1] !b_counts;
+      check bool "B tracker sees no foreign unmatched completion" true
+        (EB.integrity_error b = None)))
 ;;
 
 let () =
@@ -319,7 +393,9 @@ let () =
             test_take_drain_cancel_clears_active_without_spin
         ] )
     ; ( "concurrency"
-      , [ test_case "pure transitions under concurrent domains" `Quick
+      , [ test_case "execution scope isolates queue, tracker and FSM" `Quick
+            test_execution_scope_isolates_queue_tracker_and_fsm
+        ; test_case "pure transitions under concurrent domains" `Quick
             test_state_pending_count_integrity_under_concurrent_updates
         ; test_case "event bus is intentionally process-wide" `Quick
             test_keeper_event_bus_is_intentionally_process_wide

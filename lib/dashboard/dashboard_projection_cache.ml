@@ -49,7 +49,11 @@ let candle_observation_sequence ~base_path ~request_sequence observation =
   Stdlib.Mutex.protect candle_observation_mu (fun () ->
     match Hashtbl.find_opt candle_observations base_path with
     | Some (latest_request, sequence, previous) when request_sequence > latest_request ->
-      let sequence = if observation = previous then sequence else request_sequence in
+      (* A gap may hide an older in-flight read of different state. Reusing an
+         earlier identity would let that read outrank this newer observation. *)
+      let sequence =
+        if request_sequence = latest_request + 1 && observation = previous
+        then sequence else request_sequence in
       Hashtbl.replace candle_observations base_path (request_sequence, sequence, observation);
       sequence
     | Some _ -> request_sequence

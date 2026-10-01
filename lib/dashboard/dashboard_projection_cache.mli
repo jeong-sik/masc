@@ -12,7 +12,10 @@ val with_current_keeper_observations :
   config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
 (** Refresh Keeper equipment, wallet balances, Item-account revisions and currency supply together in
     an operator/execution/briefing envelope.
-    Call after outer HTTP caches as well as the metadata snapshot cache. *)
+    Call after outer HTTP caches as well as the metadata snapshot cache.
+    [candle_observation_sequence] orders fresh reads independently of cached
+    metadata generations; consumers reject an older observation in the same
+    server incarnation. *)
 
 val get_or_compute_snapshot_json :
   config:Workspace_utils.config ->

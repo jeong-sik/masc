@@ -208,7 +208,7 @@ function ModelContextEditor({ modelId, value, draft, disabled, onChange }: {
 }) {
   return html`
     <div class="rt-field" style=${{ marginTop: '9px', flexWrap: 'wrap' }}>
-      <label class="sub-k" for=${`model-context-${modelId}`}>컨텍스트 토큰</label>
+      <label class="sub-k" for=${`model-context-${modelId}`}>요청 컨텍스트 토큰</label>
       <input
         id=${`model-context-${modelId}`}
         class="rt-input-sm mono"
@@ -1148,7 +1148,7 @@ export function RuntimeEnvironmentEditor({
            masc #21521 / agentCore models.toml). Showing it back to the operator here
            invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
-        <p class="rt-note">컨텍스트를 바꾼 뒤 상단에서 저장하세요. 이 모델을 공유하는 런타임의 MASC 컨텍스트 예산에 적용됩니다. 클라이언트의 실제 컨텍스트 크기는 해당 모델과 클라이언트의 적용 상태를 확인하세요.</p>
+        <p class="rt-note">컨텍스트를 바꾼 뒤 상단에서 저장하세요. 이 모델을 공유하는 런타임의 MASC 컨텍스트 예산에 적용됩니다. 이 숫자는 요청값이며 실제 사용 가능 크기를 보장하지 않습니다. 실제값은 실행 후 턴 상세의 클라이언트 보고값에서 확인하세요. 관측이 없으면 미측정입니다.</p>
         <input
           class="rt-search mono"
           placeholder="모델 검색 — id / api-name"
@@ -1163,7 +1163,7 @@ export function RuntimeEnvironmentEditor({
               <div class="rt-model-h">
                 <span class="rt-model-id mono">${model.id}</span>
                 <span class="rt-model-api mono">${model.apiName}</span>
-                <span class="rt-model-ctx mono">${protoContext(model.maxContext)}</span>
+                <span class="rt-model-ctx mono">요청 ${protoContext(model.maxContext)}</span>
               </div>
               <div class="rt-caps">
                 ${capChip(model.toolsSupport, 'tools')}
@@ -1379,7 +1379,7 @@ export function RuntimeEnvironmentEditor({
                     ${effectiveEnabled ? null : html`<span class="rt-default-tag">disabled</span>`}
                   </div>
                   <div class="rt-bind-sub mono">
-                    ${protoContext(model?.maxContext ?? null)}${binding.priceInput != null
+                    요청 ${protoContext(model?.maxContext ?? null)}${binding.priceInput != null
                       ? html` · $${binding.priceInput}/$${binding.priceOutput ?? '—'} per M`
                       : null}
                   </div>

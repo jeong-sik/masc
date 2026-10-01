@@ -75,10 +75,10 @@ let home_decision_rows (state : state) =
     | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
     | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
   in
-  let tasks = match state.tasks_error, state.operator_stalled with
-    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | None, Some rows ->
+  let tasks = match state.operator_stalled with
+    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
           Home_request (Home_operator_task row.task_id),
           Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
@@ -207,7 +207,8 @@ let home_initial_reading_ready state selected =
   | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state && Option.is_some state.operator_stalled
+      approvals_reading_current state
+      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 

@@ -669,9 +669,9 @@ let render_approvals (state : state) =
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third

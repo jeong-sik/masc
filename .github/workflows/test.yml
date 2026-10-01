@@ -466,6 +466,15 @@ jobs:
           done
           exit "${status}"
 
+      - name: Upload equipped portrait HTTP evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-equipped-portrait
+          path: ${{ runner.temp }}/candle-equipped-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Capture Navigation fixture PTY screenshots
         if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
         env:

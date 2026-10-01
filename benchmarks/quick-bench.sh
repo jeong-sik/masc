@@ -7,7 +7,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MASC_URL="${MASC_URL:-http://127.0.0.1:8935/mcp}"
+# No default URL. masc_broadcast writes a real message and masc_runtime_verify
+# sends a real chat completion to every endpoint, so a default of the
+# production server (8935) would spend its quota and post to its Board. Point
+# this at an isolated server on port 9400 or above (docs/BENCHMARK-RUNBOOK.md).
+MASC_URL="${MASC_URL:?set MASC_URL to the /mcp URL of an isolated benchmark server on port 9400 or above, see docs/BENCHMARK-RUNBOOK.md}"
 MASC_AGENT="${MASC_AGENT:-bench}"
 MASC_TOKEN="${MASC_TOKEN:-}"
 BENCH_WORKSPACE_PATH="${BENCH_WORKSPACE_PATH:-$ROOT_DIR}"
@@ -208,7 +212,6 @@ bench_bootstrap_agent
 printf "%-28s %5dms\n" "masc_start" "$BENCH_LAST_MS"
 
 measure_avg "masc_status" "masc_status" '{}' "$BENCH_ITERATIONS"
-measure_avg "masc_agents" "masc_agents" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_tasks" "masc_tasks" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_messages (5)" "masc_messages" '{"limit":5}' "$BENCH_ITERATIONS"
 measure_avg "masc_broadcast" "masc_broadcast" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,content:"quick-bench",format:"compact"}')" "$BENCH_ITERATIONS"

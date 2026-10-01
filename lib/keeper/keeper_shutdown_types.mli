@@ -49,6 +49,8 @@ type dashboard_purge_artifact =
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
+  | Keeper_board_attention_candidates_artifact
+  | Keeper_board_attention_partitions_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =

@@ -154,7 +154,8 @@ let load_active_tasks (base_path : string) :
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
-    * Masc_tui_agenda.stalled list option =
+    * Masc_tui_agenda.stalled Masc_tui_agenda.reading
+    * unit Masc_tui_agenda.reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -165,7 +166,8 @@ let load_active_tasks (base_path : string) :
       , []
       , Some reason
       , None
-      , None )
+      , Masc_tui_agenda.Read_failed reason
+      , Masc_tui_agenda.Not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -183,7 +185,7 @@ let load_active_tasks (base_path : string) :
          failing the whole load: the tasks are still worth showing, and the
          reason is reported beside them rather than as an absence of links. *)
       let goals_for_task, goal_link_error =
-        match Workspace_goal_index.read_goal_task_links_r config with
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
         | Ok goal_task_links ->
           let index =
@@ -218,15 +220,21 @@ let load_active_tasks (base_path : string) :
          assignee has a Keeper queue reads the registry and the meta store, and
          a frame that touches the filesystem per row is a frame that stutters.
          Same rows, same load, same answer the rejection delivery computes. *)
-      , Some
-          (Masc.Operator_task_attention.project ~config
-             observation.observed_backlog.tasks
-           |> List.map (fun item ->
-                { Masc_tui_agenda.task_id =
-                    Masc.Operator_task_attention.task_id item
-                ; what = Masc.Operator_task_attention.summary item
-                ; since_iso = Masc.Operator_task_attention.waiting_since item
-                })) )
+      , (match recovery_error with
+         | Some reason -> Masc_tui_agenda.Read_failed reason
+         | None ->
+             Masc_tui_agenda.Read
+               (Masc.Operator_task_attention.project ~config
+                  observation.observed_backlog.tasks
+                |> List.map (fun item ->
+                     { Masc_tui_agenda.task_id =
+                         Masc.Operator_task_attention.task_id item
+                     ; what = Masc.Operator_task_attention.summary item
+                     ; since_iso = Masc.Operator_task_attention.waiting_since item
+                     })))
+      , (match goal_link_error with
+         | Some reason -> Masc_tui_agenda.Read_failed reason
+         | None -> Masc_tui_agenda.Read []) )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -259,8 +267,9 @@ let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
   state.log_entries <- snapshot.entries;
   state.log_error <- snapshot.error;
+  let _, cols = Masc_tui_render_prim.get_terminal_size () in
   state.log_scroll <-
-    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
+    min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
 
 (** Load the newest physical metrics rows across months and rotations. *)
 let load_selected_keeper_logs (state : state) (base_path : string)
@@ -344,7 +353,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, task_goal_links =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
@@ -374,6 +383,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
      left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
+  state.task_goal_links <- task_goal_links;
   state.goals_to_confirm <- load_goals_to_confirm base_path;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
@@ -505,7 +515,8 @@ let clear_local_workspace (state : state) =
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
-  state.operator_stalled <- None;
+  state.operator_stalled <- Masc_tui_agenda.Not_read;
+  state.task_goal_links <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
   state.keepers <- [];
@@ -1279,7 +1290,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
-  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+  rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
 }
 
 (** Load the Runtime operator surface from its identity projection and optional
@@ -1308,7 +1319,7 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              match probe_result with
              | Error detail -> Error ("runtime probe load failed: " ^ detail)
              | Ok probe_json ->
-                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
                   | Ok probe -> Ok probe
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
@@ -1401,39 +1412,6 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
-(* One Team row per brief. A row with no name is not a Keeper anyone can act
-   on and is left out; the liveness counts above still count it. A phase or a
-   turn age this build cannot read stays visible as such on its own row
-   rather than failing the whole snapshot for one Keeper. *)
-let overview_keeper_rows_of_briefs briefs =
-  List.filter_map
-    (fun brief ->
-      match Yojson.Safe.Util.member "name" brief with
-      | `String name when String.trim name <> "" ->
-          let okp_phase =
-            match Yojson.Safe.Util.member "phase" brief with
-            | `Null -> Keeper_phase_absent
-            | `String word -> (
-                match Tui_decode.keeper_phase_of_string word with
-                | Some phase -> Keeper_phase phase
-                | None -> Keeper_phase_unreadable word)
-            | other -> Keeper_phase_unreadable (Yojson.Safe.to_string other)
-          in
-          let okp_last_turn_ago_s =
-            match Yojson.Safe.Util.member "last_turn_ago_s" brief with
-            | `Float seconds -> Some seconds
-            | `Int seconds -> Some (float_of_int seconds)
-            | _ -> None
-          in
-          let okp_paused =
-            match Yojson.Safe.Util.member "paused" brief with
-            | `Bool paused -> Some paused
-            | _ -> None
-          in
-          Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
-      | _ -> None)
-    briefs
-
 (* Plan usage on Usage names each account's email. The route needs Admin,
    and a read that fails is said beside the section rather than drawn as
    accounts without an email. The section names the failure, so the reason is
@@ -1501,25 +1479,6 @@ let load_overview ~(host : string) ~(port : int) :
         let counts = keeper_liveness_of_briefs keeper_briefs in
         { counts with klc_unreadable = counts.klc_unreadable + n_unread }
       in
-      (* An unread Keeper gets a Team row too, so the block and the count
-         name the same fleet; its phase is the reason the row was not read. *)
-      let ov_keeper_rows =
-        overview_keeper_rows_of_briefs keeper_briefs
-        @ List.map
-            (fun (unread : Keeper_snapshot_unread.t) ->
-              let reason =
-                match unread.reason with
-                | Keeper_snapshot_unread.Meta_read_failed detail ->
-                    "metadata unread: " ^ detail
-                | Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
-              in
-              { okp_name = unread.name
-              ; okp_phase = Keeper_phase_unreadable reason
-              ; okp_last_turn_ago_s = None
-              ; okp_paused = None
-              })
-            keepers_unread
-      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
       Ok
@@ -1528,7 +1487,6 @@ let load_overview ~(host : string) ~(port : int) :
           ov_keepers;
           ov_keeper_listing;
           ov_keeper_liveness;
-          ov_keeper_rows;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the

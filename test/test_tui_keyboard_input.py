@@ -15209,6 +15209,103 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         release_slow.set()
 
 
+def run_http_conditional_read_regression(executable: str) -> None:
+    """A dashboard read sends the tag of the answer it kept, and a 304 answers
+    with that answer. The briefing is the first read of every full pass and
+    the goal tree the last one on the Overview, so a slow goal tree keeps one
+    pass out across several ticks; the briefing's tag must still go out on
+    the pass after it."""
+    fixtures = overview_event_http_fixtures()
+    briefing = fixtures["/api/v1/dashboard/briefing"]
+    if not isinstance(briefing, tuple):
+        raise AssertionError("briefing fixture must be a response tuple")
+    _status, briefing_payload = briefing
+    briefing_body = json.dumps(briefing_payload).encode()
+    briefing_tag = 'W/"briefing-fixture"'
+    reads = {"untagged": 0, "tagged": 0}
+    slow_goals = threading.Event()
+    slow_goals_done = threading.Event()
+
+    def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
+        if headers.get("if-none-match") == briefing_tag:
+            reads["tagged"] += 1
+            return RawHttpResponse(
+                304, b"", content_type="application/json",
+                headers=(("ETag", briefing_tag),),
+            )
+        reads["untagged"] += 1
+        return RawHttpResponse(
+            200, briefing_body, content_type="application/json",
+            headers=(("ETag", briefing_tag),),
+        )
+
+    def answer_goals() -> HttpResponse:
+        if slow_goals.is_set() and not slow_goals_done.is_set():
+            # Longer than three refresh ticks at refresh=0.5.
+            time.sleep(1.6)
+            slow_goals_done.set()
+        return empty_goals_fixture()
+
+    fixtures["/api/v1/dashboard/briefing"] = HeadersHttpResponse(answer_briefing)
+    fixtures[DASHBOARD_GOALS_PATH] = answer_goals
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
+        wait_for_output(
+            process, master_fd, output, connected, start=0, timeout=3.0
+        )
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] >= 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing's tag did not go out on two reads: {reads!r}"
+            )
+        answered_start = len(output)
+        wait_for_output(
+            process, master_fd, output, connected,
+            start=answered_start, timeout=2.0,
+        )
+        if b"HTTP 304" in output:
+            raise AssertionError("a 304 reached the screen as a refusal")
+        slow_goals.set()
+        if not wait_for_fixture_state(
+            process, master_fd, output, slow_goals_done.is_set, timeout=4.0
+        ):
+            raise AssertionError("the slow goal tree read did not finish")
+        reads_after_slow = reads["tagged"] + reads["untagged"]
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] + reads["untagged"] >= reads_after_slow + 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing was not read again after the slow pass: {reads!r}"
+            )
+        if reads["untagged"] != 1:
+            raise AssertionError(
+                "only the first briefing read may go out without the tag; "
+                f"reads were {reads!r}"
+            )
+        os.write(master_fd, b"q")
+
+    try:
+        run_terminal_scenario(
+            executable, description="HTTP conditional read",
+            interact=interact, refresh=0.5, terminal_cols=140,
+            workspace="conditional-read-fixture", http_fixtures=fixtures,
+        )
+    finally:
+        slow_goals_done.set()
+
+
 def run_observer_reconnect_regression(executable: str) -> None:
     releases = [threading.Event() for _ in range(8)]
     seen: list[dict[str, str]] = []
@@ -20788,6 +20885,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
     ScenarioFamily("http-badge-refresh", "HTTP badge refresh timing regression", (run_http_badge_refresh_regression,)),
+    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
     ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
     ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
 )

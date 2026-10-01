@@ -13,6 +13,23 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
+def validate_result(row, runtime_id):
+    receipt = row['receipt']
+    if row['status'] == 'ok':
+        require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
+                'successful result classification or slot mismatch')
+        require(receipt['output']['result'] == row['answer'], 'successful answer mismatch')
+    else:
+        require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
+        code = {'invalid_response': 'candle_appraisal_rejected',
+                'transport_unavailable': 'candle_appraisal_unavailable'}[row['status']]
+        require(receipt['status'] == 'failed' and receipt['code'] == code,
+                'failed result classification mismatch')
+        require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
+                and receipt['output']['result'] == {'error': row['answer']},
+                'failed answer mismatch')
+
+
 def expected_input(case):
     data = case['input']
     if case['stage'] != 'weights':
@@ -58,6 +75,7 @@ def load_run(directory):
                 'receipt request identity mismatch')
         require(payload['actual_input'] == expected_input(case),
                 'receipt actual input disagrees with frozen case')
+        validate_result(row, plan['runtime_id'])
         prompt = payload['prompt']
         require(prompt['source'] == 'file' and prompt['key'] == 'candle_appraiser_' + case['stage'],
                 'receipt prompt source or stage mismatch')
@@ -85,7 +103,7 @@ def load_run(directory):
         tally["modes"] = sorted(value for value, count in counts.items() if count == max(counts.values())) if counts else []
         tally["modal_count"] = max(counts.values()) if counts else 0
         summaries[case_id] = tally
-    return plan, metadata, summaries, hashlib.sha256(raw).hexdigest()
+    return plan, metadata, summaries, hashlib.sha256(raw).hexdigest(), {row["receipt"]["run_id"] for row in rows}
 
 
 def main():
@@ -93,14 +111,17 @@ def main():
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     args = parser.parse_args()
-    baseline, base_meta, base_cases, base_hash = load_run(args.baseline)
-    candidate, candidate_meta, candidate_cases, candidate_hash = load_run(args.candidate)
+    baseline, base_meta, base_cases, base_hash, base_ids = load_run(args.baseline)
+    candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids = load_run(args.candidate)
+    require(base_ids.isdisjoint(candidate_ids), "baseline and candidate reuse run IDs")
     require({key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
         key: value for key, value in candidate.items() if key != "prompt_sha256"}, "Evidence validation failed: {key: value for key, value in baseline.items() if key != 'prompt_sha256'} == {key: value for key, value in candidate.items() if key != 'prompt_sha256'}")
     require(base_meta["build"]["executable_sha256"] == candidate_meta["build"]["executable_sha256"], "Evidence validation failed: base_meta['build']['executable_sha256'] == candidate_meta['build']['executable_sha256']")
     changed = [name for name in baseline["prompt_sha256"] if baseline["prompt_sha256"][name] != candidate["prompt_sha256"][name]]
     require(changed == ["candle_appraiser_grade.md"], "only the reviewed Grade prompt may change")
     prompt_source = json.loads((args.candidate / "prompt-source.json").read_text())
+    require(baseline["prompt_sha256"] == prompt_source["baseline_prompt_sha256"],
+            "baseline prompt hashes disagree with declared original baseline")
     require(prompt_source["binary_commit"] == candidate["source_commit"], "Evidence validation failed: prompt_source['binary_commit'] == candidate['source_commit']")
     require(prompt_source["prompt_sha256"] == candidate["prompt_sha256"], "Evidence validation failed: prompt_source['prompt_sha256'] == candidate['prompt_sha256']")
     print(json.dumps({

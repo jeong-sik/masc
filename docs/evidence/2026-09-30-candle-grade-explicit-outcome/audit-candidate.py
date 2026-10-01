@@ -151,6 +151,9 @@ def main():
             completed.add(run_id)
             completion = event['completion']
             require(completion['outcome'] == receipt['status'], "audit check failed: completion['outcome'] == receipt['status']")
+            if receipt['status'] == 'failed':
+                require(completion['code'] == receipt['code'] and completion['detail'] == receipt['detail'],
+                        'registry failure code or detail disagrees with receipt')
             require(completion['selected_slot'] == receipt['selected_slot'], "audit check failed: completion['selected_slot'] == receipt['selected_slot']")
             require(completion['elapsed_s'] == receipt['elapsed_s'], "audit check failed: completion['elapsed_s'] == receipt['elapsed_s']")
             side, reference, expected = 'output', completion['output'], receipt['output']

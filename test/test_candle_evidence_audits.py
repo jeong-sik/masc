@@ -82,16 +82,39 @@ class CandleEvidenceAudits(unittest.TestCase):
         metadata['plan'] = plan
         write_json(baseline/'metadata.json', metadata)
         rows = [json.loads(line) for line in (baseline/'results.jsonl').read_text().splitlines()]
+        # Separate temporary IDs and prompt declaration describe this synthetic
+        # comparison fixture only, not independent measured executions.
         for row in rows:
+            row['receipt']['run_id'] = 'fixture-baseline-' + row['receipt']['run_id']
             if row['stage'] == 'grade':
                 payload = row['receipt']['input']['payload']
                 payload['prompt']['effective_template'] = body
                 encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
                 payload['prompt']['rendered'] = body.replace('{{appraisal_input}}', encoded)
         write_rows(baseline/'results.jsonl', rows)
+        source_path = candidate/'prompt-source.json'
+        prompt_source = json.loads(source_path.read_text())
+        prompt_source['baseline_prompt_sha256'] = plan['prompt_sha256']
+        write_json(source_path, prompt_source)
         script = CANDIDATE/'compare-evaluations.py'
         valid = self.run_audit(script, baseline, candidate)
         self.assertEqual(valid['changed_prompt_files'], ['candle_appraiser_grade.md'])
+        answer_rows = copy.deepcopy(rows)
+        grade = next(row for row in answer_rows if row['stage'] == 'grade' and row['status'] == 'ok')
+        grade['answer']['grade'] = 'fixture-unreported-answer'
+        write_rows(baseline/'results.jsonl', answer_rows)
+        self.run_audit(script, baseline, candidate, error='successful answer mismatch')
+        shared_rows = copy.deepcopy(rows)
+        for row in shared_rows:
+            row['receipt']['run_id'] = row['receipt']['run_id'].removeprefix('fixture-baseline-')
+        write_rows(baseline/'results.jsonl', shared_rows)
+        self.run_audit(script, baseline, candidate, error='reuse run IDs')
+        write_rows(baseline/'results.jsonl', rows)
+        prompt_source['baseline_prompt_sha256'] = json.loads((candidate/'plan.json').read_text())['prompt_sha256']
+        write_json(source_path, prompt_source)
+        self.run_audit(script, baseline, candidate, error='baseline prompt hashes disagree')
+        prompt_source['baseline_prompt_sha256'] = plan['prompt_sha256']
+        write_json(source_path, prompt_source)
         changed_rows = copy.deepcopy(rows)
         payload = changed_rows[0]['receipt']['input']['payload']
         payload['actual_input']['goal']['title'] = 'Different unmeasured goal'
@@ -104,6 +127,33 @@ class CandleEvidenceAudits(unittest.TestCase):
         write_rows(baseline/'results.jsonl', rows)
         prompt_file.write_text(frozen + 'tampered')
         self.run_audit(script, baseline, candidate, error='frozen prompt hash mismatch')
+
+    def test_survey_binary_hash_matches_frozen_provenance(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        self.run_audit(script, bundle, bundle)
+        metadata = json.loads((bundle/'metadata.json').read_text())
+        metadata['build']['executable_sha256'] = '0'*64
+        write_json(bundle/'metadata.json', metadata)
+        self.run_audit(script, bundle, bundle, error='executable hash disagrees with frozen provenance')
+
+    def test_candidate_registry_failure_fields_match_receipt(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        script = CANDIDATE/'audit-candidate.py'
+        self.run_audit(script, bundle, bundle)
+        rows = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        failed_ids = {row['receipt']['run_id'] for row in rows if row['status'] != 'ok'}
+        self.assertTrue(failed_ids, 'retained candidate has an actual transport failure')
+        original = [json.loads(line) for line in (bundle/'exact-lane-runs-v6.jsonl').read_text().splitlines()]
+        for field in ('code', 'detail'):
+            with self.subTest(field=field):
+                events = copy.deepcopy(original)
+                event = next(event for event in events if event['id'] in failed_ids and event['event'] == 'complete')
+                event['completion'][field] = 'fixture-contradiction'
+                write_rows(bundle/'exact-lane-runs-v6.jsonl', events)
+                self.run_audit(script, bundle, bundle, error='registry failure code or detail disagrees')
 
     def test_survey_closed_failures_match_receipt_code_detail_and_result(self):
         bundle = self.root/'survey'

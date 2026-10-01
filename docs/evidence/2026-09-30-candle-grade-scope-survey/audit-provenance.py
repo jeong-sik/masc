@@ -56,6 +56,13 @@ def main():
     require(metadata['build']['commit_source'] == 'embedded', "Evidence validation failed: metadata['build']['commit_source'] == 'embedded'")
     require(metadata['build']['commit'] == plan['source_commit'], "Evidence validation failed: metadata['build']['commit'] == plan['source_commit']")
     require(metadata['build']['binary_commit'] == plan['source_commit'], "Evidence validation failed: metadata['build']['binary_commit'] == plan['source_commit']")
+    for filename, source_key in (('freeze.json', 'binary_commit'), ('frozen-audit.json', 'source_commit')):
+        provenance = json.loads((args.evidence/filename).read_text())
+        require(provenance[source_key] == plan['source_commit'], 'survey binary source disagrees with frozen provenance')
+        require(provenance['executable_sha256'] == metadata['build']['executable_sha256'],
+                'survey executable hash disagrees with frozen provenance')
+        require(provenance['plan_sha256'] == sha((args.workspace/'plan.json').read_bytes()),
+                'survey plan disagrees with frozen provenance')
     corpus = (args.workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "Evidence validation failed: sha(corpus) == plan['cases_sha256']")
     require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "Evidence validation failed: sha((args.workspace / '.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")

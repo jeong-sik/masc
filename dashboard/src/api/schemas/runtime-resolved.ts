@@ -5,7 +5,7 @@
 // assignments-only /api/v1/dashboard/runtime-defaults listing, and a
 // hand-rolled fallback that faked runtime-provider catalog fields from that
 // listing). This is the single resolved document instead: effective
-// max-context plus which of override/capability/override_clamped_by_capability
+// max-context plus the declaration scope or capability provenance that
 // produced it (see lib/runtime/runtime.mli `resolve_max_context_of_runtime`),
 // every configured lane, and the full keeper fleet joined against
 // [runtime.assignments] with the [runtime].default rider made explicit
@@ -31,6 +31,10 @@ const MaxContextSourceSchema = union([
   literal('override'),
   literal('capability'),
   literal('override_clamped_by_capability'),
+  literal('provider_override'),
+  literal('binding_override'),
+  literal('provider_override_clamped_by_capability'),
+  literal('binding_override_clamped_by_capability'),
 ])
 
 const RuntimeResolutionSchema = object({

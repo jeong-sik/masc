@@ -256,6 +256,7 @@ let fanout_provider ~id ~url =
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
   ; wire_kind = None
+  ; max_context = None
   ; transport = Http url
   ; is_non_interactive = true
   ; credentials = Some (Inline "probe-test-token")
@@ -294,6 +295,7 @@ let fanout_binding ~provider_id ~is_default =
   ; enabled = true
   ; is_default
   ; wizard_default = false
+  ; max_context = None
   ; max_concurrent = None
   ; disable_parallel_tool_use = false
   ; context_marks = None

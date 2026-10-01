@@ -27,7 +27,7 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let slow_report_ns = 1_000_000_000L
 let ms_of_ns ns = Int64.to_float ns /. 1e6
 
-let timed ~verb ~path (run : unit -> (int * string, string) result) =
+let timed_with ~status ~verb ~path run =
   let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
   let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
@@ -36,9 +36,12 @@ let timed ~verb ~path (run : unit -> (int * string, string) result) =
       path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
-       | Ok (status, _) -> Printf.sprintf "status %d" status
+       | Ok answer -> Printf.sprintf "status %d" (status answer)
        | Error detail -> detail);
   result
+
+let timed ~verb ~path (run : unit -> (int * string, string) result) =
+  timed_with ~status:fst ~verb ~path run
 let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
@@ -484,11 +487,53 @@ let decode_json ~allow_empty ~status_code ~body =
    length, and for a 401 the auth JSON [refusal] exists to replace. *)
 let named_refusal what ~status ~body = what ^ ": " ^ refusal ~status_code:status ~body
 
-(** GET a JSON response from a dashboard endpoint. *)
+(* Dashboard answers kept with their entity tags ([Masc_tui_kept_reads]). Each
+   refresh pass reads most dashboard paths again, and most answers have not
+   changed since the last one: on 2026-09-30 the board list,
+   keepers/composite, scheduled automation, goals, briefing and planning
+   changed at most once in five two-second polls. The JSON lexer was 11.6% of
+   this process's busy samples on its main thread, and parsing one of those
+   bodies takes 0.38 ms to 1.86 ms. *)
+let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.create ()
+
+(** Starts a new generation of kept dashboard answers. A full refresh pass
+    calls it when it starts; an answer no read asked for in two passes is
+    dropped. *)
+let start_read_generation () = Masc_tui_kept_reads.start_generation kept_reads
+
+(* [http_get] with request headers of the caller's and the response headers. *)
+let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
+    (Masc_http_client.response, string) result =
+  let url = url_of ~host ~port ~path in
+  timed_with
+    ~status:(fun { Masc_http_client.status; _ } -> status)
+    ~verb:"GET" ~path
+  @@ fun () ->
+  with_credential_refresh_on
+    ~refused:(function
+      | Ok { Masc_http_client.status = 401; _ } -> true
+      | Ok _ | Error _ -> false)
+  @@ fun () ->
+  match
+    Masc_http_client.get_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~headers:(headers @ auth_headers ()) ()
+  with
+  | Ok response -> Ok response
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+(** GET a JSON response from a dashboard endpoint. The answer kept from the
+    last read of the same address goes out as [If-None-Match], and a 304
+    answers with the value decoded from it. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
-  match http_get ~host ~port ~path with
-  | Error e -> Error e
-  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+  Masc_tui_kept_reads.read kept_reads
+    ~address:(url_of ~host ~port ~path)
+    ~send:(fun headers ->
+      http_get_response ~host ~port ~path ~headers
+      |> Result.map (fun { Masc_http_client.status; headers; body } ->
+             { Masc_tui_kept_reads.status; headers; body }))
+    ~decode:(fun { Masc_tui_kept_reads.status; body; _ } ->
+      decode_json ~allow_empty:false ~status_code:status ~body)
 
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does
@@ -1642,9 +1687,10 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) :
+let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
     (int * string, string) result =
-  http_get ~host ~port ~path:"/api/v1/gate/keepers?detailed=true"
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+    ^ percent_encode_path_segment expected_workspace)
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 

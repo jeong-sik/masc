@@ -432,35 +432,67 @@ let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path
     check bool "cancel does not authorize resume" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 
 let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with_path (fun path ->
-  let official = ref None in
-  with_open path (fun store ->
+  let steering = Operation.Operation_id.of_string "official-new-user-steering" |> string_ok in
+  let first, saved = with_open path (fun store ->
     let first = admitted store in
     let seed = match Semantic.create ~id:(Scope.direct_operation operation_id) ~input ~sources:[] ~now:10. with
       | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
     let checkpoint : Semantic.official_client_checkpoint =
       { client_kind = Codex; runtime_id = "codex.test"; session_id = "original-thread";
         turn_id = "yielded-turn"; tool_surface_sha256 = String.make 64 'a'; frame = seed.frame } in
-    official := Some checkpoint;
     let authority = Semantic.Official_client checkpoint in
+    ignore (Store.submit store ~now:11. ~operation_id:steering ~source
+      ~input:(`Assoc ["message", `String "New steering for the original task"]) |> ok);
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+    rejected (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:authority);
+    check bool "failed official retention does not report success" true
+      (match (current store).state with Operation.Running _ -> true | _ -> false);
+    check bool "failed official retention has no resume authority" true
+      (Store.direct_checkpoint store ~operation_id |> ok = None);
     ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id
       ~execution_digest:first.execution_digest ~checkpoint:authority |> ok);
     check bool "original multimodal input remains durable" true ((current store).input = first.input);
     check bool "official yield is pending, not a fake provider retry" true
-      ((current store).state = Operation.Queued && Store.direct_runtime_retry store ~operation_id |> ok = None));
-  with_open path (fun store ->
-    let saved = Option.get !official in
-    let authority = Semantic.Official_client saved in
+      ((current store).state = Operation.Queued && Store.direct_runtime_retry store ~operation_id |> ok = None);
+    first, checkpoint) in
+  let authority = Semantic.Official_client saved in
+  let check_original store =
+    let observed = current store in
+    check bool "same admitted operation survives" true
+      (Operation.Operation_id.equal first.operation_id observed.operation_id);
+    check string "same admission digest survives" first.admission_digest observed.admission_digest;
+    check string "same execution digest survives" first.execution_digest observed.execution_digest;
+    check bool "original source and task payload survive" true
+      (observed.source = first.source && observed.input = first.input);
     check bool "reopen preserves the official authority" true
       (match Store.direct_checkpoint store ~operation_id |> ok with
-       | Some observed -> Semantic.equal_gate_checkpoint authority observed | None -> false);
-    ignore (Store.claim_next store ~now:13. |> ok);
-    rejected (Store.resume_direct_checkpoint store ~now:14. ~operation_id
+       | Some observed -> Semantic.equal_gate_checkpoint authority observed | None -> false)
+  in
+  with_open path (fun store ->
+    check_original store;
+    let next = Store.claim_next store ~now:13. |> ok |> Option.get in
+    check bool "new user steering runs before the yielded operation" true
+      (Operation.Operation_id.equal steering next.operation_id);
+    ignore (Store.succeed_running store ~now:14. ~operation_id:steering ~outcome_ref:"steering-settled-turn" |> ok);
+    let resumed = Store.claim_next store ~now:15. |> ok |> Option.get in
+    check bool "original operation claims after steering" true
+      (Operation.Operation_id.equal operation_id resumed.operation_id);
+    check_original store);
+  with_open path (fun store ->
+    check int "claim crash retains official continuation instead of failing it" 0
+      (List.length (Store.settle_running_after_restart store ~now:16. |> ok));
+    check bool "claim crash restores unfinished operation" true ((current store).state = Operation.Queued);
+    check_original store;
+    ignore (Store.claim_next store ~now:17. |> ok);
+    rejected (Store.resume_direct_checkpoint store ~now:18. ~operation_id
       ~observed:(Semantic.Official_client {saved with session_id="unrelated-thread"}));
-    Store.resume_direct_checkpoint store ~now:14. ~operation_id ~observed:authority |> ok;
+    check_original store;
+    Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:authority |> ok;
     let advanced = Semantic.Official_client {saved with turn_id="next-yield"} in
-    ignore (Store.defer_direct_checkpoint store ~now:15. ~operation_id
+    ignore (Store.defer_direct_checkpoint store ~now:19. ~operation_id
       ~execution_digest:(current store).execution_digest ~checkpoint:advanced |> ok);
-    ignore (Store.cancel_queued store ~now:16. ~operation_id |> ok);
+    ignore (Store.cancel_queued store ~now:20. ~operation_id |> ok);
     check bool "cancel terminalizes official continuation" true (Semantic.is_terminal (execution store));
     check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 

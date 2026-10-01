@@ -267,6 +267,8 @@ def test_http_endpoint(
             path_only = self.path.split("?", 1)[0]
             if self.path in fixtures:
                 fixture = fixtures[self.path]
+            elif path_only == "/api/v1/gate/keepers" and "/api/v1/gate/keepers?detailed=true" in fixtures:
+                fixture = fixtures["/api/v1/gate/keepers?detailed=true"]
             elif self.path == "/health":
                 fixture = (200, {})
             elif self.path == "/health?full=1":
@@ -1341,6 +1343,13 @@ def row_budget_http_fixtures() -> HttpFixtures:
         for index in range(1, 6)
     ]
     return {
+        # This layout scenario has no currency. Answer the Overview's roster
+        # read so an unrelated fixture failure does not consume a body row.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (
             200,
@@ -1539,6 +1548,13 @@ def with_workspace_identity(
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
+        # The Overview reads the roster for its Candle observation even when
+        # the Keeper pane is hidden. An unrelated scenario has no currency.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
@@ -1611,6 +1627,7 @@ def keeper_runtime_http_fixtures(
     fixtures["/api/v1/gate/keepers?detailed=true"] = (
         200,
         {
+            "candle": {"status": "off"},
             "count": 2,
             "total": 2,
             "truncated": False,
@@ -1627,6 +1644,8 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1641,6 +1660,8 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
@@ -6901,7 +6922,7 @@ def open_atomic_chat(process: subprocess.Popen[bytes], master_fd: int, output: b
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     # Seeing the preview proves the same observer response carrying the control
     # token has reached the UI before the first Enter.
-    wait_for_output(process, master_fd, output, b"Atomic fixture ready", start=0, timeout=10)
+    wait_for_output(process, master_fd, output, "기존 작업 처리 중".encode(), start=0, timeout=10)
 
 
 def wait_for_atomic_admissions(process: subprocess.Popen[bytes], master_fd: int,
@@ -6972,9 +6993,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 3건 대기".encode())
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -7010,7 +7031,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
             send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
             os.write(master_fd, b"\r")
@@ -7026,7 +7047,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7050,7 +7071,7 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("stop acknowledgement was not held")
@@ -7074,7 +7095,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -7112,7 +7133,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
@@ -7230,10 +7251,10 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if b"1 rechecking delivery" not in pending_screen or b"queued at Keeper" in pending_screen:
+            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
@@ -15178,6 +15199,109 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         release_slow.set()
 
 
+def run_http_conditional_read_regression(executable: str) -> None:
+    """A dashboard read sends the tag of the answer it kept, and a 304 answers
+    with that answer. On Work, the briefing is the first read of a full pass
+    and the goal tree the last. A slow goal tree keeps one pass out across
+    several ticks; the briefing's tag must still go out on the pass after it."""
+    fixtures = overview_event_http_fixtures()
+    briefing = fixtures["/api/v1/dashboard/briefing"]
+    if not isinstance(briefing, tuple):
+        raise AssertionError("briefing fixture must be a response tuple")
+    _status, briefing_payload = briefing
+    briefing_body = json.dumps(briefing_payload).encode()
+    briefing_tag = 'W/"briefing-fixture"'
+    reads = {"untagged": 0, "tagged": 0}
+    slow_goals = threading.Event()
+    goals_requested = threading.Event()
+    slow_goals_done = threading.Event()
+
+    def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
+        if headers.get("if-none-match") == briefing_tag:
+            reads["tagged"] += 1
+            return RawHttpResponse(
+                304, b"", content_type="application/json",
+                headers=(("ETag", briefing_tag),),
+            )
+        reads["untagged"] += 1
+        return RawHttpResponse(
+            200, briefing_body, content_type="application/json",
+            headers=(("ETag", briefing_tag),),
+        )
+
+    def answer_goals() -> HttpResponse:
+        goals_requested.set()
+        if slow_goals.is_set() and not slow_goals_done.is_set():
+            # Longer than three refresh ticks at refresh=0.5.
+            time.sleep(1.6)
+            slow_goals_done.set()
+        return empty_goals_fixture()
+
+    fixtures["/api/v1/dashboard/briefing"] = HeadersHttpResponse(answer_briefing)
+    fixtures[DASHBOARD_GOALS_PATH] = answer_goals
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
+        wait_for_output(
+            process, master_fd, output, connected, start=0, timeout=3.0
+        )
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] >= 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing's tag did not go out on two reads: {reads!r}"
+            )
+        answered_start = len(output)
+        wait_for_output(
+            process, master_fd, output, connected,
+            start=answered_start, timeout=2.0,
+        )
+        if b"HTTP 304" in output:
+            raise AssertionError("a 304 reached the screen as a refusal")
+        tab_until(process, master_fd, output, b"MASC Work")
+        if not wait_for_fixture_event(
+            process, master_fd, output, goals_requested, timeout=4.0
+        ):
+            raise AssertionError("Work did not request its goal tree")
+        slow_goals.set()
+        if not wait_for_fixture_state(
+            process, master_fd, output, slow_goals_done.is_set, timeout=4.0
+        ):
+            raise AssertionError("the slow goal tree read did not finish")
+        reads_after_slow = reads["tagged"] + reads["untagged"]
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] + reads["untagged"] >= reads_after_slow + 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing was not read again after the slow pass: {reads!r}"
+            )
+        if reads["untagged"] != 1:
+            raise AssertionError(
+                "only the first briefing read may go out without the tag; "
+                f"reads were {reads!r}"
+            )
+        os.write(master_fd, b"q")
+
+    try:
+        run_terminal_scenario(
+            executable, description="HTTP conditional read",
+            interact=interact, refresh=0.5, terminal_cols=140,
+            workspace="conditional-read-fixture", http_fixtures=fixtures,
+        )
+    finally:
+        slow_goals_done.set()
+
+
 def run_observer_reconnect_regression(executable: str) -> None:
     releases = [threading.Event() for _ in range(8)]
     seen: list[dict[str, str]] = []
@@ -16623,13 +16747,29 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             executable,
             description="pressing a row chooses, then opens it",
             interact=pressing_a_row_chooses_then_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
         )
         run_terminal_scenario(
             executable,
             description="pressing a row of a scrolled list opens it",
             interact=pressing_a_row_of_a_scrolled_list_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
             prepare_workspace=seed_long_roster,
         )
         run_terminal_scenario(
@@ -17036,7 +17176,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
 
     def interact(process, master_fd, slave_fd, output, _base):
-        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose browser \xc2\xb7 separate sessions do not share login")
         if reads:
             raise AssertionError("unselected multi-client view sent a browser read")
         os.write(master_fd, b"j")
@@ -17046,10 +17186,16 @@ def run_browser_client_picker_regression(executable: str) -> None:
             raise AssertionError("Zen choice did not pin its client ID")
         read_available(master_fd, output)
         chooser_start = len(output)
-        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        send_and_wait(process, master_fd, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
         wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=bytes(output).rfind(b"Firefox", chooser_start), timeout=3.0)
+        picker = screen_text(bytes(output))
+        for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
+            if option not in picker:
+                raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
         if reads[-1] != {"lane": "live", "clientId": firefox}:
             raise AssertionError("browser switch reused the old browser's tab ID")
@@ -20739,6 +20885,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
     ScenarioFamily("http-badge-refresh", "HTTP badge refresh timing regression", (run_http_badge_refresh_regression,)),
+    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
     ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
     ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
 )

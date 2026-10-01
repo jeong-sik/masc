@@ -110,6 +110,12 @@ def reports(source: Source, observation: dict, *, recognized: bool):
     if not isinstance(output.get("rows"), list) or not isinstance(output.get("coverage"), list):
         raise InvalidInput("Output must contain rows and coverage arrays")
     upstream_coverage = [coverage(item, "output coverage") for item in output["coverage"]]
+    coverage_by_source = {}
+    for item in upstream_coverage:
+        key = (item["source_id"], item["incarnation"])
+        if key in coverage_by_source and coverage_by_source[key] != item:
+            raise InvalidInput("Conflicting upstream coverage for the same source incarnation")
+        coverage_by_source[key] = item
     producer_status = coverage(observation.get("producer_status"), "producer_status")
     if source.incarnation != producer["instance_id"]:
         raise InvalidInput("Source incarnation does not identify this producer instance")
@@ -136,10 +142,9 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         string(original.get("id"), "row.id")
         row_coordinates(original)
         fields = object_value(original.get("fields"), "row.fields")
-        source_id = string(fields.get("source_id"), "row.fields.source_id")
-        incarnation = string(fields.get("incarnation"), "row.fields.incarnation")
-        if not any(item["source_id"] == source_id and item["incarnation"] == incarnation
-                   for item in upstream_coverage):
+        coordinates = (string(fields.get("source_id"), "row.fields.source_id"),
+                       string(fields.get("incarnation"), "row.fields.incarnation"))
+        if coordinates not in coverage_by_source:
             raise InvalidInput("Fusion row has no matching upstream source coverage")
         boolean(fields.get("input_complete"), "row.input_complete")
         if lane == "fusion/status":

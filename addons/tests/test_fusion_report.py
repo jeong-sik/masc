@@ -381,6 +381,38 @@ class FusionReport(unittest.TestCase):
         self.assertEqual(selected_producer["output_selection"], {"lanes": ["fusion/result"]})
         self.assertEqual(selected_producer["coverage_scope"], "whole_producer")
 
+    def test_every_fusion_row_requires_matching_source_coverage(self):
+        original = project(detail())
+        for result_only in (False, True):
+            selected = copy.deepcopy(original)
+            if result_only:
+                selected["rows"] = [selected["rows"][1]]
+            kwargs = {"output_id": "result", "selected_lanes": ["fusion/result"]} if result_only else {}
+            for field, wrong in (("source_id", "unrelated-source"), ("incarnation", "unrelated-run")):
+                malformed = copy.deepcopy(selected)
+                malformed["coverage"][0][field] = wrong
+                with self.subTest(result_only=result_only, field=field):
+                    self.assertTrue(call("fusion-report", [upstream(malformed, **kwargs)])["isError"])
+                for index in range(len(selected["rows"])):
+                    malformed = copy.deepcopy(selected)
+                    malformed["rows"][index]["fields"][field] = wrong
+                    with self.subTest(result_only=result_only, field=field, row=index):
+                        self.assertTrue(call("fusion-report", [upstream(malformed, **kwargs)])["isError"])
+            missing = copy.deepcopy(selected)
+            missing["coverage"] = []
+            self.assertTrue(call("fusion-report", [upstream(missing, **kwargs)])["isError"])
+            conflicting = copy.deepcopy(selected)
+            conflict = copy.deepcopy(conflicting["coverage"][0])
+            conflict["complete"] = False
+            conflicting["coverage"].append(conflict)
+            self.assertTrue(call("fusion-report", [upstream(conflicting, **kwargs)])["isError"])
+            partial = copy.deepcopy(selected)
+            partial["coverage"][0]["complete"] = False
+            reply = call("fusion-report", [upstream(partial, **kwargs)])
+            self.assertFalse(reply["isError"])
+            self.assertFalse(reply["structuredContent"]["coverage"][0]["complete"])
+            self.assertFalse(reports(reply["structuredContent"])[0]["fields"]["input_complete"])
+
     def test_empty_and_unrelated_rows_do_not_become_reports(self):
         self.assertEqual(call("fusion-report", [])["structuredContent"]["rows"], [])
         mixed = project(detail())

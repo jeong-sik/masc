@@ -1575,7 +1575,11 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
       List.iteri (fun offset (comment : Board.comment) ->
         Hashtbl.replace comment_positions (Board.Comment_id.to_string comment.id) offset) comments;
       let comment_revision =
-        `List (List.map Board.comment_to_yojson comments)
+        `List (List.map (fun (comment : Board.comment) ->
+            `List [ `String (Board.Comment_id.to_string comment.id)
+                  ; (match comment.parent_id with
+                     | None -> `Null
+                     | Some parent -> `String (Board.Comment_id.to_string parent)) ]) comments)
         |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in

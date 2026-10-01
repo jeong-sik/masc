@@ -29,7 +29,6 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
     runtime: { state: 'idle' },
     measurement: { captured: false },
     invariants: {
-      no_runtime_before_measurement: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -152,10 +151,9 @@ describe('constants', () => {
     expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime'])
   })
 
-  it('INVARIANT_LABELS has all 3 invariants', () => {
+  it('INVARIANT_LABELS names the measured invariants', () => {
     const keys = Object.keys(INVARIANT_LABELS)
-    expect(keys).toHaveLength(3)
-    expect(keys).toContain('phase_derivation_agreement')
+    expect(keys).toEqual(['event_priority_monotone', 'phase_derivation_agreement'])
   })
 
   it('MAX_OBSERVATIONS and MAX_TRANSITION_HISTORY are positive', () => {

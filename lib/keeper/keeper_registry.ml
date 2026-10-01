@@ -25,7 +25,7 @@ let notify_state_change_observer () =
     (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
-let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
+let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
      Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
@@ -40,7 +40,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
           | Resolved_turn_idempotent -> obs
           | Resolved_turn_transition _ ->
@@ -75,23 +75,23 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let mark_turn_provider_attempt_started ~base_path name =
+let mark_turn_provider_attempt_started ~observation_token ~base_path name =
   match get ~base_path name with
   | None | Some { current_turn_observation = None; _ } -> ()
   | Some _ ->
     set_turn_decision_stage
-      ~base_path
+      ~observation_token ~base_path
       name
       Decision_active_tool_policy_selected;
-    set_turn_phase ~base_path name (Packed Turn_executing)
+    set_turn_phase ~observation_token ~base_path name (Packed Turn_executing)
 ;;
 
-let set_turn_selected_model ~base_path name selected_model =
+let set_turn_selected_model ~observation_token ~base_path name selected_model =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
             selected_model
           })
@@ -102,7 +102,7 @@ let set_turn_selected_model ~base_path name selected_model =
 ;;
 
 
-let mark_turn_finished ~base_path name =
+let mark_turn_finished ~observation_token ~base_path name =
   (* Terminal turn lifecycle step: freeze [current_turn_observation] into
      [last_completed_turn] and clear the live observation.  This is
      intentionally NOT routed through [set_turn_phase_with]: it mutates the
@@ -114,56 +114,40 @@ let mark_turn_finished ~base_path name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
-      let had_live_turn =
-        match e.current_turn_observation with
-        | Some _ -> true
-        | None -> false
-      in
-      let last_completed_turn =
-        match e.current_turn_observation with
-        | Some obs ->
-          let ended_at = now in
-          completed_turn_to_record
-          := Some
-               { Keeper_transition_audit.turn_id = obs.turn_id
-               ; started_at = obs.started_at
-               ; ended_at
-               ; outcome = completed_turn_outcome_of_observation obs
-               };
-          Some
-            { ct_turn_id = obs.turn_id
-            ; ct_started_at = obs.started_at
-            ; ct_ended_at = ended_at
-            ; ct_decision_stage = obs.decision_stage
-            ; ct_selected_model = obs.selected_model
-            ; ct_wake = obs.wake
-            }
-        | None -> e.last_completed_turn (* no live turn → preserve previous *)
-      in
-      let meta =
-        if had_live_turn
-        then
-          { e.meta with
-            runtime =
-              { e.meta.runtime with
-                usage = { e.meta.runtime.usage with last_turn_ts = now }
-              }
+      match e.current_turn_observation with
+      | None -> e, false
+      | Some obs when not (Keeper_turn_observation_token.equal
+                            observation_token obs.observation_token) -> e, false
+      | Some obs ->
+        completed_turn_to_record := Some
+          { Keeper_transition_audit.turn_id = obs.turn_id
+          ; started_at = obs.started_at
+          ; ended_at = now
+          ; outcome = completed_turn_outcome_of_observation obs
+          };
+        let last_completed_turn = Some
+          { ct_turn_id = obs.turn_id
+          ; ct_started_at = obs.started_at
+          ; ct_ended_at = now
+          ; ct_decision_stage = obs.decision_stage
+          ; ct_selected_model = obs.selected_model
+          ; ct_wake = obs.wake
           }
-        else e.meta
-      in
-      { e with meta; current_turn_observation = None; last_completed_turn }, had_live_turn)
+        in
+        let meta =
+          { e.meta with runtime =
+              { e.meta.runtime with usage =
+                  { e.meta.runtime.usage with last_turn_ts = now } } }
+        in
+        (* Reset only the finishing owner's wakeup under the keeper key lock.
+           A stale cleanup must not clear a successor's signal. *)
+        Atomic.set e.fiber_wakeup false;
+        { e with meta; current_turn_observation = None; last_completed_turn }, true)
   in
-  Option.iter
-    (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
-    !completed_turn_to_record;
-  (* IR-1 belt-and-suspenders: reset wakeup after turn completes so a stale
-     true cannot suppress the next wakeup signal.  The primary consumer is
-     [interruptible_sleep]'s CAS, but an explicit reset here guarantees the
-     flag is clean regardless of whether the heartbeat loop's sleep path ran. *)
-  (match get ~base_path name with
-   (* tla-lint: allow-mutation: fiber signal — clear stale wakeup flag, paired with [interruptible_sleep] CAS *)
-   | Some entry -> Atomic.set entry.fiber_wakeup false
-   | None -> ());
+  if changed then
+    Option.iter
+      (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
+      !completed_turn_to_record;
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

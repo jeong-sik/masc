@@ -572,6 +572,53 @@ let test_flush_under_cancellation_still_writes () =
     (find_row ~target:("post:" ^ post_id ^ ":" ^ voter) ~voter rows <> None)
 ;;
 
+let test_flush_writes_only_changed_primary_table () =
+  let post = create_post_exn ~author:"selective-author" ~content:"selective post" in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = add_comment_exn ~post_id ~author:"selective-commenter"
+      ~content:"selective comment" in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let store = match Board_dispatch.backend () with Board_dispatch.Jsonl s -> s in
+  Board.flush_dirty store;
+  let inode path = (Unix.stat path).Unix.st_ino in
+  let comments_before = inode (Board.comments_path ()) in
+  (match Board_dispatch.vote ~voter:"selective-post-voter" ~post_id
+      ~direction:Board.Up with
+   | Ok _ -> () | Error e -> Alcotest.fail (Board.show_board_error e));
+  Board.flush_dirty store;
+  Alcotest.(check int) "post vote leaves comments file untouched"
+    comments_before (inode (Board.comments_path ()));
+  let posts_before = inode (Board.persist_path ()) in
+  (match Board_dispatch.vote_comment ~voter:"selective-comment-voter" ~comment_id
+      ~direction:Board.Up with
+   | Ok _ -> () | Error e -> Alcotest.fail (Board.show_board_error e));
+  Board.flush_dirty store;
+  Alcotest.(check int) "comment vote leaves posts file untouched"
+    posts_before (inode (Board.persist_path ()));
+  (* A new comment changes both tables; the narrower flush must keep the
+     parent's reply count as well as the child row across restart. *)
+  ignore (add_comment_exn ~post_id ~author:"second-commenter" ~content:"second comment");
+  Board.flush_dirty store;
+  let persisted_post = Fs_compat.load_file (Board.persist_path ())
+    |> String.trim |> Yojson.Safe.from_string in
+  Alcotest.(check int) "parent count is persisted before loader reconstruction" 2
+    Yojson.Safe.Util.(persisted_post |> member "reply_count" |> to_int);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok p ->
+       Alcotest.(check int) "post vote survives" 1 p.Board.votes_up;
+       Alcotest.(check int) "both comments survive" 2 p.Board.reply_count);
+  (match Board_dispatch.get_comments ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok comments ->
+       match List.find_opt (fun (c : Board.comment) ->
+         String.equal (Board.Comment_id.to_string c.id) comment_id) comments with
+       | None -> Alcotest.fail "voted comment missing after reload"
+       | Some c -> Alcotest.(check int) "comment vote survives" 1 c.Board.votes_up)
+
 let test_flush_failure_keeps_the_vote_log_scheduled () =
   let voter = "vote-log-retry-voter" in
   let post =
@@ -817,6 +864,8 @@ let () =
     [
       ( "current contract",
         [
+          Alcotest.test_case "flush skips unchanged primary tables" `Quick
+            (with_eio test_flush_writes_only_changed_primary_table);
           Alcotest.test_case "flush preserves cast ts" `Quick
             (with_eio test_flush_preserves_cast_ts);
           Alcotest.test_case "flip inherits flip-time" `Quick

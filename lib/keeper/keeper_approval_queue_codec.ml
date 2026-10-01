@@ -639,6 +639,32 @@ let persisted_delivery_of_yojson ~base_path json =
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
 
+(* Version 11 had no captured rule-mutation intent. Preserve its explicit
+   delivery and grant as one-shot state, never infer a new remembered rule.
+   The versionless append log used this same exact delivery shape. *)
+let persisted_delivery_v11_of_yojson ~base_path = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending.delivery.v11" in
+    let* () = reject_unknown_fields ~surface
+      ~allowed:["entry"; "decision"; "source"; "remember_rule";
+        "rule_expires_at"; "created_by"; "grant_consumed"] fields in
+    let* () = match List.assoc_opt "remember_rule" fields with
+      | Some (`Bool _) -> Ok ()
+      | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
+      | None -> Error (surface ^ ".remember_rule is required") in
+    persisted_delivery_of_yojson ~base_path
+      (`Assoc (("remember_rule", `Bool false) :: ("rule_intent", `Null)
+        :: List.remove_assoc "remember_rule" fields))
+  | _ -> Error "gate_pending.delivery.v11 must be a JSON object"
+;;
+
+let persisted_log_delivery_of_yojson ~base_path = function
+  | `Assoc fields as json when not (List.mem_assoc "rule_intent" fields) ->
+      persisted_delivery_v11_of_yojson ~base_path json
+  | json -> persisted_delivery_of_yojson ~base_path json
+;;
+
 let map_of_unique_entries ~surface ~id_of entries =
   let rec build map = function
     | [] -> Ok map
@@ -791,14 +817,13 @@ let snapshot_of_yojson ~base_path json =
         ~allowed:[ "version"; "generation"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
-    let* () =
+    let* version =
         match List.assoc_opt "version" fields with
-        | Some (`Int version) when version = pending_store_version -> Ok ()
+        | Some (`Int version) when version = pending_store_version || version = 11 -> Ok version
         | Some (`Int version) ->
           Error
             (Printf.sprintf
-               "%s.version %d is unsupported (current %d); reset runtime state \
-                before restarting MASC"
+               "%s.version %d is unsupported (current %d); preserve the store and use a reader supporting its version"
                surface
                version
                pending_store_version)
@@ -819,7 +844,8 @@ let snapshot_of_yojson ~base_path json =
     let* delivery_entries =
       parse_list
           ~surface:"gate_pending.deliveries"
-          (persisted_delivery_of_yojson ~base_path)
+          ((if version = 11 then persisted_delivery_v11_of_yojson
+            else persisted_delivery_of_yojson) ~base_path)
           delivery_json
     in
     let* pending_map =
@@ -897,7 +923,7 @@ let log_row_of_yojson ~base_path json =
         let* json = required_member ~surface "delivery" fields in
         Result.map
           (fun delivery -> Delivery_upsert delivery)
-          (persisted_delivery_of_yojson ~base_path json)
+          (persisted_log_delivery_of_yojson ~base_path json)
       | "delivery_remove" -> Result.map (fun id -> Delivery_remove id) (id ())
       | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
     in

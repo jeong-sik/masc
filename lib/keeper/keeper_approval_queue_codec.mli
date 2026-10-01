@@ -58,8 +58,9 @@ val snapshot_of_yojson :
 val validate_pending_snapshot : base_path:string -> Yojson.Safe.t -> (unit, string) result
 (** Run the snapshot decode {!Keeper_approval_queue.install_persistence} runs on
     [gate/pending.json], without installing anything. [Error] carries the
-    loader's own message: an unsupported [version] (which names the runtime
-    reset), a malformed snapshot, or the first entry the loader would drop.
+    loader's own message: an unsupported [version], a malformed snapshot, or
+    the first entry the loader would drop. Released v11 snapshots retain their
+    pending entries and one-shot deliveries; new snapshots use v12.
     The append log is not read. *)
 val replay_results_of_yojson :
   Yojson.Safe.t -> (resolution_replay_outcome Set_util.StringMap.t, string) result

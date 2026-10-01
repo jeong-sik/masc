@@ -4627,7 +4627,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
        Alcotest.(check bool) "partial entry error observed" true (after -. before >= 1.0))
 ;;
 
-let test_unsupported_version_snapshot_requires_runtime_reset () =
+let test_unsupported_version_snapshot_preserves_state () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -4648,8 +4648,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 12); reset \
-                   runtime state before restarting MASC"
+                  "gate_pending.version 8 is unsupported (current 12); preserve the store and use a reader supporting its version"
               ; _
               }) ->
           ()
@@ -4658,7 +4657,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
             "unsupported version returned the wrong error: %s"
             (Masc.Keeper_approval_queue_result.install_error_to_string error));
        let store_path = AQ.For_testing.pending_store_path ~base_path in
-       Alcotest.(check bool) "original remains for operator reset" true
+       Alcotest.(check bool) "unsupported original remains untouched" true
          (Sys.file_exists store_path);
        let preserved = read_pending_snapshot_bytes ~base_path in
        Alcotest.(check string) "content preserved byte-for-byte" original preserved)
@@ -4757,11 +4756,10 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 12); reset \
-                  runtime state before restarting MASC"
+                 "gate_pending.version 10 is unsupported (current 12); preserve the store and use a reader supporting its version"
              ; _
              }) ->
-         Alcotest.(check bool) "the log is left for the operator reset" true
+         Alcotest.(check bool) "the unsupported log is preserved for inspection" true
            (Sys.file_exists (AQ.For_testing.pending_log_path ~base_path))
        | Error error ->
          Alcotest.failf
@@ -5171,6 +5169,71 @@ let test_consumed_grant_after_failed_delivery_has_the_decision () =
        resolve_exn ~base_path ~id;
        Alcotest.(check int) "a later press adds no row" 1
          (resolved_rows_for_approval ~base_path id))
+;;
+
+let test_released_v11_preserves_pending_and_one_shot_delivery () =
+  List.iter (fun via_log ->
+    let base_path = temp_dir () in
+    let keeper_name = "queue-released-v11" in
+    Fun.protect ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path) (fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      ignore (install_exn ~base_path);
+      let pending_id = submit ~base_path ~keeper_name ~input:(`Assoc ["target", `String "pending"]) in
+      let input = `Assoc ["target", `String "delivery"] in
+      let delivery_id = submit ~base_path ~keeper_name ~input in
+      let open Yojson.Safe.Util in
+      let entries = read_pending_snapshot ~base_path |> member "pending" |> to_list in
+      let entry id = List.find (fun json -> json |> member "id" |> to_string = id) entries in
+      let delivery = match delivery_json ~base_path ~entry:(entry delivery_id) ~remember_rule:false with
+        | `Assoc fields -> `Assoc (("remember_rule", `Bool true) ::
+            List.remove_assoc "remember_rule" (List.remove_assoc "rule_intent" fields))
+        | _ -> Alcotest.fail "delivery must be object" in
+      let snapshot = `Assoc ["version", `Int 11; "generation", `Int 1;
+        "next_sequence", `Int 3; "pending", `List [entry pending_id];
+        "deliveries", `List (if via_log then [] else [delivery])] in
+      let module Codec = Masc.Keeper_approval_queue_codec in
+      let _, decoded_deliveries, _, _, _ = match Codec.snapshot_of_yojson ~base_path
+        (`Assoc ["version", `Int 11; "generation", `Int 1; "next_sequence", `Int 3;
+          "pending", `List [entry pending_id]; "deliveries", `List [delivery]]) with
+        | Ok decoded -> decoded | Error e -> Alcotest.fail e in
+      let old = Set_util.StringMap.find delivery_id decoded_deliveries in
+      Alcotest.(check bool) "old delivery cannot fabricate remembered authority" false old.remember_rule;
+      Alcotest.(check bool) "old delivery has no rule intent" true (old.rule_intent = None);
+      Alcotest.(check string) "source authorization is retained" "human_operator"
+        (Rule_types.decision_source_to_string old.source);
+      Alcotest.(check string) "delivery is bound to installed workspace" base_path old.entry.audit_base_path;
+      List.iter (fun invalid ->
+        Alcotest.(check bool) "malformed/future store is refused" true
+          (Result.is_error (Codec.validate_pending_snapshot ~base_path invalid)))
+        [ `Assoc ["version", `Int 13; "generation", `Int 1; "next_sequence", `Int 3;
+            "pending", `List []; "deliveries", `List []]
+        ; `Assoc ["version", `Int 11; "generation", `Int 1; "next_sequence", `Int 3;
+            "pending", `List []; "deliveries", `List [delivery_json ~base_path ~entry:(entry delivery_id) ~remember_rule:false]]
+        ; `Assoc ["version", `Int 12; "generation", `Int 1; "next_sequence", `Int 3;
+            "pending", `List []; "deliveries", `List [delivery]] ];
+      write_pending_snapshot ~base_path snapshot;
+      if via_log then (
+        let row = `Assoc ["kind", `String "delivery_upsert"; "generation", `Int 2;
+          "next_sequence", `Int 3; "delivery", delivery] in
+        Out_channel.with_open_bin (AQ.For_testing.pending_log_path ~base_path)
+          (fun out -> output_string out (Yojson.Safe.to_string row ^ "\n")));
+      AQ.For_testing.reset_runtime_state ();
+      let report = install_exn ~base_path in
+      Alcotest.(check int) "unresolved pending approval survives" 1 report.loaded_pending;
+      Alcotest.(check int) "old delivery is replayed" 1 report.replayed_deliveries;
+      (match Rules.list_rules ~base_path () with
+       | Ok [] -> () | _ -> Alcotest.fail "old remembered flag fabricated a rule");
+      (match AQ.consume_approved_resolution ~base_path ~id:delivery_id
+          ~keeper_name:"foreign-keeper" ~tool_name:"external-effect" ~input with
+       | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching -> ()
+       | _ -> Alcotest.fail "foreign Keeper must not consume the released grant");
+      (match AQ.consume_approved_resolution ~base_path ~id:delivery_id ~keeper_name
+          ~tool_name:"external-effect" ~input with
+       | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+       | _ -> Alcotest.fail "original exact one-shot grant must remain consumable");
+      let current = read_pending_snapshot ~base_path in
+      Alcotest.(check int) "new durable projection writes current version" 12
+        (current |> member "version" |> to_int))) [false; true]
 ;;
 
 let test_persisted_delivery_replays_before_origin_wake () =
@@ -6813,7 +6876,7 @@ let () =
         ; Alcotest.test_case
             "unsupported version requires runtime reset"
             `Quick
-            test_unsupported_version_snapshot_requires_runtime_reset
+            test_unsupported_version_snapshot_preserves_state
         ; Alcotest.test_case
             "v10 store requires runtime reset before rows are read"
             `Quick
@@ -6838,6 +6901,8 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
+        ; test_case "released v11 snapshot and append delivery continuity" `Quick
+            test_released_v11_preserves_pending_and_one_shot_delivery
         ; Alcotest.test_case
             "a boot replay does not record the decision again"
             `Quick

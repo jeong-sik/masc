@@ -9,23 +9,53 @@ auto-approve a tool call.
 
 ## Fail-Closed Parse Policy
 
-The persisted file must be a JSON list. Each entry must be an object with these
-required fields:
+The persisted file is a JSON list. New writes use one revision envelope per
+rule identity:
 
-- `id`: non-blank string
-- `keeper_name`: non-blank string
-- `tool_name`: non-blank string
-- `request_fingerprint`: non-blank string
-- `created_at`: number
+- `revision`: non-blank mutation revision
+- `operation_id`: non-blank ID of the mutation that produced this state
+- `presence`: `active` or `deleted`
+- `rule`: the complete approval rule
 
-`created_by`, `source_approval_id`, and `expires_at` are optional and may be
-absent or null. `expires_at` is an absolute Unix timestamp: at and after that
-time the rule no longer authorizes. A malformed non-null `expires_at` fails
-the entry rather than silently becoming a permanent rule.
+The nested rule requires `id`, `keeper_name`, `tool_name`,
+`request_fingerprint` (non-blank strings), and numeric `created_at`.
+`created_by`, `source_approval_id`, and `expires_at` may be absent or null.
+`expires_at` is an absolute Unix timestamp; a malformed non-null value is
+refused rather than becoming a permanent authorization. Unknown or duplicate
+fields reject the whole rule store. Malformed state and intent envelopes do
+not fall back to permissive defaults.
 
-No malformed required field receives a permissive default, and any unsupported
-or duplicate field rejects the whole file with `explicit re-approval is
-required`.
+Deleted rules remain as tombstones with their exact rule and new revision.
+They do not list or authorize. An older remembered-approval intent cannot
+renew or resurrect a rule after a later renewal or deletion. Replaying the
+exact already-applied intent is idempotent; a revision conflict is reported
+separately from the explicit one-shot approval.
+
+## Upgrade continuity
+
+The immediately preceding release wrote bare rule objects in this same list.
+The file reader accepts only that released shape through the strict rule
+parser, marks it active, and derives stable revision and operation IDs from
+SHA-256 of the canonical parsed rule. Field order or omitted optional nulls
+do not create a different revision. Reading does not rewrite the file. The
+next successful rule mutation writes revision envelopes and retains deletion
+tombstones. This narrow boundary preserves existing security state; it is not
+permission to accept unknown historical or future formats.
+
+Pending snapshots from the preceding release use version11. Their pending
+approvals and explicit deliveries remain readable. A delivery without a
+captured rule intent is restored as **one-shot only**: its decision, source,
+exact request, expiry and grant-consumption state remain, but its old
+`remember_rule` flag cannot create or renew a remembered rule. Rules already
+written to the old rule file remain available independently. The released
+versionless append log uses the same delivery shape and follows the same
+one-shot rule. New snapshot writes use version12 and require the current
+rule-intent contract.
+
+No file conversion or runtime-state reset is needed for these released
+formats. Unsupported versions and malformed files remain untouched and
+unavailable; use a reader that supports their format instead of deleting
+unresolved approvals or remembered security state.
 
 ## Rule Expiry
 

@@ -1785,15 +1785,15 @@ type runtime_probe_annotation =
   | Runtime_probe_failure of string
 
 let runtime_probe_status_label = function
-  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
-  | Tui_decode.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | status -> Tui_decode.runtime_provider_status_to_string status
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
+  | status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
-    | Tui_decode.Runtime_provider_skipped_cli
-    | Tui_decode.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
     | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
@@ -10581,11 +10581,11 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match snapshot.Tui_decode.rss_probe with
           | None -> "probe unavailable"
           | Some probe ->
-              let summary = probe.Tui_decode.rps_summary in
+              let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
               Printf.sprintf "%d reachable / %d failed / %d skipped"
-                summary.Tui_decode.rpsu_reachable
-                summary.Tui_decode.rpsu_failed
-                summary.Tui_decode.rpsu_skipped
+                summary.Masc.Tui_decode_runtime_probe.rpsu_reachable
+                summary.Masc.Tui_decode_runtime_probe.rpsu_failed
+                summary.Masc.Tui_decode_runtime_probe.rpsu_skipped
         in
         let probe_note =
           match
@@ -10593,7 +10593,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
           with
           | Some detail, _ -> [ "probe: " ^ single_line detail ]
           | None, Some probe ->
-              (match probe.Tui_decode.rps_errors with
+              (match probe.Masc.Tui_decode_runtime_probe.rps_errors with
                | detail :: _ -> [ "probe: " ^ single_line detail ]
                | [] -> [])
           | None, None -> []

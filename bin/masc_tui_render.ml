@@ -10930,7 +10930,7 @@ let render_connectors (state : state) =
       end)
 
 let runtime_refresh_badge refresh_state =
-  let open Masc.Tui_decode in
+  let open Masc.Tui_decode_runtime_probe in
   let label, style =
     match refresh_state with
     | Runtime_probe_fresh -> "fresh", (Theme.ok ())
@@ -10941,7 +10941,7 @@ let runtime_refresh_badge refresh_state =
   style ^ label ^ Ansi.reset
 
 let runtime_overall_badge status =
-  let open Masc.Tui_decode in
+  let open Masc.Tui_decode_runtime_probe in
   let style =
     match status with
     | Runtime_probe_reachable -> (Theme.ok ())
@@ -10961,8 +10961,8 @@ let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
-  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
-      let open Masc.Tui_decode in
+  | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
+      let open Masc.Tui_decode_runtime_probe in
       let style =
         match probe.rpp_status with
         | Runtime_provider_reachable -> (Theme.ok ())
@@ -10985,7 +10985,7 @@ let runtime_route_probe_badge runtime probe =
 
 let runtime_probe_detail = function
   | None -> []
-  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+  | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
       let latency =
         Option.map (fun value -> Printf.sprintf "%.0fms" value) probe.rpp_latency_ms
       in
@@ -11118,7 +11118,7 @@ let runtime_routes_detail_lines state ~width =
         @ (match snapshot.rss_probe with
            | None -> field "Probe" "unavailable; no observation has been read"
            | Some probe ->
-               field "Probe status" (Tui_decode.runtime_probe_status_to_string probe.rps_status)
+               field "Probe status" (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
                @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
                @ List.concat_map (field "Probe limitation") probe.rps_limitations)
   in
@@ -11161,7 +11161,7 @@ let runtime_detail_lines state target ~width =
         |> List.find_opt (fun (runtime, _) -> String.equal runtime.ro_id runtime_id)
         |> Option.map (fun (runtime, lanes) ->
                let probe =
-                 Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id
+                 Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id
                in
                runtime, lanes, None, probe)
   in
@@ -11711,7 +11711,7 @@ let render_runtime (state : state) =
                     @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
                     @ runtime_probe_detail
                         (Option.bind state.runtime_surface (fun snapshot ->
-                           Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                           Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                in
                let line = "  " ^ Masc_tui_table.row
                  (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
@@ -11719,7 +11719,7 @@ let render_runtime (state : state) =
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
                    ~status:(runtime_route_probe_badge runtime
                      (Option.bind state.runtime_surface (fun snapshot ->
-                       Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                       Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)

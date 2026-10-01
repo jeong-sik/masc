@@ -33,6 +33,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
     report_action state "error"
       (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
 
+module Code_results = Masc_tui_code_results
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
@@ -1651,9 +1652,9 @@ type async_msg =
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
   (* The wizard's replies carry the save they answer, and
-     [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
+     [Masc_tui_voice_wizard_session.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
-  | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
   (* The keeper-voice screen: the voices its endpoint answers to, and what
      the setup route said about the one line it writes. *)
   | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
@@ -2814,12 +2815,12 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 ;;
 
 let launch_voice_wizard_save state ~mailbox
-    (session : Masc_tui_types.voice_wizard_session) =
+    (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
   match
-    ( Masc_tui_types.voice_wizard_save_held session
+    ( Masc_tui_voice_wizard_session.voice_wizard_save_held session
     , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
         ~alongside )
   with
@@ -2837,7 +2838,7 @@ let launch_voice_wizard_save state ~mailbox
   | None, Ok body ->
     state.voice_wizard_requests <- state.voice_wizard_requests + 1;
     let request = state.voice_wizard_requests in
-    state.voice_wizard <- Some (Masc_tui_types.voice_wizard_sending session ~request);
+    state.voice_wizard <- Some (Masc_tui_voice_wizard_session.voice_wizard_sending session ~request);
     let host = server_peer_host in
     let port = state.port in
     let payload = Yojson.Safe.to_string body in
@@ -2849,15 +2850,15 @@ let launch_voice_wizard_save state ~mailbox
         with
         | Masc_tui_http.Post_answered json ->
           (match voice_setup_revision json with
-           | Some revision -> Masc_tui_types.Save_written revision
+           | Some revision -> Masc_tui_voice_wizard_session.Save_written revision
            (* Written, by the status, but with no revision to keep editing
               against: what the session holds is now stale, and whether it is
               this write's is exactly what the reread decides. *)
            | None ->
-             Masc_tui_types.Save_unanswered_reply "the answer named no revision")
-        | Masc_tui_http.Post_refused message -> Masc_tui_types.Save_refused message
+             Masc_tui_voice_wizard_session.Save_unanswered_reply "the answer named no revision")
+        | Masc_tui_http.Post_refused message -> Masc_tui_voice_wizard_session.Save_refused message
         | Masc_tui_http.Post_unanswered detail ->
-          Masc_tui_types.Save_unanswered_reply detail
+          Masc_tui_voice_wizard_session.Save_unanswered_reply detail
       in
       enqueue_async mailbox (Voice_wizard_saved (request, reply))
     in
@@ -2866,7 +2867,7 @@ let launch_voice_wizard_save state ~mailbox
      | None ->
        enqueue_async mailbox
          (Voice_wizard_saved
-            (request, Masc_tui_types.Save_refused "Eio switch is unavailable"))
+            (request, Masc_tui_voice_wizard_session.Save_refused "Eio switch is unavailable"))
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
 ;;
 
@@ -3548,9 +3549,8 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
 let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Goal_timeline_loaded (goal_id, result)))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Goal_timeline_loaded (goal_id, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
 
 let launch_task_history_load state ~mailbox task_id =
@@ -3957,27 +3957,6 @@ let launch_code_blame_load state ~mailbox ~path =
     ~deliver:(fun result ->
       enqueue_async mailbox (Code_blame_loaded (request, result)))
     (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
-
-(* Remember where a jump is about to leave from, so B can walk back.
-   Bounded: the oldest entry falls off past twenty. *)
-let code_jump_back_limit = 20
-
-let push_code_jump state =
-  let file = Masc_tui_fetched.current_key state.code_file in
-  let entry =
-    ( state.code_scope,
-      state.code_dir,
-      file,
-      state.code_file_cursor,
-      state.code_file_scroll )
-  in
-  state.code_jump_back <-
-    entry
-    :: (if List.length state.code_jump_back >= code_jump_back_limit then
-          List.filteri
-            (fun i _ -> i < code_jump_back_limit - 1)
-            state.code_jump_back
-        else state.code_jump_back)
 
 (* Ask the language server about [symbol] on the pane's cursor line. The
    question rides the surface's workspace axes, so a keeper checkout and a
@@ -4944,13 +4923,10 @@ let launch_lane_package_preview state ~mailbox path =
     | Ok installer ->
     state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
     let host=server_peer_host and port=state.port in
-    match Eio_context.get_switch_opt () with
-    | None -> enqueue_async mailbox (Lane_package_preview_loaded (generation,path,Error "Eio switch unavailable"))
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-        let result = try Masc_tui_http.get_json ~host ~port
-            ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)
-          with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_package_preview_loaded (generation,path,result)); `Stop_daemon))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Lane_package_preview_loaded (generation,path,result))
+      (fun () -> Masc_tui_http.get_json ~host ~port
+        ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
 
 let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
@@ -4972,13 +4948,9 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~headers:(Masc_tui_http.auth_headers ()) ~path:"/api/v1/lane-addons/declaration"
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
-    match Eio_context.get_switch_opt () with
-    | None -> map_lane_addons state (fun view -> {view with loading=false;error=(match request with Document.Read _ -> lane_addons_detail_failure "Eio switch unavailable" | Document.Save _ -> lane_addons_request_failure "Eio switch unavailable")})
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-        let result = try perform () with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, result))
+      perform)
 
 let launch_lane_subscriptions state ~mailbox request =
   let module Subs = Masc_tui_lane_subscriptions in
@@ -4990,17 +4962,11 @@ let launch_lane_subscriptions state ~mailbox request =
       let generation=state.lane_addons_generation in
       state.lane_addons <- Some {view with generation;loading=true;error=None};
       let host=server_peer_host and port=state.port in
-      let run () =
-        let result = try
-          Result.bind (Masc_tui_http.post_json ~host ~port
-            ~path:"/api/v1/lane-addons/subscriptions"
-            ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
-        with Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn) in
-        enqueue_async mailbox (Lane_subscriptions_loaded (generation,result)) in
-      (match Eio_context.get_switch_opt () with
-       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-       | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Lane_subscriptions_loaded (generation,result))
+        (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
+          ~path:"/api/v1/lane-addons/subscriptions"
+          ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
 
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
@@ -5022,6 +4988,14 @@ let launch_lane_addons state ~mailbox request =
     draft = None;action_menu=None;last_action;action_receipt;presentation } in
   state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let get_json ~path =
+    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+      (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
+  let post_json ~path ~body =
+    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+      (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let perform () =
     let ( let* ) = Result.bind in
     let inventory_result result = Result.map_error (fun detail -> `Inventory detail) result in
@@ -5032,7 +5006,7 @@ let launch_lane_addons state ~mailbox request =
        lar_diagnostic=diagnostic;lar_inventory_read=inventory_read} in
     let inspect () =
       try
-        let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
+        let* json = get_json ~path:"/api/v1/lane-addons" in
         Addons.decode json
       with Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Printexc.to_string exn) in
@@ -5041,13 +5015,13 @@ let launch_lane_addons state ~mailbox request =
         let* snapshot = inventory_result (inspect ()) in
         Ok (reply ~snapshot ~inventory_read:`Read ())
     | Addons.Subscriptions args ->
-        let* json=request_result (Masc_tui_http.post_json ~host ~port
+        let* json=request_result (post_json
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string args)) in
         Ok (reply ~receipt:json ())
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
-        let* json = detail_result (Masc_tui_http.get_json ~host ~port
+        let* json = detail_result (get_json
           ~path:("/api/v1/lane-addons/slice?" ^ query)) in
         let* previous, source = match view.snapshot with
           | Some snapshot -> Ok (snapshot, Cached_snapshot)
@@ -5065,10 +5039,10 @@ let launch_lane_addons state ~mailbox request =
               | Cached_snapshot -> Error (`Detail detail)))
     | Addons.Act action | Addons.Action_status action ->
         let* json = match request with
-          | Addons.Act _ -> request_result (Masc_tui_http.post_json ~host ~port
+          | Addons.Act _ -> request_result (post_json
               ~path:"/api/v1/lane-addons/actions"
               ~body:(Yojson.Safe.to_string (Addons.action_json action)))
-          | _ -> detail_result (Masc_tui_http.get_json ~host ~port
+          | _ -> detail_result (get_json
               ~path:("/api/v1/lane-addons/actions?instance_id="
               ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
               ^ Masc_tui_http.percent_encode_query_value action.request_id)) in
@@ -5083,25 +5057,17 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
           | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
-        let* receipt = request_result (Masc_tui_http.post_json ~host ~port
+        let* receipt = request_result (post_json
           ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body)) in
         (match inspect () with
          | Ok snapshot -> Ok (reply ~snapshot ~receipt ~inventory_read:`Read ())
          | Error detail -> Ok (reply ~receipt ~inventory_read:(`Failed detail) ()))
   in
-  match Eio_context.get_switch_opt () with
-  | None ->
-      let detail = "Eio switch unavailable" in
-      state.lane_addons <- Some (match lane_addons_request_failure_kind request with
-        | `Inventory -> {pending_view with loading=false;error=None;snapshot_read_error=Some detail}
-        | `Detail -> {pending_view with loading=false;error=lane_addons_detail_failure detail}
-        | `Request -> {pending_view with loading=false;error=lane_addons_request_failure detail})
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-      let result = try perform () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (lane_addons_failure_for_request request (Printexc.to_string exn)) in
-      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon))
+  launch_workspace_request state ~mailbox
+    ~boundary_error:(lane_addons_failure_for_request request)
+    ~deliver:(fun result -> Lane_addons_loaded (generation, result))
+    perform)
 
 let launch_browser_history state ~mailbox ~reload =
   match state.browser_history with
@@ -5272,23 +5238,9 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_inflight <- Some generation;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_runtime_surface ~host ~port ~force with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Runtime_surface_loaded (generation, result))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Runtime_surface_loaded
-                (generation, Error "Eio switch is unavailable")))
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Runtime_surface_loaded (generation, result))
+        (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force)
 
 let launch_repositories_load state ~mailbox =
   if state.repositories_inflight then ()
@@ -5914,12 +5866,9 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    Masc_tui_async_read.launch
-      ~source:Masc_tui_async_read.Standalone_lanes
-      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
-      ~deliver:(fun result ->
-        enqueue_async mailbox
-          (Standalone_lanes_loaded (standalone_generation, result)))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Standalone_lanes_loaded (standalone_generation,
+        Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result))
       (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
@@ -7545,22 +7494,10 @@ let launch_runtime_lane_write state ~mailbox ~written write =
   let host = server_peer_host in
   let port = state.port in
   state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
-  let run () =
-    let result =
-      try write ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_lane_slots_written (written, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_lane_slots_written (written, Error "Eio switch is unavailable"))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Runtime_lane_slots_written (written, result))
+    (fun () -> write ~host ~port)
+
 ;;
 
 (* [e] opens the runtime picker on the Runtime lanes reading, and the same
@@ -10579,14 +10516,9 @@ let launch_system_logs_load state ~mailbox =
     Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level
   in
-  let run_load () =
-    enqueue_async mailbox
-      (System_logs_loaded
-         (load_system_logs ~host ~port ?level ~limit:system_log_page ()))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_load
-  | None -> run_load ()
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> System_logs_loaded result)
+    (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
 
 let apply_fleet_safety_load state = function
   | Ok reading ->
@@ -11048,6 +10980,49 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  state.board_vote_armed <- None;
+  state.board_compose_armed <- false;
+  state.board_compose_reply_to <- None;
+  state.board_post_inflight <- false;
+  state.board_posts <- [];
+  state.board_detail <- Board_detail.clear state.board_detail;
+  state.board_list_reading <- Board_list_unread;
+  state.board_list_error <- None;
+  state.board_mode <- Board_list;
+  state.goal_action_armed <- None;
+  state.goal_action_error <- None;
+  state.planning <- None;
+  state.planning_baseline <- None;
+  state.planning_mode <- Planning_list;
+  state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
+  state.goals_to_confirm <- Masc_tui_agenda.Not_read;
+  state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
+  state.standalone_lanes <- None;
+  state.standalone_lanes_error <- None;
+  state.standalone_lanes_inflight <- false;
+  state.standalone_lanes_reread_pending <- false;
+  state.runtime_surface_generation <- state.runtime_surface_generation + 1;
+  state.runtime_surface_inflight <- None;
+  state.runtime_surface_force_pending <- false;
+  state.runtime_surface <- None;
+  state.runtime_surface_error <- None;
+  state.runtime_detail_target <- None;
+  state.runtime_lane_pick <- None;
+  state.runtime_lane_name_draft <- None;
+  state.runtime_lane_remove_armed <- None;
+  state.runtime_lane_cursor_after_write <- None;
+  state.runtime_lane_notice <- None;
+  state.runtime_lane_write <- Lane_write_idle;
+  state.slot_editor <- None;
+  state.system_logs <- None;
+  state.system_logs_error <- None;
+  state.system_logs_cursor <- 0;
+  state.system_logs_scroll <- 0;
+  state.system_logs_detail_seq <- None;
+  state.system_logs_detail_scroll <- 0;
+  state.lane_addons_generation <- state.lane_addons_generation + 1;
+  state.lane_addons <- None;
+  state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -12095,24 +12070,9 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
   | Board_detail.Started (detail, request) ->
     state.board_detail <- detail;
     let full_history = state.board_history_post_id = Some post_id in
-    let load_result () =
-      try load_board_post ~full_history ~host ~port ~post_id () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    let run_refresh () =
-      try
-        enqueue_async mailbox (Board_post_refresh_done (request, load_result ()))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-          enqueue_async mailbox
-            (Board_post_refresh_done
-               (request, Error (Printexc.to_string exn)))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork ~sw run_refresh
-    | None -> apply_board_post_load state request (load_result ())
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Board_post_refresh_done (request, result))
+      (fun () -> load_board_post ~full_history ~host ~port ~post_id ())
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
@@ -12680,18 +12640,12 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth (
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
-  let run_post () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; result })
+    (fun () ->
       match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox
-      (Board_new_post_done { reply_to = None; sent_draft; result })
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_post
-  | None -> run_post ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 
@@ -12706,20 +12660,15 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
        (Goal_phase.Public_action.to_string action));
   let host = server_peer_host in
   let port = state.port in
-  let run_transition () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Goal_transition_done result)
+    (fun () ->
       match
         Masc_tui_http.post_goal_transition ~host ~port ~goal_id ~action
           ~note:None
       with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox (Goal_transition_done result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_transition
-  | None -> run_transition ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)
@@ -12727,7 +12676,6 @@ let handle_goal_confirmation_key state ~mailbox =
   match state.planning_mode with
   | Planning_list -> ()
   | Planning_detail goal_id ->
-      with_async_switch state ~action:"Goal confirmation" @@ fun sw ->
       let host = server_peer_host and port = state.port in
       state.goal_action_armed <- None;
       (match state.goal_confirmation with
@@ -12737,8 +12685,9 @@ let handle_goal_confirmation_key state ~mailbox =
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
-           Eio.Fiber.fork ~sw (fun () ->
-             let result =
+           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+             ~deliver:(fun result -> Goal_confirmation_submitted result)
+             (fun () ->
                let ( let* ) = Result.bind in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
                let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
@@ -12747,8 +12696,7 @@ let handle_goal_confirmation_key state ~mailbox =
                  when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
                    Ok "completion confirmed"
                | _ -> Error "goal confirmation: server did not confirm completion"
-             in
-             enqueue_async mailbox (Goal_confirmation_submitted result))
+             )
        | Loading -> ()
        (* A confirmation read before a failed re-read is not the goal's
           current state; confirming it would act on what the server no longer
@@ -12761,16 +12709,16 @@ let handle_goal_confirmation_key state ~mailbox =
                 state.goal_confirmation <- Goal_confirmation.Inspecting loading;
                 state.goal_action_error <- None;
                 state.planning_scroll <- 0;
-                Eio.Fiber.fork ~sw (fun () ->
-                  let result =
+                launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+                  ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
+                  (fun () ->
                     let ( let* ) = Result.bind in
                     let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
                     let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
                     match confirmation.phase with
                     | Goal_phase.Awaiting_confirmation -> Ok confirmation
                     | _ -> Error "goal is not awaiting confirmation"
-                  in
-                  enqueue_async mailbox (Goal_confirmation_loaded (request, result)))))
+                  )))
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
    same press again submits it, and any other key disarms. *)
@@ -12817,18 +12765,12 @@ let start_board_comment state ~mailbox ~(post_id : string)
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
-  let run_comment () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; result })
+    (fun () ->
       match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox
-      (Board_new_post_done { reply_to = Some post_id; sent_draft; result })
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_comment
-  | None -> run_comment ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 (* Send a vote through the tools route. The voter is stamped by the route,
@@ -12843,17 +12785,12 @@ let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let host = server_peer_host in
   let port = state.port in
-  let run_vote () =
-    let result =
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Board_vote_done result)
+    (fun () ->
       match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox (Board_vote_done result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_vote
-  | None -> run_vote ()
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
 
 (* The vote keys on the list row under the cursor. Two presses: the first
@@ -13912,24 +13849,24 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       Option.iter
         (fun session ->
           Option.iter
-            (fun (updated : Masc_tui_types.voice_wizard_session) ->
+            (fun (updated : Masc_tui_voice_wizard_session.voice_wizard_session) ->
               state.voice_wizard <- Some updated;
               (match reply with
                (* The pane is one revision behind a write, and possibly behind
                   one that got no answer. *)
-               | Masc_tui_types.Save_written _ | Masc_tui_types.Save_unanswered_reply _ ->
+               | Masc_tui_voice_wizard_session.Save_written _ | Masc_tui_voice_wizard_session.Save_unanswered_reply _ ->
                    launch_voice_config_load state ~mailbox
-               | Masc_tui_types.Save_refused _ -> ());
+               | Masc_tui_voice_wizard_session.Save_refused _ -> ());
               match updated.vws_save with
-              | Masc_tui_types.Save_probing request ->
+              | Masc_tui_voice_wizard_session.Save_probing request ->
                   launch_voice_wizard_probe state ~mailbox ~request
                     voice_wizard_probe_sentence
-              | Masc_tui_types.Save_unanswered { request; _ } ->
+              | Masc_tui_voice_wizard_session.Save_unanswered { request; _ } ->
                   launch_voice_wizard_reread state ~mailbox ~request
-              | Masc_tui_types.Save_not_sent | Masc_tui_types.Save_sending _
-              | Masc_tui_types.Save_settled | Masc_tui_types.Save_needs_reopen _ ->
+              | Masc_tui_voice_wizard_session.Save_not_sent | Masc_tui_voice_wizard_session.Save_sending _
+              | Masc_tui_voice_wizard_session.Save_settled | Masc_tui_voice_wizard_session.Save_needs_reopen _ ->
                   ())
-            (Masc_tui_types.voice_wizard_after_save session ~request reply))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_save session ~request reply))
         state.voice_wizard
   | Voice_agent_voices_loaded result ->
       (match state.voice_agent_voices, result with
@@ -13984,7 +13921,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_probe session ~request
+            (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
                (Result.map voice_wizard_probe_lines result)))
         state.voice_wizard
   | Voice_wizard_reread (request, result) ->
@@ -13992,7 +13929,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_reread session ~request result))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_reread session ~request result))
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
@@ -15118,186 +15055,24 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (request, result) ->
-      state.code_listing <-
-        Masc_tui_fetched.complete ~equal:code_scope_path_equal
-          state.code_listing request result;
-      (match result with
-       | Ok _
-         when code_scope_path_equal
-                (Masc_tui_fetched.request_key request)
-                (code_listing_key state) ->
-           state.code_cursor <-
-             max 0
-               (min state.code_cursor (List.length (code_entries state) - 1))
-       | Ok _ | Error _ -> ())
-  | Code_file_loaded (request, result) -> (
-      let path = Masc_tui_fetched.request_key request in
-      (* An answer for a file the operator has moved past describes bytes
-         that are no longer on screen, and everything below resets the
-         scroll, the cursor and the sibling panes to match it. The sibling
-         loads already guarded on the open path; this one never did. *)
-      if not (Masc_tui_fetched.is_current ~equal:String.equal state.code_file request)
-      then ()
-      else
-      match result with
-      | Ok content ->
-          (* Lex once at load: comment and string state crosses rows, so a
-             window could not answer. Past the budget the file draws plain
-             rather than slowly. *)
-          let language =
-            if String.length content > 500_000 then None
-            else Masc_tui_code_lexer.language_of_path path
-          in
-          let rows =
-            Masc_tui_code_lexer.rows_of_source ~language content
-            |> List.map
-                 (List.map (fun (text, kind) ->
-                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
-          in
-          (* [rows] stays a list for the memo scan and the width fold just
-             below, both of which read it once front to back. The pane keeps
-             the array. *)
-          state.code_file <-
-            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok (Array.of_list rows));
-          (* The jump that asked for this file may have named a line; the
-             reset and the jump live together so neither overwrites the
-             other. Consumed once -- the next plain open starts at the top. *)
-          state.code_file_scroll <-
-            (match state.code_target_line with
-             | Some line -> max 0 (line - 1)
-             | None -> 0);
-          state.code_file_cursor <- state.code_file_scroll;
-          state.code_lsp_note <- None;
-          state.code_target_line <- None;
-          state.code_file_hscroll <- 0;
-          (* The widest row is the horizontal clamp; measured here, once,
-             not on every l press over ten thousand rows. *)
-          state.code_file_max_width <-
-            List.fold_left
-              (fun widest segments ->
-                let row_width =
-                  List.fold_left
-                    (fun acc (text, _) ->
-                      acc + Message_layout.display_width text)
-                    0 segments
-                in
-                max widest row_width)
-              0 rows;
-          state.code_memos <- Masc_tui_memo.of_file ~path rows;
-          state.code_focus_file <- Right_pane;
-          (* A new file starts on its content; the old file's history or
-             diff would caption the wrong bytes. *)
-          state.code_history <- Masc_tui_fetched.clear state.code_history;
-          state.code_history_open <- false;
-          state.code_history_scroll <- 0;
-          state.code_diff <- Masc_tui_fetched.clear state.code_diff;
-          state.code_diff_open <- false;
-          state.code_diff_scroll <- 0;
-          state.code_diff_hscroll <- 0;
-          state.code_diff_max_width <- 0;
-          state.code_notes_open <- false;
-          state.code_notes_scroll <- 0;
-          state.code_blame <- Masc_tui_fetched.clear state.code_blame
-      | Error detail ->
-          state.code_memos <- [];
-          state.code_file <-
-            Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Error detail))
+      Code_results.apply_entries state request result
+  | Code_file_loaded (request, result) ->
+      Code_results.apply_file state request result
   | Code_blame_loaded (request, result) ->
-      (* An answer that arrives after the operator moved on describes bytes
-         that are no longer on screen, and a margin naming the wrong authors
-         is worse than no margin. Opening a file clears the blame, so a
-         request from before that is no longer the one being waited on and
-         [complete] drops it -- the hand-written path comparison this arm
-         used to carry said the same thing in more places. *)
-      state.code_blame <-
-        Masc_tui_fetched.complete ~equal:String.equal state.code_blame request result
+      Code_results.apply_blame state request result
   | Code_lsp_answered (question, symbol, result) ->
-      (match result with
-       | Error detail ->
-           state.code_lsp_note <- Some (symbol ^ ": " ^ detail)
-       | Ok (Masc.Tui_decode.Lsp_hover text) ->
-           state.code_lsp_note <-
-             Some
-               (match text with
-                | Some t ->
-                    symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
-                | None -> symbol ^ ": the server has nothing to say here")
-       | Ok (Masc.Tui_decode.Lsp_locations []) ->
-           state.code_lsp_note <-
-             Some (Printf.sprintf "no %s found for %S" question symbol)
-       | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
-           let open Masc.Tui_decode in
-           if location.ll_inside then begin
-             (* Jump there: same file just moves the cursor, another file
-                opens with the line as its target. Either way the place the
-                jump left from goes on the back stack first. *)
-             push_code_jump state;
-             state.code_lsp_note <-
-               Some
-                 (Printf.sprintf "%s: %s:%d" symbol location.ll_path
-                    location.ll_line);
-             match Masc_tui_fetched.current state.code_file with
-             | Some (open_path, Masc_tui_fetched.Ready rows)
-               when String.equal open_path location.ll_path ->
-                 let cursor =
-                   max 0
-                     (min (location.ll_line - 1) (Array.length rows - 1))
-                 in
-                 state.code_file_cursor <- cursor;
-                 (* Follow the jump: a definition past the fold is a cursor
-                    the operator cannot see otherwise. *)
-                 state.code_file_scroll <-
-                   Masc_tui_scroll.ensure_visible ~cursor
-                     ~height:(Masc_tui_render.code_pane_content_height state)
-                     state.code_file_scroll
-             (* A different file, or this one not readable yet: ask for it.
-                [start] answers Already_loading if that is the read already in
-                flight, so a jump into the file being read does not double it. *)
-             | Some _ | None ->
-                 state.code_target_line <- Some location.ll_line;
-                 launch_code_file_load state ~mailbox
-                   ~path:location.ll_path
-           end
-           else
-             (* Outside the workspace (stdlib, a package): say where rather
-                than open a path the surface cannot serve. *)
-             state.code_lsp_note <-
-               Some
-                 (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
-                    location.ll_path location.ll_line))
+      (match Code_results.apply_lsp_answer state ~question ~symbol result with
+       | Code_results.No_followup -> ()
+       | Code_results.Reveal_cursor ->
+           state.code_file_scroll <-
+             Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
+               ~height:(Masc_tui_render.code_pane_content_height state)
+               state.code_file_scroll
+       | Code_results.Load_file path -> launch_code_file_load state ~mailbox ~path)
   | Code_diff_loaded (request, result) ->
-      let landed =
-        Masc_tui_fetched.is_current ~equal:String.equal state.code_diff request
-        && Result.is_ok result
-      in
-      state.code_diff <-
-        Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
-      if landed then begin
-        state.code_diff_scroll <- 0;
-        state.code_diff_hscroll <- 0;
-        state.code_diff_max_width <-
-          match result with
-          | Error _ -> 0
-          | Ok diff ->
-              List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
-                max widest (Message_layout.display_width
-                  (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
-      end
+      Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
-      (* The scope travels in the key, so a slow answer from a repository the
-         operator has left cannot caption the file now open at the same
-         relative path. *)
-      let landed =
-        Masc_tui_fetched.is_current ~equal:code_scope_path_equal state.code_history
-          request
-        && Result.is_ok result
-      in
-      state.code_history <-
-        Masc_tui_fetched.complete ~equal:code_scope_path_equal state.code_history
-          request result;
-      if landed then state.code_history_scroll <- 0
+      Code_results.apply_history state request result
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -19489,6 +19264,9 @@ and is loaded on demand through keeper_skill.
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~action ~stem ~post =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -19505,7 +19283,9 @@ and is loaded on demand through keeper_skill.
             report_action state "error"
               (action ^ ": body is not JSON: " ^ message)
           | `Assoc _ ->
-            (match post declaration with
+            (match Result.bind
+               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (fun () -> post declaration) with
              | Error detail -> report_action state "error" (action ^ ": " ^ detail)
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with
@@ -20177,7 +19957,7 @@ and is loaded on demand through keeper_skill.
                 Option.iter
                   (fun session ->
                     state.voice_wizard <-
-                      Some (Masc_tui_types.voice_wizard_append session text))
+                      Some (Masc_tui_voice_wizard_session.voice_wizard_append session text))
                   state.voice_wizard
             | Some Text_palette ->
                 state.palette_query <- state.palette_query ^ text;
@@ -21026,7 +20806,7 @@ and is loaded on demand through keeper_skill.
               let set value = state.voice_wizard <- Some value in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
-              if Masc_tui_types.voice_wizard_is_sending session && not (String.equal k "esc")
+              if Masc_tui_voice_wizard_session.voice_wizard_is_sending session && not (String.equal k "esc")
               then ()
               else (
                 match k with
@@ -21048,32 +20828,32 @@ and is loaded on demand through keeper_skill.
                   (match session.vws_step with
                    | Voice_wizard.Review ->
                      launch_voice_wizard_save state ~mailbox:async_messages
-                       (Masc_tui_types.voice_wizard_commit session)
+                       (Masc_tui_voice_wizard_session.voice_wizard_commit session)
                    | Voice_wizard.Section
                    | Voice_wizard.Provider
                    | Voice_wizard.Name
                    | Voice_wizard.Address
                    | Voice_wizard.Credential
                    | Voice_wizard.Model
-                   | Voice_wizard.Voice -> set (Masc_tui_types.voice_wizard_next session))
-                | "up" -> set (Masc_tui_types.voice_wizard_previous session)
-                | "down" -> set (Masc_tui_types.voice_wizard_next session)
+                   | Voice_wizard.Voice -> set (Masc_tui_voice_wizard_session.voice_wizard_next session))
+                | "up" -> set (Masc_tui_voice_wizard_session.voice_wizard_previous session)
+                | "down" -> set (Masc_tui_voice_wizard_session.voice_wizard_next session)
                 (* The provider is a closed set, so it walks under the same keys
                    a bool toggles under elsewhere in this pane. *)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Section ->
-                  set (Masc_tui_types.voice_wizard_cycle_section session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_section session)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Provider ->
-                  set (Masc_tui_types.voice_wizard_cycle_provider session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_provider session)
                 | "\127" | "\b" | "backspace" ->
-                  set (Masc_tui_types.voice_wizard_backspace session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_backspace session)
                 | s when String.length s = 1 && Char.code s.[0] = 21 ->
-                  set (Masc_tui_types.voice_wizard_clear session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_clear session)
                 | s
                   when (String.length s = 1 && Char.code s.[0] >= 32)
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                  set (Masc_tui_types.voice_wizard_append session s)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_append session s)
                 | _ -> ()))
        (* The launch form owns every key while it is up, above the quit key
           the way the Lane Add-ons form is: a prompt with a q in it is a
@@ -22568,16 +22348,19 @@ and is loaded on demand through keeper_skill.
                  | "c" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Stagehand view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "j" | "down" | "k" | "up" ->
+                 | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (browser_choices view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt (listed_clients view) cursor with
+                     (match List.nth_opt (browser_choices view) cursor with
                       | None -> ()
-                      | Some client ->
-                          state.browser_lane <- Some (choose_client client view);
-                          launch_browser_lane state ~mailbox:async_messages Read)
+                      | Some choice ->
+                          state.browser_lane <- Some (choose_browser choice view);
+                          if not (browser_choice_selected view choice) then
+                            (match choice with
+                             | Connected_browser _ -> launch_browser_lane state ~mailbox:async_messages Read
+                             | Stagehand_browser | Automation_browser -> refresh_browser_lane state ~mailbox:async_messages))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_none (browser_history_on_screen state)
@@ -22702,7 +22485,7 @@ and is loaded on demand through keeper_skill.
                  | "l" -> switch_to Live
                  | "a" -> switch_to Automation
                  | "c" -> switch_to Stagehand
-                 | "b" when view.source = Live && not (busy view) ->
+                 | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
@@ -25988,7 +25771,7 @@ and is loaded on demand through keeper_skill.
                       | Some (Hist_keeper_change change) -> (
                           match Masc_tui_fetched.current state.code_file with
                           | Some (_, Masc_tui_fetched.Ready rows) ->
-                            push_code_jump state;
+                            Code_results.push_code_jump state;
                             state.code_history_open <- false;
                             let cursor =
                               max 0
@@ -27232,7 +27015,7 @@ and is loaded on demand through keeper_skill.
                          state.config_scroll <- 0;
                          state.voice_wizard
                            <- Some
-                                (Masc_tui_types.voice_wizard_open
+                                (Masc_tui_voice_wizard_session.voice_wizard_open
                                    ~section:Voice_setup.Tts
                                    ~provider:Voice_wizard.Elevenlabs ~revision)
                        | (Some _ | None), _ -> ())

@@ -111,8 +111,16 @@ def computation_output(status="answered", *, role="panel", outcome=True, text="F
     terminal = None
     if outcome:
         terminal = {"status": status, "error": "actual host failure"}
-        if answered:
+        if answered or status == "invalid_response":
             terminal["response"] = {key: value for key, value in response.items() if key != "_meta"}
+    if status == "invalid_response":
+        fields["sampling_response"] = response
+        fields["validation_error"] = "Fusion requires an actual response model"
+        fields["sampling_error"]["message"] = json.dumps({
+            **terminal, "evidence": refs})
+    elif not answered and not outcome:
+        fields["sampling_error"]["message"] = json.dumps({
+            "status": status, "error": "actual host failure", "request": refs["request"]})
     retain_fixture_receipt(refs, terminal)
     template = project(detail())
     item = copy.deepcopy(template["rows"][0])

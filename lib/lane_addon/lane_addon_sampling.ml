@@ -122,9 +122,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       "package",`Assoc ["id",`String package.id;"revision",`String package.revision];
       "state",`String state;"request",Types.evidence_to_json request;
       "outcome",Option.fold ~none:`Null ~some:Types.evidence_to_json outcome] in
-    let save state = Eio_unix.run_in_systhread (fun () ->
-      Store.save_sampling_request store ~instance_id ~request_id (record state)) in
-    let* () = save Pending in
+    let* () = Eio_unix.run_in_systhread (fun () ->
+      Store.save_sampling_request store ~instance_id ~request_id (record Pending)) in
     let outcome = try match invoke ~route ~request params with
       | Ok answer ->
           (match validate_response answer with
@@ -156,13 +155,9 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         Store.save_sampling_outcome store ~instance_id ~request_id (record (Finished evidence))) with
         | Ok () -> Ok ()
         | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
-            "error",`String detail;"request",Types.evidence_to_json request;
-            "evidence",references])) in
-      let* () = match save (Finished evidence) with
-        | Ok () -> Ok ()
-        | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
-            "error",`String detail;"request",Types.evidence_to_json request;
-            "evidence",references])) in
+            "error",`String detail;"request",Types.evidence_to_json request])) in
+      (* This journal is the terminal authority. The original pending intent
+         stays unchanged; a redundant rewrite must not relabel a durable answer. *)
       Ok references) in
     Eio.Fiber.check ();
     let* references = retained in

@@ -469,11 +469,14 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let rejected = ref false in
   let oversized = ref false in
   let raises = ref false and blank_model = ref false and malformed = ref false in
-  let fail_index = ref false in
+  let fail_index = ref false and fail_journal = ref false in
   let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "model-evidence") in
   let index_directory = Filename.concat (Masc.Lane_addon_store.root store)
     (Filename.concat "sampling" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
   let saved_index = index_directory ^ ".saved" in
+  let outcome_directory = Filename.concat (Masc.Lane_addon_store.root store)
+    (Filename.concat "sampling-outcomes" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
+  let saved_outcomes = outcome_directory ^ ".saved" in
   let invoke ~route ~request (_ : Mcp_protocol.Sampling.create_message_params) =
     incr calls;
     check string "host owns the selected logical route" "fixture-route" route;
@@ -489,6 +492,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     if !fail_index then (
       Unix.rename index_directory saved_index;
       write index_directory "fixture blocks terminal index replacement");
+    if !fail_journal then (
+      Unix.rename outcome_directory saved_outcomes;
+      write outcome_directory "fixture blocks terminal journal");
     if !raises then failwith "fixture invocation outcome uncertain"
     else if !rejected then Error "fixture model refusal"
     else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_=(if !malformed then "image" else "text");
@@ -558,14 +564,14 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     if Sys.file_exists saved_index then (
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory)) (fun () ->
-    check bool "terminal index failure does not report success" true
-      (Result.is_error (observe worker "good")));
-  let index_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
-    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message"
-    |> Yojson.Safe.Util.to_string |> Yojson.Safe.from_string in
-  check string "terminal index failure remains uncertain" "outcome_unknown"
-    (Yojson.Safe.Util.member "status" index_failure |> Yojson.Safe.Util.to_string);
-  let recovered_references = Yojson.Safe.Util.member "evidence" index_failure in
+    check bool "durable terminal answer survives unavailable primary index" true
+      (Result.is_ok (observe worker "good")));
+  let successful_reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "result" in
+  check string "primary index loss does not relabel the actual answer" "host-fixture"
+    (Yojson.Safe.Util.member "model" successful_reply |> Yojson.Safe.Util.to_string);
+  let recovered_references = successful_reply |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member "masc.lane_sampling" in
   let recovered_outcome = Yojson.Safe.Util.member "outcome" recovered_references |> read_reference in
   check string "index failure exposes the retained actual answer" "host answer"
     (recovered_outcome |> Yojson.Safe.Util.member "response"
@@ -576,9 +582,41 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       = Yojson.Safe.Util.member "request" recovered_references);
   let interrupted = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
-  check bool "failed terminal replacement recovers the independently retained outcome" true
+  check bool "recovery resolves the authoritative terminal journal" true
     (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
       && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" recovered_references) interrupted);
+  let request_id = recovered_references |> Yojson.Safe.Util.member "request" |> read_reference
+    |> Yojson.Safe.Util.member "request_id" |> Yojson.Safe.Util.to_string in
+  let pending_intent = Yojson.Safe.from_file
+    (Filename.concat index_directory (Masc.Lane_addon_store.digest request_id ^ ".json")) in
+  check string "primary index remains the original pending intent" "pending"
+    Yojson.Safe.Util.(pending_intent |> member "state" |> to_string);
+  let projected_refs = ["request";"outcome"] |> List.map (fun key ->
+    match Types.evidence_of_json (Yojson.Safe.Util.member key recovered_references) with
+    | Ok value -> value | Error detail -> fail detail) in
+  check string "receipt agrees with the returned durable answer" "answered"
+    Yojson.Safe.Util.(project "sampling-worker" (selected projected_refs) |> List.hd
+      |> member "terminal" |> member "status" |> to_string);
+  fail_journal := true;
+  Fun.protect ~finally:(fun () ->
+    fail_journal := false;
+    Unix.unlink outcome_directory;
+    Unix.rename saved_outcomes outcome_directory) (fun () ->
+    check bool "failed terminal journal cannot return successful sampling" true
+      (Result.is_error (observe worker "good")));
+  let journal_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message"
+    |> Yojson.Safe.Util.to_string |> Yojson.Safe.from_string in
+  check string "failed terminal journal remains outcome unknown" "outcome_unknown"
+    Yojson.Safe.Util.(journal_failure |> member "status" |> to_string);
+  check bool "unindexed outcome is not exported as attested evidence" true
+    (Yojson.Safe.Util.member "evidence" journal_failure = `Null);
+  let pending_request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" journal_failure) with
+    | Ok value -> value | Error detail -> fail detail in
+  let pending_receipt = project "sampling-worker" (selected [pending_request]) |> List.hd in
+  check bool "journal failure projects the same request-only pending receipt" true
+    (Yojson.Safe.Util.member "outcome" pending_receipt = `Null
+     && Yojson.Safe.Util.member "terminal" pending_receipt = `Null);
   rejected := true;
   check bool "model refusal is not a synthetic successful observation" true
     (Result.is_error (observe worker "good"));

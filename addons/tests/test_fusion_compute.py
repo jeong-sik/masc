@@ -406,6 +406,23 @@ class FusionCompute(unittest.TestCase):
                 fields["sampling_response"]["_meta"]["provider_key"] = "forged credential"
                 self.assertTrue(call_report("fusion-report", [upstream(output)])["isError"])
 
+    def test_terminal_payload_cannot_add_claims_to_host_failures(self):
+        with tempfile.TemporaryDirectory() as root:
+            for status, pending in (("host_error", False), ("invalid_response", False),
+                                    ("outcome_unknown", False), ("outcome_unknown", True)):
+                original = call(Host(root, status=status, pending=pending), [source()])["structuredContent"]
+                for key, value in (("provider_key", "invented"), ("extra", {"billing": "invented"})):
+                    with self.subTest(status=status, pending=pending, key=key):
+                        output = copy.deepcopy(original)
+                        error = output["rows"][0]["fields"]["sampling_error"]
+                        terminal = json.loads(error["message"])
+                        terminal[key] = value
+                        error["message"] = json.dumps(terminal)
+                        host = Host(root)
+                        self.assertTrue(call(host, [upstream(output)], binding("judge"), ping=True)["isError"])
+                        self.assertEqual(host.calls, [])
+                        self.assertTrue(call_report("fusion-report", [upstream(output)])["isError"])
+
     def test_failure_envelope_cannot_claim_worker_metadata_as_host_error(self):
         with tempfile.TemporaryDirectory() as root:
             for status in ("host_error", "invalid_response", "outcome_unknown"):

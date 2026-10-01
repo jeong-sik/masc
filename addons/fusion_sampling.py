@@ -44,7 +44,16 @@ def terminal_error(error, computation, refs):
         raise InvalidInput("Sampling error must retain the host terminal outcome") from cause
     if terminal.get("status") != computation["status"]:
         raise InvalidInput("Computation status differs from the host terminal outcome")
+    keys = {"status", "error", "evidence"}
+    if terminal["status"] == "invalid_response":
+        keys.add("response")
+    elif terminal["status"] == "outcome_unknown" and "request" in terminal:
+        keys = {"status", "error", "request"}
+    if set(terminal) != keys or not isinstance(terminal.get("error"), str):
+        raise InvalidInput("Sampling terminal fields differ from the host outcome contract")
     expected = terminal.get("evidence")
+    if expected is not None and (not isinstance(expected, dict) or "outcome" not in expected):
+        raise InvalidInput("Terminal evidence requires an attested outcome")
     if expected is None and terminal["status"] == "outcome_unknown" and "request" in terminal:
         expected = {"request": terminal["request"]}
     if expected != refs or ("request" in terminal and terminal["request"] != refs.get("request")):

@@ -52,8 +52,8 @@ val save_sampling_request : t -> instance_id:string -> request_id:string ->
 val sampling_requests : t -> instance_id:string -> (Yojson.Safe.t list, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
-(** Independently retain the terminal request/outcome link before replacing the
-    primary request index. Recovery can discover it if that replacement fails. *)
+(** Retain the authoritative terminal request/outcome link. The original request
+    index remains the pending intent; recovery and projection prefer this journal. *)
 val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
   f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
 (** Stream recovery records with bounded per-record reads and constant directory

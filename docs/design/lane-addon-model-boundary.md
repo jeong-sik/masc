@@ -71,6 +71,11 @@ the string-error callback cannot establish whether an error was a policy refusal
 or a provider failure. Unexpected invocation exceptions are `outcome_unknown`.
 Error responses expose that status inline because a container cannot read the
 host's evidence store. Cancellation propagates and preserves its pending request.
+After invocation, the immutable outcome and its outcome journal are retained
+under cancellation protection. That journal is the sole terminal authority;
+the original request index remains a pending intent. Recovery and receipt
+projection prefer the journal. Once it is durable, loss of the primary request
+index cannot change a known answer into `outcome_unknown`.
 If terminal retention fails after invocation, the error identifies the retained
 request and explicitly reports uncertainty, never a claim that no call happened.
 

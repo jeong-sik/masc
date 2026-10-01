@@ -126,7 +126,7 @@ let save_checkpoint config ~trace_id messages turn_count =
   | Error detail -> failf "save checkpoint: %s" detail
 ;;
 
-let append_boundary ?history_at_start config ~trace_id ~turn ~recorded_at messages =
+let append_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task) ?history_at_start config ~trace_id ~turn ~recorded_at messages =
   let position =
     match Boundaries.position_of_messages messages with
     | Ok position -> position
@@ -136,7 +136,7 @@ let append_boundary ?history_at_start config ~trace_id ~turn ~recorded_at messag
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start =
               (match history_at_start with
                | Some history_at_start -> history_at_start
@@ -202,6 +202,97 @@ let establish_progress config ~trace_id first =
   | Consumer.Nothing_to_read
   | Consumer.Official_advanced _
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
+;;
+
+module Historical = Masc.Keeper_librarian_task_context
+module Task_context = Masc.Keeper_turn_task_context
+
+let historical_task task_id goal_id target =
+  let task_id = match Keeper_id.Task_id.of_string task_id with
+    | Ok id -> id | Error detail -> fail detail in
+  Task_context.Task {task_id;goals=Ok [{Task_context.goal_id;phase=Goal_phase.Executing;
+    criterion=Goal_store.Criterion {revision="original-" ^ goal_id;title=goal_id;
+      metric=Some "count";target_value=Some target}}]}
+
+let observed_task_ids contexts = List.filter_map (fun (entry : Historical.t) ->
+  match entry.scope.attribution with
+  | Historical.Observed {task_context=Task_context.Task {task_id;_};_} ->
+    Some (Keeper_id.Task_id.to_string task_id)
+  | Historical.Observed _ | Historical.Unattributed -> None) contexts
+
+let test_historical_contexts_in_one_batch ~missing_boundary () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-historical-contexts" in
+  establish_progress config ~trace_id "t1";
+  let first = [message "t1"] in
+  let tool_messages = if not missing_boundary then [] else
+    let module T = Agent_core.Types in
+    [ T.make_message ~role:T.Assistant
+        [T.ToolUse {id="read-1";name="read_file";input=`Assoc []}];
+      { (T.make_message ~role:T.Tool [T.ToolResult {tool_use_id="read-1";
+          content="source result";outcome=T.Tool_succeeded;json=None;content_blocks=None}])
+        with tool_call_id=Some "read-1" } ] in
+  let selected_first = message "t2" :: tool_messages in
+  let first_two = first @ selected_first in
+  let messages = first_two @ [message "t3"] in
+  let a = historical_task "task-a" "goal-a" "1" in
+  let b = historical_task "task-b" "goal-b" "2" in
+  if not missing_boundary then
+    append_boundary ~task_context:a
+      ~history_at_start:(Boundaries.history_at_start_of_messages first)
+      config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary ~task_context:b
+    ~history_at_start:(Boundaries.history_at_start_of_messages first_two)
+    config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  write_meta ~current_task_id:"task-current-unrelated" config trace_id;
+  let commits = ref 0 in
+  ignore (consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+    incr commits;
+    check bool "each selected message body occurs once" true
+      (input.messages = selected_first @ [message "t3"]);
+    check (list string) "gap splitting preserves tools once"
+      (if missing_boundary then ["read_file"] else [])
+      (List.map (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name) input.tool_observations);
+    check (list string) "source bodies are selected once" ["t2";"t3"] (text_markers input);
+    check (list string) "each turn retains its own Task" (if missing_boundary then ["task-b"] else ["task-a";"task-b"])
+      (observed_task_ids input.historical_task_contexts);
+    (match input.historical_task_contexts with
+     | [left;right] ->
+       check (pair int int) "first message association" (0,List.length selected_first) (left.first_message,left.after_message);
+       check (pair int int) "second message association" (List.length selected_first,List.length selected_first+1) (right.first_message,right.after_message);
+       check (pair int int) "earlier tools retain their own interval"
+         (0,if missing_boundary then 1 else 0)
+         (left.first_tool_observation,left.after_tool_observation);
+       check (pair int int) "later Task does not inherit earlier tools"
+         (left.after_tool_observation,left.after_tool_observation)
+         (right.first_tool_observation,right.after_tool_observation);
+       check bool "missing earlier boundary is an explicit gap" missing_boundary
+         (left.scope.attribution = Historical.Unattributed);
+       (match right.scope.attribution with
+        | Historical.Observed {turn_ref;task_context} ->
+          check int "right turn is T3" 3 (Ids.Turn_ref.absolute_turn turn_ref);
+          check bool "original criterion is retained" true (task_context=b)
+        | Historical.Unattributed -> fail "known T3 admission lost")
+     | _ -> fail "expected two distinct source contexts");
+    check bool "current Goal context stays separate" true (input.goal_context = Masc.Keeper_librarian.No_task);
+    let variables = Masc.Keeper_librarian.prompt_variables input in
+    check string "prompt carries exact context association"
+      (Yojson.Safe.to_string (Historical.to_json input.historical_task_contexts))
+      (List.assoc "historical_task_contexts" variables);
+    let history = List.assoc "conversation_history" variables in
+    check bool "existing message zero label identifies t2" true
+      (String_util.contains_substring history "[turn=0 role=user speaker=unknown] t2");
+    check bool "existing message one label identifies t3" true
+      (String_util.contains_substring history (Printf.sprintf "[turn=%d role=user speaker=unknown] t3" (List.length selected_first)));
+    true));
+  check int "one batch commits once" 1 !commits;
+  let expected_end = match Boundaries.position_of_messages messages with
+    | Ok (Boundaries.Atom_history {end_atom;_}) -> end_atom
+    | _ -> fail "fixture has no atom endpoint" in
+  check int "cursor reaches T3" expected_end (Option.get (read_progress config)).position.end_atom;
+  ignore (consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> incr commits; true));
+  check int "drained sources do not call model again" 1 !commits
 ;;
 
 let test_n_tick_reads_every_intermediate_turn () =
@@ -2441,12 +2532,12 @@ let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
 module Official = Masc.Keeper_librarian_official_progress
 module History = Masc.Keeper_context_core_history
 
-let append_official_boundary config ~trace_id ~turn ~recorded_at =
+let append_official_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task) config ~trace_id ~turn ~recorded_at =
   let record : Boundaries.record =
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start = Boundaries.Continued_history
           ; position = Boundaries.No_atom_history
           }
@@ -2593,13 +2684,13 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
    fragment from the start of the turn, it kept no assistant text, and the
    error path writes its tool observations and its end line. The Librarian
    reads that turn like any other, and the turn after it too. *)
-let test_a_failed_official_turn_is_read () =
+let test_a_failed_official_turn_is_read ?(tool_only=false) () =
   with_workspace
   @@ fun config ->
   let trace_id = "trace-official-failed" in
   write_meta config trace_id;
   let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
-  History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
+  if not tool_only then History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
     (session config trace_id) (message "q-failed");
   let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
     { tool_name
@@ -2614,7 +2705,7 @@ let test_a_failed_official_turn_is_read () =
     }
   in
   Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
-    ~task_context:Masc.Keeper_turn_task_context.No_task
+    ~task_context:(historical_task "task-failed" "goal-failed" "1")
     ~config
     ~meta:(meta trace_id)
     ~turn_ref:failed_ref
@@ -2622,13 +2713,39 @@ let test_a_failed_official_turn_is_read () =
     ~tool_observations:[ detail "fixture_effect" ]
     ~history_at_start:Boundaries.Continued_history
     ~restart_notice_pending:(Atomic.make false);
-  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
-  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ());
+  if tool_only then
+    Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+      ~task_context:(historical_task "task-second" "goal-second" "2")
+      ~config ~meta:(meta trace_id)
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:2)
+      ~session:(session config trace_id) ~tool_observations:[detail "second_effect"]
+      ~history_at_start:Boundaries.Continued_history
+      ~restart_notice_pending:(Atomic.make false)
+  else (
+    write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+    append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ()));
+
   let carried = ref [] in
   let tools = ref [] in
   (match
      consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
        carried := text_markers input;
+       (match input.historical_task_contexts with
+        | first :: _ ->
+          check (pair int int) "failed turn message interval" (0,if tool_only then 0 else 1)
+            (first.first_message,first.after_message);
+          check (list string) "failed turn retains exact Task even without text"
+            ["task-failed"] (observed_task_ids [first]);
+          (match first.scope.attribution with
+           | Historical.Observed {turn_ref;_} -> check bool "failed turn reference" true (Ids.Turn_ref.equal failed_ref turn_ref)
+           | Historical.Unattributed -> fail "failed official attribution lost")
+        | [] -> fail "failed official context absent");
+       if tool_only then (
+         check (list string) "two tool-only turns retain separate Tasks"
+           ["task-failed";"task-second"] (observed_task_ids input.historical_task_contexts);
+         check (list (pair int int)) "two tool-only turns retain separate observation intervals"
+           [(0,1);(1,2)] (List.map (fun (entry : Historical.t) ->
+             entry.first_tool_observation,entry.after_tool_observation) input.historical_task_contexts));
        tools :=
          List.map
            (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
@@ -2641,9 +2758,9 @@ let test_a_failed_official_turn_is_read () =
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
    | Consumer.Memory_not_committed -> fail "the failed turn left nothing to read");
-  check (list string) "the failed turn's input, then the next turn" [ "q-failed"; "q2"; "a2" ]
+  check (list string) "the failed turn's input, then the next turn" (if tool_only then [] else [ "q-failed"; "q2"; "a2" ])
     !carried;
-  check (list string) "the tool the failed turn called" [ "fixture_effect" ] !tools
+  check (list string) "the tool the failed turn called" (if tool_only then ["fixture_effect";"second_effect"] else ["fixture_effect"]) !tools
 ;;
 
 (* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
@@ -2655,14 +2772,20 @@ let test_a_mixed_keeper_is_read_in_line_order () =
   let trace_id = "trace-mixed" in
   establish_progress config ~trace_id "t1";
   write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
-  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.0;
+  append_official_boundary ~task_context:(historical_task "task-official" "goal-official" "1") config ~trace_id ~turn:2 ~recorded_at:2.0;
   let messages = [ message "t1"; message "t3" ] in
-  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  append_boundary ~task_context:(historical_task "task-atom" "goal-atom" "2")
+    ~history_at_start:(Boundaries.history_at_start_of_messages [message "t1"]) config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
   save_checkpoint config ~trace_id messages 3;
   let carried = ref [] in
   (match
      consume config (fun ~expected_revision:_ ~range_id ~official_range_id input ->
        carried := text_markers input;
+       check (list string) "official then atom admission context"
+         ["task-official";"task-atom"] (observed_task_ids input.historical_task_contexts);
+       check (list (pair int int)) "mixed source message associations"
+         [(0,2);(2,3)] (List.map (fun (entry : Historical.t) ->
+           entry.first_message,entry.after_message) input.historical_task_contexts);
        check bool "the atoms of the pass carry a receipt" true (Option.is_some range_id);
        check bool "the official turns carry a receipt" true (Option.is_some official_range_id);
        true)
@@ -3126,7 +3249,11 @@ let () =
   run
     "Keeper Librarian durable consumer"
     [ ( "range lifecycle"
-      , [ test_case "N ticks retain intermediate turns" `Quick
+      , [ test_case "A and B retain distinct historical contexts in one batch" `Quick
+            (test_historical_contexts_in_one_batch ~missing_boundary:false)
+        ; test_case "missing boundary leaves earlier atoms unattributed" `Quick
+            (test_historical_contexts_in_one_batch ~missing_boundary:true)
+        ; test_case "N ticks retain intermediate turns" `Quick
             test_n_tick_reads_every_intermediate_turn
         ; test_case "unread turns counts what a pass has left" `Quick
             test_unread_turns_counts_what_a_pass_has_left
@@ -3214,8 +3341,10 @@ let () =
             (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
         ; test_case "an official-only keeper is read from its fragments" `Quick
             test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "tool-only errored official turn retains admission" `Quick
+            (test_a_failed_official_turn_is_read ~tool_only:true)
         ; test_case "a failed official turn is read" `Quick
-            test_a_failed_official_turn_is_read
+            (test_a_failed_official_turn_is_read ~tool_only:false)
         ; test_case "a mixed keeper is read in line order" `Quick
             test_a_mixed_keeper_is_read_in_line_order
         ; test_case "official receipt recovers failed cursor write" `Quick

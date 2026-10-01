@@ -304,7 +304,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let ( let* ) = Result.bind in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
-        { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+        { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
           keeper_id;
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
@@ -517,15 +517,16 @@ let context_pass_needed ~keepers_dir ~keeper_name
 
 (* The queue pass organizes the inputs pending now, with no turn range, so
    the Keeper's current task is the task these inputs belong to. The durable
-   and continuity passes read turns that may predate that task, and a turn
-   boundary does not record its task, so they stay [No_task]. *)
+   and continuity passes read turns that may predate that task, so their
+   current Goal context stays [No_task]. Historical durable context is separate;
+   continuity admission provenance is not yet transported. *)
 let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
     ~working_context : Keeper_librarian.input =
   { keeper_id
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
-  ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
   ; current

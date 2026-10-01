@@ -37,7 +37,7 @@ let input () : Librarian.input =
       Ids.Turn_ref.make
         ~trace_id:"trace-selection"
         ~absolute_turn:7
-  ; goal_context = Masc.Keeper_librarian.No_task
+  ; historical_task_contexts = []; goal_context = Masc.Keeper_librarian.No_task
   ; keeper_id = Masc_test_deps.keeper_id_fixture librarian_subject_keeper
   ; keeper_instructions = "You are the retry-test keeper."
   ; current =

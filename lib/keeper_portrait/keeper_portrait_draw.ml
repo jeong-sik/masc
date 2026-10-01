@@ -489,10 +489,11 @@ let bow_knot g x y =
    flame rises from the middle above the wax top and the horns leave the top
    corners, so the band across the middle is the free row. Both stay below
    the flame's round body at the centre and inside the horns' bases at the
-   sides. *)
-let crown_centre g = (0.0, g.top +. 0.055)
-let crown_half_width = 0.15
-let crown_band_half_height = 0.026
+   sides. The crown band sits below the top outline so the 24-pixel Info
+   mosaic can distinguish it from bare wax. *)
+let crown_centre g = (0.0, g.top +. 0.12)
+let crown_half_width = 0.18
+let crown_band_half_height = 0.07
 
 let crown_field g x y =
   let cx, cy = crown_centre g in

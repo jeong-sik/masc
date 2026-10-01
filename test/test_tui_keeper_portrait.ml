@@ -221,6 +221,20 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
     in
     check bool (label ^ ": accessory changes pixels within the same frame") false
       (String.equal without_accessories.Draw.rgba equipped.Portrait.image.Draw.rgba);
+    if label = "crown" then (
+      let gold_pixels = ref 0 in
+      for y = 0 to equipped.Portrait.image.Draw.edge - 1 do
+        for x = 0 to equipped.Portrait.image.Draw.edge - 1 do
+          let bare, _ = Draw.pixel without_accessories ~x ~y in
+          let crowned, alpha = Draw.pixel equipped.Portrait.image ~x ~y in
+          if alpha > 0 && bare <> crowned
+             && crowned.red > crowned.green
+             && crowned.green > crowned.blue + 10
+          then incr gold_pixels
+        done
+      done;
+      check bool "crown keeps gold pixels in the 24-pixel mosaic" true
+        (!gold_pixels > 0));
     let without_accessory_cells =
       View.lines ~project View.Mosaic equipped.Portrait.box without_accessories
     in

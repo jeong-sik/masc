@@ -199,6 +199,26 @@ status: reference
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
   [Provider_config](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**Model Context Window (모델 문맥 창 / 용량 관측)**
+: 런타임 설정에서 지정한 요청 문맥 창 크기(`Requested Context Window`, `context_window`)와,
+  턴 실행 시 제공자/클라이언트가 실제 보고한 가용 문맥 용량(`Client-Reported Capacity`, `provider_context_window`)의
+  엄격한 구분(#40552·#40554).
+  대시보드 런타임 편집기([`runtime-environment-editor.ts`](../../dashboard/src/components/runtime-environment-editor.ts))의
+  `max-context`는 요청 값일 뿐이며 500K·1M 프리셋과 직접 토큰 입력을 지원한다.
+  - 점유율 분모는 클라이언트 보고치([`turn-context-window.ts`](../../dashboard/src/lib/turn-context-window.ts)):
+    `TurnRecordEntry`의 문맥 점유율(Occupancy %) 계산은 설정된 요청치가 아니라 해당 턴에서
+    클라이언트가 실제로 보고한 용량을 분모로 쓴다(`reported ?? configured`). 보고치가 있으면
+    '실측 컨텍스트', 없으면 '설정 기준 컨텍스트' 라벨을 붙인다. 예를 들어 1,000,000 토큰 요청에
+    클라이언트가 828,400을 보고하고 414,200 토큰을 입력한 경우, 점유율은 41.42%가 아니라 50.0%로 계산된다.
+  - 초과 및 누락 처리: 요청치 이내라도 실제 보고된 용량을 초과하는 입력은 진입 불가(`unavailable`)로
+    남으며, 클라이언트 보고치가 없는 턴은 고정 비율로 추정하지 않고 `unmeasured` 상태로 명시한다.
+    누적/턴 합계 토큰을 요청당 점유율로 왜곡하지 않는다.
+  - 관측 전용 불변식: 최신 TurnRecord tail(RFC-0233)에서 투영되는 문맥 수치([`keeper_context_observation_projection.mli`](../../lib/keeper/keeper_context_observation_projection.mli))는
+    대시보드 트리아지(밴드·정렬·헬스 카운트) 관측 전용이며, 런타임의 다음 요청 진입 허가 결정에 직접 사용할 수 없다.
+  → [turn-context-window.ts](../../dashboard/src/lib/turn-context-window.ts) ·
+  [Keeper_context_observation_projection](../../lib/keeper/keeper_context_observation_projection.mli) ·
+  [docs/SHARED-RUNTIME-MODELS.md](../SHARED-RUNTIME-MODELS.md)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
@@ -1601,6 +1621,16 @@ status: reference
   [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
+
+**Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
+: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039).
+  - 대시보드 Item 탭([`keeper-items.ts`](../../dashboard/src/components/keeper-items.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
+  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
+  - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
+  - 단축 뷰포트 예산 보호: 15~16행의 짧거나 좁은 터미널 화면에서는 Candle 블록이 여유 행(spare rows)에만 진입하며, 화면이 혼잡할 때는 상태 이름과 요약만 남기고 전체 진단과 정확한 수량은 전역 Help/Info 시트로 접어 다른 핵심 작업(Attention, Task)의 시각 예산을 침범하지 않는다.
+  → [keeper-items.ts](../../dashboard/src/components/keeper-items.ts) ·
+  [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_ledger](../../lib/candle_store/candle_ledger.mli)
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·

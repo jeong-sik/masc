@@ -12,6 +12,7 @@ import {
 function keeperWire(name = 'planner') {
   return {
     runtime_class: 'keeper',
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     meta: {
       name,
@@ -38,6 +39,7 @@ function issueWire(name = 'broken') {
   return {
     status: 'error',
     runtime_class: 'keeper',
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     keepalive_running: false,
     effective_meta_error: {

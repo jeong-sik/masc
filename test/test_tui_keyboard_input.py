@@ -267,6 +267,8 @@ def test_http_endpoint(
             path_only = self.path.split("?", 1)[0]
             if self.path in fixtures:
                 fixture = fixtures[self.path]
+            elif path_only == "/api/v1/gate/keepers" and "/api/v1/gate/keepers?detailed=true" in fixtures:
+                fixture = fixtures["/api/v1/gate/keepers?detailed=true"]
             elif self.path == "/health":
                 fixture = (200, {})
             elif self.path == "/health?full=1":
@@ -1643,6 +1645,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1658,6 +1661,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],

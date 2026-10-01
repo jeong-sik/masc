@@ -13,6 +13,8 @@ registers the callback with the pinned MCP client's implementation before
 initialization. Only connections with this callback advertise sampling.
 Unconfigured requests receive the SDK's protocol error. Host refusals return
 an error to the requesting process rather than an invented model answer.
+Callback exceptions also return protocol errors, preserving subsequent tool
+framing; Eio cancellation still propagates to the caller.
 
 The integration suite exercises an actual Python MCP subprocess with an empty
 environment: initialization capability, exact request text and output limit,
@@ -22,10 +24,9 @@ execution or Docker isolation evidence.
 
 ## Remaining Lane/Fusion wiring
 
-- Declare model access explicitly in the package interface and resolve its
-  host-owned model route from installation TOML. The generic MCP callback does
-  not automatically grant Add-ons model access.
-- Register the callback only for the exact installed package with model access.
+- Resolve the host-owned model route from installation TOML and supply the
+  production callback. Package model-access declaration and worker-level
+  callback admission are implemented below; they do not resolve a provider.
   Keep provider keys on the host and the worker's existing network isolation.
 - Retain the model request before calling the provider, then retain actual
   model/runtime response identity, errors and source references separately.

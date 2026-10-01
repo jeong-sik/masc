@@ -68,7 +68,7 @@ for line in sys.stdin:
 |}
 ;;
 
-let sampling_round_trip ?sampling_handler () =
+let sampling_round_trip ?sampling_handler ?(after_reply = fun _ -> ()) () =
   with_temp_script sampling_server (fun path ->
     with_eio (fun ~sw ~mgr ->
       let client = match Mcp.connect ~sw ~mgr ~command:"python3" ~args:[path]
@@ -81,7 +81,7 @@ let sampling_round_trip ?sampling_handler () =
         match Mcp.call_tool_full client ~name:"compose" ~arguments:(`Assoc []) with
         | Ok result ->
             (match result.structured_content with
-             | Some value -> value | None -> Alcotest.fail "missing callback round-trip evidence")
+             | Some value -> after_reply client; value | None -> Alcotest.fail "missing callback round-trip evidence")
         | Error error -> Alcotest.fail (Error.to_string error))))
 ;;
 
@@ -118,6 +118,44 @@ let test_sampling_denial_is_returned_to_package () =
   let open Yojson.Safe.Util in
   Alcotest.(check string) "host refusal is a protocol error, not a synthetic answer"
     "host policy rejected this request" (result |> member "reply" |> member "error" |> member "message" |> to_string)
+;;
+
+exception Sampling_callback_failure
+exception Sampling_callback_cancelled
+
+let test_sampling_exception_preserves_stdio () =
+  let calls = ref 0 in
+  let sampling_handler _ =
+    incr calls;
+    if !calls = 1 then raise Sampling_callback_failure
+    else Ok {Mcp_protocol.Sampling.role=Assistant;
+      content=Text {type_="text";text="Recovered callback"};
+      model="host-fixture-model";stop_reason=None;_meta=None} in
+  let open Yojson.Safe.Util in
+  let after_reply client =
+    match Mcp.call_tool_full client ~name:"compose" ~arguments:(`Assoc []) with
+    | Error error -> Alcotest.fail (Error.to_string error)
+    | Ok result ->
+        let value = match result.structured_content with
+          | Some value -> value | None -> Alcotest.fail "missing subsequent tool response" in
+        Alcotest.(check string) "next tool and sampling replies remain framed"
+          "Recovered callback"
+          (value |> member "reply" |> member "result" |> member "content" |> member "text" |> to_string) in
+  let result = sampling_round_trip ~sampling_handler ~after_reply () in
+  Alcotest.(check string) "callback exception reaches the package as an error"
+    (Printexc.to_string Sampling_callback_failure)
+    (result |> member "reply" |> member "error" |> member "message" |> to_string);
+  Alcotest.(check int) "same connection handled both callbacks" 2 !calls
+;;
+
+let test_sampling_cancellation_propagates () =
+  let propagated =
+    try
+      ignore (sampling_round_trip ~sampling_handler:(fun _ ->
+        raise (Eio.Cancel.Cancelled Sampling_callback_cancelled)) ());
+      false
+    with Eio.Cancel.Cancelled Sampling_callback_cancelled -> true in
+  Alcotest.(check bool) "callback cancellation is not a protocol error" true propagated
 ;;
 
 let test_sampling_is_disabled_without_host_handler () =
@@ -480,6 +518,8 @@ let () =
     ; ( "sampling_boundary"
       , [ test_case "host model access round trip over stdio" `Quick test_sampling_is_host_owned_over_stdio
         ; test_case "host denial reaches the package" `Quick test_sampling_denial_is_returned_to_package
+        ; test_case "callback exception preserves stdio framing" `Quick test_sampling_exception_preserves_stdio
+        ; test_case "callback cancellation propagates" `Quick test_sampling_cancellation_propagates
         ; test_case "no handler means no advertised sampling" `Quick test_sampling_is_disabled_without_host_handler ] )
     ; ( "connect_lifecycle"
       , [ test_case "connect_all empty" `Quick test_connect_all_empty

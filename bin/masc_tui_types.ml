@@ -5393,6 +5393,7 @@ type state = {
   mutable item_cursor: int;
   mutable item_account: (string * Masc_tui_keeper_items.t) option;
   mutable item_account_error: string option;
+  mutable item_account_revision: (string * (string option, string) result) option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
@@ -7944,6 +7945,7 @@ let create_state
   item_cursor = 0;
   item_account = None;
   item_account_error = None;
+  item_account_revision = None;
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;

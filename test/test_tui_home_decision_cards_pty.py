@@ -365,14 +365,14 @@ def planning_link_failure_has_own_diagnostic(executable):
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output, b"go Work", b"go Work")
         h.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
-        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks: (links unavailable)")
         unavailable = h.screen_text(bytes(output))
         assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable
         assert b"task-777" not in unavailable, unavailable
         path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
         path.write_text(json.dumps({"version": 1, "links": []}))
-        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = h.screen_text(bytes(output))
         assert b"links unavailable" not in repaired, repaired
         home.assert_no_decision_posts(requests)
@@ -400,14 +400,14 @@ def planning_backlog_failure_recovers(executable):
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output, b"go Work", b"go Work")
         h.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
-        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (nothing here is a reading)")
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks: (nothing here is a reading)")
         failed = h.screen_text(bytes(output))
         assert b"links not read" not in failed, failed
-        assert b"Open tasks  (none)" not in failed, failed
+        assert b"Open tasks: (none)" not in failed, failed
         seed_operator_task(base)
         # An auxiliary archive error must not impersonate a primary failure.
         (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")
-        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = h.screen_text(bytes(output))
         assert b"nothing here is a reading" not in repaired, repaired
         assert b"links not read" not in repaired, repaired

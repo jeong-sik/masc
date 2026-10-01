@@ -2918,6 +2918,7 @@
 (include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
+(include stanzas/test_tui_kept_reads.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 
@@ -3992,7 +3993,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
+ (libraries masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
 
 (test
  (name test_tui_workspace_entries)
@@ -4516,6 +4517,7 @@
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
  (libraries
+  masc_tui_pick_list
   alcotest
   masc
   masc_tui_acting_pane
@@ -4615,6 +4617,7 @@
   (alias runtest-test_tui_keyboard_rosters_pty)
   (alias runtest-test_tui_keyboard_board_terminal_pty)
   (alias runtest-test_tui_keyboard_input-http-badge-refresh)
+  (alias runtest-test_tui_keyboard_input-http-conditional-read)
 ))
 
 (alias
@@ -6684,6 +6687,17 @@
  (deps (alias runtest-test_tui_keyboard_input-http-badge-refresh)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-http-conditional-read)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} http-conditional-read)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-http-conditional-read)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -7836,6 +7850,12 @@
  (deps (alias runtest-test_tui_preset_viewport_pty)))
 
 (rule
+ (alias runtest-test_tui_agenda_navigation_pty)
+ (deps test_tui_agenda_navigation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_agenda_navigation_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias (name runtest) (deps (alias runtest-test_tui_agenda_navigation_pty)))
+
+(rule
  (alias runtest-test_tui_client_connector_layout_pty)
  (deps test_tui_client_connector_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_client_connector_layout_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -7860,6 +7880,7 @@
  (deps (alias runtest-test_tui_tools_layout_pty)))
 
 (include stanzas/test_tui_prompts_layout_pty.inc)
+(include stanzas/test_tui_recorded_diff_pan_pty.inc)
 
 
 (rule
@@ -7871,6 +7892,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-harness-server-binary)))
+
+(rule
+ (alias runtest-test_benchmark_scripts)
+ (deps
+  test_benchmark_scripts.py
+  ../benchmarks/quick-bench.sh
+  ../benchmarks/benchmark.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  (glob_files ../config/tools/masc_*.toml))
+ (action (run python3 %{dep:test_benchmark_scripts.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_benchmark_scripts)))
+
 (rule
  (alias runtest-test_tool_quality_live_plan)
  (deps

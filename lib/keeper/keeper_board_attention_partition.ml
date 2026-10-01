@@ -2114,9 +2114,7 @@ let abandon ~now ~base_path ~partition =
       Error ("only a Blocked partition can be abandoned: " ^ current.partition_id))
 ;;
 
-module For_testing = struct
-  let path = path
-end
+let ledger_path = path
 ;;
 
 (* For [Heap_roots]: walk the table under its own lock, so the diagnostic

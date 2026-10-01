@@ -32,6 +32,17 @@ function responseWith(runtime: Record<string, unknown>) {
 }
 
 describe('runtime-resolved schema', () => {
+  it.each([
+    'provider_override',
+    'binding_override',
+    'provider_override_clamped_by_capability',
+    'binding_override_clamped_by_capability',
+  ])('accepts scoped context provenance %s', (source) => {
+    expect(parseRuntimeResolvedResponse(responseWith({
+      ...validRuntime, max_context_source: source,
+    })).default_runtime.max_context_source).toBe(source)
+  })
+
   it('accepts a complete resolved max-context contract', () => {
     expect(parseRuntimeResolvedResponse(responseWith(validRuntime)).default_runtime)
       .toMatchObject(validRuntime)

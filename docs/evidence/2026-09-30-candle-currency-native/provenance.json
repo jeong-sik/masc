@@ -124,7 +124,7 @@
   "limits": [
     "PTY currency inputs are synthetic wire served by isolated loopback HTTP",
     "Native ledger purchase and strict decoder are separate scenarios in the same run",
-    "Does not verify later SSE correction7a5cdd or main Dashboard composition",
+    "Does not verify later SSE correction 7a5cdd or main Dashboard composition",
     "No live Keeper or workspace changes"
   ]
 }

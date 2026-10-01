@@ -3419,6 +3419,45 @@ let test_canonical_reply_payload_keeps_empty_typed_reply () =
       (Keeper_turn_outcome.equal canonical.turn_outcome
          Keeper_turn_outcome.Visible_reply)
 
+let test_continuation_preserves_completed_delivery_without_completing_operation () =
+  let module Stream = Server_routes_http_keeper_stream in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"continuation-with-delivery" ~absolute_turn:2 in
+  let receipt = `Assoc ["kind", `String "dashboard"] in
+  let payload = `Assoc
+      [ "reply", `String "Progress posted; remaining work is saved."
+      ; Keeper_turn_outcome.wire_key,
+        `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint)
+      ; Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+      ; Keeper_surface_post.delivery_target_wire_key, receipt ] in
+  let canonical = match Stream.For_testing.canonical_reply_payload_of_body
+      ~redact_text:Fun.id (Yojson.Safe.to_string payload) with
+    | Ok value -> value
+    | Error error -> fail (Stream.canonical_reply_payload_error_to_string error) in
+  check bool "delivery evidence does not replace continuation outcome" true
+    (canonical.turn_outcome = Keeper_turn_outcome.Continuation_checkpoint);
+  check bool "completed surface post remains available to event projection" true
+    (canonical.external_effect_target = Some Keeper_surface_post.Delivered_to_dashboard);
+  let polled = Yojson.Safe.from_string canonical.poll_body in
+  check bool "polling retains completed delivery evidence" true
+    (Yojson.Safe.Util.member Keeper_surface_post.delivery_target_wire_key polled = receipt);
+  check bool "continuation remains a valid direct reply" true
+    (Stream.For_testing.direct_reply_terminal_error
+       (Some canonical.payload_json) canonical.visible_reply = None);
+  let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+    { client_kind = Codex; runtime_id = "codex.test"; session_id = "original-thread";
+      turn_id = "yielded-turn"; tool_surface_sha256 = String.make 64 'a';
+      frame = Keeper_repetition_snapshot.empty } in
+  let execution = Stream.For_testing.operation_execution_of_outcome
+      ~operation_state:(fun () -> Ok Keeper_chat_operation.Queued)
+      ~pending_continuation:(fun () -> Ok (Some
+        (Keeper_direct_gate_continuation.Bound_official_client checkpoint)))
+      ~outcome:(Some (Stream.Delivered {outcome_ref=Ids.Turn_ref.to_string turn_ref}))
+      ~delivery:(Ok ()) in
+  match execution with
+  | Keeper_owner.Operation_deferred -> ()
+  | Keeper_owner.Operation_succeeded _ -> fail "surface delivery completed unfinished operation"
+  | Keeper_owner.Operation_failed _ -> fail "valid continuation delivery became failure"
+
 let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
   let turn_ref =
     Ids.Turn_ref.make ~trace_id:"canonical-visible" ~absolute_turn:9
@@ -4297,6 +4336,8 @@ let () =
             test_keeper_chat_user_only_persists_attachment_refs_not_raw_media;
           test_case "canonical reply keeps empty typed reply" `Quick
             test_canonical_reply_payload_keeps_empty_typed_reply;
+          test_case "continuation retains completed delivery without operation success" `Quick
+            test_continuation_preserves_completed_delivery_without_completing_operation;
           test_case "canonical reply redacts text and preserves evidence" `Quick
             test_canonical_reply_payload_redacts_reply_and_preserves_evidence;
           test_case "canonical reply rejects malformed success bodies" `Quick

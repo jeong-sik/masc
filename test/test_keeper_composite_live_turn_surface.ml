@@ -53,11 +53,12 @@ let test_live_turn_surfaces_model_and_tools () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name;
         Keeper_registry.set_turn_selected_model ~base_path:base name
           (Some "claude-sonnet");
-        Keeper_registry.record_turn_tool_inflight ~base_path:base name ~count:3)
+        Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:3)
       ()
   in
   check bool "is_live true" true (J.member "is_live" json |> J.to_bool);
@@ -77,7 +78,8 @@ let test_live_turn_model_null_before_selection () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name)
       ()
   in
@@ -138,7 +140,8 @@ let test_run_state_in_turn_reports_woken_wake () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:
             (Keeper_registry.Woken
                [ Keeper_event_queue.Bootstrap ])
@@ -163,7 +166,8 @@ let test_run_state_in_turn_reports_proactive_tick () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name)
       ()
   in
@@ -185,9 +189,10 @@ let test_run_state_in_turn_reports_chat_request () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Chat_request name;
-        Keeper_registry.record_turn_tool_inflight ~base_path:base name ~count:2)
+        Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:2)
       ()
   in
   check bool "is_live true during a chat turn" true
@@ -214,9 +219,10 @@ let test_chat_turn_clears_live_turn_on_finish () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Chat_request name;
-        Keeper_registry.mark_turn_finished ~base_path:base name)
+        Keeper_registry.mark_turn_finished ~observation_token ~base_path:base name)
       ()
   in
   check bool "is_live false after the chat turn finishes" false
@@ -225,6 +231,65 @@ let test_chat_turn_clears_live_turn_on_finish () =
     (match J.member "live_turn" json with `Null -> true | _ -> false);
   check string "run_state falls back to waiting" "waiting"
     (J.member "run_state" json |> J.member "kind" |> J.to_string)
+;;
+
+(* Two attempts may have the same display counter (including a resumed
+   operation). Late callbacks must retain the identity captured by their turn. *)
+let test_late_predecessor_cannot_finish_successor () =
+  let base = temp_base () in
+  let name = "successor-keeper" in
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  let entry () =
+    match Keeper_registry.get ~base_path:base name with
+    | Some entry -> entry
+    | None -> fail "registered keeper disappeared"
+  in
+  let live () =
+    match (entry ()).current_turn_observation with
+    | Some obs -> obs
+    | None -> fail "successor observation disappeared"
+  in
+  let a = Masc.Keeper_turn_observation_token.fresh () in
+  let b = Masc.Keeper_turn_observation_token.fresh () in
+  let start token =
+    Keeper_registry.mark_turn_started ~observation_token:token
+      ~base_path:base ~wake:Keeper_registry.Chat_request name
+  in
+  let finish token =
+    Keeper_registry.mark_turn_finished ~observation_token:token ~base_path:base name
+  in
+  start a;
+  let a_counter = (live ()).turn_id in
+  start b;
+  check int "display counters deliberately coincide" a_counter (live ()).turn_id;
+  Keeper_registry.record_turn_tool_inflight ~observation_token:b
+    ~base_path:base name ~count:2;
+  let before = entry () in
+  Atomic.set before.fiber_wakeup true;
+  Keeper_registry.record_turn_tool_inflight ~observation_token:a
+    ~base_path:base name ~count:0;
+  finish a;
+  let after = entry () in
+  check bool "stale cleanup leaves the whole successor entry untouched"
+    true (before == after);
+  check bool "successor retains ownership" true
+    (Masc.Keeper_turn_observation_token.equal b (live ()).observation_token);
+  check bool "successor wakeup survives" true (Atomic.get after.fiber_wakeup);
+  let json = Observer.snapshot_to_json (Observer.observe after) in
+  check int "dashboard still sees successor tools" 2
+    (J.member "live_turn" json |> J.member "active_tool_count" |> J.to_int);
+  finish b;
+  let completed = entry () in
+  check bool "own finish clears live observation" true
+    (completed.current_turn_observation = None);
+  check bool "own finish records completion" true
+    (Option.is_some completed.last_completed_turn);
+  Atomic.set completed.fiber_wakeup true;
+  finish a;
+  finish b;
+  check bool "duplicate finishes preserve completed entry" true (completed == entry ());
+  check bool "duplicate finish preserves a newly signalled wakeup" true
+    (Atomic.get (entry ()).fiber_wakeup)
 ;;
 
 let test_run_state_waiting_when_running_idle () =
@@ -294,6 +359,8 @@ let () =
             test_run_state_in_turn_reports_proactive_tick;
           test_case "in_turn reports a chat-lane turn" `Quick
             test_run_state_in_turn_reports_chat_request;
+          test_case "late predecessor cannot finish successor" `Quick
+            test_late_predecessor_cannot_finish_successor;
           test_case "chat turn clears the live turn on finish" `Quick
             test_chat_turn_clears_live_turn_on_finish;
           test_case "waiting for a Running keeper with no live turn" `Quick

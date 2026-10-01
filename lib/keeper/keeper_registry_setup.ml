@@ -1088,13 +1088,14 @@ let stamp_turn_progress ~now ~event_kind obs =
   }
 ;;
 
-let mark_turn_started ~base_path ~wake name =
+let mark_turn_started ~observation_token ~base_path ~wake name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let turn_id = e.meta.runtime.usage.total_turns + 1 in
       let obs =
-        { turn_id
+        { observation_token
+        ; turn_id
         ; started_at = now
         ; last_progress_at = now
         ; last_progress_kind = Some "turn_started"
@@ -1124,13 +1125,15 @@ let record_turn_progress ~base_path name ~event_kind =
 ;;
 
 (* Write-through observation of the turn event bus [pending_tool_count] in the
-   live [turn_observation]. It has no timeout or lifecycle authority. A [None]
-   [current_turn_observation] (turn already ended) is a no-op, so a late
-   background-drain callback after [mark_turn_finished] cannot leak. *)
-let record_turn_tool_inflight ~base_path name ~count =
+   live [turn_observation]. It has no timeout or lifecycle authority. A missing observation or a different ownership token is a no-op, including
+   when a successor has already started before the background drain finishes. *)
+let record_turn_tool_inflight ~observation_token ~base_path name ~count =
   let (_ : bool) =
     update_entry_if_registered ~base_path name (fun e ->
-      update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+      update_current_turn e (fun obs ->
+        if Keeper_turn_observation_token.equal observation_token obs.observation_token
+        then { obs with active_tool_count = count }
+        else obs))
   in
   ()
 ;;

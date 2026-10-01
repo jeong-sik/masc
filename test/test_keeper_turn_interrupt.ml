@@ -71,7 +71,7 @@ let test_interrupt_cancels_turn () =
   Masc_test_deps.init_eio_clock env;
   let clock = Eio.Stdenv.clock env in
   ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
-  Keeper_registry.mark_turn_started
+  Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
     ~base_path:base
     ~wake:Keeper_registry.Proactive_tick
     name;

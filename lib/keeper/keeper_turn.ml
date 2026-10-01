@@ -1144,7 +1144,9 @@ let run_keeper_invocation_turn_admitted
   =
   let base_path = ctx.config.base_path in
   let name = Keeper_invocation_contract.target_name request in
+  let observation_token = Keeper_turn_observation_token.fresh () in
   Keeper_registry.mark_turn_started
+    ~observation_token
     ~base_path
     ~wake:Keeper_registry.Chat_request
     name;
@@ -1163,7 +1165,7 @@ let run_keeper_invocation_turn_admitted
   let finish () =
     try
       Eio.Cancel.protect (fun () ->
-        Keeper_registry.mark_turn_finished ~base_path name)
+        Keeper_registry.mark_turn_finished ~observation_token ~base_path name)
     with
     | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
       log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn

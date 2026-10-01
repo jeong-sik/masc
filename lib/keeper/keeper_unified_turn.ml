@@ -880,6 +880,7 @@ let run_keeper_cycle
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
+               let observation_token = Keeper_turn_observation_token.fresh () in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
                    ?event_bus
@@ -888,6 +889,7 @@ let run_keeper_cycle
                     active tool execution from the no-progress window. *)
                    ~on_pending_count_change:(fun count ->
                      Keeper_registry.record_turn_tool_inflight
+                       ~observation_token
                        ~base_path:config.base_path
                        meta.name
                        ~count)
@@ -922,7 +924,7 @@ let run_keeper_cycle
          so the composite observer can surface live in-turn states like
          [`Executing`]. The matching [mark_turn_finished] in the finally
          block clears the field, preventing stale state on idle keepers. *)
-               Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
+               Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake meta.name;
                (* Refresh from the committed owner projection, then put the
                   TOML back on. The projection is durable keeper JSON, which
                   omits the TOML-owned fields on purpose
@@ -1028,6 +1030,7 @@ let run_keeper_cycle
                    try
                      Eio.Cancel.protect (fun () ->
                        Keeper_registry.mark_turn_finished
+                         ~observation_token
                          ~base_path:config.base_path
                          meta.name)
                    with

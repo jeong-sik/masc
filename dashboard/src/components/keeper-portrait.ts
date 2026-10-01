@@ -14,7 +14,7 @@ import { keeperEquipmentKey, type KeeperEquipment, type KeeperPortraitReading } 
 // When the portrait cannot load (a keeper that is gone, a
 // refused token) the caller's fallback is drawn instead, so the header never
 // shows a broken image icon. A failure is kept for this mount only: opening
-// the keeper again asks once more, and nothing retries on its own.
+// the keeper again or accepting a newer account observation asks once more.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -71,16 +71,17 @@ type Portrait =
 export interface KeeperPortraitProps {
   name: string
   reading: KeeperPortraitReading
+  accountRevision?: string | null
   /** Drawn width and height in CSS pixels; fixed so nothing shifts while it loads. */
   sizePx: number
   /** Drawn instead when the portrait cannot load. */
   fallback: VNode
 }
 
-export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortraitProps) {
+export function KeeperPortrait({ name, reading, accountRevision, sizePx, fallback }: KeeperPortraitProps) {
   const path = keeperPortraitUrl(name, sizePx, reading.state === 'ready' ? reading.equipment : undefined)
   const equipmentKey = reading.state === 'ready' ? keeperEquipmentKey(reading.equipment) : null
-  const identity = JSON.stringify([path, equipmentKey])
+  const identity = JSON.stringify([path, equipmentKey, accountRevision])
   const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', identity })
 
   // Synchronises with two things outside Preact: the request, and the object

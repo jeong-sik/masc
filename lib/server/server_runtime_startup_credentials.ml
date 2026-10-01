@@ -90,13 +90,16 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   in
   let synced_count, failed =
     List.fold_left
-      (fun (synced_count, failed) keeper_name ->
-        match Auth.ensure_keeper_credential base_path ~agent_name:keeper_name with
+      (fun (synced_count, failed) (keeper_name, result) ->
+        match result with
         | Ok _ -> (synced_count + 1, failed)
         | Error err ->
             ( synced_count,
               (keeper_name, Masc_domain.masc_error_to_string err) :: failed ))
-      (0, []) keeper_names
+      (0, [])
+      (match Auth.ensure_keeper_credentials base_path ~agent_names:keeper_names with
+       | Ok results -> results
+       | Error error -> List.map (fun name -> name, Error error) keeper_names)
   in
   if synced_count > 0 then
     Log.Server.info
@@ -124,9 +127,11 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   (* RFC-0393: a keeper's credential lives under its keeper_name — the
      decorated agent alias and the #10440 short-form alias mirror it
      required are gone. *)
-  let rotation_outcomes =
-    Auth.rotate_shared_tokens_for_agents base_path ~agent_names:keeper_names
-  in
+  match Auth.rotate_shared_tokens_for_agents base_path ~agent_names:keeper_names with
+  | Error error ->
+    Log.Server.error "#10304 shared keeper token rotation was not admitted or discovery failed: %s"
+      (Masc_domain.masc_error_to_string error)
+  | Ok rotation_outcomes ->
   List.iter
     (fun (outcome : Auth.rotation_outcome) ->
       let successes, failures =
@@ -136,7 +141,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
              | Ok () -> (agent_name :: ok, failed)
              | Error err ->
                  ( ok,
-                   (agent_name, Masc_domain.masc_error_to_string err) :: failed ))
+                   (agent_name, Auth.rotation_failure_to_string err) :: failed ))
           ([], []) outcome.rotated_agents
       in
       let success_count = List.length successes in

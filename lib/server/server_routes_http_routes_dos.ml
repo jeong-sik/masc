@@ -11,8 +11,8 @@
     (another player holds the controller, no machine is loaded, an unknown
     key), as [POST /api/v1/msx/load] answers.
 
-    Each call first runs the gate a Keeper's own call runs
-    ([Keeper_dos_controller.before_call]): before a move, a controller whose
+    Each call uses the controller execution boundary a Keeper's call uses
+    ([Keeper_dos_controller.execute]): before a move, a controller whose
     Keeper stopped or whose credential expired or is gone is let go, and a
     pass to a name not at the machine is a 400 (a 503 when who sits there
     cannot be read) and nothing runs. *)
@@ -72,21 +72,19 @@ let run_response ~config ~who ~route ~body =
     (match Tool_input_validation.validate_args ~schema:(schema route).Masc_domain.input_schema ~name ~args () with
      | Error refusal -> rejected (Tool_result.message refusal)
      | Ok args ->
-       (match Keeper_dos_controller.before_call ~config ~who ~name ~args with
+       let ctx : Tool_misc.context =
+         { config; agent_name = who; help_schemas = Config.raw_all_tool_schemas } in
+       (match Keeper_dos_controller.execute ~config ~who ~name ~args
+           ~run:(fun () -> Tool_misc.dispatch ctx ~name ~args) with
         | Error (Keeper_dos_controller.Refused message) -> rejected message
         | Error (Keeper_dos_controller.Seats_unknown message) ->
           `Service_unavailable, result_json ~ok:false ~message `Null
-        | Ok () ->
-          let ctx : Tool_misc.context =
-            { config; agent_name = who; help_schemas = Config.raw_all_tool_schemas }
-          in
-          (match Tool_misc.dispatch ctx ~name ~args with
-           | None -> `Internal_server_error, result_json ~ok:false ~message:(name ^ " is not dispatched") `Null
-           | Some result ->
-             let ok = Tool_result.is_success result in
-             machine_changed ~config;
-             ( (if ok then `OK else `Bad_request)
-             , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) ))))
+        | Ok None -> `Internal_server_error, result_json ~ok:false ~message:(name ^ " is not dispatched") `Null
+        | Ok (Some result) ->
+          let ok = Tool_result.is_success result in
+          machine_changed ~config;
+          ( (if ok then `OK else `Bad_request)
+          , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )))
 
 (* A press for a caller that chose the keys from one program's layout (the
    masc pad). It takes [POST /api/v1/dos/press]'s steps -- the departed-holder

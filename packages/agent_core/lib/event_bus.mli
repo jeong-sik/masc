@@ -281,6 +281,10 @@ val filter_tools_only : filter
 val filter_topic : string -> filter
 val filter_correlation : string -> filter
 val filter_run : string -> filter
+
+(** Exact caller-owned scope; missing or foreign scopes are excluded before
+    subscriber queue admission. The bus does not interpret the scope. *)
+val filter_caller_scope : Caller_scope.t -> filter
 val filter_any : filter list -> filter
 val filter_all : filter list -> filter
 

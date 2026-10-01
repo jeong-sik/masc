@@ -64,7 +64,27 @@ def await_screen(process, fd, output, predicate, description):
 
 
 def balance_contains(text: bytes, value: bytes) -> bool:
-    return any(b"Candle balance:" in line and value in line for line in text.splitlines())
+    # Long values occupy rows below the label. Read only this field's
+    # contiguous right-pane rows, not the separate Candle details section.
+    rows = text.decode("utf-8", "replace").splitlines()
+    label = "Candle balance:"
+    for index, row in enumerate(rows):
+        if label not in row:
+            continue
+        column = row.index(label)
+        parts = [row[column + len(label):].strip()]
+        for continuation in rows[index + 1:]:
+            part = continuation[column:].strip()
+            if not part:
+                break
+            parts.append(part)
+        return " ".join(" ".join(part.split()) for part in parts if part) == value.decode("ascii")
+    return False
+
+
+def name_contains(text: bytes, name: bytes) -> bool:
+    return any(line.split(b"Name:", 1)[1].strip() == name
+               for line in text.splitlines() if b"Name:" in line)
 
 
 class CurrencyRoster:
@@ -79,6 +99,7 @@ class CurrencyRoster:
         payload["candle"] = dict(READY)
         for row in payload["keepers"]:
             row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+            row["candle_account_revision"] = "a" * 64
         if phase == "disabled":
             payload["candle"] = {"status": "disabled", "reason": "ledger deliberately unavailable"}
             for row in payload["keepers"]:
@@ -91,6 +112,7 @@ class CurrencyRoster:
             payload["candle"] = {"status": "off"}
             for row in payload["keepers"]:
                 row["candle_balance_milli"] = None
+                row["candle_account_revision"] = None
         elif phase != "ready":
             raise AssertionError(f"unknown fixture phase {phase}")
         with self.lock:
@@ -122,6 +144,8 @@ def run(binary: str, phase: str, captures: Path | None):
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
             h.resize_and_wait(process, fd, output, rows=38, columns=120,
                               needle=SUMMARY[0], final_cursor=b"\x1b[?25l")
+            for line in SUMMARY:
+                assert screen(output).count(line) == 1, "Home duplicated a Candle summary row"
             capture(output, "ready-overview")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
@@ -146,12 +170,18 @@ def run(binary: str, phase: str, captures: Path | None):
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
-            balance_status = b"disabled:" if phase == "disabled" else b"unavailable:"
+            balance_status = {
+                "disabled": b"disabled: ledger deliberately unavailable",
+                "malformed-supply": (b"unavailable: Candle observation.issued_milli: "
+                                     b"Candle amount must be a canonical nonnegative decimal string"),
+                "malformed-balance": (b"unavailable: keepers[0]: "
+                                      b"Candle amount must be a canonical nonnegative decimal string"),
+            }
             await_screen(process, fd, output,
-                lambda text: b"Name:" in text and b"alpha" in text and b"Paused:" in text
+                lambda text: name_contains(text, b"alpha") and b"Paused:" in text
                 and BALANCE not in text
                 and (b"Candle balance:" not in text if phase == "off"
-                     else balance_contains(text, balance_status)),
+                     else balance_contains(text, balance_status[phase])),
                 "retain Keeper identity and truthful balance after " + phase)
             capture(output, "changed-info")
 
@@ -230,6 +260,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         for row in payload["keepers"]:
             row["candle_balance_milli"] = (
                 BALANCE_MILLI if phase == "a-ready" else amount) if row["name"] == "alpha" else "0"
+            row["candle_account_revision"] = "a" * 64
         if held:
             held_started.set()
             if not release_held.wait(timeout=30):
@@ -378,6 +409,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             roster_payload["candle"] = dict(READY)
             for row in roster_payload["keepers"]:
                 row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+                row["candle_account_revision"] = "a" * 64
         if phase != "error":
             fixtures[ROSTER_PATH] = (200, roster_payload)
 

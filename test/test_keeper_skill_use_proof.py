@@ -598,10 +598,13 @@ class KeeperSkillUseProofTest(unittest.TestCase):
     def test_rejects_duplicate_exact_activation_identity(self):
         health, dashboard, ledger = fixture()
         ledger["activations"].append(copy.deepcopy(ledger["activations"][0]))
-        refresh_projection(dashboard, ledger)
 
-        with self.assertRaisesRegex(proof.ProofError, "found 2"):
+        # The projection must now fail before a duplicate can acquire a valid
+        # revision or reach proof selection. The CLI handles this typed error.
+        with self.assertRaises(events.SkillLedgerError) as caught:
             self.validate(health, dashboard, ledger)
+        self.assertIs(caught.exception.fault, events.SkillLedgerFault.DUPLICATE_SKILL_TOOL_USE_ID)
+        self.assertIsNone(caught.exception.row)
 
     def test_rejects_resource_as_skill_body_proof(self):
         health, dashboard, ledger = fixture()
@@ -638,9 +641,17 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
     def test_rejects_transition_rejection_for_exact_invocation(self):
         health, dashboard, ledger = fixture()
-        ledger["transition_rejections"] = [
-            {"kind": "action_before_delivery", "skill_tool_use_id": "call-skill-1"}
-        ]
+        activation = ledger["activations"][0]
+        ledger["transition_rejections"] = [{
+            "kind": "action_before_delivery",
+            "skill_tool_use_id": activation["skill_tool_use_id"],
+            "activation_turn_ref": activation["turn_ref"],
+            "observed_turn_ref": activation["turn_ref"],
+            "action_identity": {"kind": "call_id", "call_id": "refused-action"},
+            "tool_name": "keeper_status",
+            "observed_agent_core_turn": activation["agent_core_turn"],
+            "observed_at": activation["activated_at"],
+        }]
         ledger["revision"] = events.ledger_revision(ledger)
 
         with self.assertRaisesRegex(proof.ProofError, "has rejected transitions"):

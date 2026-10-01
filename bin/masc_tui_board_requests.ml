@@ -6,9 +6,8 @@ open Masc_tui_async_protocol
 module Board_detail = Masc_tui_board_detail
 
 let start_board_post_refresh state ~host ~port ~post_id ~deliver ~report_error =
-  (match Board_detail.view_for state.board_detail ~post_id with
-   | Board_detail.Absent -> state.board_history_post_id <- None
-   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
+  if state.board_history_post_id <> Some post_id then
+    state.board_history_post_id <- None;
   match Board_detail.start state.board_detail ~post_id with
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->

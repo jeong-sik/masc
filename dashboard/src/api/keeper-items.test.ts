@@ -20,6 +20,18 @@ describe('Keeper Item account wire', () => {
     expect(parsed.catalog.find(item => item.id === 'book')).toMatchObject({ price_status: 'unpriced' })
   })
 
+  it.each(['\n', '\r', '\r\n', '\u2028', '\u2029'])(
+    'rejects trailing line terminator %j in balances and prices',
+    terminator => {
+      const balanceWire = JSON.parse(JSON.stringify({ ...ready, balance_milli: `800${terminator}` }))
+      const priceWire = JSON.parse(JSON.stringify({ ...ready,
+        catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: `200${terminator}` } : item),
+      }))
+      expect(() => parseKeeperItems(balanceWire, 'rondo')).toThrow('schema drift')
+      expect(() => parseKeeperItems(priceWire, 'rondo')).toThrow('schema drift')
+    },
+  )
+
   it('rejects a different Keeper, incomplete catalog, duplicate ownership and malformed price', () => {
     expect(() => parseKeeperItems(ready, 'geek-scout')).toThrow()
     expect(() => parseKeeperItems({ ...ready, catalog: catalog.slice(1) }, 'rondo')).toThrow()

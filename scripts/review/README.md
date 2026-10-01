@@ -10,8 +10,29 @@ The reviewer writes a literal first line:
 verdict: PASS head: <40-hex SHA> by: <reviewer>
 ```
 
-Approve with `approve-guard.sh --repo O/R --pr N --head SHA --body FILE`.
-Use `--check` for a read-only admission probe. A source-reviewed child may be
+Capture the base commit and complete change identity when reviewing, before
+writing the approval. Use exact PR `base.sha` and `head.sha` from GitHub:
+
+```sh
+python3 scripts/review/review-diff.py --repo O/R --base BASE_SHA --head HEAD_SHA
+bash scripts/review/approve-guard.sh --repo O/R --pr N --head HEAD_SHA \
+  --review-base BASE_SHA --review-diff CAPTURED_SHA256 --body FILE
+```
+
+The identity covers each changed path, old/new mode and complete old/new object
+ID against GitHub's three-dot merge base. It includes binary and submodule
+changes, independent of rename guesses, patch truncation and local diff order.
+It needs a Git checkout; `GUARD_REPO_ROOT` selects one when the script is
+executed outside that checkout. Missing exact objects are fetched from the
+named repository; unreadable evidence refuses admission.
+
+The reviewer supplies the captured identity explicitly. The guard does not
+stamp a current diff onto an old source review. New approval footers preserve
+the reviewed base and identity. Consumption compares the current complete
+change: a moved/renamed base with identical change keeps the approval; retarget
+or parent landing that changes the diff requires independent re-review.
+Head-only approvals supply no evidence of the reviewed diff and are not
+backfilled. Use `--check` for a read-only admission probe. A source-reviewed child may be
 approved while its parent is still open. Inspect the REST PR's `stack` metadata
 and ordered stack membership before choosing the merge scope. For a native
 stack, merging a selected PR includes every open downstack PR through it; do

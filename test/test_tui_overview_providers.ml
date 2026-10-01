@@ -14,7 +14,8 @@ let now = 1790180180.0
    kimi: at its full value, reset time ten minutes ago. codex and
    ollama_cloud: nothing heard since the server started. Every display name
    differs from its id, so a row that draws the id instead is caught. *)
-let resolved state_word =
+let resolved ?(kimi_observed_at = 1790170000.0) ?(kimi_resets_at = 1790179580.0)
+    state_word =
   Yojson.Safe.from_string
     (Printf.sprintf
        {|{
@@ -27,7 +28,7 @@ let resolved state_word =
         { "limit_id": null, "window": {"kind": "duration_minutes", "minutes": 300},
           "role": "gates_model_calls",
           "utilization": {"unit": "percent", "value": 100},
-          "resets_at": 1790179580, "observed_at": 1790170000.0,
+          "resets_at": %.1f, "observed_at": %.1f,
           "source": "codex.account_rate_limits_updated" } ] },
     { "scope": "provider:claude_code", "scope_id": "id-claude_code", "providers": [{"id": "claude_code", "display_name": "Claude Max"}], "state": %S,
       "windows": [
@@ -43,7 +44,7 @@ let resolved state_word =
       "state": "not_reported_since_start", "windows": [] }
   ]
 }|}
-       state_word)
+       kimi_resets_at kimi_observed_at state_word)
 
 let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   { ro_id = id
@@ -159,20 +160,22 @@ let test_silent_account_draws_only_its_exhaustion () =
       check bool "the silent account that is not exhausted draws nothing" true
         (not (List.exists (contains ~affix:"Ollama Cloud") lines))
 
-let reported_section ~width =
+let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
+    ?(kimi_resets_at = 1790179580.0) ~width () =
   let windows =
-    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
+    match Masc.Tui_decode_usage.decode_provider_usage_windows
+      (resolved ~kimi_observed_at ~kimi_resets_at "reported") with
     | Ok windows -> windows
     | Error err -> failf "fixture should decode: %s" err
   in
   let runtimes =
     Types.Quota_read
       [ runtime ~scope:"provider:kimi" ~exhausted:true
-          ~resets:(now +. 7200.0) "kimi.k3"
+          ~resets:(current +. 7200.0) "kimi.k3"
       ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -186,40 +189,44 @@ let claude_five_hour lines =
 (* Reported values keep bounded meters; reset/age metadata wrap separately
    rather than consuming the value columns. *)
 let test_meter_width_is_bounded () =
-  let wide = claude_five_hour (reported_section ~width:120) in
+  let wide = claude_five_hour (reported_section ~width:120 ()) in
   let _, wide_cells = meter_of wide in
   check int "a wide terminal draws a 24-cell meter" 24 wide_cells;
   check bool "a wide terminal keeps the hearing age" true
-    (List.exists (contains ~affix:"heard 3m00s ago") (reported_section ~width:120));
-  let narrow = claude_five_hour (reported_section ~width:44) in
+    (List.exists (contains ~affix:"heard 3m00s ago") (reported_section ~width:120 ()));
+  let narrow = claude_five_hour (reported_section ~width:44 ()) in
   let _, narrow_cells = meter_of narrow in
   check bool "a narrow card keeps a readable, bounded meter" true
     (narrow_cells >= 10 && narrow_cells <= 24);
   List.iter (fun line -> check bool "narrow card respects terminal cells" true
-    (Masc_tui_message_layout.display_width line <= 44)) (reported_section ~width:44);
-  let separate = reported_section ~width:70 in
+    (Masc_tui_message_layout.display_width line <= 44)) (reported_section ~width:44 ());
+  let separate = reported_section ~width:70 () in
   let text = String.concat "\n" separate in
   check bool "one passed reset keeps the other account's report age" true
     (contains ~affix:"Claude Max" text && contains ~affix:"heard 3m00s ago" text);
   check bool "the past-reset card keeps the reset state" true
     (contains ~affix:"reset time passed" text);
-  let observed = Unix.localtime 1790170000.0 in
-  let current = Unix.localtime now in
-  let clock =
-    if observed.Unix.tm_year = current.Unix.tm_year
-       && observed.Unix.tm_yday = current.Unix.tm_yday
-    then Printf.sprintf "%02d:%02d" observed.Unix.tm_hour observed.Unix.tm_min
-    else Printf.sprintf "%02d-%02d %02d:%02d"
-      (observed.Unix.tm_mon + 1) observed.Unix.tm_mday
-      observed.Unix.tm_hour observed.Unix.tm_min
-  in
-  (* At 70 cells the dated form can wrap after its date. A wider card keeps
-     the complete local observation clock together for this exact assertion. *)
-  let clock_card = String.concat "\n" (reported_section ~width:90) in
-  check bool "the past-reset card names the actual local observed clock" true
-    (contains ~affix:("Last report " ^ clock) clock_card);
   List.iter (fun line -> check bool "separate cards fit the supplied width" true
     (Masc_tui_message_layout.display_width line <= 70)) separate
+
+(* Construct calendar times in the runner's own zone. The expected text is
+   fixed by the specified local calendar, including a prior-day report; the
+   test does not reimplement the clock formatter's branch or output. *)
+let test_observation_clock_follows_local_dates () =
+  let local_time day hour minute =
+    let calendar = Unix.localtime now in
+    fst (Unix.mktime { calendar with Unix.tm_year = 2026 - 1900; tm_mon = 9 - 1;
+      tm_mday = day; tm_hour = hour; tm_min = minute; tm_sec = 0 })
+  in
+  let current = local_time 24 1 16 in
+  let card observed_at =
+    String.concat "\n" (reported_section ~width:90 ~current
+      ~kimi_observed_at:observed_at ~kimi_resets_at:(current -. 60.) ())
+  in
+  check bool "same local day shows only the clock" true
+    (contains ~affix:"Last report 00:16" (card (local_time 24 0 16)));
+  check bool "previous local day includes month and day" true
+    (contains ~affix:"Last report 09-23 22:26" (card (local_time 23 22 26)))
 
 (* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
    call, so it is not drawn in the exhausted tone, while the account's token
@@ -485,6 +492,8 @@ let () =
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded
+        ; test_case "observation clock follows local dates" `Quick
+            test_observation_clock_follows_local_dates
         ; test_case "a window that gates nothing is not an alarm" `Quick
             test_window_that_gates_nothing_is_not_an_alarm
         ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected

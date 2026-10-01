@@ -20,6 +20,8 @@ val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) re
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+(** Publishes every directory ancestor before accepting a durable receipt,
+    including ancestors left visible by earlier failed publication attempts. *)
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Missing receipts return [None]. Existing receipts are accepted only after
     strictly syncing the exact opened file and parent directory, verifying the
@@ -70,6 +72,8 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val save_action : sync_parent:(string -> unit) -> t -> instance_id:string ->
+    request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
   val append_observation :

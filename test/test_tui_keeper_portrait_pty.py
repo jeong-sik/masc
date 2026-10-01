@@ -987,7 +987,11 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             metadata.write_text("{", encoding="utf-8")
             try:
                 identity["unread"] = False
-                wait_refreshes(process, fd, output)
+                # The loader's actual decode report proves it tried the
+                # corrupted file; health probes alone precede bundle apply.
+                report = f"[masc-tui] decode failed for {metadata}:"
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: report in h.exit_reason_log(_base), timeout=10), "local roster failure was not observed"
                 assert reads == [True], "incomplete roster restored detail authority"
             finally:
                 metadata.write_bytes(original_metadata)

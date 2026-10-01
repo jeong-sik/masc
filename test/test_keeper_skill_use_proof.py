@@ -638,9 +638,17 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
     def test_rejects_transition_rejection_for_exact_invocation(self):
         health, dashboard, ledger = fixture()
-        ledger["transition_rejections"] = [
-            {"kind": "action_before_delivery", "skill_tool_use_id": "call-skill-1"}
-        ]
+        activation = ledger["activations"][0]
+        ledger["transition_rejections"] = [{
+            "kind": "action_before_delivery",
+            "skill_tool_use_id": activation["skill_tool_use_id"],
+            "activation_turn_ref": activation["turn_ref"],
+            "observed_turn_ref": activation["turn_ref"],
+            "action_identity": {"kind": "call_id", "call_id": "refused-action"},
+            "tool_name": "keeper_status",
+            "observed_agent_core_turn": activation["agent_core_turn"],
+            "observed_at": activation["activated_at"],
+        }]
         ledger["revision"] = events.ledger_revision(ledger)
 
         with self.assertRaisesRegex(proof.ProofError, "has rejected transitions"):

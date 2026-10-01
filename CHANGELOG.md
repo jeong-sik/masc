@@ -5,6 +5,7 @@
 ## [0.49.0] - 2026-10-01
 
 
+
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
@@ -419,6 +420,7 @@
 - Keep stored Goal fixtures separate from HTTP-only verification fields while preserving exact-detail and no-write checks (#40492).
 - Move terminal voice setup session state and pure transitions into a dedicated module with direct consumers and a public interface (#40195).
 - Delegate the source-selectable voice wizard PTY alias to its existing family so full tests execute it once. #40195
+- Verify the real Goal confirmation and payout worker path keeps one payment across pending reopen/drop, re-verification and worker restart; retain scoped integration evidence. (#40047)
 
 ## [0.48.0] - 2026-09-29
 

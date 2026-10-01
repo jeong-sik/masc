@@ -40,8 +40,8 @@ let contains haystack needle = Astring.String.is_infix ~affix:needle haystack
 
 let test_tail_cuts_on_utf8_boundary () =
   let hangul = String.concat "" (List.init 200 (fun _ -> "\xea\xb0\x80")) in
-  reset "tail-keeper" ~now:0.;
-  Keeper_turn_preview.note_text ~keeper_name:"tail-keeper" ~now:1. hangul;
+  let writer = Some (reset "tail-keeper" ~now:0.) in
+  Keeper_turn_preview.note_text ~writer ~now:1. hangul;
   match Keeper_turn_preview.current ~keeper_name:"tail-keeper" with
   | None -> Alcotest.fail "text was noted but nothing is current"
   | Some preview ->
@@ -53,9 +53,9 @@ let test_tail_cuts_on_utf8_boundary () =
 ;;
 
 let test_blank_text_does_not_erase_the_last_words () =
-  reset "blank-keeper" ~now:0.;
-  Keeper_turn_preview.note_text ~keeper_name:"blank-keeper" ~now:1. "words";
-  Keeper_turn_preview.note_text ~keeper_name:"blank-keeper" ~now:2. "   ";
+  let writer = Some (reset "blank-keeper" ~now:0.) in
+  Keeper_turn_preview.note_text ~writer ~now:1. "words";
+  Keeper_turn_preview.note_text ~writer ~now:2. "   ";
   match Keeper_turn_preview.current ~keeper_name:"blank-keeper" with
   | None -> Alcotest.fail "entry vanished"
   | Some preview ->
@@ -64,9 +64,9 @@ let test_blank_text_does_not_erase_the_last_words () =
 ;;
 
 let test_tool_note_keeps_text_and_text_keeps_tool () =
-  reset "mix-keeper" ~now:0.;
-  Keeper_turn_preview.note_text ~keeper_name:"mix-keeper" ~now:1. "drafting";
-  Keeper_turn_preview.note_tool ~keeper_name:"mix-keeper" ~now:2.
+  let writer = Some (reset "mix-keeper" ~now:0.) in
+  Keeper_turn_preview.note_text ~writer ~now:1. "drafting";
+  Keeper_turn_preview.note_tool ~writer ~now:2.
     "Execute";
   (match Keeper_turn_preview.current ~keeper_name:"mix-keeper" with
    | Some { Keeper_turn_preview.text_tail; last_tool; _ } ->
@@ -74,7 +74,7 @@ let test_tool_note_keeps_text_and_text_keeps_tool () =
      Alcotest.(check (option string)) "and recorded the tool"
        (Some "Execute") last_tool
    | None -> Alcotest.fail "entry vanished");
-  Keeper_turn_preview.note_text ~keeper_name:"mix-keeper" ~now:3. "still going";
+  Keeper_turn_preview.note_text ~writer ~now:3. "still going";
   match Keeper_turn_preview.current ~keeper_name:"mix-keeper" with
   | Some { Keeper_turn_preview.text_tail; last_tool; _ } ->
     Alcotest.(check string) "text note replaced the tail" "still going"
@@ -92,26 +92,26 @@ let test_unknown_keeper_has_no_preview () =
 let test_live_attempt_failover_and_new_turn () =
   let keeper_name = "live-lifecycle" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
-  reset keeper_name ~now:1.;
-  Keeper_turn_preview.note_attempt ~keeper_name ~now:2. ~runtime_id:"claude";
+  let writer = Some (reset keeper_name ~now:1.) in
+  Keeper_turn_preview.note_attempt ~writer ~now:2. ~runtime_id:"claude";
   Alcotest.(check bool) "silent provider wait is visible" true
     (Astring.String.is_infix ~affix:"waiting for provider response"
       (Keeper_turn_preview.status_text (current ())));
-  Keeper_turn_preview.note_failure ~keeper_name ~now:3. ~runtime_id:"claude" "401 invalid key";
-  Keeper_turn_preview.note_attempt ~keeper_name ~now:4. ~runtime_id:"glm";
+  Keeper_turn_preview.note_failure ~writer ~now:3. ~runtime_id:"claude" "401 invalid key";
+  Keeper_turn_preview.note_attempt ~writer ~now:4. ~runtime_id:"glm";
   let switched = Keeper_turn_preview.status_text (current ()) in
   Alcotest.(check bool) "new provider and failure both visible" true
     (Astring.String.is_infix ~affix:"glm" switched && Astring.String.is_infix ~affix:"401" switched);
-  Keeper_turn_preview.note_stream ~keeper_name ~now:5. (text_delta "working\n");
+  Keeper_turn_preview.note_stream ~writer ~now:5. (text_delta "working\n");
   Alcotest.(check string) "a finished line appears before the turn completes"
     "working\n" (current ()).text_tail;
-  Keeper_turn_preview.note_tool ~keeper_name ~now:6. "Execute";
+  Keeper_turn_preview.note_tool ~writer ~now:6. "Execute";
   Alcotest.(check bool) "last observed tool visible" true
     (Astring.String.is_infix ~affix:"last observed tool: Execute" (Keeper_turn_preview.status_text (current ())));
-  Keeper_turn_preview.note_tool ~keeper_name ~now:7. "Execute";
+  Keeper_turn_preview.note_tool ~writer ~now:7. "Execute";
   Alcotest.(check bool) "a returned tool is never labelled running" false
     (Astring.String.is_infix ~affix:"tool running" (Keeper_turn_preview.status_text (current ())));
-  reset keeper_name ~now:8.;
+  let _writer = reset keeper_name ~now:8. in
   Alcotest.(check string) "new turn cannot inherit old output" "" (current ()).text_tail;
   Alcotest.(check (option string)) "new turn cannot inherit old failure" None (current ()).last_failure
 ;;
@@ -119,31 +119,31 @@ let test_live_attempt_failover_and_new_turn () =
 let test_overlapping_and_rejected_tools_remain_observations () =
   let keeper_name = "overlapping-tools" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
-  reset keeper_name ~now:1.;
-  Keeper_turn_preview.note_stream ~keeper_name ~now:1.5
+  let writer = Some (reset keeper_name ~now:1.) in
+  Keeper_turn_preview.note_stream ~writer ~now:1.5
     (Agent_core.Types.ContentBlockStart { index=1; content_type="tool_use"; tool_id=Some "dynamic"; tool_name=Some "MCP" });
   Alcotest.(check (option string)) "official-client dynamic tool is visible" (Some "MCP") (current ()).last_tool;
-  Keeper_turn_preview.note_failure ~keeper_name ~now:1.6 ~runtime_id:"claude" (String.make 10000 'x');
+  Keeper_turn_preview.note_failure ~writer ~now:1.6 ~runtime_id:"claude" (String.make 10000 'x');
   Alcotest.(check bool) "diagnostic cannot flood the light poll" true
     (String.length (Option.get (current ()).last_failure) < 300);
-  reset keeper_name ~now:1.7;
+  let writer = Some (reset keeper_name ~now:1.7) in
   (* The same hook can run before validation rejects Skill. *)
-  Keeper_turn_preview.note_tool ~keeper_name ~now:2. "Skill";
+  Keeper_turn_preview.note_tool ~writer ~now:2. "Skill";
   Alcotest.(check string) "a request does not claim execution"
     "tool activity observed · last observed tool: Skill"
     (Keeper_turn_preview.status_text (current ()));
   (* A starts, B starts, A returns. A is the latest observation, not a claim
      that A is running or that B stopped. No shared in-flight slot is cleared. *)
   List.iteri (fun index tool ->
-    Keeper_turn_preview.note_tool ~keeper_name ~now:(3. +. float_of_int index) tool)
+    Keeper_turn_preview.note_tool ~writer ~now:(3. +. float_of_int index) tool)
     ["A"; "B"; "A"];
   Alcotest.(check string) "interleaved returns keep their historical meaning"
     "tool activity observed · last observed tool: A"
     (Keeper_turn_preview.status_text (current ()));
-  Keeper_turn_preview.note_failure ~keeper_name ~now:6. ~runtime_id:"claude" "rejected";
+  Keeper_turn_preview.note_failure ~writer ~now:6. ~runtime_id:"claude" "rejected";
   Alcotest.(check (option string)) "failed attempt drops tool observation" None
     (current ()).last_tool;
-  Keeper_turn_preview.note_attempt ~keeper_name ~now:7. ~runtime_id:"glm";
+  Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"glm";
   Alcotest.(check (option string)) "next attempt has no prior tool" None
     (current ()).last_tool
 ;;
@@ -158,30 +158,30 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
     let first = "deploy with preview-split-" and second = "secret-9931 now\n" in
     Alcotest.(check string) "the second half alone passes plain redaction" second
       (Keeper_secret_redaction.redact_text redaction second);
-    Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction;
-    Keeper_turn_preview.note_stream ~keeper_name ~now:2. (text_delta first);
+    let writer = Some (Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction) in
+    Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
     Alcotest.(check string) "an unfinished line is held back" "" (tail keeper_name);
     Alcotest.(check bool) "while the activity already shows the response" true
       (contains
          (Keeper_turn_preview.status_text
             (Option.get (Keeper_turn_preview.current ~keeper_name)))
          "receiving response");
-    Keeper_turn_preview.note_stream ~keeper_name ~now:3. (text_delta second);
+    Keeper_turn_preview.note_stream ~writer ~now:3. (text_delta second);
     Alcotest.(check string) "the finished line arrives redacted"
       "deploy with [REDACTED] now\n" (tail keeper_name);
     Alcotest.(check bool) "no part of the secret is served" false
       (contains (tail keeper_name) "secret-9931");
-    Keeper_turn_preview.note_text ~keeper_name ~now:4. ("final answer: " ^ secret);
+    Keeper_turn_preview.note_text ~writer ~now:4. ("final answer: " ^ secret);
     Alcotest.(check string) "the whole response text is redacted as well"
       "final answer: [REDACTED]" (tail keeper_name))
 ;;
 
 let test_held_text_is_released_at_the_message_stop () =
   let keeper_name = "held-tail-preview" in
-  Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty;
-  Keeper_turn_preview.note_stream ~keeper_name ~now:2. (text_delta "no newline yet");
+  let writer = Some (Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
+  Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta "no newline yet");
   Alcotest.(check string) "held while the line is open" "" (tail keeper_name);
-  Keeper_turn_preview.note_stream ~keeper_name ~now:3. Agent_core.Types.MessageStop;
+  Keeper_turn_preview.note_stream ~writer ~now:3. Agent_core.Types.MessageStop;
   Alcotest.(check string) "released, not dropped, at the stop" "no newline yet"
     (tail keeper_name)
 ;;
@@ -194,30 +194,83 @@ let test_korean_without_secrets_passes_through_whole () =
   let cut_in_a_syllable = 7 in
   let second_cut = String.length korean - 5 in
   with_secret_redaction ~keeper_name "unrelated-secret-value-5550" (fun redaction ->
-    Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction;
+    let writer = Some (Keeper_turn_preview.reset ~keeper_name ~now:1. ~redaction) in
     List.iteri
       (fun index piece ->
-         Keeper_turn_preview.note_stream ~keeper_name ~now:(2. +. float_of_int index)
+         Keeper_turn_preview.note_stream ~writer ~now:(2. +. float_of_int index)
            (text_delta piece))
       [ String.sub korean 0 cut_in_a_syllable
       ; String.sub korean cut_in_a_syllable (second_cut - cut_in_a_syllable)
       ; String.sub korean second_cut (String.length korean - second_cut)
       ];
-    Keeper_turn_preview.note_stream ~keeper_name ~now:5.
+    Keeper_turn_preview.note_stream ~writer ~now:5.
       (Agent_core.Types.MessageDelta { stop_reason = Some EndTurn; usage = None });
     Alcotest.(check string) "the tail is the text, byte for byte" korean (tail keeper_name))
 ;;
 
 let test_no_text_before_a_redaction_is_armed () =
-  let keeper_name = "unarmed-preview" in
-  Keeper_turn_preview.note_text ~keeper_name ~now:1. "words before any turn";
-  Alcotest.(check string) "text without a snapshot is not kept" "" (tail keeper_name)
+  Keeper_turn_preview.note_text ~writer:None ~now:1. "words before any turn";
+  Alcotest.(check bool) "unowned text creates no preview" true
+    (Keeper_turn_preview.current ~keeper_name:"unarmed-preview" = None)
+;;
+
+let test_late_execution_keeps_successor_preview_and_redactor () =
+  let keeper_name = "overlapping-preview" in
+  with_secret_redaction ~keeper_name "successor-secret" (fun redaction ->
+    let config = Workspace.default_config (Filename.get_temp_dir_name ()) in
+    let callbacks preview =
+      let _, _, _, _, on_event =
+        Keeper_agent_run_turn_helpers.turn_progress_callbacks
+          ~preview ~observation_token:None ~config ~keeper_name
+          ~downstream:None ~turn_id:1
+      in
+      Option.get on_event
+    in
+    let a = Some (reset keeper_name ~now:1.) in
+    let emit_a = callbacks a in
+    emit_a (text_delta "old unfinished ");
+    let b = Some (Keeper_turn_preview.reset ~keeper_name ~now:2. ~redaction) in
+    let emit_b = callbacks b in
+    Keeper_turn_preview.note_attempt ~writer:b ~now:3. ~runtime_id:"current";
+    emit_b (text_delta "successor-");
+    let before = Option.get (Keeper_turn_preview.current ~keeper_name) in
+    (* An old stream finishing must neither flush B's held secret nor append
+       A's held text to B. Tool/failure/final-text writers share the same rule. *)
+    emit_a Agent_core.Types.MessageStop;
+    emit_a (Agent_core.Types.ContentBlockStart
+      { index = 0; content_type = "tool_use"; tool_id = Some "old-tool"
+      ; tool_name = Some "Execute" });
+    Keeper_turn_preview.note_failure ~writer:a ~now:4. ~runtime_id:"old" "old failure";
+    Keeper_turn_preview.note_attempt ~writer:a ~now:5. ~runtime_id:"old-retry";
+    Keeper_turn_preview.note_text ~writer:a ~now:6. "old final answer";
+    Keeper_turn_preview.note_tool ~writer:a ~now:7. "old tool";
+    Keeper_turn_preview.note_stream ~writer:None ~now:8. (text_delta "unowned\n");
+    let after = Option.get (Keeper_turn_preview.current ~keeper_name) in
+    Alcotest.(check bool) "all old callbacks preserve the displayed snapshot" true
+      (before == after);
+    emit_b (text_delta "secret\n");
+    Alcotest.(check string) "B retains its own held line and secret snapshot"
+      "[REDACTED]\n" (tail keeper_name);
+    emit_b (Agent_core.Types.ContentBlockStart
+      { index = 0; content_type = "native_tool"; tool_id = Some "current-tool"
+      ; tool_name = Some "Read" });
+    let current = Option.get (Keeper_turn_preview.current ~keeper_name) in
+    Alcotest.(check (option string)) "native tool stream updates current preview"
+      (Some "Read") current.last_tool;
+    emit_b (Agent_core.Types.ContentBlockStart
+      { index = 1; content_type = "native_tool"; tool_id = Some "next-tool"
+      ; tool_name = Some "Search" });
+    emit_b (Agent_core.Types.ContentBlockStop { index = 0 });
+    Alcotest.(check (option string)) "native completion keeps exact tool attribution"
+      (Some "Read") (Option.get (Keeper_turn_preview.current ~keeper_name)).last_tool)
 ;;
 
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
-      , [ Alcotest.test_case "overlapping and rejected tools are observations" `Quick
+      , [ Alcotest.test_case "late execution preserves successor preview and redactor" `Quick
+            test_late_execution_keeps_successor_preview_and_redactor
+        ; Alcotest.test_case "overlapping and rejected tools are observations" `Quick
             test_overlapping_and_rejected_tools_remain_observations
         ; Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick
             test_live_attempt_failover_and_new_turn

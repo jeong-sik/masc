@@ -18,24 +18,24 @@ type t =
    [String_util.utf8_suffix] so a cut Hangul glyph never reaches a terminal. *)
 let tail_bytes = 240
 
-(* Response text reaches [text_tail] only through the turn's redaction
-   snapshot, the one the same keeper's chat stream uses, because the turns
-   route serves the tail to every operator surface. [reset] arms it at turn
-   entry. An entry that a tool, attempt or failure note created before any
-   reset records activity and no text. *)
+(* Every writer owns its stream redactor, including held partial lines. *)
 type text_intake =
-  | Unarmed
-  | Redacting of
-      { redaction : Keeper_secret_redaction.t
-      ; stream : Keeper_stream_text_redaction.t
-      }
+  { redaction : Keeper_secret_redaction.t
+  ; stream : Keeper_stream_text_redaction.t
+  }
+
+module Tool_indexes = Map.Make (Int)
 
 type entry =
   { preview : t
   ; text_intake : text_intake
+  ; tools : string Tool_indexes.t
   }
+type writer = entry ref
 
-let table : (string, entry) Hashtbl.t = Hashtbl.create 16
+(* The displayed preview points at the latest installed writer. Callbacks
+   retain their own writer and never look it up in this table. *)
+let table : (string, writer) Hashtbl.t = Hashtbl.create 16
 
 let mutex = Mutex.create ()
 
@@ -49,76 +49,67 @@ let empty now =
 
 let current ~keeper_name =
   with_lock (fun () ->
-    Option.map (fun entry -> entry.preview) (Hashtbl.find_opt table keeper_name))
+    Option.map (fun writer -> (!writer).preview) (Hashtbl.find_opt table keeper_name))
 
 (* [f] returns [None] when the note changes nothing, which leaves
    [updated_at] where it was. *)
-let change_entry ~keeper_name ~now f =
-  with_lock (fun () ->
-    (* DET-OK: absent in-memory telemetry starts empty; this is initialization,
-       not a fallback for unknown external input. *)
-    let old =
-      Option.value
-        ~default:{ preview = empty now; text_intake = Unarmed }
-        (Hashtbl.find_opt table keeper_name)
-    in
-    match f old with
-    | None -> ()
-    | Some entry ->
-      Hashtbl.replace table keeper_name
-        { entry with preview = { entry.preview with updated_at = now } })
+let change_entry ~writer ~now f =
+  Option.iter (fun writer ->
+    with_lock (fun () ->
+      match f !writer with
+      | None -> ()
+      | Some entry ->
+        writer := { entry with preview = { entry.preview with updated_at = now } })) writer
 
-let update ~keeper_name ~now f =
-  change_entry ~keeper_name ~now (fun entry ->
+let update ~writer ~now f =
+  change_entry ~writer ~now (fun entry ->
     Some { entry with preview = f entry.preview })
 
 let redacting redaction =
-  Redacting { redaction; stream = Keeper_stream_text_redaction.create redaction }
+  { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
 let reset ~keeper_name ~now ~redaction =
-  change_entry ~keeper_name ~now (fun _ ->
-    Some { preview = empty now; text_intake = redacting redaction })
+  let writer = ref { preview = empty now; text_intake = redacting redaction; tools = Tool_indexes.empty } in
+  with_lock (fun () -> Hashtbl.replace table keeper_name writer);
+  writer
 
-let note_attempt ~keeper_name ~now ~runtime_id =
-  change_entry ~keeper_name ~now (fun { preview; text_intake } ->
+let note_attempt ~writer ~now ~runtime_id =
+  change_entry ~writer ~now (fun { preview; text_intake; tools = _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
           ; last_tool = None; text_tail = "" }
         (* A new attempt is a new provider stream. Text the previous stream
            still held belongs to the tail this clears. *)
+      ; tools = Tool_indexes.empty
       ; text_intake =
-          (match text_intake with
-           | Unarmed -> Unarmed
-           | Redacting { redaction; stream = _ } -> redacting redaction)
+          redacting text_intake.redaction
       })
 
-let note_failure ~keeper_name ~now ~runtime_id detail =
+let note_failure ~writer ~now ~runtime_id detail =
   let detail = Observability_redact.redact_preview ~max_len:tail_bytes detail in
-  update ~keeper_name ~now (fun old ->
+  update ~writer ~now (fun old ->
     { old with runtime_id = Some runtime_id; activity = Failed
     ; last_tool = None; last_failure = Some detail })
 
 (* The whole response text arrives here at once, so plain redaction sees
    every secret in it whole before the tail is cut. *)
-let note_text ~keeper_name ~now text =
+let note_text ~writer ~now text =
   let text = String.trim text in
   if not (String.equal text "") then
-    change_entry ~keeper_name ~now (fun ({ preview; text_intake } as entry) ->
+    change_entry ~writer ~now (fun ({ preview; text_intake; tools = _ } as entry) ->
       let preview =
-        match text_intake with
-        | Redacting { redaction; stream = _ } ->
+        let redaction = text_intake.redaction in
           { preview with
             text_tail =
               String_util.utf8_suffix ~max_bytes:tail_bytes
                 (Keeper_secret_redaction.redact_text redaction text)
           ; activity = Receiving_response }
-        | Unarmed -> { preview with activity = Receiving_response }
       in
       Some { entry with preview })
 
-let note_tool ~keeper_name ~now tool_name =
-  update ~keeper_name ~now (fun old ->
+let note_tool ~writer ~now tool_name =
+  update ~writer ~now (fun old ->
     { old with last_tool = Some tool_name; activity = Tool_observed })
 
 (* What a provider event says about the turn apart from its text. It reads
@@ -162,16 +153,25 @@ let released_text_tail tail events =
 (* Deltas pass through the turn's stream redactor, which releases a line once
    it is complete, so a secret split between two deltas is replaced before any
    part of it reaches the tail. *)
-let note_stream ~keeper_name ~now event =
-  change_entry ~keeper_name ~now (fun ({ preview; text_intake } as entry) ->
+let note_stream ~writer ~now event =
+  change_entry ~writer ~now (fun ({ preview; text_intake; tools = _ } as entry) ->
     let text_tail =
-      match text_intake with
-      | Unarmed -> None
-      | Redacting { stream; redaction = _ } ->
-        released_text_tail preview.text_tail
-          (Keeper_stream_text_redaction.on_event stream event)
+      released_text_tail preview.text_tail
+        (Keeper_stream_text_redaction.on_event text_intake.stream event)
     in
-    match activity_of_event preview event, text_tail with
+    let tools, activity =
+      match event with
+      | Agent_core.Types.ContentBlockStart { index; tool_name = Some name; _ } ->
+        Tool_indexes.add index name entry.tools, activity_of_event preview event
+      | ContentBlockStop { index } ->
+        Tool_indexes.remove index entry.tools,
+        Option.map (fun name ->
+          { preview with last_tool = Some name; activity = Tool_observed })
+          (Tool_indexes.find_opt index entry.tools)
+      | _ -> entry.tools, activity_of_event preview event
+    in
+    let entry = { entry with tools } in
+    match activity, text_tail with
     | None, None -> None
     | Some preview, None -> Some { entry with preview }
     | None, Some text_tail -> Some { entry with preview = { preview with text_tail } }

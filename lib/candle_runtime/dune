@@ -27,6 +27,8 @@
   masc_keeper_registry
   masc_config_dir_resolver
   masc_log
+  digestif
+  yojson
   time_compat
   eio
   ptime))

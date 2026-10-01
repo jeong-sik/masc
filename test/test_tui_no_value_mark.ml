@@ -52,6 +52,7 @@ let diff_marker_bindings =
    they keep a one-byte mark. *)
 let width_measured_modules =
   [ "bin/masc_tui_render.ml"
+  ; "bin/masc_tui_render_approvals.ml"
   ; "bin/masc_tui_render_code.ml"
   ; "bin/masc_tui_render_resources.ml"
   ; "bin/masc_tui_render_board.ml"

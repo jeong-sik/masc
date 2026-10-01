@@ -440,7 +440,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
       ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
     funding_rows confirmed_at payment)) in
   append config history;
-  let waiting = prepared config "overflow" in
+  let waiting = prepared ~due_date:None config "overflow" in
   let calls = ref [] in
   (match drain config (make_runner calls) with
    | [Candle_appraise.Rejected _] -> ()
@@ -464,6 +464,36 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
     Candle_payout_worker.pulse ();
     idle env;
     check int "a deterministic ledger refusal is not retried by pulse" refused_calls (List.length !calls))
+
+let test_finite_overflow_retries_after_decay () =
+  with_workspace @@ fun _env config ->
+  let historical_amount = max_int / 1000 in
+  let history = List.concat (List.init 1000 (fun i ->
+    let payment = Candle_payment.make
+      ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
+      ~grade:Candle_grade.Epic ~total_milli:historical_amount
+      ~grade_trace:(trace "past-grade")
+      ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
+      ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
+      ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
+    funding_rows confirmed_at payment)) in
+  append config history;
+  let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+  let configured = Fs_compat.load_file path in
+  let off = "half_life = \"off\"" in
+  Fs_compat.save_file path ("half_life = 1" ^ String.sub configured (String.length off)
+    (String.length configured - String.length off));
+  let waiting = prepared ~due_date:None config "decay-overflow" in
+  let appraise = make_runner (ref []) in
+  (match Candle_appraise.settle_one ~now ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> () | _ -> fail "finite overflow was not retryable");
+  check int "retry adds no partial payment" 0 (List.length (paid config waiting.goal_id));
+  let later () = now () +. 3600. in
+  (match Candle_appraise.settle_one ~now:later ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Settled _ -> () | _ -> fail "decay did not free credit capacity");
+  (match Candle_appraise.settle_one ~now:later ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Superseded _ -> () | _ -> fail "settlement was repeated");
+  check int "decay recovery pays exactly once" 1 (List.length (paid config waiting.goal_id))
 
 let test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it () =
   with_workspace @@ fun env config ->
@@ -583,7 +613,8 @@ let test_clock_reversal_retries_but_malformed_history_rejects () =
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
+      [test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
+      ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
       ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse

@@ -407,15 +407,15 @@ let keeper_exists state keeper_name =
     ~config:(Mcp_server.workspace_config state)
     keeper_name
 
-let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
+let respond_keeper_tool_json ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
   match
     Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
   with
   | Some result when Tool_result.is_success result -> (
       let body = Tool_result.message result in
       try
-        ignore (Yojson.Safe.from_string body);
-        respond_json_with_cors ~status:`OK request reqd body
+        let json = Yojson.Safe.from_string body |> project in
+        respond_json_value_with_cors ~status:`OK request reqd json
       with
       | Yojson.Json_error err ->
           Log.Misc.error "channel_gate %s returned invalid json: %s"
@@ -470,7 +470,14 @@ let handle_gate_keepers ~sw ~clock state request reqd =
   let args =
     `Assoc [ ("limit", `Int limit); ("detailed", `Bool detailed) ]
   in
-  respond_keeper_tool_json ~sw ~clock state request reqd
+  let project =
+    match authorize_token_bound_permission_request ~base_path:config.base_path
+      ~permission:Masc_domain.CanAdmin request with
+    | Ok _ -> Dashboard_projection_cache.with_current_gate_keeper_observations ~config
+    | Error _ -> Fun.id
+  in
+  respond_keeper_tool_json ~project
+    ~sw ~clock state request reqd
     ~tool_name:"masc_keeper_list" ~args
 
 (** GET /api/v1/gate/keeper-status?name=<keeper>

@@ -379,14 +379,6 @@ let item_account reply =
        (Yojson.Safe.from_string reply.body))
   |> snd
 
-let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
-
-let item_account reply =
-  check int "Item account HTTP response" 200 reply.status;
-  require_ok Fun.id
-    (Masc_tui_keeper_items.decode ~keeper_name:keeper
-       (Yojson.Safe.from_string reply.body))
-
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
     let first = get ~router (path ~size:"72" keeper) in
@@ -433,6 +425,61 @@ let token_for config ~agent_name role =
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a
    shared machine is refused. *)
+let test_gate_account_revision_uses_current_candle_reading () =
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for config ~agent_name:"gate-operator" Masc_domain.Admin in
+    let worker = token_for config ~agent_name:"gate-worker" Masc_domain.Worker in
+    let read ?(token=operator) () =
+      let response = get ~router ~token "/api/v1/gate/keepers?detailed=true" in
+      check int "authorized Gate discovery succeeds" 200 response.status;
+      Yojson.Safe.from_string response.body in
+    let broken = require_ok Fun.id
+      (Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "broken"])) in
+    require_ok Fun.id (Keeper_meta_store.replace_snapshot config broken);
+    let broken_path = Filename.concat (Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.base_path) "broken.toml" in
+    Fs_compat.mkdir_p (Filename.dirname broken_path);
+    Out_channel.with_open_bin broken_path (fun oc -> output_string oc "invalid keeper TOML");
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    let assert_revision json =
+      let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+      let rows = Yojson.Safe.Util.(json |> member "keepers" |> to_list) in
+      List.iter (fun row ->
+        let name = Yojson.Safe.Util.(row |> member "name" |> to_string) in
+        let expected = Json_util.option_to_yojson (fun value -> `String value)
+          (Candle_observe.account_revision candle ~keeper:name) in
+        check bool "HTTP operator roster revision matches its current observation" true
+          (Yojson.Safe.Util.member "candle_account_revision" row = expected);
+        match row with
+        | `Assoc fields -> check int "revision appears once" 1
+            (List.length (List.filter (fun (key,_) -> key="candle_account_revision") fields))
+        | _ -> fail "Gate row is not an object") rows;
+      rows in
+    ignore (assert_revision (read ()));
+    let policy = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+    Fs_compat.mkdir_p (Filename.dirname policy);
+    Out_channel.with_open_bin policy (fun oc -> output_string oc "invalid Candle policy");
+    let disabled = read () in
+    let rows = assert_revision disabled in
+    check bool "directory-error row retains operator account revision" true
+      (List.exists (fun row -> Yojson.Safe.Util.member "status" row = `String "error") rows);
+    let item = get ~router ~token:operator (item_path keeper) in
+    check int "disabled Item response succeeds" 200 item.status;
+    let item_revision = Yojson.Safe.Util.member "account_revision" (Yojson.Safe.from_string item.body) in
+    let keeper_row = List.find (fun row -> Yojson.Safe.Util.member "name" row = `String keeper) rows in
+    check bool "disabled Item and roster share account authority" true
+      (item_revision = Yojson.Safe.Util.member "candle_account_revision" keeper_row);
+    let shared = read ~token:worker () in
+    check bool "Worker discovery omits currency" true (Json_util.assoc_member_opt "candle" shared = None);
+    List.iter (fun row ->
+      check bool "Worker discovery omits balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
+      check bool "Worker discovery omits account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None))
+      Yojson.Safe.Util.(shared |> member "keepers" |> to_list);
+    Sys.remove policy;
+    ignore (assert_revision (read ())))
+
 let test_router_strict_auth_needs_a_read_token () =
   with_router (fun ~config router ->
     Auth.save_auth_config config.Workspace.base_path
@@ -701,11 +748,14 @@ beanie = %d
     check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
     check string "same choice does not append" stable (ledger_bytes ());
     Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
-    let public_roster () = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
-      ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
-      ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
-      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
-      | None -> fail "public Keeper roster not registered" in
+    let operator = token_for config ~agent_name:"portrait-roster-operator" Masc_domain.Admin in
+    let public_roster () =
+      let auth = Auth.load_auth_config base_path in
+      Fun.protect ~finally:(fun () -> Auth.save_auth_config base_path auth) (fun () ->
+        Auth.save_auth_config base_path {auth with enabled=true; require_token=true};
+        let response = get ~router ~token:operator "/api/v1/gate/keepers?detailed=true" in
+        check int "operator roster succeeds" 200 response.status;
+        Yojson.Safe.from_string response.body) in
     let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
     (match require_ok Fun.id candle with
@@ -791,6 +841,7 @@ let () =
     ; "router",
       [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
+      ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
       ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
       ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ] ]

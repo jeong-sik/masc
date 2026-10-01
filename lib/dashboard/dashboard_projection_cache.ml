@@ -133,6 +133,23 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
     ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
     ~config snapshot
 
+let with_current_gate_keeper_observations ~config snapshot =
+  (* The compact Gate form names its rows [items], while the detailed form
+     uses [keepers]. Both reuse the same immutable observation projection. *)
+  let compact = match snapshot with
+    | `Assoc fields -> List.mem_assoc "items" fields
+    | _ -> false in
+  let rename from_key into_key = function
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        (if key = from_key then into_key else key), value) fields)
+    | json -> json in
+  let input = if compact then rename "items" "keepers" snapshot else snapshot in
+  let projected = with_current_keeper_observations ~config input in
+  let projected = if compact then rename "keepers" "items" projected else projected in
+  match projected with
+  | `Assoc fields -> `Assoc (List.remove_assoc "candle_observation_sequence" fields)
+  | json -> json
+
 module For_test = struct
   let with_current_keeper_observations = with_current_keeper_observations_using
 end

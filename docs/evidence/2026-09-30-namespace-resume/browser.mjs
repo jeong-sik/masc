@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,10 +15,11 @@ const { chromium } = require('playwright')
 const statePath = '/src/components/flow-control/flow-control-state.ts'
 const fixed = await readFile(resolve(root, '.' + statePath), 'utf8')
 const main = await readFile(new URL('./main-flow-control-state.ts', import.meta.url), 'utf8')
+const sourceHead = execFileSync('git', ['-C', resolve(root, '..'), 'rev-parse', 'HEAD'], {encoding:'utf8'}).trim()
 const receipts = []
 const browser = await chromium.launch({ args: ['--no-sandbox'] })
 try {
-  for (const variant of ['main', 'fixed']) {
+  for (const variant of ['main', 'fixed', 'fixed-readback-error', 'fixed-readback-mismatch']) {
     let paused = true
     let pending = null
     const events = []
@@ -28,7 +30,7 @@ try {
           if (id.endsWith(statePath)) return variant === 'main' ? main : fixed
           if (id.endsWith('/src/store.ts')) return `import {signal} from '@preact/signals';
             export const serverStatus=signal(null);
-            export const shellAuthSummary=signal({effective_role:'worker',auth_error_code:null,auth_error_detail:null});`
+            export const shellAuthSummary=signal({effective_role:'admin',auth_error_code:null,auth_error_detail:null});`
           if (id.endsWith('/src/operator-store.ts')) return `import {signal} from '@preact/signals';
             export const operatorSnapshot=signal(null);
             export {runOperatorAction as dispatchOperatorAction,confirmOperatorAction as confirmOperatorPendingAction} from '/src/api/core.ts';`
@@ -84,7 +86,23 @@ try {
             } else if (path === '/api/v1/dashboard/project-snapshot') {
               response = {root:{status:{paused}}}
             } else if (path === '/mcp') {
-              response = {jsonrpc:'2.0',id:body.id,error:{code:-32601,message:'Unknown tool: ' + body.params?.name}}
+              assert.equal(body.method, 'tools/call')
+              if (body.params?.name === 'masc_pause_status') {
+                assert.notEqual(variant, 'main')
+                if (variant === 'fixed-readback-error') {
+                  response = {jsonrpc:'2.0',id:body.id,error:{code:-32603,message:'Fixture pause status unavailable'}}
+                } else {
+                  // A new authoritative pause after resume can disagree.
+                  if (variant === 'fixed-readback-mismatch') paused = true
+                  const status = {ok:true,initializing:false,paused}
+                  response = {jsonrpc:'2.0',id:body.id,result:{isError:false,
+                    content:[{type:'text',text:JSON.stringify(status)}]}}
+                }
+              } else {
+                assert.equal(variant, 'main')
+                assert.equal(body.params?.name, 'masc_resume')
+                response = {jsonrpc:'2.0',id:body.id,error:{code:-32601,message:'Unknown tool: masc_resume'}}
+              }
             } else { response = {} }
             events.push({method:req.method,path,body,actorHeader:req.headers['x-masc-agent-name'],response})
             res.setHeader('Content-Type', 'application/json');res.end(JSON.stringify(response))
@@ -101,14 +119,26 @@ try {
       await page.goto(origin + '/__probe?token=fixture-token&agent=fixture-operator')
       await page.waitForFunction(()=>window.ready)
       await page.getByRole('button',{name:'Resume',exact:true}).first().click()
-      if (variant === 'fixed') {
+      if (variant !== 'main') {
         await page.getByRole('dialog').waitFor()
         assert.equal(paused,true)
-        await page.screenshot({path:resolve(out,'fixed-confirm.png')})
+        await page.screenshot({path:resolve(out,variant+'-confirm.png')})
         await page.getByRole('dialog').getByRole('button',{name:'Resume',exact:true}).click()
-        await page.waitForFunction(()=>window.toasts.some(t=>t.message==='Namespace resumed.'))
-        assert.equal(paused,false)
-        assert.deepEqual(events.map(e=>e.path),['/api/v1/operator/action','/api/v1/operator/confirm','/api/v1/dashboard/project-snapshot'])
+        if (variant === 'fixed') {
+          await page.waitForFunction(()=>window.toasts.some(t=>t.message==='Namespace resumed.' && t.tone==='success'))
+          assert.equal(paused,false)
+        } else if (variant === 'fixed-readback-error') {
+          await page.waitForFunction(()=>window.toasts.some(t=>t.message==='Resume failed: Fixture pause status unavailable' && t.tone==='error'))
+          assert.equal(paused,false)
+        } else {
+          await page.waitForFunction(()=>window.toasts.some(t=>t.message==='Resume sent; namespace state is paused.' && t.tone==='warning'))
+          assert.equal(paused,true)
+        }
+        const toasts = await page.evaluate(()=>window.toasts)
+        if (variant !== 'fixed') assert.ok(!toasts.some(t=>t.message==='Namespace resumed.' || t.tone==='success'))
+        assert.deepEqual(events.map(e=>e.path),['/api/v1/operator/action','/api/v1/operator/confirm',
+          '/api/v1/dashboard/project-snapshot','/mcp'])
+        assert.equal(events.at(-1).body.params.name,'masc_pause_status')
       } else {
         await page.waitForFunction(()=>window.toasts.some(t=>t.tone==='error'))
         assert.equal(paused,true)
@@ -127,7 +157,10 @@ finally {
   await browser.close()
   await writeFile(resolve(out,'receipt.json'), JSON.stringify({
     scope:'Actual controls and API serializers in Chromium; store projections and HTTP responses are fixtures. Not deployment evidence.',
-    base:'ae82a3b855cc5cb8c37a134ef01eebff35368bc3',
+    sourceHead,
+    fixtureRole:'admin',
+    fixtureSha256:createHash('sha256').update(await readFile(new URL('./browser.mjs', import.meta.url))).digest('hex'),
+    originalSourceBase:'ae82a3b855cc5cb8c37a134ef01eebff35368bc3',
     mainSha256:createHash('sha256').update(main).digest('hex'),
     fixedSha256:createHash('sha256').update(fixed).digest('hex'),
     sourceUnchanged:fixed===await readFile(resolve(root,'.'+statePath),'utf8'),receipts,

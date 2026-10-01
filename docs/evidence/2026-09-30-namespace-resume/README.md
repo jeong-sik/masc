@@ -1,8 +1,9 @@
 # Namespace Pause/Resume control evidence
 
 Task: task-647. Issue: [#27053](https://github.com/jeong-sik/masc/issues/27053).
-This record was assembled on 2026-09-30 after the captured runs; it is a summary
-of the command receipts and browser fixture, not a reconstructed execution log.
+The historical record below was assembled on 2026-09-30 after its captured runs.
+The current readback fixture was captured on 2026-10-01; its separate receipt,
+source hashes and screenshots are identified below.
 
 ## Scope and source identity
 
@@ -19,14 +20,46 @@ resolved to `d652fb617c4b4b6e420a277827e39359c52ee159`; the diff from base
 for the flow-control directory, header control, operator-actions.ts and
 namespace-truth-actions.ts was empty.
 
-The browser receipt pins the original and fixed flow-state sources by SHA256.
-The current source matches the fixed digest:
+The historical `browser/receipt.json` pins the original and fixed flow-state
+sources by SHA256. The fixed source **at that capture** had digest:
 `f3b052505fba3e207fa083c9204193886131bc12bd3624695b69a151362ece85`.
-`SHA256SUMS` also covers all four edited source/test files and committed evidence.
+`SHA256SUMS` verifies the current source/test bytes and the retained historical
+evidence files separately. Historical browser success does not certify the
+subsequently changed flow state.
 [근거] Git source/diff commands and captured source bytes, 2026-09-30 UTC;
 High for this checkout; deployment identity was not measured.
 
-## Checks
+## Current readback fixture (2026-10-01)
+
+`browser-current-run.json` records the actual Chromium command and exit 0 from
+2026-10-01T01:24:30.730142Z through 01:24:35.475973Z. Its complete combined
+output is in `browser-current-run.log.gz`; `browser-current/receipt.json` records
+all four scenarios and zero page errors. Production source was unchanged during
+execution at `89be7af1a92479ef58a86c1cec1c9f12d29d7c25`; the current flow-state
+SHA256 is `b68cb5fec23ef834d8303040c26523c184648413eaa043135724ecc89053a756`.
+
+The fixture uses explicit admin standing, as the current controls require.
+The original source still calls unavailable `masc_resume` and shows an error.
+Current source first requests `namespace_resume`, confirms the returned token,
+reads `/api/v1/dashboard/project-snapshot`, then calls `masc_pause_status` through
+`/mcp`. The last response decides the result:
+
+- Current readback returns `paused=false`: the control shows Running and a
+  `Namespace resumed.` success message.
+- Readback returns a JSON-RPC error: the control shows an error and no success
+  message, despite the fixture's accepted resume.
+- A new authoritative pause occurs before readback: the control remains Paused
+  and shows a warning instead of a success message.
+
+The 1280px and 375px images in `browser-current/` show each result. The three
+`*-confirm.png` images show the pending confirmation before changing pause state.
+The page skin, auth standing, stores and HTTP responses are isolated fixtures;
+these screenshots do not prove production styling, server authorization, durable
+pause storage, fleet scheduling or provider use. The earlier sandboxed browser
+launch failed before page creation with a Mach-port permission error; the
+recorded successful run was executed separately in the parent session.
+
+## Historical checks (2026-09-30)
 
 Each JSON receipt contains the exact command, working directory, UTC start/end
 and process exit code. Its matching gzip log contains combined stdout/stderr.
@@ -68,7 +101,7 @@ this PR; `git diff ae82a3b855cc5cb8c37a134ef01eebff35368bc3 HEAD --name-only
 control uses the existing checker with `--dir` and passes. The global check
 must be repaired separately before claiming it passes.
 
-## Browser result and limits
+## Historical browser result and limits (2026-09-30)
 
 `browser.mjs` loads actual EmergencyStopControl, FlowControlPanel,
 ConfirmDialogOverlay and API serializers in Chromium. Store projections, HTTP

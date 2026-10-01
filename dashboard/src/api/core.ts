@@ -731,6 +731,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         recommended_actions: [],
         command_focus: {},
         operator_targets: { keepers: [], available_actions: [] },
+        attention_read_error: 'Attention has not been observed yet.',
         attention_queue: [],
         sessions: [],
         agent_briefs: [],

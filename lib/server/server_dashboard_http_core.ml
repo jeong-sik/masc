@@ -72,6 +72,7 @@ let mission_cache =
         ; "recommended_actions", `List []
         ; "command_focus", `Assoc []
         ; "operator_targets", `Assoc []
+        ; "attention_read_error", `String "Attention has not been observed yet."
         ; "attention_queue", `List []
         ; "agent_briefs", `List []
         ; "keeper_briefs", `List []

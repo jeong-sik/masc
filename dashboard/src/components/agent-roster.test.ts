@@ -738,6 +738,7 @@ describe('AgentRoster live-only cards', () => {
       command_focus: {},
       operator_targets: {},
       attention_queue: [],
+      attention_read_error: null,
       sessions: [],
       agent_briefs: [
         {

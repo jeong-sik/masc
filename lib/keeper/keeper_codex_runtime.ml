@@ -5,6 +5,10 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 
+type scheduling_turn =
+  | Autonomous_schedule
+  | Direct_schedule of Keeper_chat_operation.Operation_id.t
+
 type successful_tool_completion =
   | No_successful_tool_completion
   | Successful_tool_completion
@@ -1397,20 +1401,27 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
-        (match
-       Runtime_codex_app_server.run_turn
-         ?await_handoff:(
+        let scheduling_turn =
            match Keeper_owner_registry.get ~base_path ~keeper_name with
            | Error _ -> None
            | Ok owner ->
              (match Keeper_owner.turn_in_flight owner with
               | Some { lane = Keeper_owner.Autonomous; _ } ->
-                Some (fun () -> Keeper_owner.await_claimable_operation owner)
-              (* Direct operations need a resumable outcome before early
-                 completion can safely release their slot. A scheduling reply
-                 must not mark an unfinished direct request as succeeded. *)
-              | Some { lane = (Keeper_owner.Chat_operation | Keeper_owner.Maintenance); _ }
-              | None -> None))
+                Some (owner, Autonomous_schedule)
+              | Some { lane = Keeper_owner.Chat_operation; _ } ->
+                Option.map (fun operation_id -> owner, Direct_schedule operation_id)
+                  (Keeper_owner.operation_projection owner).running_operation_id
+              | Some { lane = Keeper_owner.Maintenance; _ } | None -> None)
+        in
+        let await_handoff = Option.map (fun (owner, turn) ->
+          match turn with
+          | Autonomous_schedule ->
+            (fun () -> Keeper_owner.await_claimable_operation owner)
+          | Direct_schedule operation_id ->
+            (fun () -> Keeper_owner.await_newer_original_operation owner ~operation_id)) scheduling_turn in
+        (match
+       Runtime_codex_app_server.run_turn
+         ?await_handoff
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
@@ -1582,7 +1593,20 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; cooperative_boundary = None
-         ; stop_reason = Completed
+         ; stop_reason =
+             (* This is after natural vendor completion and durable session
+                settlement. The direct turn owner retains that exact authority
+                before requeueing the original operation, never succeeding it
+                on the scheduling reply. An unacknowledged notice is equally
+                unable to prove original-work completion. Autonomous turns keep
+                their own event-batch completion contract. *)
+             (match scheduling_turn, turn.scheduling_handoff with
+              | Some (_, Direct_schedule _),
+                  (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+                Yielded_to_operation_queued { turns_used = turn_count }
+              | (Some (_, Autonomous_schedule) | None), _
+              | Some (_, Direct_schedule _),
+                  (Handoff_unrequested | Handoff_rejected) -> Completed)
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did

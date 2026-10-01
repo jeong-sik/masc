@@ -608,6 +608,12 @@ let test_scheduling_handoff_preserves_active_protocol () =
           match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true) path with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
+            let expected_handoff = match acceptance with
+              | Some true -> Runtime_codex_app_server.Handoff_accepted
+              | Some false -> Runtime_codex_app_server.Handoff_rejected
+              | None -> Runtime_codex_app_server.Handoff_pending in
+            check bool "terminal carries scheduling disposition" true
+              (result.scheduling_handoff = expected_handoff);
             check int "concurrent tool frames survive steer response" 2 !calls;
             check string "natural terminal survives handoff" "MASC_SUBSCRIPTION_OK" result.text);
       let rows = In_channel.with_open_bin capture_path In_channel.input_lines

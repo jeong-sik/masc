@@ -135,12 +135,18 @@ type turn_usage =
 
 val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
 
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+(** Scheduling notice outcome at natural turn completion. Pending means a
+    notice was sent but its acknowledgement did not precede the terminal frame;
+    it is not evidence that the original operation finished. *)
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool

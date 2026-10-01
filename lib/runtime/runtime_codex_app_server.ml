@@ -161,12 +161,15 @@ let fold_turn_usage seen frame =
     Thread_count { last; thread_total }
 ;;
 
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
@@ -1341,8 +1344,6 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
-
 let request_scheduling_handoff io ~thread_id ~turn_id =
   send_request io ~id:6 ~method_:"turn/steer"
     ~params:(`Assoc
@@ -1959,6 +1960,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
     ; model
     ; text
     ; dynamic_tool_calls = !tool_call_count
+    ; scheduling_handoff = !handoff
     ; subscription
     ; user_agent
     ; resumed

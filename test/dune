@@ -6048,7 +6048,7 @@
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_chat_portrait.inc)
-(include stanzas/test_tui_candle.inc)
+
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)

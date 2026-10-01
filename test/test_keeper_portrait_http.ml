@@ -314,7 +314,9 @@ let with_router f =
         (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper ])) in
       require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
       let router = Server_routes_http_routes_dashboard.add_routes ~sw
-        ~clock:(Eio.Stdenv.clock env) (Http.Router.create ()) in
+        ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())
+        |> Server_routes_http_routes_channel_gate.add_routes ~sw
+          ~clock:(Eio.Stdenv.clock env) in
       f ~config router)
 
 type reply = { status : int; headers : (string * string) list; body : string }
@@ -451,6 +453,12 @@ let test_router_strict_auth_needs_a_read_token () =
     let off = get ~router ~token:reader items in
     let expected_workspace = Server_base_path_diagnostics.detect
       ~effective_base_path:config.Workspace.base_path ~effective_masc_root:(Workspace.masc_dir config) () in
+    let roster_bound workspace = "/api/v1/gate/keepers?detailed=true&expected_workspace="
+      ^ Uri.pct_encode ~component:`Query_value workspace in
+    check int "roster refuses changed workspace before dispatch" 409
+      (get ~router ~token:reader (roster_bound (expected_workspace.effective_base_path ^ "/other"))).status;
+    check int "roster refuses blank workspace authority" 400
+      (get ~router ~token:reader (roster_bound " ")).status;
     let bound suffix = items ^ "?expected_workspace=" ^ Uri.pct_encode ~component:`Query_value suffix in
     check int "matching health workspace binding admits the current account" 200
       (get ~router ~token:reader (bound expected_workspace.effective_base_path)).status;

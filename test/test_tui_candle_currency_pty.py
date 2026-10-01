@@ -122,6 +122,8 @@ def run(binary: str, phase: str, captures: Path | None):
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
             h.resize_and_wait(process, fd, output, rows=38, columns=120,
                               needle=SUMMARY[0], final_cursor=b"\x1b[?25l")
+            for line in SUMMARY:
+                assert screen(output).count(line) == 1, "Home duplicated a Candle summary row"
             capture(output, "ready-overview")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")

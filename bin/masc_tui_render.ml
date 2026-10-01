@@ -320,17 +320,6 @@ let render_overview (state : state) =
               if spare < List.length readings + 1 then notice :: readings
               else readings @ [notice]
         in
-        let candle =
-          Masc_tui_candle.summary_lines state.candle_observation
-          |> List.concat_map (fun line ->
-               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-                 (Terminal_text.single_line line))
-          |> List.map (fun line -> (None, " " ^ line))
-        in
-        let context =
-          if List.length context + List.length candle <= spare then context @ candle
-          else context
-        in
         let shown_context = List.take (min spare (List.length context)) context in
         List.iter
           (function

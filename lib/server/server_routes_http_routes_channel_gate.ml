@@ -450,6 +450,18 @@ let keeper_list_max_limit = 200
     narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
     bound. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
+  let config = Mcp_server.workspace_config state in
+  let paths = Server_base_path_diagnostics.detect
+    ~effective_base_path:config.Workspace.base_path
+    ~effective_masc_root:(Workspace.masc_dir config) () in
+  match query_param request "expected_workspace" with
+  | Some expected when String.trim expected = "" ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "expected workspace must not be blank")
+  | Some expected when not (String.equal expected paths.effective_base_path) ->
+      respond_json_value_with_cors ~status:`Conflict request reqd
+        (Channel_gate.error_json "Server workspace changed; refresh its identity before reading Keepers")
+  | Some _ | None ->
   let limit =
     int_query_param request "limit" ~default:keeper_list_max_limit
     |> fun value -> max 1 (min keeper_list_max_limit value)

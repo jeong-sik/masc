@@ -1687,9 +1687,10 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) :
+let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
     (int * string, string) result =
-  http_get ~host ~port ~path:"/api/v1/gate/keepers?detailed=true"
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+    ^ percent_encode_path_segment expected_workspace)
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 

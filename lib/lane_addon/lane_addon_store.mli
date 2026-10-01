@@ -5,8 +5,8 @@ val create : root:string -> t
 val root : t -> string
 val digest : string -> string
 val blob_reference : string -> Lane_addon_types.evidence
-(** Computes the content address without writing. The same address is returned
-    by [write_blob], so callers can admit a complete envelope before retaining it. *)
+(** Content-addressed reference without writing. It may be used to measure a
+    complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
 val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }

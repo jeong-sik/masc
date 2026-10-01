@@ -1,7 +1,8 @@
 (** Screen dispatch and shared rendering projections.
-    Workspace Code drawing and its viewport are owned by {!Masc_tui_render_code};
-    Board screens by {!Masc_tui_render_board}; MCP resource reading by
-    {!Masc_tui_render_resources}. *)
+    Board, Code, MCP resource, Approval and Fusion screens are owned by
+    {!Masc_tui_render_board}, {!Masc_tui_render_code},
+    {!Masc_tui_render_resources}, {!Masc_tui_render_approvals} and
+    {!Masc_tui_render_fusion}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
@@ -130,6 +131,11 @@ val agenda_scroll_position : Masc_tui_types.state -> int
 val presets_viewport : Masc_tui_types.state -> int * int
 (** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
+val answering_selected_target :
+  Masc_tui_types.state -> lines:Masc_tui_answering.line list -> string option
+(** The selected keeper only when its actionable row lies in the rendered
+    Answering window. Paging away leaves no visible target until movement
+    brings the cursor back into view. *)
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop
     stores this result inside frame Build timing; rendering never stores it. *)

@@ -18,9 +18,13 @@ val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.act
 val notify_fusion_run : run_id:string -> unit
 (** Capture hints for exact-run bindings against the process-wide Fusion registry.
     No I/O or package callback; work is carried to the owner domain. *)
-val authorize_retained_read : access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
-(** Pure read authorization against the strict durable visibility codec. The
-    supplied access is host-owned; no request field can set it. *)
+val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
+(** Pure read authorization against one authoritative full binding snapshot.
+    Explicit durable visibility remains required for current records. The exact
+    published v0.48.0 envelope is readable only after its complete retained
+    producer graph proves shared visibility. Cycles, absent or ambiguous
+    incarnations and private dependencies fail closed. The supplied access is
+    host-owned; no request field can set it. No stored bytes are changed. *)
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {
@@ -46,8 +50,6 @@ val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> co
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
-(** Declaration reads and writes use the same explicit authority boundary as
-    [dispatch]; an omitted [access] grants no private authority. *)
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
     its receipt never claims that a worker has already applied the change. *)
@@ -81,6 +83,10 @@ module For_testing : sig
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Fiber-local persistence replacement captured before filesystem offload.
       Allows the existing strict writer to inject a real post-rename failure. *)
+  val with_declaration_writer :
+    (directory:string -> Lane_addon_declaration.write_request ->
+      (Lane_addon_declaration.receipt, Lane_addon_declaration.error) result) ->
+    (unit -> 'a) -> 'a
   val with_observation_writer :
     (store:Lane_addon_store.t -> instance_id:string -> seq:int ->
       sources:Yojson.Safe.t -> Lane_addon_types.output ->

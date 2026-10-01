@@ -22,8 +22,7 @@ snapshot is needed. A registered Fusion state change nudges only matching
 installed sources; attach/explicit observe also captures the current run.
 
 Every observation is a frozen snapshot retained by the host. Source completeness
-describes that one capture, not all historical Fusion stages. Missing runs are
-unavailable coverage with no fabricated rows.
+describes that one capture, not all historical Fusion stages. Initially missing or unreadable runs reject Attach or configured reconciliation before a worker starts. If an admitted instance later loses authoritative run history, its next capture reports unavailable coverage with no fabricated rows.
 
 This subscription follows Fusion status publications, not later arbitrary edits
 or deletion of the Board card. Such mutations require explicit observe to

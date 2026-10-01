@@ -99,7 +99,8 @@ class ProtocolCase(unittest.TestCase):
         if expected_summary is None:
             self.assertEqual(output, json.loads(result["content"][0]["text"]))
         else:
-            self.assertEqual(result["content"][0]["text"], expected_summary)
+            summary = expected_summary(output) if callable(expected_summary) else expected_summary
+            self.assertEqual(result["content"][0]["text"], summary)
         self.assertEqual(set(output), {"rows", "coverage"})
         for row in output["rows"]:
             self.assertEqual(set(row), ROW_FIELDS)

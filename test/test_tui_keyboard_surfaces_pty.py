@@ -35,6 +35,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_surface_navigation.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
 )
 
 if __name__ == "__main__":

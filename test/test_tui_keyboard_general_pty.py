@@ -27,6 +27,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_surface_navigation.mli",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_message_layout.ml",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
     "bin/masc_tui_next_request_band.ml",
 )
 

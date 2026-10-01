@@ -263,7 +263,7 @@ max_reply_bytes=4194304
         observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});
         stop=(fun () -> Ok ())} in
       on_created connection; Ok connection);
-    acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready=(fun ~package:_ -> Ok ());
     recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
   Lane_addon_runtime.For_testing.with_backend backend (fun () ->

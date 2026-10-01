@@ -717,11 +717,49 @@ type cell_edge =
   | Left_edge
   | Right_edge
 
+(* Style escapes take no display cells. Remove only valid SGR sequences before
+   locating complete column tokens; an unknown escape remains visible and
+   cannot silently make an alignment assertion pass. *)
+let strip_sgr text =
+  let length = String.length text in
+  let visible = Buffer.create length in
+  let rec sgr_end offset =
+    if offset >= length then None
+    else match text.[offset] with
+      | 'm' -> Some (offset + 1)
+      | '0' .. '9' | ';' -> sgr_end (offset + 1)
+      | _ -> None
+  in
+  let rec scan offset =
+    if offset < length then
+      if text.[offset] = '\027' && offset + 1 < length
+         && text.[offset + 1] = '[' then
+        match sgr_end (offset + 2) with
+        | Some next -> scan next
+        | None -> Buffer.add_char visible text.[offset]; scan (offset + 1)
+      else begin
+        Buffer.add_char visible text.[offset];
+        scan (offset + 1)
+      end
+  in
+  scan 0;
+  Buffer.contents visible
+
 (* A table laid out by [Masc_tui_table.fit] draws some of its columns. A drawn
    column's reading sits under its name; a column the table has given up has
    no name in the header and no reading in the row. [cells] names every
    column with its edge, its header and the reading the probe puts in it. *)
 let check_fitted_cells ~shown ~header ~row ~inner_width cells =
+  let visible_header = strip_sgr header in
+  let visible_row = strip_sgr row in
+  check int (Printf.sprintf "inner %d: header style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width header)
+    (Masc_tui_message_layout.display_width visible_header);
+  check int (Printf.sprintf "inner %d: row style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width row)
+    (Masc_tui_message_layout.display_width visible_row);
+  let header = visible_header in
+  let row = visible_row in
   List.iter
     (fun (column, edge, label, mark) ->
       if List.mem column shown then

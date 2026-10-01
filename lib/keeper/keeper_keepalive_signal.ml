@@ -538,9 +538,34 @@ let route_for_keeper_with_bounded_retry
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
+      ?dispatch_attention
       ~(config : Workspace.config)
       (addressed : Board_dispatch.addressed_board_signal)
   =
+  let candidates = ref [] in
+  let record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta signal =
+    match dispatch_attention with
+    | None -> record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta signal
+    | Some _ ->
+      let observe persistence =
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+          ~labels:["keeper", meta.Keeper_meta_contract.name; "kind", signal_kind_label;
+                   "audience", audience_label; "persistence", persistence] ()
+      in
+      let candidate = Keeper_board_attention_candidate.of_board_signal
+        ~meta ~recorded_at:(Time_compat.now ()) signal in
+      (match Keeper_board_attention_candidate.record ~base_path:config.Workspace.base_path candidate with
+       | Keeper_board_attention_candidate.Recorded persisted ->
+         observe "recorded";
+         candidates := persisted :: !candidates
+       | Keeper_board_attention_candidate.Duplicate _ ->
+         observe "duplicate";
+         (* Existing candidates already belong to their ordinary worker. *)
+         ignore (Keeper_board_attention_worker_wake.request ~base_path:config.base_path ~keeper_name:meta.name)
+       | Keeper_board_attention_candidate.Record_error detail ->
+         Log.Keeper.warn ~keeper_name:meta.name "board attention event candidate record failed: %s" detail)
+  in
   let signal = addressed.signal in
   let signal_kind_label =
     match signal.kind with
@@ -550,7 +575,7 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
     | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
-  match Keeper_board_audience.of_board_audience addressed.audience with
+  (match Keeper_board_audience.of_board_audience addressed.audience with
   | Error error ->
     (* Fail closed: a classification error (unsupported [@@] selector,
        mixed direct+broadcast address, or a Direct post without targets)
@@ -840,7 +865,8 @@ let wakeup_relevant_keeper_for_board_signal
               signal.post_id
               (Printexc.to_string exn));
          Eio_guard.yield_step board_ym)
-      registry_entries)
+      registry_entries));
+  Option.iter (fun dispatch -> dispatch (List.rev !candidates)) dispatch_attention
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

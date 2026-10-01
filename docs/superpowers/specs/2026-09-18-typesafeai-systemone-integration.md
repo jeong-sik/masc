@@ -61,40 +61,31 @@ The JSON body has exactly three top-level fields:
 
 - `model`: the `model` of the `[typesafeai] destinations` entry being asked
   (`jev-latest` for the default destination);
-- `state`: one `singleton_judgment_request`;
+- `state`: `{ "signal": ... }`, the current signal only;
 - `questions`: one `relevance` choice question.
 
-`state.keeper_context` contains every field below, including the Keeper's full
-instructions rather than only an identifier:
-
-- `lane_keeper_name`, `keeper_record_id`, `keeper_runtime_uid`;
-- `instructions`;
-- `current_task_id`;
-- `mention_keeper_ids`.
-
-`state.items[0]` contains:
-
-- `candidate_id`;
-- `signal`, including `kind`, `post_id`, `author`, `title`, `content`,
-  `hearth`, `updated_at`, `reaction`, and, for a vote signal, `vote`;
-  `reaction` contains `target_type`, `target_id`, `user_id`, `emoji`, and
-  `reacted`, while `vote` contains `target_kind`, `target_id`,
-  `target_author`, `voter`, and `direction`;
-- the complete `post`: `id`, `author`, `title`, `body`, `post_kind`,
-  `visibility`, `created_at`, `updated_at`, `expires_at`, `votes_up`,
-  `votes_down`, `reply_count`, `pinned`, and any present `hearth`, `thread_id`,
-  `origin`, `classification_reason`, or arbitrary `meta` JSON;
-- every attached `comment`, each with `id`, `post_id`, `parent_id`, `author`,
-  `content`, `created_at`, `expires_at`, `votes_up`, and `votes_down`.
+`state.signal` contains `kind`, `post_id`, typed `comment_id`/`parent_id`,
+`author`, `title`, `content`, `hearth`, `updated_at`, `reaction`, and, for a
+vote signal, `vote`. `reaction` contains `target_type`, `target_id`,
+`user_id`, `emoji`, and `reacted`, while `vote` contains `target_kind`,
+`target_id`, `target_author`, `voter`, and `direction`. The post and comment
+snapshot is not sent.
 
 `questions.relevance` contains `type = choice`, an `instructions` string that
-names the Keeper, and a `criteria` object with the `relevant` and
-`not_relevant` labels and their descriptions.
+names the Keeper and lists its normalized `board_interests`, and a `criteria`
+object with the `relevant`, `not_relevant` and `uncertain` labels and their
+descriptions. Keeper instructions, record/runtime/task identity, and mention
+lists are not sent.
 
-This is the same singleton state used by the regular exact-output judgment
-path. Operators should enable the integration only when sending the credential
-and all Board, Keeper, and question data above to the configured endpoint is
-acceptable.
+The Keeper is named in the question rather than in the state. With the
+Keeper's role in the state (the exact-output lane's
+`singleton_judgment_request`), Jev answered relevant far more often; on
+2026-10-01 a blind judge reading the production rule sided with the
+question-only shape in 23 of the 26 cases where the two shapes disagreed.
+The same shape lets one request carry one question per Keeper for the same
+signal. Operators should enable the integration only when sending the
+credential and the Board signal and Keeper interests above to the configured
+endpoint is acceptable.
 
 ### 2.3 Transparent Fallback
 When opted in:

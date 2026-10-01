@@ -1,0 +1,11 @@
+run: 36662141540
+source_head: f040b6f96679c2a3c46ad34fdf7a193a4e48d55e
+scope: focused Presets PTY (color and NO_COLOR) and preset text unit
+Latest integrated head 3128a81dda is not covered by this run.
+
+test suite	Checkout	2026-09-30T03:01:51.9609695Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +f040b6f96679c2a3c46ad34fdf7a193a4e48d55e:refs/remotes/origin/fix/tui-preset-layout-20260930
+test suite	Checkout	2026-09-30T03:01:59.9470320Z  * [new ref]           f040b6f96679c2a3c46ad34fdf7a193a4e48d55e -> origin/fix/tui-preset-layout-20260930
+test suite	Checkout	2026-09-30T03:01:59.9538809Z f040b6f96679c2a3c46ad34fdf7a193a4e48d55e
+test suite	Checkout	2026-09-30T03:02:01.6843812Z f040b6f96679c2a3c46ad34fdf7a193a4e48d55e
+test suite	Test	2026-09-30T03:08:06.0883132Z Preset physical-row viewport: PASS
+test suite	Test	2026-09-30T03:08:16.2479543Z [targeted] test/test_tui_preset_text: OK in 0s

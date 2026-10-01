@@ -25,6 +25,26 @@ let prepare_official_resume ~(observed : Semantic.official_client_checkpoint) ~e
        Resume its latest settled turn; never substitute another client thread. *)
     Ok { observed with Semantic.turn_id = settled.turn_id }
   | Some _ | None -> Error "original official-client conversation is no longer settled with its admitted tool surface"
+let recover_undispatched_official_resume ~base_path ~keeper_name
+    ~current_owner_epoch ~(observed : Semantic.official_client_checkpoint) ~expected =
+  match expected with
+  | Some ({ Native.phase = (Native.Start { owner_epoch; previous_settlement }
+      | Native.Active { owner_epoch; previous_settlement; _ }); _ } as stored)
+    when stored.client_kind = Native.Codex && observed.client_kind = Native.Codex
+      && stored.runtime_id = observed.runtime_id
+      && stored.tool_surface_sha256 = observed.tool_surface_sha256
+      && not (String.equal owner_epoch current_owner_epoch) ->
+    (match previous_settlement with
+     | Some previous when String.equal previous.session_id observed.session_id ->
+       (* Codex cannot send turn/start before mark_turn_starting. Start/Active
+          from a dead process therefore prove no model/tool work was dispatched.
+          Restore only this retained conversation; never release Turn_inflight. *)
+       Native.release_transient ~base_path ~keeper_name ~expected:stored
+         ~failure:Native.Pre_dispatch_failed ~released_at:(Time_compat.now ())
+       |> Result.map Option.some
+     | Some _ | None -> Ok expected)
+  | Some _ | None -> Ok expected
+
 let owner result = Result.map_error Owner.command_error_to_string result
 let validate_scope ~operation_id (checkpoint : Agent_core.Checkpoint.t) =
   let* frame = Keeper_repetition_scope.load checkpoint.context
@@ -45,6 +65,8 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
   | None -> Ok None
   | Some (Semantic.Official_client observed) ->
     let* expected = Native.load ~base_path ~keeper_name in
+    let* expected = recover_undispatched_official_resume ~base_path ~keeper_name
+        ~current_owner_epoch:(Native.process_epoch ()) ~observed ~expected in
     let* checkpoint = prepare_official_resume ~observed ~expected in
     Ok (Some { authority = Official_client checkpoint; observed = Semantic.Official_client observed })
   | Some (Semantic.Agent_core observed) ->
@@ -120,5 +142,6 @@ let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Nat
       |> owner |> Result.map (fun _ -> ())
 
 module For_testing = struct
+  let recover_undispatched_official_resume = recover_undispatched_official_resume
   let prepare_official_resume = prepare_official_resume
 end

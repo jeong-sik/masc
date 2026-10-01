@@ -1706,6 +1706,7 @@ let run_named
     ?trace_link
     ?event_bus
     ?on_runtime_observation
+    ?before_dispatch
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
@@ -2363,6 +2364,22 @@ let run_named
         , on_transmitted_model_input
         , hooks )
       in
+      (* Keep cooperative authority through local setup. Non-Codex runtimes
+         use their fallible input-admission boundary; Codex has the narrower
+         durable turn-start callback below. Diagnostic wire observers cannot
+         authorize effects because their rejection does not stop transport. *)
+      let model_input_projection =
+        match runtime.Runtime_instance.execution, before_dispatch with
+        | _, None | Runtime_execution.Codex_app_server _, Some _ -> model_input_projection
+        | (Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), Some admit ->
+          Some (fun messages ->
+            let projected = match model_input_projection with
+              | None -> Ok messages | Some project -> project messages in
+            Result.bind projected (fun messages ->
+              admit ()
+              |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+              |> Result.map (fun () -> messages)))
+      in
       let inference_policy =
         attempt_inference_policy
           ~runtime_id:attempt_runtime_id
@@ -2402,6 +2419,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?before_dispatch
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)

@@ -310,6 +310,7 @@ val run_named :
   ?trace_link:string * string ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
+  ?before_dispatch:(unit -> (unit, string) result) ->
   ?on_request_wire_observation:
     (runtime_id:string ->
      body_bytes:int ->

@@ -132,7 +132,7 @@ default = "codex.context"
     write_catalog window;
     Runtime.init_default ~config_path |> require) catalog_context_window;
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?prompt_blocks
+  let run ?before_dispatch ?official_task_reference ?model_input_projection ?prompt_blocks
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
@@ -150,6 +150,7 @@ default = "codex.context"
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
+      ?before_dispatch
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
@@ -1019,7 +1020,25 @@ let test_declared_limit_above_history_changes_nothing () =
     undeclared declared
 
 
+let test_dispatch_admission_rejection_prevents_start_and_resume () =
+  List.iter (fun resumed ->
+    with_fixture @@ fun ~run ~capture ~reports:_ ->
+    if resumed then successful (run ~instructions:"Keeper" ~world:"Initial" ());
+    let before = List.length (read_requests capture) in
+    let calls = ref 0 in
+    let attempt = run ~before_dispatch:(fun () -> incr calls; Error "checkpoint commit unavailable")
+        ~instructions:"Keeper" ~world:"Next turn" () in
+    check bool "failed durable admission refuses the turn" true (Result.is_error attempt.Keeper_codex_runtime.result);
+    check int "admission checked once" 1 !calls;
+    let requests = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+    check bool "turn/start never crosses a failed admission" false
+      (List.exists (fun row -> member "method" row = `String "turn/start") requests);
+    check bool "the selected thread was prepared before admission" true
+      (List.exists (fun row -> member "method" row =
+        `String (if resumed then "thread/resume" else "thread/start")) requests)) [false; true]
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "failed dispatch admission prevents fresh and resumed turn/start" `Quick test_dispatch_admission_rejection_prevents_start_and_resume;
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;

@@ -845,6 +845,7 @@ let run_turn
       ?deferred_runtime_lane
       ?runtime_retry_deferral
       ?on_runtime_attempt_failed
+      ?before_dispatch
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
@@ -1712,6 +1713,7 @@ let run_turn
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages
+                      ?before_dispatch
                       ~model_input_projection
                       ~hooks
                       ?approval_gate

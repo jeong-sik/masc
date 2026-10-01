@@ -2282,56 +2282,6 @@ let decode_repository_change_snapshot json =
   let* rcs_total = required_int_field json "total" in
   Ok { rcs_scope; rcs_changes; rcs_total }
 
-(* Name the fields that disagree. The check is strict on purpose -- a dashboard
-   payload whose shape has drifted is refused rather than read around -- but the
-   refusal used to say only "unknown, duplicate, or missing fields" for a
-   nine-kilobyte object, leaving the operator to diff the payload against the
-   decoder by hand. The three lists that settle the verdict are the three lists
-   worth printing, so the verdict is made from them instead of from a pair of
-   length and set comparisons that then get thrown away.
-
-   The wording follows the copy of this check in [Llm_provider.Types], which
-   has printed all three groups since it was written: same keys, same
-   brackets, so one reader learns one shape.
-
-   Empty groups are left out rather than drawn as "[]" -- this message goes on
-   a terminal row, where the surface cuts it. *)
-let require_exact_object_fields context expected = function
-  | `Assoc fields ->
-    let actual = List.map fst fields in
-    let seen = List.sort_uniq String.compare actual in
-    let unknown = List.filter (fun f -> not (List.mem f expected)) seen in
-    let missing =
-      List.filter (fun f -> not (List.mem f seen))
-        (List.sort_uniq String.compare expected)
-    in
-    let duplicate =
-      List.filter
-        (fun f -> List.length (List.filter (String.equal f) actual) > 1)
-        seen
-    in
-    (match (unknown, missing, duplicate) with
-     | [], [], [] -> Ok ()
-     | _ ->
-         let group label = function
-           | [] -> None
-           | names ->
-               Some (Printf.sprintf "%s=[%s]" label (String.concat ", " names))
-         in
-         let groups =
-           List.filter_map
-             (fun part -> part)
-             [ group "missing" missing
-             ; group "unknown" unknown
-             ; group "duplicates" duplicate
-             ]
-         in
-         Error
-           (Printf.sprintf "%s fields mismatch (%s)" context
-              (String.concat ", " groups)))
-  | _ -> Error (context ^ " must be an object")
-;;
-
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in
   let* hv_task_title = required_string_field json "task_title" in

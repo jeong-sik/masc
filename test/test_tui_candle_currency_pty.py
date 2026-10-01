@@ -15,10 +15,11 @@ import sys
 import threading
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
     "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",

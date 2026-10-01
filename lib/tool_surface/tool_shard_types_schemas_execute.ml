@@ -7,9 +7,7 @@
     [shell]. Pipes, redirections, [;]/[&&] sequencing and [FOO=1] prefixes are
     shell syntax inside [command]; the schema carries no object form for them.
 
-    Accepted fields: argv, command, shell, cwd, timeout_sec, intent. This sentence is
-    the contract line checked by scripts/check-execute-async-surface.sh —
-    update both together.
+    Accepted fields: argv, command, shell, cwd, timeout_sec, intent.
 
     The builders this file used to hold carried a [prose] type that decided,
     per call site, whether a nested repeat restates its description. A file

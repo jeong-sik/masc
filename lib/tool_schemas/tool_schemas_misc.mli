@@ -129,6 +129,7 @@ type misc_operation =
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase
+  | Misc_candle_equip
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen

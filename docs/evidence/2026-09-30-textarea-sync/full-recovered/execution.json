@@ -1,0 +1,20 @@
+{
+  "command": [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "vitest.config.ts",
+    "--no-file-parallelism",
+    "--maxWorkers=1"
+  ],
+  "cwd": "dashboard",
+  "started": "2026-09-30T14:05:42.731471+00:00",
+  "finished": "2026-09-30T14:12:28.453185+00:00",
+  "exit": 0,
+  "base_head": "727fc531230d48f601bc78c7b33f6ad26c5de654",
+  "source_files": 2087,
+  "source_unchanged": true,
+  "log_sha256": "3714d3ea13d901b82a62effc9b6cd58df66ad2b2d51b18d0768ed6e2585d3e6b"
+}

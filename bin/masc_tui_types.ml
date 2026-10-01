@@ -5296,6 +5296,13 @@ type play_invite =
   ; shown_name : string option
   }
 
+(* Replaced as one reading at refresh/workspace boundaries. The successful
+   index is built once by the loader and is read-only on render paths. *)
+type task_goal_links_reading =
+  | Goal_links_not_read
+  | Goal_links_read_failed of string
+  | Goal_links_read of (string, string list) Hashtbl.t
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5310,7 +5317,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
-  mutable goal_task_links: (string * string list) Masc_tui_agenda.reading;
+  mutable goal_task_links: task_goal_links_reading;
   mutable task_flow: Masc_tui_task_flow.t option;
   (* Primary backlog authority, shared by Home and Agenda. Archive coverage
      stays in tasks_error; Goal-link coverage owns goal_task_links. Neither
@@ -8083,7 +8090,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
-  goal_task_links = Masc_tui_agenda.Not_read;
+  goal_task_links = Goal_links_not_read;
   task_flow = None;
   operator_stalled = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
@@ -9276,10 +9283,9 @@ let changes_budget_note_rows (state : state) =
    Failed or unread stores cannot prove that a task is unlinked. *)
 let task_goal_reading (state : state) ~task_id =
   match state.goal_task_links with
-  | Masc_tui_agenda.Not_read -> Masc_tui_agenda.Not_read
-  | Read_failed reason -> Masc_tui_agenda.Read_failed reason
-  | Read goal_task_links ->
-      let index = Workspace_goal_index.build_task_goal_index ~goal_task_links () in
+  | Goal_links_not_read -> Masc_tui_agenda.Not_read
+  | Goal_links_read_failed reason -> Masc_tui_agenda.Read_failed reason
+  | Goal_links_read index ->
       Masc_tui_agenda.Read (Workspace_goal_index.goals_for_task index ~task_id)
 
 (* The strip above the composer: what fires next, and who is blocked on the

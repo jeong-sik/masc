@@ -825,15 +825,20 @@ let test_task_goal_reading_preserves_source_truth () =
   let reading () = Masc_tui_types.task_goal_reading state ~task_id:"task-777" in
   check bool "an unread registry makes no absence claim" true
     (reading () = Agenda.Not_read);
-  state.goal_task_links <- Agenda.Read ["goal-a", ["task-777"]; "goal-b", ["task-777"]];
+  let index = Workspace_goal_index.build_task_goal_index
+      ~goal_task_links:["goal-a", ["task-777"]; "goal-b", ["task-777"]] () in
+  state.goal_task_links <- Masc_tui_types.Goal_links_read index;
   check bool "multiple Goal references come from the registry" true
     (reading () = Agenda.Read ["goal-a"; "goal-b"]);
-  state.goal_task_links <- Agenda.Read_failed "malformed primary";
+  state.goal_task_links <- Masc_tui_types.Goal_links_read_failed "malformed primary";
   check bool "failed refresh does not reuse references or assert absence" true
     (reading () = Agenda.Read_failed "malformed primary");
-  state.goal_task_links <- Agenda.Read [];
+  state.goal_task_links <- Masc_tui_types.Goal_links_read (Hashtbl.create 0);
   check bool "repaired empty registry proves absence" true
-    (reading () = Agenda.Read [])
+    (reading () = Agenda.Read []);
+  state.goal_task_links <- Masc_tui_types.Goal_links_not_read;
+  check bool "workspace reset discards the old index" true
+    (reading () = Agenda.Not_read)
 
 let test_distinct_calls_from_one_keeper_remain_reachable () =
   let state = agenda_state () in

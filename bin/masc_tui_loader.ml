@@ -155,7 +155,7 @@ let load_active_tasks (base_path : string) :
     * string option
     * Masc_tui_task_flow.t option
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
-    * (string * string list) Masc_tui_agenda.reading =
+    * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -167,7 +167,7 @@ let load_active_tasks (base_path : string) :
       , Some reason
       , None
       , Masc_tui_agenda.Read_failed reason
-      , Masc_tui_agenda.Not_read )
+      , Goal_links_not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -182,15 +182,16 @@ let load_active_tasks (base_path : string) :
         match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error err ->
             let reason = "goal links unavailable: " ^ err in
-            Masc_tui_agenda.Read_failed reason
-        | Ok links -> Masc_tui_agenda.Read links
+            Goal_links_read_failed reason
+        | Ok goal_task_links ->
+            Goal_links_read
+              (Workspace_goal_index.build_task_goal_index ~goal_task_links ())
       in
       let goals_for_task =
         match goal_task_links with
-        | Masc_tui_agenda.Read links ->
-            let index = Workspace_goal_index.build_task_goal_index ~goal_task_links:links () in
+        | Goal_links_read index ->
             fun task_id -> Workspace_goal_index.goals_for_task index ~task_id
-        | Not_read | Read_failed _ -> fun _ -> []
+        | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
         match read_archived_tasks config with
@@ -508,7 +509,7 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
-  state.goal_task_links <- Masc_tui_agenda.Not_read;
+  state.goal_task_links <- Goal_links_not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;

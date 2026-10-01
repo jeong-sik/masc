@@ -4141,6 +4141,7 @@
   alcotest
   ast_grep
   masc
+  masc_workspace
   masc_tui_agenda
   masc_tui_markdown_render_cache
   masc_tui_message_layout

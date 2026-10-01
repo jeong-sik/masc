@@ -151,3 +151,10 @@ or using the report. No Docker isolation, credential separation, Broadcast
 publication, or production Keeper action is established by this scenario.
 Run the native composition test and the Python MCP package suites against the
 composed head; historical receipts do not establish execution of a later merge.
+
+The original preview HTML, composition, browser receipts and screenshots are
+retained from historical integration commit
+`125600b0e5909ac44b05e2f06da6bd09c9fe418e`. Their hashes remain linked by
+`preview-checks.json`; they are not screenshots or browser execution of this
+merged revision. The parent preview bundle is separately archived as described
+in `docs/evidence/fusion-report-20260930/README.md`.

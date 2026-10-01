@@ -168,7 +168,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
    - 일꾼은 Goal 검증기와 같은 모양이다(2장). 조건 변수로 깨우고, 서버를 시작할 때 한 번 훑는다. Goal 하나에 하나만 돈다. 점검 루프나 확정 요청 안에서 모델을 부르지 않는다. 그 시간만큼 다른 요청이 멈추기 때문이다. lane 호출은 fork 해서 다른 Goal 의 처리가 긴 호출 뒤에 줄 서지 않게 하고, 깨움은 Atomic 표시로 놓치지 않게 한다(검증기가 그렇게 한다: `lib/goal_verification_agent.ml:745-770`, `:774`).
    - 일꾼은 이럴 때 깨어난다. `PayoutOwed` 를 썼을 때, 서버를 시작할 때, 다른 지급이 끝났을 때(`Paid`·`Unattributed`·`PayoutFailed`).
    - lane 이 쉬거나 연결되지 않아 호출하지 못했을 때와 Task 나 연결을 읽지 못했을 때는 maintenance pulse 가 다시 깨운다. 판정 lane 이 쉬면 pulse 간격에 다시 깨우는 기존 방식과 같다(`docs/constitution.xml:190-191`).
-   - 응답이 거절된 경우에는 pulse 로 깨우지 않는다. 같은 입력에서 거절이 반복되면 pulse 마다 모델을 부르게 되기 때문이다. 그런 지급은 위 세 때에 다시 시도한다.
+   - 응답이나 실행 요청이 거절된 경우에는 pulse 로 깨우지 않는다. 같은 입력에서 거절이 반복되면 pulse 마다 모델을 부르게 되기 때문이다. 모델 응답의 형식·도메인 오류(`Invalid_response`)와 실행 요청의 거절(`Execution_rejected`)을 구분해 실행 기록에 남기며, 둘 다 지급 의무를 지우지 않고 위 세 때에 다시 시도한다. 계정 휴식·서버 오류·연결 실패·시간 초과는 Exact와 공식 클라이언트의 typed 원인을 따라 `Transport_unavailable`로 유지한다. 요청·인증·설정 거절을 증명하는 typed 원인이 없으면 기존 재시도 동작을 유지하며, Muse의 실패는 호스트의 `retryable` 판정을 따른다. 이 분류는 지급 일꾼의 재시도만 정하며 CLI 레인 회전이나 중단된 턴의 무부작용을 보증하지 않는다. 앞선 HTTP 거절 뒤 CLI도 실패했거나 실행 기록 저장이 실패해도 그 거절을 일시적 연결 불가로 바꾸지 않는다. 선언한 다음 후보가 성공하면 정상 지급을 계속한다.
 
 - 지급은 `PayoutOwed` 와 그것이 가리키는 `Snapshot` 의 값(검증 통과 시각, 기한, Task id 목록)만 따른다. 재오픈해서 다시 통과해도 이미 남은 `PayoutOwed` 는 바뀌지 않는다.
 - 같은 Goal 에 두 번 지급하지 않게 하는 키(멱등 키, idempotency key)는 goal_id 다. 3.1 의 cursor 조건 덧붙이기와 지급 상태가 이 키를 강제한다.

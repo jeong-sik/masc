@@ -288,6 +288,47 @@ let test_transport_recovery_is_retried_by_pulse () =
     idle env);
   ignore (one_payment config "transport")
 
+let test_execution_rejection_waits_for_event_and_preserves_preceding_work () =
+  with_workspace @@ fun env config ->
+  let waiting = prepared config "execution-refusal" in
+  let accept = ref false in
+  let calls = ref [] in
+  let runner ~identity request =
+    match request with
+    | A.Relation _ when not !accept ->
+      calls := !calls @ [identity, request];
+      Error (A.Execution_rejected "fixture provider rejected the relation request")
+    | A.Grade _ | A.Relation _ | A.Weights _ -> make_runner calls ~identity request in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    await env "permanent relation refusal" (fun () ->
+      List.exists (fun (_, request) -> A.stage request = "relation") !calls);
+    idle env;
+    check (list string) "grade succeeded before the failed relation"
+      ["grade";"relation"] (List.map (fun (_, request) -> A.stage request) !calls);
+    let before = events config in
+    check int "execution refusal pays nobody" 0 (List.length (paid config waiting.goal_id));
+    (match Candle_payout.state ~goal_id:waiting.goal_id before with
+     | Candle_payout.Waiting current -> check bool "same confirmed obligation remains" true (current=waiting)
+     | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled ->
+       fail "execution refusal consumed or failed the obligation");
+    List.iter (fun () ->
+      Candle_payout_worker.pulse ();
+      idle env;
+      check int "maintenance pulse repeats neither grade nor relation" 2 (List.length !calls);
+      check bool "pulse appends no synthetic failure or payment fact" true
+        (events config = before)) [(); ()];
+    accept := true;
+    Candle_payout_worker.wake ();
+    await env "change event resumes the refused obligation" (fun () -> paid config waiting.goal_id <> []);
+    idle env);
+  let payment = one_payment config waiting.goal_id in
+  check string "resumed payment keeps its confirmed verifier" waiting.verification_run_id
+    payment.identity.verification_run_id;
+  check (list string) "one fresh complete appraisal follows the event"
+    ["grade";"relation";"grade";"relation";"relation";"relation";"weights"]
+    (List.map (fun (_, request) -> A.stage request) !calls)
+
 let test_unrelated_and_external_only_work_mint_nothing () =
   with_workspace @@ fun _env config ->
   ignore (prepared config "unrelated");
@@ -569,6 +610,7 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
       (match Server_candle_appraiser.For_testing.run ~base_path:config.base_path ~execute ~identity request with
        | Error (A.Transport_unavailable _) -> ()
        | Error (A.Invalid_response _) -> fail "missing prompt is a source failure"
+       | Error (A.Execution_rejected _) -> fail "missing prompt is a recoverable source failure"
        | Ok _ -> fail "missing prompt was accepted");
       check bool "missing prompt does not dispatch a provider" false !dispatched;
       let replayed = Runs.replay path in
@@ -619,6 +661,7 @@ let () =
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
+      ;test_case "execution refusal holds through pulses and resumes on event" `Quick test_execution_rejection_waits_for_event_and_preserves_preceding_work
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates

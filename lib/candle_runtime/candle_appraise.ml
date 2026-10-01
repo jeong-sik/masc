@@ -126,7 +126,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
     | Candle_ledger.Refused error -> error
     | Candle_ledger.Event_unwritable detail -> A.Invalid_response detail
     | (Candle_ledger.Read_failed _ | Candle_ledger.Write_failed _ | Candle_ledger.Write_locked _) as error ->
-      A.Transport_unavailable (Candle_ledger.update_error_to_string (function A.Invalid_response detail | A.Transport_unavailable detail -> detail) error))
+      A.Transport_unavailable (Candle_ledger.update_error_to_string A.error_to_string error))
 let pending ~base_path =
   Candle_ledger.read ~base_path |> Result.map (fun view -> Candle_payout.waiting (Candle_ledger.events view))
   |> Result.map_error Candle_ledger.read_error_to_string
@@ -143,7 +143,7 @@ let settle_one ~now ~appraise ~base_path (waiting : Candle_payout.waiting) =
       | Candle_payout.Waiting _ | Candle_payout.Failed _ | Candle_payout.No_obligation | Candle_payout.Settled -> Ok (Superseded waiting.goal_id) in
   match result () with
   | Ok outcome -> outcome
-  | Error (A.Invalid_response detail) -> Rejected {goal_id=waiting.goal_id;detail}
+  | Error (A.Invalid_response detail | A.Execution_rejected detail) -> Rejected {goal_id=waiting.goal_id;detail}
   | Error (A.Transport_unavailable detail) -> Retry_later {goal_id=waiting.goal_id;detail}
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Retry_later {goal_id=waiting.goal_id;detail=Printexc.to_string exn}

@@ -1,0 +1,139 @@
+name: Leader-selected CI
+run-name: Leader-selected CI on ${{ inputs.candidate }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact combined candidate SHA; dispatch this workflow on main
+        required: true
+        type: string
+      selection:
+        description: JSON receipt from prepare-approved-batch.py
+        required: true
+        type: string
+      compile:
+        description: Bottom Core runtime library build
+        type: boolean
+        default: false
+      tests:
+        description: Explicit minimal behavior suites (required when selected)
+        type: boolean
+        default: false
+      suites:
+        description: Comma-separated suites for the behavior test runner
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: leader-ci-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  selection:
+    name: Recheck approved selection
+    runs-on: ubuntu-24.04
+    steps:
+      # Source authority is read using the integrated main implementation,
+      # not a script supplied by an unverified candidate.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify candidate and selected scopes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTION: ${{ inputs.selection }}
+          SCOPES: ${{ toJSON(inputs) }}
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Dispatch leader CI on main')
+          if not any(scopes[name] is True for name in ('compile', 'tests')):
+              raise SystemExit('Select at least one CI scope')
+          if scopes['tests'] and not scopes['suites'].strip():
+              raise SystemExit('Ordinary behavior verification requires explicit suites')
+          if scopes['suites'] and not scopes['tests']:
+              raise SystemExit('Suites require the tests scope')
+          Path('selection.json').write_text(os.environ['SELECTION'])
+          PY
+          python3 scripts/review/verify-approved-selection.py \
+            --selection selection.json --repo "$REPOSITORY" \
+            --candidate "$CANDIDATE" --git-dir . > verified-selection.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: verified-selection.json
+          if-no-files-found: error
+
+  compile:
+    needs: selection
+    if: inputs.compile
+    uses: ./.github/workflows/ci.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+
+  tests:
+    needs: selection
+    if: inputs.tests
+    uses: ./.github/workflows/test.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+      suite: ${{ inputs.suites }}
+      minimal: true
+
+  evidence:
+    name: Record selected CI results
+    needs: [selection, compile, tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record scope and results
+        env:
+          SCOPES: ${{ toJSON(inputs) }}
+          RESULTS: ${{ toJSON(needs) }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          needs = json.loads(os.environ['RESULTS'])
+          keys = {'compile': 'compile', 'tests': 'tests'}
+          chosen = {job: needs[job]['result'] for option, job in keys.items() if scopes[option] is True}
+          passed = bool(chosen) and needs['selection']['result'] == 'success' and all(v == 'success' for v in chosen.values())
+          receipt = {'schema_version': 1, 'candidate': os.environ['CANDIDATE'],
+                     'actor': os.environ['GITHUB_ACTOR'], 'selection': json.loads(scopes['selection']),
+                     'suites': scopes['suites'], 'results': chosen, 'checks_passed': passed,
+                     'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'merge_authorized': False}
+          Path('leader-ci-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Candidate: `' + receipt['candidate'] + '`\n\n')
+              for job, result in chosen.items():
+                  out.write('- ' + job + ': ' + result + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: leader-ci-results-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: leader-ci-results.json
+          if-no-files-found: error
+      - name: Require selected checks to pass
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raise SystemExit(0 if json.loads(Path('leader-ci-results.json').read_text())['checks_passed'] else 1)
+          PY

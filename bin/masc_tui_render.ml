@@ -74,14 +74,6 @@ let acting_pane_row_count () = Array.length !acting_pane_row_targets
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 let set_table_frame enabled = table_frame_enabled := enabled
 
-let fenced_pretty_json text =
-  let pretty =
-    match Yojson.Safe.from_string text with
-    | json -> Yojson.Safe.pretty_to_string json
-    | exception Yojson.Json_error _ -> text
-  in
-  fenced_document_text ~language:"json" pretty
-
 let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
 
 (* The main loop uses the target identity to restart the motion when selection
@@ -313,6 +305,11 @@ let render_overview (state : state) =
                | 0 -> ""
                | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
+  let health =
+    match Masc_tui_candle.compact_status state.candle_observation with
+    | None -> health
+    | Some status -> health ^ " · " ^ status
+  in
   let work =
     match state.task_flow, state.tasks_error with
     | _, Some _ -> " Work: reading unavailable · open Work for the source"
@@ -362,6 +359,17 @@ let render_overview (state : state) =
               let notice = (None, " " ^ Terminal_text.single_line notice) in
               if spare < List.length readings + 1 then notice :: readings
               else readings @ [notice]
+        in
+        let candle =
+          Masc_tui_candle.summary_lines state.candle_observation
+          |> List.concat_map (fun line ->
+               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                 (Terminal_text.single_line line))
+          |> List.map (fun line -> (None, " " ^ line))
+        in
+        let context =
+          if List.length context + List.length candle <= spare then context @ candle
+          else context
         in
         let shown_context = List.take (min spare (List.length context)) context in
         List.iter
@@ -466,17 +474,14 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   let some_lines label = function None -> [] | Some text -> labeled_lines label text in
   let list_lines label items = List.concat_map (labeled_lines label) items in
   let goal_lines =
-    match List.find_opt (fun (row : Tui_decode.task) -> String.equal row.id task.id) state.tasks with
-    | None -> []
-    | Some row ->
-        (match state.task_goal_links, row.goal_ids with
-         | Masc_tui_agenda.Not_read, _ ->
-             labeled_lines "goal" "(membership unknown: links not read)"
-         | Masc_tui_agenda.Read_failed reason, _ ->
-             labeled_lines "goal" ("(membership unknown: " ^ reason ^ ")")
-         | Masc_tui_agenda.Read _, [] -> labeled_lines "goal" "(not linked to a goal)"
-         | Masc_tui_agenda.Read _, goal_ids -> List.concat_map (fun goal_id ->
-             labeled_lines "goal" goal_id @ labeled_lines "link" (Link.reference Goal goal_id)) goal_ids)
+    match task_goal_reading state ~task_id:task.id with
+    | Masc_tui_agenda.Not_read ->
+        labeled_lines "goal" "(membership unknown: links not read)"
+    | Masc_tui_agenda.Read_failed reason ->
+        labeled_lines "goal" ("(membership unknown: " ^ reason ^ ")")
+    | Masc_tui_agenda.Read [] -> labeled_lines "goal" "(not linked to a goal)"
+    | Masc_tui_agenda.Read goal_ids -> List.concat_map (fun goal_id ->
+        labeled_lines "goal" goal_id @ labeled_lines "link" (Link.reference Goal goal_id)) goal_ids
   in
   (* Status, actor and every transition's evidence are real rows in the same
      reading as the description. No metadata field is a one-line preview. *)
@@ -669,9 +674,12 @@ let render_work_tasks (state : state) =
                day.d_completed) flow.daily in
            c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
                      (List.length flow.daily) (Chart.sparkline ~min:0 completed)));
-      (match Terminal_text.optional_single_line state.tasks_error with
-       | None -> ()
-       | Some reason -> c.push (" Coverage: " ^ reason));
+      let link_error = match state.goal_task_links with
+        | Goal_links_read_failed reason -> Some reason
+        | Goal_links_not_read | Goal_links_read _ -> None in
+      (match List.filter_map Terminal_text.optional_single_line [state.tasks_error; link_error] with
+       | [] -> ()
+       | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
       c.push "";
       let room = max 0 (budget - 4) in
       if rows = [] && Option.is_some state.task_flow then
@@ -2268,8 +2276,14 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
   let linked = match linked_tasks with
     | [] ->
-        let note = match local_rows_page state ~error:state.tasks_error with
-          | Page_empty -> "(none)" | Page_unread -> page_unread_note | Page_failed -> page_failed_note in
+        let note = match state.task_reading with
+          | Masc_tui_overview_tasks.Rows_unavailable _ -> page_failed_note
+          | Rows_unread -> page_unread_note
+          | Rows_read _ ->
+              (match state.goal_task_links with
+               | Goal_links_not_read -> "(links not read)"
+               | Goal_links_read_failed _ -> "(links unavailable)"
+               | Goal_links_read _ -> "(none)") in
         field ~tone:Planning_detail.Quiet "Open tasks" note
     | tasks -> field "Open tasks" (string_of_int (List.length tasks))
         @ List.concat_map (fun (task : Tui_decode.task) ->
@@ -6170,6 +6184,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         @ row_lines ~width "Paused:"
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
+        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
+           match Masc_tui_candle.balance_text state.candle_observation amount with
+           | None -> []
+           | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in
       List.iter add_line
         (match portrait with
@@ -6179,6 +6199,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Tui_decode.Ready _ -> ()
        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
+      (* The short Overview names only the reading's state. Info retains
+         every diagnostic and exact supply amount, wrapped and scrollable. *)
+      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+      if candle_lines <> [] then (
+        add_section "Candle details";
+        List.iter
+          (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+              (Terminal_text.single_line line)
+            |> List.iter (fun line -> add_line ("  " ^ line)))
+          candle_lines;
+        add_empty ());
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome
@@ -8201,8 +8233,9 @@ let harness_ledger_lines ~cols snapshot =
             [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
                 Ansi.dim Ansi.reset calibration.hcal_total
                 calibration.hcal_approve calibration.hcal_reject evaluator
-            ; Printf.sprintf "  %sgate%s    %s" Ansi.dim Ansi.reset
-                (fit_width gates (max 8 (cols - 12)))
+            ; row_with_field ~cols
+                ~lead:(Printf.sprintf "  %sgate%s    " Ansi.dim Ansi.reset)
+                ~field:gates ~tail:""
             ; (if calibration.hcal_labeled > 0 then
                  Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
                    calibration.hcal_labeled
@@ -8428,41 +8461,32 @@ let render_harness_list (state : state) =
    walked, so a verdict said "pass" without saying what it was passing
    towards. *)
 let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
-  let goal_ids =
-    match
-      List.find_opt
-        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
-        state.tasks
-    with
-    | Some row -> row.goal_ids
-    | None -> []
-  in
   let goal_of id =
     Option.bind state.planning (fun snapshot ->
       List.find_opt
         (fun (goal : Tui_decode.planning_goal) -> String.equal goal.pg_id id)
         snapshot.Tui_decode.pl_goals)
   in
-  match state.task_goal_links, goal_ids with
-  | Masc_tui_agenda.Not_read, _ ->
-      [ Ansi.dim, "  Towards      membership unknown: goal links not read" ]
-  | Masc_tui_agenda.Read_failed reason, _ ->
-      [ Ansi.dim, "  Towards      membership unknown: " ^ Terminal_text.single_line reason ]
-  | Masc_tui_agenda.Read _, [] ->
+  match task_goal_reading state ~task_id:verdict.hv_task_id with
+  | Masc_tui_agenda.Not_read ->
+    [ Ansi.dim, "  Towards      goal links not read" ]
+  | Read_failed _ ->
+    [ Ansi.dim, "  Towards      goal links unavailable" ]
+  | Read [] ->
     (* Two different silences, told apart. A task this screen has never seen
        (the backlog has not loaded, or the verdict judged something already
        archived) is not the same as a task that serves no goal, and drawing
        nothing for both leaves the reader unable to tell which. *)
     let known_task =
       List.exists
-        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
-        state.tasks
+        (fun (row : Masc_domain.task) -> String.equal row.id verdict.hv_task_id)
+        state.tasks_domain
     in
     if known_task then
       [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
     else
       [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
-  | Masc_tui_agenda.Read _, goal_ids ->
+  | Read goal_ids ->
     (Ansi.bold, "  TOWARDS")
     :: List.concat_map
          (fun id ->
@@ -10860,7 +10884,7 @@ let render_connectors (state : state) =
       end)
 
 let runtime_refresh_badge refresh_state =
-  let open Masc.Tui_decode in
+  let open Masc.Tui_decode_runtime_probe in
   let label, style =
     match refresh_state with
     | Runtime_probe_fresh -> "fresh", (Theme.ok ())
@@ -10871,7 +10895,7 @@ let runtime_refresh_badge refresh_state =
   style ^ label ^ Ansi.reset
 
 let runtime_overall_badge status =
-  let open Masc.Tui_decode in
+  let open Masc.Tui_decode_runtime_probe in
   let style =
     match status with
     | Runtime_probe_reachable -> (Theme.ok ())
@@ -10891,8 +10915,8 @@ let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
-  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
-      let open Masc.Tui_decode in
+  | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
+      let open Masc.Tui_decode_runtime_probe in
       let style =
         match probe.rpp_status with
         | Runtime_provider_reachable -> (Theme.ok ())
@@ -10915,7 +10939,7 @@ let runtime_route_probe_badge runtime probe =
 
 let runtime_probe_detail = function
   | None -> []
-  | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
+  | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
       let latency =
         Option.map (fun value -> Printf.sprintf "%.0fms" value) probe.rpp_latency_ms
       in
@@ -11048,7 +11072,7 @@ let runtime_routes_detail_lines state ~width =
         @ (match snapshot.rss_probe with
            | None -> field "Probe" "unavailable; no observation has been read"
            | Some probe ->
-               field "Probe status" (Tui_decode.runtime_probe_status_to_string probe.rps_status)
+               field "Probe status" (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
                @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
                @ List.concat_map (field "Probe limitation") probe.rps_limitations)
   in
@@ -11091,7 +11115,7 @@ let runtime_detail_lines state target ~width =
         |> List.find_opt (fun (runtime, _) -> String.equal runtime.ro_id runtime_id)
         |> Option.map (fun (runtime, lanes) ->
                let probe =
-                 Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id
+                 Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id
                in
                runtime, lanes, None, probe)
   in
@@ -11641,7 +11665,7 @@ let render_runtime (state : state) =
                     @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
                     @ runtime_probe_detail
                         (Option.bind state.runtime_surface (fun snapshot ->
-                           Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                           Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                in
                let line = "  " ^ Masc_tui_table.row
                  (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
@@ -11649,7 +11673,7 @@ let render_runtime (state : state) =
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
                    ~status:(runtime_route_probe_badge runtime
                      (Option.bind state.runtime_surface (fun snapshot ->
-                       Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                       Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
@@ -12653,256 +12677,6 @@ let render_runtime_pick (state : state) =
           else c.push ("  " ^ line))
         view.Masc_tui_pick_list.rows)
 
-(* The Resources surface: the MCP resource inventory on the left, the
-   selected read on the right. Wide terminals show both; narrow ones show
-   the list, and Enter swaps to the content until Esc. *)
-
-let resource_mime_essence mime =
-  match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
-  | essence :: _ -> String.trim essence
-  | [] -> ""
-
-let resource_language_of_mime mime =
-  let mime = resource_mime_essence mime in
-  if
-    String.equal mime "application/json"
-    || String.equal mime "text/json"
-    || String.ends_with ~suffix:"+json" mime
-  then Some "json"
-  else if List.mem mime [ "application/toml"; "text/toml"; "text/x-toml" ]
-  then Some "toml"
-  else if
-    List.mem mime
-      [ "application/yaml"; "application/x-yaml"; "text/yaml"; "text/x-yaml" ]
-  then Some "yaml"
-  else None
-
-let resource_mime_is_markdown mime =
-  List.mem (resource_mime_essence mime)
-    [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
-
-let pretty_resource_text ~mime text =
-  match resource_language_of_mime mime with
-  | Some "json" -> fenced_pretty_json text
-  | Some language -> fenced_document_text ~language text
-  | None when resource_mime_is_markdown mime -> text
-  | None -> text
-
-let resource_document (resource : Masc_tui_mcp.resource)
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested =
-  let present = function
-    | Some text when String.trim text <> "" -> text
-    | Some _ | None -> "not supplied"
-  in
-  let size =
-    match resource.size with
-    | Some bytes -> Printf.sprintf "%d bytes" bytes
-    | None -> "size unknown"
-  in
-  let mime = present resource.mime_type in
-  let metadata =
-    String.concat "\n\n"
-      [ "MCP resource — read-only data exposed by this server."
-      ; "**About:** " ^ present resource.description
-      ; "**URI:** `" ^ resource.uri ^ "`"
-      ; "**Name:** " ^ resource.name
-      ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
-      ]
-  in
-  let part_document index (part : Masc_tui_mcp.resource_content) =
-    let part_mime = Option.value part.rc_mime_type ~default:mime in
-    let body =
-      match part.rc_kind with
-      | Masc_tui_mcp.Resource_text text ->
-          pretty_resource_text ~mime:part_mime text
-      | Masc_tui_mcp.Resource_blob { base64_bytes } ->
-          Printf.sprintf
-            "Binary data · `%s` · %d base64 bytes · preview unavailable"
-            part_mime base64_bytes
-    in
-    match contents with
-    | Some (_ :: _ :: _) ->
-        Printf.sprintf "### Part %d · %s\n\n%s" index part_mime body
-    | Some (_ :: []) | Some [] | None -> body
-  in
-  let body =
-    match (error, contents) with
-    | Some detail, _ -> detail
-    | None, None when requested -> "(reading resource…)"
-    | None, None -> "(Enter reads the selected resource.)"
-    | None, Some parts ->
-        parts |> List.mapi (fun index part -> part_document (index + 1) part)
-        |> String.concat "\n\n"
-  in
-  metadata ^ "\n\n---\n\n" ^ body
-
-let render_resources (state : state) =
-  let drawn_resource_scroll = ref state.resource_scroll in
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~name:"System / Resources" ~split;
-  let pane_rows = pane_surface_content_height ~rows in
-  let list_rows_budget = pane_rows in
-  let rows_list =
-    match state.resources_list with Some rows -> rows | None -> []
-  in
-  let total = List.length rows_list in
-  let cursor = max 0 (min state.resources_cursor (total - 1)) in
-  let list_pane ~framed pane_buf pane_cols =
-    (* Same rule as the code surface: beside the content pane the box is the
-       pane separator; alone on a narrow terminal it is the redundant outer
-       frame every other surface dropped. *)
-    let framed_top = if framed then framed_top else fun _ _ -> () in
-    let framed_divider = if framed then framed_divider else box_divider in
-    let framed_line = if framed then framed_line else box_line in
-    let framed_empty = if framed then framed_empty else box_empty in
-    let framed_bottom = if framed then framed_bottom else box_bottom in
-    framed_top pane_buf pane_cols;
-    let list_focused = state.resource_focus = Left_pane in
-    framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
-       ^ "Resources"
-       ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
-       ^ Ansi.reset);
-    framed_divider pane_buf pane_cols;
-    (* The status line spends one of the budgeted rows, not an extra one:
-       an extra row pushed the pane past its height and the frame's last
-       casualty was the footer. *)
-    let status_rows =
-      match state.resources_error with
-      | Some detail ->
-          framed_line pane_buf pane_cols
-            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
-          1
-      | None ->
-          (match resources_empty_note state.resources_list with
-           | Some note ->
-               framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
-               1
-           | None -> 0)
-    in
-    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
-    let first =
-      if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
-    in
-    let rows_list_window = Rows.of_list ~first:first ~height:list_rows_budget rows_list in
-    for i = 0 to list_rows_budget - 1 do
-      match Rows.at rows_list_window (first + i) with
-      | Some resource ->
-          let selected = first + i = cursor in
-          let name = Masc_tui_mcp.display_name resource in
-          let line =
-            if selected then
-              Theme.selection ^ " " ^ name
-              ^ String.make
-                  (max 0
-                     (pane_cols - 5 - Message_layout.display_width name))
-                  ' '
-              ^ Ansi.reset
-            else " " ^ name
-          in
-          framed_line pane_buf pane_cols line
-      | None -> framed_empty pane_buf pane_cols
-    done;
-    framed_bottom pane_buf pane_cols
-  in
-  let content_pane ~split pane_buf pane_cols =
-    let selected_resource = List.nth_opt rows_list cursor in
-    let error_uri = Option.map fst state.resource_content_error in
-    let content_uri = Option.map fst state.resource_content in
-    let shown_uri =
-      match state.resource_pending_uri, error_uri, content_uri with
-      | Some uri, _, _ -> Some uri
-      | None, Some uri, _ -> Some uri
-      | None, None, Some uri -> Some uri
-      | None, None, None -> Option.map (fun resource -> resource.Masc_tui_mcp.uri) selected_resource
-    in
-    let shown_resource =
-      Option.bind shown_uri (fun uri ->
-          List.find_opt
-            (fun (resource : Masc_tui_mcp.resource) ->
-               String.equal resource.uri uri)
-            rows_list)
-    in
-    let title =
-      match shown_resource with
-      | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
-      | None -> "Resource detail"
-    in
-    if split then box_top pane_buf pane_cols;
-    box_line pane_buf pane_cols
-      ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
-       ^ title
-       ^ Ansi.reset);
-    box_divider pane_buf pane_cols;
-    let content_height = pane_rows in
-    (match shown_resource with
-     | None ->
-         for _ = 1 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | Some resource ->
-         let contents =
-           match state.resource_content, shown_uri with
-           | Some (content_uri, parts), Some uri
-             when String.equal content_uri uri -> Some parts
-           | Some _, (Some _ | None) | None, _ -> None
-         in
-         let error =
-           match state.resource_content_error, shown_uri with
-           | Some (error_uri, detail), Some uri
-             when String.equal error_uri uri -> Some detail
-           | Some _, (Some _ | None) | None, _ -> None
-         in
-         let requested =
-           match state.resource_pending_uri, shown_uri with
-           | Some pending_uri, Some uri -> String.equal pending_uri uri
-           | Some _, None | None, _ -> false
-         in
-         let rendered =
-           Message_layout.wrap_body ~markdown:document_markdown
-             ~max_cells:(max 1 (pane_cols - 8))
-             ~sanitize:Terminal_text.single_line
-             (resource_document resource contents ~error ~requested)
-         in
-         let total_lines = List.length rendered in
-         let max_scroll = max 0 (total_lines - content_height) in
-         let scroll = max 0 (min state.resource_scroll max_scroll) in
-         let rendered_window = Rows.of_list ~first:scroll ~height:content_height rendered in
-         (* The pane is the only place that knows how many rows the text
-            actually used, so it reports the row it could draw back out. *)
-         drawn_resource_scroll := scroll;
-         for i = 0 to content_height - 1 do
-           match Rows.at rendered_window (scroll + i) with
-           | Some line -> box_line pane_buf pane_cols ("  " ^ line)
-           | None -> box_empty pane_buf pane_cols
-         done);
-    box_bottom pane_buf pane_cols
-  in
-  (if split then begin
-     let left_cols = keeper_roster_pane_cols in
-     let right_cols = cols - left_cols in
-     let left_buf = Buffer.create 1024 in
-     let right_buf = Buffer.create 4096 in
-     list_pane ~framed:true left_buf left_cols;
-     content_pane ~split right_buf right_cols;
-     write_two_panes buf ~left_cols:left_cols ~left:left_buf
-       ~right:right_buf
-   end
-   else if state.resource_focus = Right_pane then content_pane ~split buf cols
-   else list_pane ~framed:false buf cols);
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints_resources
-            ~detail_focus:(state.resource_focus = Right_pane)));
-  finish_surface state ~clamped:(Resource_scroll !drawn_resource_scroll)
-    ~surface_key:"resources" ~rows:terminal_rows ~cols buf
-
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
    seconds only look precise. *)
@@ -12924,7 +12698,6 @@ let binary_age_text = function
    it and it did not take" happens, so these stay two panes over one store. *)
 let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
@@ -12950,59 +12723,75 @@ let render_runtime_params (state : state) =
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
   let selected = List.nth_opt state.runtime_params state.runtime_params_cursor in
-  let selected_contract =
+  let field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 4)) value
+        |> List.map (fun line -> "    " ^ line))
+  in
+  (* Values are exact JSON. Word wrapping can discard a space at a chunk
+     boundary, so split the sanitised value only between terminal cells. *)
+  let value_field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Message_layout.split_cells
+          ~max_cells:(max 1 (framed_inner_width cols - 4))
+          (Masc.Tui_terminal_text.sanitize_terminal_text value)
+        |> List.map (fun line -> "    " ^ line))
+  in
+  let selected_lines =
+    (match state.runtime_params_notice with
+     | None -> []
+     | Some (ok, text) -> field (if ok then "Result" else "Refused") text)
+    @
     match selected with
-    | None -> "  Select a row to see its contract"
+    | None -> ["  Select a row to see its contract"]
     | Some row ->
       let open Tui_decode in
-      let type_name =
-        if String.trim row.rpr_value_type = "" then "typed value"
-        else row.rpr_value_type
-      in
-      let bounds =
-        [ Option.map (fun value -> "min " ^ value) row.rpr_min_json
-        ; Option.map (fun value -> "max " ^ value) row.rpr_max_json
-        ]
-        |> List.filter_map Fun.id
-        |> String.concat " · "
-      in
-      String.concat " · "
-        (List.filter (fun text -> String.trim text <> "")
-           [ "  " ^ type_name; bounds; row.rpr_description ])
+      field "Key" row.rpr_key
+      @ value_field "Current" row.rpr_current_json
+      @ value_field "Default" row.rpr_default_json
+      @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
+      @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
+      @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
+      @ (row.rpr_choices
+         |> List.mapi (fun index choice ->
+              value_field (Printf.sprintf "Choice %d" (index + 1))
+                (Yojson.Safe.to_string (`String choice)))
+         |> List.concat)
+      @ field "Contract" row.rpr_description
+      @ (match row.rpr_surface with
+         | None -> []
+         | Some surface -> field "Group" (surface.rps_id ^ " · " ^ surface.rps_description))
   in
-  (* [box_line_styled] fits this row to the frame and the style covers what it
-     fits, so a fit here only padded the row past the frame and spent its last
-     cell on the cut mark. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Terminal_text.single_line selected_contract);
+    "  j/k selects · PgUp/PgDn reads the complete value and contract";
   box_divider buf cols;
-  let editing = Option.is_some state.runtime_param_edit in
   (* Editing adds a divider and two form rows.  Spend those rows out of the
      list budget so the footer remains visible instead of falling underneath
      the always-present composer. *)
-  let content_height = max 1 (rows - (if editing then 10 else 7)) in
+  let list_height, detail_height =
+    Masc_tui_types.runtime_params_viewport state ~terminal_rows in
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   (match state.runtime_params_error with
    | Some detail ->
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
                         ^ Terminal_text.single_line detail);
-     for _ = 2 to content_height do box_empty buf cols done
+     for _ = 2 to list_height do box_empty buf cols done
    | None ->
      if state.runtime_params_loading && state.runtime_params = []
      then begin
        box_line buf cols (Ansi.dim ^ "  (loading runtime parameters…)" ^ Ansi.reset);
-       for _ = 2 to content_height do box_empty buf cols done
+       for _ = 2 to list_height do box_empty buf cols done
      end
      else if state.runtime_params = []
      then begin
        box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
-       for _ = 2 to content_height do box_empty buf cols done
+       for _ = 2 to list_height do box_empty buf cols done
      end else begin
        (* Rows arrive in registry-group order (Tui_decode sorts them by
           surface). Headers are lines on this screen, not decoration outside it:
           they are built into the same list the window scrolls over, so a group
-          heading costs a row from [content_height] instead of pushing the last
+          heading costs a row from [list_height] instead of pushing the last
           param off the bottom.
 
           The cursor stays an index into [state.runtime_params] — key handling
@@ -13040,12 +12829,12 @@ let render_runtime_params (state : state) =
        in
        let total = List.length display in
        let first =
-         if total <= content_height then 0
-         else if cursor_display < content_height then 0
-         else min (total - content_height) (cursor_display - content_height + 1)
+         if total <= list_height then 0
+         else if cursor_display < list_height then 0
+         else min (total - list_height) (cursor_display - list_height + 1)
        in
-       let display_window = Rows.of_list ~first:first ~height:content_height display in
-       for index = 0 to content_height - 1 do
+       let display_window = Rows.of_list ~first:first ~height:list_height display in
+       for index = 0 to list_height - 1 do
          match Rows.at display_window (first + index) with
          | None -> box_empty buf cols
          | Some (`Header (id, description)) ->
@@ -13057,21 +12846,17 @@ let render_runtime_params (state : state) =
                 (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
          | Some (`Row (row_index, row)) ->
            let open Tui_decode in
+           let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
+           let key_width = max 1 (framed_inner_width cols - 7 - value_width) in
            let line =
-             Printf.sprintf "    %s %-41s %-16s%s"
+             Printf.sprintf "    %s %s %s"
                (Masc_tui_config_mark.param_glyph
                   ~has_override:row.rpr_has_override)
-               (Terminal_text.single_line row.rpr_key)
-               (Terminal_text.single_line
+               (Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
+                |> fun key -> fit_width key key_width)
+               (fit_width (Terminal_text.single_line
                   (runtime_param_value_text ~value_type:row.rpr_value_type
-                     row.rpr_current_json))
-               (if row.rpr_has_override
-                then Printf.sprintf "  default %s"
-                       (Terminal_text.single_line
-                          (runtime_param_value_text
-                             ~value_type:row.rpr_value_type
-                             row.rpr_default_json))
-                else "")
+                     row.rpr_current_json)) value_width)
            in
            if row_index = cursor then box_line_selected buf cols line
            else
@@ -13079,6 +12864,18 @@ let render_runtime_params (state : state) =
                ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line
        done
      end);
+  box_divider buf cols;
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
+      ~height:(max 1 detail_height) state.config_scroll in
+  let detail_window = Rows.of_list ~first:scroll ~height:detail_height selected_lines in
+  for index = 0 to detail_height - 1 do
+    match Rows.at detail_window (scroll + index) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols line
+  done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Masc_tui_scroll.window_reading ~noun:"Detail" ~scroll
+       ~height:detail_height (List.length selected_lines));
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -13106,10 +12903,12 @@ let render_runtime_params (state : state) =
        else draft
      in
      box_divider buf cols;
-     box_line buf cols
-       (row_with_field ~cols
-          ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
-          ~field:draft ~tail:"");
+     let runtime_param_edit_row =
+       row_with_field ~cols
+         ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
+         ~field:draft ~tail:""
+     in
+     box_line buf cols runtime_param_edit_row;
      box_line_styled buf cols ~style:(Theme.recede ())
        (Printf.sprintf "  editing %s · %s"
           (Terminal_text.single_line edit.rpe_key)
@@ -13144,7 +12943,8 @@ let render_runtime_params (state : state) =
           | Some { rpe_mode = Advanced_json; _ } ->
             "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | None -> Masc_tui_keys.footer_hints_config ~pane:Config_params));
-  finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Runtime_params_scroll scroll)
+    ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
 (* Where the prompt catalog is, for the one row both prompt screens draw above
@@ -14638,7 +14438,7 @@ let render_surface (state : state) =
     | Config_models -> render_config_models state
     | Config_params -> render_runtime_params state
     | Config_voice -> render_voice state)
-  | Resources -> render_resources state
+  | Resources -> Masc_tui_render_resources.render_resources state
   | Code ->
       if state.repository_changes_open then render_repository_changes state
       else Masc_tui_render_code.render_code state

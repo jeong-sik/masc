@@ -1785,15 +1785,15 @@ type runtime_probe_annotation =
   | Runtime_probe_failure of string
 
 let runtime_probe_status_label = function
-  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
-  | Tui_decode.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | status -> Tui_decode.runtime_provider_status_to_string status
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
+  | status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
-    | Tui_decode.Runtime_provider_skipped_cli
-    | Tui_decode.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
     | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
@@ -2930,7 +2930,8 @@ and surface_needs_of_surface : surface -> surface_needs = function
   (* Home reads decision sources. Work owns Goal evidence and Usage owns
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with needs_operator_approvals = true; needs_asks = true }
+      { nothing with needs_operator_approvals = true; needs_asks = true
+      ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -4726,6 +4727,10 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"
         | Control _ -> Some "button/link" in
+      let label = Option.map (fun label ->
+        match Masc.Browser_scene.control_selection_text anchor.kind with
+        | Some state -> label ^ " · " ^ state
+        | None -> label) label in
       let prefix = match label, index with
         | _, None -> ""
         | None, Some _ ->
@@ -4992,6 +4997,20 @@ type play_invite =
   ; shown_name : string option
   }
 
+type keeper_priority_control = {
+  priority_generation : int;
+  priority_requests : Masc_tui_keeper_chat_projection.request list;
+}
+
+type keeper_priority_control_outcome = Priority_superseded | Priority_unconfirmed
+
+(* Replaced as one reading at refresh/workspace boundaries. The successful
+   index is built once by the loader and is read-only on render paths. *)
+type task_goal_links_reading =
+  | Goal_links_not_read
+  | Goal_links_read_failed of string
+  | Goal_links_read of (string, string list) Hashtbl.t
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5006,14 +5025,12 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable goal_task_links: task_goal_links_reading;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Primary backlog authority, shared by Home and Agenda. Supplemental
-     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  (* Primary backlog authority, shared by Home and Agenda. Archive coverage
+     stays in tasks_error; Goal-link coverage owns goal_task_links. Neither
+     supplemental source can erase this reading. *)
   mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
-  (* Availability of the registry behind each task row's goal_ids. An empty
-     projection cannot claim an absent link when the registry was not read.
-     The reading payload is empty; memberships live on task.goal_ids. *)
-  mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
      names them on every surface rather than only on Planning. *)
@@ -5025,7 +5042,7 @@ type state = {
   (* What the last backlog read said about the rows. [tasks] holds the same
      rows when they were read and [] otherwise; this says which of the two
      an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
-     including notes (backup recovery, goal links) on rows that were read. *)
+     including notes (backup recovery, archive) on rows that were read. *)
   mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -5070,6 +5087,11 @@ type state = {
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
   mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_priority_controls : (string * keeper_priority_control) list;
+  mutable keeper_run_next_receipts :
+    (Masc_tui_keeper_chat_projection.request * (string, string) result) list;
+  (** Exact acknowledged priority results, retained while that input waits.
+      Pending requests are tracked by the existing pending/ready/inflight lists. *)
   mutable keeper_auto_priority_pending : (string * string) list;
   (* Accepted automatic priority requests still owned by this session, in
      Enter order per Keeper. The server uses these exact IDs as predecessors
@@ -5459,6 +5481,8 @@ type state = {
      lifecycle actions. *)
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
+  mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -5624,6 +5648,9 @@ type state = {
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_retired: Masc_tui_keeper_chat_projection.request list;
+  (** Dispatched requests whose visible receipts were withdrawn by control.
+      They remain in [keeper_run_next_inflight] until their actual callback. *)
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -7214,6 +7241,19 @@ let begin_keeper_chat_control state keeper_name =
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  (* Keep acknowledged evidence and active callbacks until the control's
+     semantic result arrives. The token callback alone is not that result. *)
+  let previous = List.concat_map (fun (name, control) ->
+    if String.equal name keeper_name then control.priority_requests else [])
+    state.keeper_priority_controls in
+  let requests = List.fold_left (fun requests request ->
+    if String.equal request.Masc_tui_keeper_chat_projection.keeper_name keeper_name
+       && not (List.exists (Masc_tui_keeper_chat_projection.same_request_identity request) requests)
+    then request :: requests else requests) previous
+    (state.keeper_run_next_inflight @ List.map fst state.keeper_run_next_receipts) in
+  state.keeper_priority_controls <-
+    (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
+    state.keeper_priority_controls;
   state.keeper_auto_priority_pending <- List.filter
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
@@ -7221,6 +7261,56 @@ let begin_keeper_chat_control state keeper_name =
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
   generation
+
+let keeper_run_next_receipt_provisional state request =
+  List.exists (fun (_, control) -> List.exists
+    (Masc_tui_keeper_chat_projection.same_request_identity request)
+    control.priority_requests) state.keeper_priority_controls
+
+let settle_keeper_priority_control state keeper_name ~generation ~outcome =
+  let matches (name, control) = String.equal name keeper_name
+    && control.priority_generation = generation in
+  match List.find_opt matches state.keeper_priority_controls with
+  | Some (_, control) ->
+      (match outcome with
+       | Priority_unconfirmed -> ()
+       | Priority_superseded ->
+           let member request = List.exists
+             (Masc_tui_keeper_chat_projection.same_request_identity request)
+             control.priority_requests in
+           state.keeper_run_next_receipts <- List.filter
+             (fun (request, _) -> not (member request)) state.keeper_run_next_receipts;
+           state.keeper_run_next_retired <- List.fold_left (fun retired request ->
+             if member request && not (List.exists
+                 (Masc_tui_keeper_chat_projection.same_request_identity request) retired)
+             then request :: retired else retired)
+             state.keeper_run_next_retired state.keeper_run_next_inflight);
+      state.keeper_priority_controls <- List.filter (fun control -> not (matches control))
+        state.keeper_priority_controls
+  | None -> ()
+
+type keeper_run_next_completion =
+  | Run_next_untracked
+  | Run_next_retired
+  | Run_next_received
+
+let settle_keeper_run_next state request result =
+  let same = Masc_tui_keeper_chat_projection.same_request_identity request in
+  if not (List.exists same state.keeper_run_next_inflight) then Run_next_untracked
+  else begin
+    state.keeper_run_next_inflight <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_inflight;
+    let retired = List.exists same state.keeper_run_next_retired in
+    state.keeper_run_next_retired <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_retired;
+    let current = not retired && List.exists (fun (entry : inflight) ->
+      same entry.sent_request) state.msg_inflight in
+    if current then begin
+      state.keeper_run_next_receipts <- (request, result) ::
+        List.filter (fun (old, _) -> not (same old)) state.keeper_run_next_receipts;
+      Run_next_received
+    end else Run_next_retired
+  end
 
 let finish_keeper_chat_control state keeper_name ~generation =
   if generation <> keeper_chat_control_generation state keeper_name
@@ -7781,9 +7871,9 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  goal_task_links = Goal_links_not_read;
   task_flow = None;
   operator_stalled = Masc_tui_agenda.Not_read;
-  task_goal_links = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
@@ -7808,6 +7898,8 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
+  keeper_priority_controls = [];
+  keeper_run_next_receipts = [];
   keeper_auto_priority_pending = [];
   keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
@@ -7969,6 +8061,8 @@ let create_state
   keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
+  candle_observation = None;
+  candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;
@@ -8045,6 +8139,7 @@ let create_state
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
+  keeper_run_next_retired = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -8824,6 +8919,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Runtime_detail_scroll of int
+  | Runtime_params_scroll of int
   | System_log_detail_scroll of int
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
@@ -8923,6 +9019,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
+  | Runtime_params_scroll value -> state.config_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
@@ -8969,6 +9066,15 @@ let changes_budget_note_rows (state : state) =
   match state.changes with
   | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
   | Some _ | None -> 0
+
+(* Both Task detail and Harness derive their goal references from this reading.
+   Failed or unread stores cannot prove that a task is unlinked. *)
+let task_goal_reading (state : state) ~task_id =
+  match state.goal_task_links with
+  | Goal_links_not_read -> Masc_tui_agenda.Not_read
+  | Goal_links_read_failed reason -> Masc_tui_agenda.Read_failed reason
+  | Goal_links_read index ->
+      Masc_tui_agenda.Read (Workspace_goal_index.goals_for_task index ~task_id)
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the
@@ -9052,6 +9158,18 @@ let surface_body_rows (state : state) ~terminal_rows =
     (terminal_rows
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
+;;
+
+(* Parameters split their body between the cursor-following list and the
+   selected value's document. Both drawing and paging use these row counts;
+   the full-surface page is taller than this document and skips unread lines. *)
+let runtime_params_viewport (state : state) ~terminal_rows =
+  let rows = surface_body_rows state ~terminal_rows in
+  (* The document position has its own row; hints cannot hide it at 40 cells. *)
+  let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
+  let content_height = max 1 (rows - chrome) in
+  let list_height = min 8 (max 1 (content_height / 3)) in
+  list_height, max 0 (content_height - list_height - 1)
 ;;
 
 (* Count the rows after wrapping, shared by the reader and every movement key.
@@ -10563,11 +10681,11 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match snapshot.Tui_decode.rss_probe with
           | None -> "probe unavailable"
           | Some probe ->
-              let summary = probe.Tui_decode.rps_summary in
+              let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
               Printf.sprintf "%d reachable / %d failed / %d skipped"
-                summary.Tui_decode.rpsu_reachable
-                summary.Tui_decode.rpsu_failed
-                summary.Tui_decode.rpsu_skipped
+                summary.Masc.Tui_decode_runtime_probe.rpsu_reachable
+                summary.Masc.Tui_decode_runtime_probe.rpsu_failed
+                summary.Masc.Tui_decode_runtime_probe.rpsu_skipped
         in
         let probe_note =
           match
@@ -10575,7 +10693,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
           with
           | Some detail, _ -> [ "probe: " ^ single_line detail ]
           | None, Some probe ->
-              (match probe.Tui_decode.rps_errors with
+              (match probe.Masc.Tui_decode_runtime_probe.rps_errors with
                | detail :: _ -> [ "probe: " ^ single_line detail ]
                | [] -> [])
           | None, None -> []
@@ -11775,8 +11893,21 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_visible_status_rows (state : state) live ~now =
+let keeper_message_unfolded_status_rows (state : state) live ~now =
   let rows = Masc_tui_keeper_chat_transcript.status_rows ~now live in
+  let rows = match state.msg_tool_visibility with
+    | Tools_full -> rows
+    | Tools_compact | Tools_results -> List.filter (fun (kind, _) ->
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Progress ->
+            (match Masc_tui_keeper_chat_transcript.phase live with
+             | Stream_failed _ -> true
+             | Waiting | Working | Stream_ended -> false)
+        | Answer_needed | Attention | Approval _ -> true) rows in
+  rows
+
+let keeper_message_visible_status_rows (state : state) live ~now =
+  let rows = keeper_message_unfolded_status_rows state live ~now in
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
@@ -11784,12 +11915,12 @@ let keeper_message_visible_status_rows (state : state) live ~now =
       rows
   else rows
 
-(* How many rows the fold took, which the folded progress line reports so the
-   count is never a thing the reader has to notice is missing. *)
+(* Count rows hidden by folding after the diagnostic mode has selected its
+   rows. Full progress and the compact summary report this same count. *)
 let keeper_message_folded_status_count (state : state) live ~now =
   if not state.msg_turn_folded then 0
   else
-    List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
+    List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
 let keeper_observed_turn (state : state) keeper_name =
@@ -11936,7 +12067,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
     item.request, Local_pending) local
 ;;
 
-let keeper_message_activity_rows (state : state) =
+let keeper_message_diagnostic_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
@@ -12025,6 +12156,125 @@ let keeper_message_activity_rows (state : state) =
       else []) @ queue_rows
 ;;
 
+(* Default chat status has one owner. Typed admission, execution and priority
+   receipts remain separate facts inside that one row; detailed rows use the
+   same Ctrl-D axis as tool diagnostics. *)
+let keeper_message_activity_rows (state : state) =
+  match state.msg_tool_visibility, state.msg_target_keeper_name with
+  | Tools_full, _ ->
+      let receipts = match state.msg_target_keeper_name with
+        | None -> []
+        | Some name -> List.filter_map (fun (request, result) ->
+            if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
+            else Some { Masc_tui_answering.lead = (if keeper_run_next_receipt_provisional state request then "Priority (control pending) "
+                else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
+              rest = " · " ^ (match result with Ok detail | Error detail ->
+                Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
+            state.keeper_run_next_receipts in
+      keeper_message_diagnostic_activity_rows state @ receipts
+  | (Tools_compact | Tools_results), None -> []
+  | (Tools_compact | Tools_results), Some keeper_name ->
+      let waiting = keeper_message_waiting_requests state ~keeper_name in
+      let clauses = ref [] and urgent = ref [] in
+      let add text = clauses := text :: !clauses in
+      let attention text = urgent := text :: !urgent in
+      let matching entry = String.equal entry.sent_request.keeper_name keeper_name in
+      let own = List.filter matching state.msg_inflight in
+      let any_phase phase = List.exists (fun entry ->
+          phase entry.log.tl_transcript) own in
+      if any_phase (fun transcript -> match Masc_tui_keeper_chat_transcript.phase transcript with
+          | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false) then
+        attention "요청 처리 실패";
+      if List.exists (fun entry -> match entry.phase with
+          | Turn_reconciling -> true | Turn_streaming -> false) own then
+        attention "메시지 전달 재확인 중";
+      if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
+        add "이어서 처리하기를 기다리는 중";
+      let has_working = any_phase (fun transcript ->
+        Masc_tui_keeper_chat_transcript.phase transcript = Working) in
+      if has_working then add "기존 작업 처리 중";
+      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+        add "응답 마무리 중";
+      List.iter (fun (admission, text) ->
+          if List.exists (fun entry ->
+              entry.phase = Turn_streaming
+              && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
+              && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
+              && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
+          then add text)
+        [None, "메시지 접수 확인 중";
+         Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
+         Some Settled, "완료된 응답을 다시 읽는 중"];
+      if not has_working then
+        (match state.keeper_turns_error with
+         | Some _ -> attention "현재 작업 확인 불가"
+         | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
+             if String.equal row.ktr_keeper_name keeper_name then
+               match row.ktr_state with
+               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
+               | Keeper_turn_idle -> ()) state.keeper_turns);
+      if waiting <> [] then begin
+        add (Printf.sprintf "내 메시지 %d건 대기" (List.length waiting));
+        let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
+        List.iter (fun (delivery, text) -> let n = count delivery in
+          if n > 0 then add (Printf.sprintf "%d건 %s" n text))
+          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
+           Rechecking_delivery, "전달 재확인 중"];
+        let requests = List.map fst waiting in
+        let holds request = List.exists
+          (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
+        let pending = List.exists (fun (_, control) ->
+            List.exists holds control.priority_requests) state.keeper_priority_controls
+            || List.exists holds
+            (state.keeper_run_next_pending @ state.keeper_run_next_ready @ state.keeper_run_next_inflight) in
+        let receipts = List.filter (fun (request, _) -> holds request
+            && not (keeper_run_next_receipt_provisional state request)) state.keeper_run_next_receipts in
+        if List.exists (fun (_, result) -> Result.is_error result) receipts then
+          attention "다음 순서 확인 불가"
+        else if pending then add "다음 순서 확인 중"
+        else if List.for_all (fun request -> List.exists (fun (received, result) ->
+            Masc_tui_keeper_chat_projection.same_request_identity request received
+            && Result.is_ok result) receipts) requests then
+          add "다음 순서로 접수됨"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
+        else if count Keeper_queued > 0 then add "접수됨"
+      end;
+      if List.exists (fun (name, _, intervention) ->
+          String.equal name keeper_name && match intervention with
+          | Retained_after_stop -> true | Awaiting_control _ -> false)
+          state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume";
+      let folded = match state.msg_live with
+        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
+        | Some _ | None -> 0 in
+      let keys =
+        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
+        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+      match List.rev !urgent @ List.rev !clauses with
+      | [] when folded = 0 -> []
+      | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
+          rest = ""; keys }]
+;;
+
+let keeper_message_activity_needs_attention (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> false
+  | Some name ->
+      Option.is_some state.keeper_turns_error
+      || List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+          String.equal row.ktr_keeper_name name && match row.ktr_state with
+          | Keeper_turn_unavailable _ -> true
+          | Keeper_turn_running _ | Keeper_turn_idle -> false) state.keeper_turns
+      || List.exists (fun entry -> String.equal entry.sent_request.keeper_name name
+          && (match entry.phase with Turn_reconciling -> true | Turn_streaming -> false
+              || match Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript with
+                 | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false)) state.msg_inflight
+      || List.exists (fun (request, result) ->
+          String.equal request.Masc_tui_keeper_chat_projection.keeper_name name
+          && Result.is_error result) state.keeper_run_next_receipts
+;;
+
 (* The in-flight requests the chat pane draws a row for.
 
    A request the live transcript is already drawing gets no row of its own:
@@ -12057,6 +12307,10 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  let uncovered = match state.msg_tool_visibility with
+    | Tools_full -> uncovered
+    | Tools_compact | Tools_results -> List.filter (fun entry ->
+        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -12087,14 +12341,64 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-let keeper_message_status_rows (state : state) =
+(* Foreign turns keep the complete stop command ahead of their descriptive
+   status. Count these physical rows with the same pane width as rendering;
+   otherwise wrapping a long Keeper name would cover the composer below. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
+  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+  let batch_label group =
+    if group.count = 1 then ""
+    else Printf.sprintf "%d messages in one turn · " group.count
+  in
+  let activity group =
+    if group.reconciling_count > 0 then
+      if group.count = 1 then "reconciling"
+      else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+    else
+      let transcript = group.representative.log.tl_transcript in
+      if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then
+        "awaiting continuation"
+      else
+        match Masc_tui_keeper_chat_transcript.phase transcript with
+        | Masc_tui_keeper_chat_transcript.Waiting -> "waiting to start"
+        | Masc_tui_keeper_chat_transcript.Working -> "running"
+        | Masc_tui_keeper_chat_transcript.Stream_ended -> "finishing"
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> "failed"
+  in
+  let summary group =
+    let age =
+      match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
+      | None -> ""
+      | Some text -> " · " ^ text
+    in
+    Printf.sprintf "  (%s%s %s%s)" (batch_label group) (activity group)
+      (Masc_tui_keeper_chat_projection.compact_request_id
+         (turn_log_execution_id group.representative.log)) age
+  in
+  let mine, others = List.partition
+      (fun group -> state.msg_target_keeper_name =
+          Some group.representative.sent_request.keeper_name)
+      (keeper_message_inflight_drawn state) in
+  List.map (fun group -> true, summary group) mine
+  @ List.concat_map (fun group ->
+      let name = Masc.Tui_terminal_text.sanitize_terminal_text
+          group.representative.sent_request.keeper_name in
+      let command_rows =
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          ("/interrupt " ^ name)
+        |> List.map (fun line -> false, "  " ^ line) in
+      command_rows @ [false, summary group]) others
+
+let keeper_message_status_rows (state : state) ~terminal_cols =
+  let chat_cols = Masc_tui_roster_pane.content_cols
+      ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name
       -> 0
     | Some _ | None -> 1
   in
-  List.length (keeper_message_inflight_drawn state)
+  List.length (keeper_message_inflight_rows state ~chat_cols ~now:0.)
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
@@ -12129,7 +12433,7 @@ let keeper_message_status_rows (state : state) =
      anything was waiting on the operator. *)
   + (match state.msg_target_keeper_name with
      | Some keeper_name
-       when (not state.msg_turn_folded)
+       when ((not state.msg_turn_folded) || state.msg_tool_visibility <> Tools_full)
             && keeper_effects_at_the_gate state ~keeper_name <> [] ->
          1
      | Some _ | None -> 0)
@@ -12153,7 +12457,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
         (Buffer.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state + 1 in
+       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

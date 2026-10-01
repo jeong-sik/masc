@@ -373,7 +373,7 @@ let check_roster_failure expected json =
        | Some other -> failf "invalid summary: %s" (Yojson.Safe.to_string other)
        | None -> fail "roster omitted runtime_blocker_summary");
     (match Tui_decode.decode_keeper_runtime_list json with
-     | Ok ([decoded], [], false, 1) ->
+     | Ok ([decoded], [], false, 1, _) ->
        check (option string) "typed TUI projection retains the current failure"
          expected decoded.kr_runtime_blocker_summary
      | Ok _ -> fail "the current roster must decode one complete reading"
@@ -435,7 +435,7 @@ let test_missing_current_failure_is_not_clear () =
 
 let test_equipment_failure_and_repair_bypass_the_roster_cache () =
   let portrait json = match Tui_decode.decode_keeper_runtime_list json with
-    | Ok ([row],[],_,_) -> row.Tui_decode.kr_portrait
+    | Ok ([row],[],_,_,_) -> row.Tui_decode.kr_portrait
     | _ -> fail "equipment read hid or malformed the Keeper row" in
   let expected = Keeper_portrait_equipment.Ready (Keeper_portrait_look.equipment_of_name "alpha") in
   Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") (fun () ->

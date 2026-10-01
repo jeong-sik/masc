@@ -138,13 +138,22 @@ class ApprovedSelectionTest(unittest.TestCase):
             self.prepare()
         self.assertEqual(error.exception.reason, P.Reason.UNSELECTED_BASE)
 
-    def set_scope(self, pr, base_ref, base_sha, stack=None):
+    def set_scope(self, pr, base_ref, base_sha, stack=None, diff=None):
+        if diff is None:
+            diff = self.fixture.diff(self.fixture.get(f"pulls/{pr}")["base"]["sha"], self.fixture.heads[pr])
         row = self.fixture.get(f"pulls/{pr}/reviews?per_page=100")[0]
         row["body"] = (f"verdict: PASS head: {self.fixture.heads[pr]} by: reviewer\n\n"
                        + "review-scope: " + json.dumps({"base_ref": base_ref, "base_sha": base_sha, "stack": stack})
-                       + f"\napprove-guard: head `{self.fixture.heads[pr]}` · source review")
+                       + f"\napprove-guard: head `{self.fixture.heads[pr]}` · source review · reviewed base `{base_sha}` · diff sha256 `{diff}`")
         self.fixture.put(f"pulls/{pr}/reviews/{row['id']}", row)
         self.save()
+
+    def test_legacy_head_only_approval_refused_by_guard(self):
+        self.fixture.approvals(legacy=True)
+        self.save()
+        with self.assertRaises(P.Rejected) as error:
+            self.prepare()
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_retargeted_upper_pr_does_not_import_unreviewed_parent(self):
         self.fixture.git('checkout', '-q', '-b', 'stacked', self.fixture.heads[1])

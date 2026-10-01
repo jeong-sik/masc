@@ -661,7 +661,10 @@ describe('BoardSurface Component', () => {
     await waitFor(() => expect(within(screen.getByTestId('board-comment-route-focus')).getByText('author keeper')).toBeInTheDocument())
     expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
     expect(detailReadPhase.value).toBe('loaded')
-    expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([[post.id], [post.id]])
+    expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([
+      [post.id, undefined, undefined, 'focused-recovered'],
+      [post.id, undefined, undefined, 'focused-recovered'],
+    ])
     second.unmount()
     render(h(BoardSurface, null))
     await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
@@ -735,6 +738,22 @@ describe('BoardSurface Component', () => {
     expect(detailLoading.value).toBe(false)
     expect(screen.queryByText(postA.title)).not.toBeInTheDocument()
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not reload an off-feed detail when the server resolves a missing focus', async () => {
+    const post = makePost({ id: 'missing-focus-post', title: 'Missing focus result', author: 'keeper' })
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: post.id, comment: 'deleted-reply' } } as any
+    vi.mocked(fetchBoardPost).mockReset().mockResolvedValue({
+      ...post, comments: [{ id: 'latest', post_id: post.id, author: 'keeper',
+        content: 'Latest retained comment', created_at: post.created_at }],
+      commentPage: { offset: 20, total: 21, revision: 'current' },
+    } as any)
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(screen.getByText(post.title)).toBeInTheDocument())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id, undefined, undefined, 'deleted-reply')
   })
 
   it('clears focused-route ancestry when returning to a retained compact thread', async () => {

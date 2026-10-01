@@ -59,17 +59,18 @@ let roomy_budget = 64 * 1024 * 1024
 
 (* A fresh cache per call, so every answer below draws unless it says otherwise. *)
 let answer ?(cache = Api.Cache.create ~byte_budget:roomy_budget) ?(build = a_build)
-    ?(holds_tag = holds_nothing) ?equipment ?expected_equipment ~name ~size ~keeper_present () =
+    ?(holds_tag = holds_nothing) ?equipment ?(preview = None) ?expected_equipment ~name ~size ~keeper_present () =
   let equipment = match equipment with
     | Some read -> read
     | None -> (fun () -> Ok (Keeper_portrait_look.equipment_of_name name)) in
-  Api.answer ~cache ~build ~name ~size ~expected_equipment:(Option.map (fun value -> Ok value) expected_equipment) ~keeper_present ~equipment ~holds_tag
+  Api.answer ~cache ~build ~name ~size ~preview ~expected_equipment:(Option.map (fun value -> Ok value) expected_equipment) ~keeper_present ~equipment ~holds_tag
 
 let describe = function
   | Api.Png _ -> "Png"
   | Api.Not_modified tag -> "Not_modified " ^ tag
   | Api.Invalid_name -> "Invalid_name"
   | Api.Invalid_size raw -> "Invalid_size " ^ raw
+  | Api.Invalid_preview raw -> "Invalid_preview " ^ raw
   | Api.Invalid_equipment detail -> "Invalid_equipment " ^ detail
   | Api.Equipment_changed -> "Equipment_changed"
   | Api.Unknown_keeper -> "Unknown_keeper"
@@ -226,11 +227,19 @@ let test_expected_equipment_precedes_tags_and_cache () =
    | other -> fail ("expected snapshot mismatch: " ^ describe other));
   check int "one authoritative equipment read" 1 !reads;
   check int "mismatch cached no PNG" 0 (Api.Cache.length cache);
-  (match Api.answer ~cache ~build:a_build ~expected_equipment:(Some (Error "bad codec"))
+  (* Previewing the same changed slot must not hide a stale observed outfit. *)
+  (match answer ~cache ~preview:(Some "crown") ~expected_equipment:original ~equipment
+      ~holds_tag:(fun _ -> fail "preview mismatch asked for a tag")
+      ~name:keeper ~size:None ~keeper_present:present () with
+   | Api.Equipment_changed -> ()
+   | other -> fail ("preview bypassed equipment authority: " ^ describe other));
+  check int "preview compares the unmodified current equipment" 2 !reads;
+  check int "preview mismatch cached no PNG" 0 (Api.Cache.length cache);
+  (match Api.answer ~preview:None ~cache ~build:a_build ~expected_equipment:(Some (Error "bad codec"))
       ~name:keeper ~size:None ~keeper_present:never_asked ~equipment ~holds_tag:holds_nothing with
    | Api.Invalid_equipment _ -> ()
    | other -> fail ("invalid expected equipment: " ^ describe other));
-  check int "malformed expectation read no equipment" 1 !reads
+  check int "malformed expectation read no equipment" 2 !reads
 
 let test_account_revision_binds_facts_not_decay_clock () =
   let at0 = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
@@ -378,6 +387,33 @@ let item_account reply =
     (Masc_tui_keeper_items.decode ~keeper_name:keeper
        (Yojson.Safe.from_string reply.body))
   |> snd
+
+let test_router_preview_is_read_only () =
+  with_router (fun ~config router ->
+    let current = get ~router (path ~size:"72" keeper) in
+    let equipment () = require_ok Fun.id
+      (Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper) in
+    let before = equipment () in
+    let preview_id = match before.Keeper_portrait_look.face with
+      | Keeper_portrait_look.Glasses -> "shades"
+      | _ -> "glasses" in
+    let preview_path = path ~size:"72" keeper ^ "&preview=" ^ preview_id in
+    let preview = get ~router preview_path in
+    check int "preview served" 200 preview.status;
+    let item = match Keeper_portrait_item.of_id preview_id with
+      | Some item -> item | None -> fail "preview item missing from catalog" in
+    let expected = answer ~equipment:(fun () -> Ok (Keeper_portrait_item.preview item before))
+        ~name:keeper ~size:(Some "72") ~keeper_present:present () |> expect_png in
+    check string "only the selected slot changes the picture" expected preview.body;
+    check bool "preview changes actual pixels" false (String.equal current.body preview.body);
+    check string "equipment unchanged" (Keeper_portrait_equipment.key before)
+      (Keeper_portrait_equipment.key (equipment ()));
+    check int "unknown item rejected" 400
+      (get ~router (path ~size:"72" keeper ^ "&preview=unknown-item")).status;
+    let cached = get ~router ~if_none_match:(header preview "etag") preview_path in
+    check int "preview revalidates" 304 cached.status;
+    check string "current picture preserved" current.body
+      (get ~router (path ~size:"72" keeper)).body)
 
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
@@ -644,11 +680,21 @@ beanie = %d
     let initial = ledger_bytes () in
     (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
+    let read_roster () =
+      Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+      match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+        ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
+        ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
+      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
+      | None -> fail "public Keeper roster not registered" in
     check int "expected equipment does not authorize an unowned outfit" 409
       (get ~router (bound_path ~size:"96" expected keeper)).status;
     check string "bound refusal does not equip or append" initial (ledger_bytes ());
-    let before = get ~router (path ~size:"96" keeper) in
+    let before = get ~router (path ~size:"160" keeper) in
     check int "starting portrait" 200 before.status;
+    let before96 = get ~router (path ~size:"96" keeper) in
+    check int "starting 96px portrait" 200 before96.status;
+    let before_roster = read_roster () in
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
@@ -731,13 +777,14 @@ beanie = %d
       (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+    check string "purchase alone does not equip" before.body (get ~router (path ~size:"160" keeper)).body;
     (match item_account (get ~router ~token:reader (item_path keeper)) with
      | Masc_tui_keeper_items.Ready account ->
        check int "Item view reads debit" 800 account.balance_milli;
        check bool "Item view reads purchase" true (List.mem item account.owned_items)
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
        fail "purchased Item account unavailable");
-    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
+    check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
@@ -746,7 +793,7 @@ beanie = %d
     check bool "cached operator metadata exposes fresh equipped portrait" true
       (dashboard_portrait () = Keeper_portrait_equipment.Ready expected);
     check int "equipment refresh did not recompute metadata" 1 !snapshot_computations;
-    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
+    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"160" keeper) in
     check int "old tag does not conceal equipped item" 200 after.status;
     check bool "actual HTTP PNG changed" false (before.body = after.body);
     let refused = get ~router ~if_none_match:"*" (bound_path ~size:"96" starting keeper) in
@@ -754,7 +801,8 @@ beanie = %d
     check bool "mismatch publishes no PNG" false (String.starts_with ~prefix:png_signature refused.body);
     let bound = get ~router (bound_path ~size:"96" expected keeper) in
     check int "matching equipment publishes current B" 200 bound.status;
-    check string "bound and unbound B share actual PNG" after.body bound.body;
+    check string "bound and unbound B share actual PNG"
+      (get ~router (path ~size:"96" keeper)).body bound.body;
     check int "matching equipment preserves 304" 304
       (get ~router ~if_none_match:(header bound "etag") (bound_path ~size:"96" expected keeper)).status;
     let stable = ledger_bytes () in
@@ -788,15 +836,16 @@ beanie = %d
     check bool "restart-style replay preserves current equipment" true
       (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
     ignore (accepted (call "default"));
-    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
+    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"160" keeper)).body;
     let restored = get ~router (bound_path ~size:"96" starting keeper) in
     check int "A after B after A accepts only matching A" 200 restored.status;
-    check string "restored bound A is never the B PNG" before.body restored.body;
+    check string "restored bound A is never the B PNG" before96.body restored.body;
     let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~now:Time_compat.now ~base_path ~keeper:owner) in
     check int "equipping spends no Candle" 800 account.balance_milli;
     check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"160" keeper)).status;
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
     check int "unreadable authority refuses a bound cached portrait" 503
       (get ~router (bound_path ~size:"96" starting keeper)).status;
@@ -829,8 +878,12 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       Fs_compat.save_file (Filename.concat evidence "before-roster.json")
+         (Yojson.Safe.pretty_to_string before_roster);
+       Fs_compat.save_file (Filename.concat evidence "equipped-roster.json")
+         (Yojson.Safe.pretty_to_string roster);
        Fs_compat.save_file (Filename.concat evidence "manifest.json")
-         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
+         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;"pixel_size",`Int 160;
            "before",Keeper_portrait_equipment.to_json starting;
            "equipped",Keeper_portrait_equipment.to_json expected;
            "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");
@@ -853,7 +906,8 @@ let () =
       ; test_case "expected equipment is checked once before tags/cache" `Quick test_expected_equipment_precedes_tags_and_cache
       ; test_case "account identity binds facts, not natural decay" `Quick test_account_revision_binds_facts_not_decay_clock ]
     ; "router",
-      [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
+      [ test_case "preview preserves current equipment" `Quick test_router_preview_is_read_only
+      ; test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token

@@ -42,40 +42,60 @@ let auth_mode ~(config : Workspace.config) =
   | exception Auth.Auth_config_error { file; reason } -> Unreadable (file ^ ": " ^ reason)
 ;;
 
-let credential_departure ~(config : Workspace.config) ~now holder =
-  match Auth.load_credential config.base_path holder with
-  | Some ({ Masc_domain.agent_name; _ } as credential)
-    when String.equal agent_name holder && Play_invite.expired ~now credential ->
-    (match auth_mode ~config with
-     | Enforced -> Some Tool_misc_dos_lane.Credential_expired
-     | Self_declared | Unreadable _ -> None)
-  | Some _ -> None
-  | None ->
+let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
+  let credential =
+    try Ok (Auth.load_credential config.base_path holder) with
+    | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+      Error (Printexc.to_string exn)
+  in
+  match credential with
+  | Error detail ->
+    Log.Auth.warn "DOS controller departure cannot read credential for %s: %s" holder detail;
+    None
+  | Ok (Some ({ Masc_domain.agent_name; _ } as credential))
+    when String.equal agent_name holder ->
+    (match Play_invite.expired ~now credential with
+     | Ok true ->
+       (match auth_mode ~config with
+        | Enforced -> Some Tool_misc_dos_lane.Credential_expired
+        | Self_declared | Unreadable _ -> None)
+     | Ok false -> None
+     | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
+       Log.Auth.warn "DOS controller cannot read credential expiry for %s: %S" holder stamp;
+       None)
+  | Ok (Some _) -> None
+  | Ok None ->
     (match auth_mode ~config with
      | Enforced ->
-       if Play_invite.credential_exists ~base_path:config.base_path holder
-       then None
-       else Some Tool_misc_dos_lane.No_credential
+       (match Auth.credential_exists_in_transaction transaction holder with
+        | Ok false -> Some Tool_misc_dos_lane.No_credential
+        | Ok true -> None
+        | Error error ->
+          Log.Auth.warn "DOS controller departure cannot check credential file for %s: %s"
+            holder (Masc_domain.masc_error_to_string error);
+          None)
      | Self_declared | Unreadable _ -> None)
 ;;
 
-let holder_left ~(config : Workspace.config) ~now holder =
+let holder_left ~transaction ~(config : Workspace.config) ~now holder =
   match Keeper_registry.get_phase ~base_path:config.base_path holder with
   | Some (Paused | Stopped) -> Some Tool_misc_dos_lane.Keeper_stopped
   | Some (Running | Failing | Draining | Restarting | Crashed | Offline) -> None
   | None ->
     (match Keeper_meta_store.read_meta config holder with
      | Ok (Some _) -> Some Tool_misc_dos_lane.Keeper_stopped
-     | Ok None -> credential_departure ~config ~now holder
+     | Ok None -> credential_departure ~transaction ~config ~now holder
      | Error _ -> None)
 ;;
 
+let recover_in_transaction ~transaction ~config ~who =
+  let now = Time_compat.now () in
+  Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~transaction ~config ~now) ~who
+;;
+
 let before_move ~config ~who =
-  let released = Auth.with_credential_transaction config.Workspace.base_path (fun _transaction ->
-    (* The credential is read without the token cache, under the same lock as
-       all credential writers. Keep that lock until release_left commits. *)
-    let now = Time_compat.now () in
-    Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who)
+  let released = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+    recover_in_transaction ~transaction ~config ~who)
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released
@@ -99,7 +119,7 @@ type call_refusal =
    can move it, so it is refused before anything happens. The name is read
    the way the pass itself reads it. Where a name may be self-declared there
    is no list to check it against, and the pass goes on as before. *)
-let pass_refusal ~config args =
+let pass_refusal ~transaction ~config args =
   match auth_mode ~config with
   | Self_declared -> None
   | Unreadable detail -> Some (Seats_unknown ("cannot read the auth config: " ^ detail))
@@ -108,7 +128,7 @@ let pass_refusal ~config args =
     | Error message -> Some (Refused message)
     | Ok None -> None
     | Ok (Some target) ->
-      (match Play_seat.hand_to config ~now:(Time_compat.now ()) with
+      (match Play_seat.hand_to_in_transaction ~transaction config ~now:(Time_compat.now ()) with
        | Error detail -> Some (Seats_unknown ("cannot tell who sits at the DOS machine: " ^ detail))
        | Ok names when List.mem target names -> None
        | Ok _ ->
@@ -127,21 +147,25 @@ let refusal_result ~tool_name = function
       ~start_time:(Tool_timing.start ()) message
 ;;
 
-let before_call ~config ~who ~name ~args =
-  let ready_to_move () =
-    Result.map_error
-      (fun error -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error))
-      (before_move ~config ~who)
-  in
-  match
-    Option.map Tool_schemas_misc.dos_controller_need
-      (Tool_schemas_misc.misc_operation_of_tool_name name)
-  with
-  | Some Tool_schemas_misc.Takes_controller ->
-    ready_to_move ()
-  | Some Tool_schemas_misc.Hands_controller ->
-    (match pass_refusal ~config args with
-     | Some refusal -> Error refusal
-     | None -> ready_to_move ())
-  | Some Tool_schemas_misc.No_controller | None -> Ok ()
+let execute ~config ~who ~name ~args ~run =
+  let recover_error error =
+    Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+  let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
+  match operation with
+  | Some Tool_schemas_misc.Misc_dos_pass ->
+    let result = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      match pass_refusal ~transaction ~config args with
+      | Some refusal -> Error refusal
+      | None ->
+        recover_in_transaction ~transaction ~config ~who;
+        Ok (Some (Tool_misc_dos_lane.pass_without_announcing ~tool_name:name
+          ~start_time:(Tool_timing.start ()) ~base_path:config.base_path ~agent_name:who args)))
+      |> Result.map_error recover_error |> Result.join in
+    Tool_misc_dos_lane.after_announcing result
+  | Some _ | None ->
+    let recovered = match Option.map Tool_schemas_misc.dos_controller_need operation with
+      | Some Tool_schemas_misc.Takes_controller -> before_move ~config ~who |> Result.map_error recover_error
+      | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
+      | Some Tool_schemas_misc.No_controller | None -> Ok () in
+    Result.map (fun () -> run ()) recovered
 ;;

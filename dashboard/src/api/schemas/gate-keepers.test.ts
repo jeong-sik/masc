@@ -13,6 +13,7 @@ function keeperWire(name = 'planner') {
   return {
     runtime_class: 'keeper',
     candle_balance_milli: null,
+    candle_account_revision: null,
     portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     meta: {
@@ -41,6 +42,7 @@ function issueWire(name = 'broken') {
     status: 'error',
     runtime_class: 'keeper',
     candle_balance_milli: null,
+    candle_account_revision: null,
     portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     keepalive_running: false,
@@ -89,6 +91,26 @@ describe('decodeGateKeepers', () => {
     })
   })
 
+  it('accepts nullable canonical account revisions across all row variants', () => {
+    const healthy = keeperWire()
+    const issue = issueWire()
+    const retained = { ...issue, meta: healthy.meta, name: healthy.name,
+      effective_meta_error: { ...issue.effective_meta_error, keeper: healthy.name },
+      created_at: healthy.created_at, updated_at: healthy.updated_at, activation_mode: 'manual' }
+    for (const row of [healthy, issue, retained]) {
+      for (const revision of [null, 'a'.repeat(64)]) {
+        expect(() => Effect.runSync(decodeGateKeepers({
+          candle: { status: 'off' }, count: 1, ...listingWire(1),
+          keepers: [{ ...row, candle_account_revision: revision }],
+        }))).not.toThrow()
+      }
+      for (const revision of [undefined, '', 'A'.repeat(64), 'a'.repeat(63), 12]) {
+        expectDrift({ candle: { status: 'off' }, count: 1, ...listingWire(1),
+          keepers: [{ ...row, candle_account_revision: revision }] })
+      }
+    }
+  })
+
   it('accepts the roster current failure without changing the compact product values', () => {
     const data = Effect.runSync(decodeGateKeepers({
       candle: { status: 'off' },
@@ -108,6 +130,24 @@ describe('decodeGateKeepers', () => {
       }))
       expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
       expect(data.directoryIssues).toEqual([])
+    }
+  })
+
+  it('accepts emitted account revisions on healthy and both directory-error row shapes', () => {
+    const revision = 'a'.repeat(64)
+    const issue = issueWire()
+    const persisted = { ...issueWire('persisted'), meta: keeperWire('persisted').meta,
+      created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:01:00Z', activation_mode: 'on_demand' }
+    const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'ready', issued_milli: '0', burned_milli: '0', circulating_milli: '0' }, count: 3,
+      keepers: [keeperWire(), issue, persisted].map(row => ({ ...row, candle_balance_milli: '0', candle_account_revision: revision })),
+      ...listingWire(3),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    expect(data.directoryIssues.map(issue => issue.keeperName)).toEqual(['broken', 'persisted'])
+    for (const value of [undefined, '', 'A'.repeat(64), revision + '\n', 1]) {
+      expectDrift({ candle: { status: 'off' }, count: 1,
+        keepers: [{ ...keeperWire(), candle_account_revision: value }], ...listingWire(1) })
     }
   })
 

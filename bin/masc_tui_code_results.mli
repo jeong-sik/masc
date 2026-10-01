@@ -11,8 +11,15 @@ val apply_file : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (string, string) result -> unit
 val apply_blame : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (Masc.Tui_decode.blame_block list, string) result -> unit
-val apply_lsp_answer : Masc_tui_types.state -> question:string -> symbol:string ->
+val start_lsp_question : Masc_tui_types.state -> question:string -> symbol:string ->
+  Masc_tui_types.code_lsp_query Masc_tui_fetched.request option
+(** Capture the source file and scope. Identical in-flight questions are
+    suppressed; a different question owns a new request identity. *)
+val apply_lsp_answer : Masc_tui_types.state ->
+  Masc_tui_types.code_lsp_query Masc_tui_fetched.request ->
   (Masc.Tui_decode.lsp_answer, string) result -> followup
+(** Admit only the latest question for the still-current source reading and
+    scope. A stale success or failure changes neither state nor followups. *)
 val apply_diff : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (Masc.Tui_decode.git_diff, string) result -> unit
 val apply_history : Masc_tui_types.state ->

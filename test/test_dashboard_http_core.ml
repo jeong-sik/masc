@@ -1,3 +1,33 @@
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
 module Types = Masc_domain
 
 (* Fixture tick for create and modify: the runner's floor tick, below every
@@ -3183,6 +3213,9 @@ let test_execution_first_compute_reuses_prepared_bytes () =
       let open Yojson.Safe.Util in
       check bool "default query retained" true
         (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "prepared execution includes its Candle observation identity" true
+        (match payload.json |> member "candle_observation_sequence" with
+         | `Int _ -> true | _ -> false);
       check bool "computed identity bytes match JSON" true
         (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
       match Surface.dashboard_execution_cached_http_representation context with
@@ -3203,7 +3236,8 @@ let test_warm_dashboard_responses_follow_equipment_authority () =
   let keeper = "portrait-http-cache" in
   let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
   mkdir_p (Filename.dirname policy_path);
-  write_file policy_path {|[payout]
+  write_file policy_path {|half_life = "off"
+[payout]
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
@@ -3231,7 +3265,7 @@ beanie = 200
     ~weights_trace:{run_id="weights";slot_id="fixture"}
     ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
   ok (Candle_ledger.update_error_to_string Fun.id)
-    (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
+    (Candle_ledger.update ~base_path (fun _ -> Ok (funding_rows at payment, ())));
   let starting = Keeper_portrait_look.equipment_of_name keeper in
   let item_id = match starting.head with
     | Keeper_portrait_look.Crown -> "beanie"
@@ -3241,7 +3275,7 @@ beanie = 200
     | Some item -> item | None -> fail "portrait catalog item missing" in
   let expected = Keeper_portrait_item.preview item starting in
   let account_revision = Candle_observe.account_revision
-    (Candle_observe.read ~base_path) ~keeper in
+    (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper in
   (* Preserve the real builder's name-before-portrait order: an unchanged
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
@@ -3349,7 +3383,8 @@ let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
   let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
   let write_policy price =
     mkdir_p (Filename.dirname policy_path);
-    write_file policy_path (Printf.sprintf {|[payout]
+    write_file policy_path (Printf.sprintf {|half_life = "off"
+[payout]
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
@@ -3365,15 +3400,19 @@ crown = %d
   in
   write_policy 0;
   Candle_status.install_appraiser_check (fun () -> Ok ());
+  let observation_sequence = ref (-1) in
   let row () =
     let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
     let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    observation_sequence := Yojson.Safe.Util.(projected |> member "candle_observation_sequence" |> to_int);
     match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
     | [row] -> row
     | _ -> fail "Item revision projection lost the Keeper"
   in
   let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
   let first = row () in
+  let first_sequence = !observation_sequence in
+  let first_view = Candle_observe.read ~now:Time_compat.now ~base_path in
   let owner = match Keeper_id.Keeper_name.of_string keeper with
     | Ok owner -> owner | Error reason -> fail reason in
   let item = match Keeper_portrait_item.of_id "crown" with
@@ -3382,6 +3421,8 @@ crown = %d
    | Ok _ -> ()
    | Error error -> fail (Candle_shop.error_to_string error));
   let purchased = row () in
+  check bool "purchase advances fresh overlay publication identity" true
+    (!observation_sequence > first_sequence);
   check bool "free purchase changes Item account revision" false
     (String.equal (revision first) (revision purchased));
   check bool "free purchase preserves observed balance" true
@@ -3390,6 +3431,27 @@ crown = %d
   check bool "free purchase preserves observed outfit" true
     (Yojson.Safe.Util.member "portrait" first
      = Yojson.Safe.Util.member "portrait" purchased);
+  let purchased_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+  let project read = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read ~config snapshot in
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  let seed = project (fun () -> first_view) in
+  let newer = ref None in
+  (* A held B read finishes after the next request has already observed A.
+     Consecutive unchanged A reads may reuse an identity, but this gap cannot:
+     otherwise delayed B's request number could outrank the newer A identity. *)
+  let delayed = project (fun () ->
+    newer := Some (project (fun () -> first_view));
+    purchased_view) in
+  let newer = match !newer with Some json -> json | None -> fail "newer read did not run" in
+  check bool "newer overlapping read advances unchanged observation identity" true
+    (sequence newer > sequence seed);
+  check bool "held old read cannot outrank newer completed overlay" true
+    (sequence delayed < sequence newer);
+  let repeated = project (fun () -> first_view) in
+  check int "unchanged consecutive observation preserves reusable encoding identity"
+    (sequence newer) (sequence repeated);
   write_policy 1;
   let repriced = row () in
   check bool "price-only edit changes Item account revision" false

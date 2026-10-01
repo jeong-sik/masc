@@ -201,8 +201,12 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         method = None
         try:
             request = object_value(json.loads(line), "request")
-            # An invalid string ID cannot be echoed in a UTF-8 error reply.
-            validate_json(request.get("id"))
+            # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
+            supplied_id = request.get("id")
+            if not (supplied_id is None or isinstance(supplied_id, (str, int, float))
+                    and not isinstance(supplied_id, bool)):
+                raise InvalidInput("JSON-RPC id must be a string, number or null")
+            validate_json(supplied_id)
             request_id = request.get("id")
             method = request.get("method")
             if request.get("jsonrpc") != "2.0" or not isinstance(method, str):

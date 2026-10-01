@@ -393,6 +393,18 @@ class FusionResults(unittest.TestCase):
         self.assertEqual([response["id"] for response in responses], [1, 2])
         self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
+    def test_deep_array_id_is_refused_without_echo_or_worker_exit(self):
+        request = {"jsonrpc": "2.0", "id": "__deep__", "method": "ping"}
+        wire = json.dumps(request).replace('"__deep__"', "[" * 900 + "0" + "]" * 900)
+        wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+        worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
+                                input=wire, capture_output=True, text=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        responses = [json.loads(line) for line in worker.stdout.splitlines()]
+        self.assertEqual(responses[0]["id"], None)
+        self.assertEqual(responses[0]["error"]["code"], -32602)
+        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
     def test_surrogate_values_and_keys_are_refused_and_unicode_is_retained(self):
         requests = []
         for bad in ("\ud800", "\udfff"):

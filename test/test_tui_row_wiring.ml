@@ -644,11 +644,11 @@ let test_board_lane_detail_draws_typed_jev_readiness () =
 let test_the_code_tree_draws_one_folder_arrow () =
   Alcotest.(check int) "both rows read the arrow from the mark module" 2
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~module_path:"bin/masc_tui_render_code.ml" ~binding_name:"render_code" ~callees:[]
        ~identifiers:[ "File_icon.folder_glyph" ]);
   Alcotest.(check int) "and neither borrows the current-entry glyph" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~module_path:"bin/masc_tui_render_code.ml" ~binding_name:"render_code" ~callees:[]
        ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ])
 
 (* Full loading diagnostics are read through /errors. Exception details still
@@ -990,7 +990,7 @@ let test_both_strips_mark_where_they_are_from_one_value () =
    says nothing on screen but a smaller board. *)
 let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   let asks callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the title asks what the board holds" 1
@@ -1123,7 +1123,7 @@ let test_the_tasks_list_pane_says_which_task_each_row_is () =
 
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the list asks which time the sort ordered by" 1

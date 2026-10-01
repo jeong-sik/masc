@@ -34,6 +34,9 @@ elif re.search(r'/pulls/\d+$', endpoint):
     if count >= state.get('base_move_after', 100000): data['base']['sha'] = 'f'*40
     if fixture.get('native'):
         members = fixture.get('members', [2,1,3])
+        if fixture.get('stack_target_moves') and count > 1:
+            fixture['stack_base'] = fixture['stack_target_moves']
+            pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
         data['stack'] = {'id':99,'number':10,'position':members.index(number)+1,'size':len(members),'base':{'ref':fixture.get('stack_base','main'),'sha':'c'*40}}
 elif endpoint.endswith('/stacks/10'):
     members = fixture.get('members', [2,1,3])
@@ -98,7 +101,7 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False):
         line = f'verdict: {verdict} head: {HEAD}' + (' run: 42' if run else '') + ' by: independent'
-        return {'id':12,'state':state,'body':line+f'\n\n---\napprove-guard: head `{HEAD}` · source review',
+        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':self.state.get('base','main'),'base_sha':'c'*40,'stack':None},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review',
                 'user':{'login':author},'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z'}
 
     def invoke(self, script, *args):
@@ -123,6 +126,9 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assert_ok(self.invoke('approve-guard.sh','--body',str(body)))
         posted=json.loads(self.fixture.read_text())['posted']
         self.assertEqual(posted['commit_id'],HEAD)
+        scope = next(line.removeprefix('review-scope: ') for line in posted['body'].splitlines()
+                     if line.startswith('review-scope: '))
+        self.assertEqual(json.loads(scope), {'base_ref':'stack/parent','base_sha':'c'*40,'stack':None})
         self.assertNotIn('/actions/',self.calls.read_text())
 
     def test_same_head_approval_is_idempotent_but_new_hold_refuses(self):
@@ -137,6 +143,15 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(self.invoke('approve-guard.sh','--body',str(body)).returncode,2)
         self.assertNotIn('POST ',self.calls.read_text())
         self.assertNotIn('/actions/',self.calls.read_text())
+
+    def test_retargeted_same_head_can_receive_fresh_scoped_approval(self):
+        self.state['reviews']=[self.review()]
+        self.state['base']='stack/new-parent'
+        body=self.root/'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed the changed diff.')
+        self.assert_ok(self.invoke('approve-guard.sh','--body',str(body)))
+        posted=json.loads(self.fixture.read_text())['posted']
+        self.assertIn('"base_ref":"stack/new-parent"', posted['body'])
 
     def test_head_movement_refuses(self):
         self.state.update(reviews=[self.review()],moved=OTHER,move_after=2)
@@ -293,11 +308,11 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def test_native_custom_base_and_merged_lower_member(self):
         self.native_stack()
-        self.state['stack_base'] = 'trunk'
-        self.state['prs']['2'].update(base='trunk',pr_state='closed',merged=True,reviews=[])
+        self.state['stack_base'] = 'feature/integration'
+        self.state['prs']['2'].update(base='feature/integration',pr_state='closed',merged=True,reviews=[])
         result = self.invoke('merge-guard.sh','--check')
         self.assert_ok(result)
-        self.assertIn('WOULD MERGE #1 through #1', result.stdout)
+        self.assertIn('WOULD MERGE #1 through #1 into feature/integration', result.stdout)
         self.assertNotIn('/pulls/2/reviews', self.calls.read_text())
 
     def test_native_closed_unmerged_lower_member_prevents_write(self):
@@ -333,20 +348,48 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def test_native_async_acceptance_is_receipt_not_completion(self):
         self.native_stack()
+        self.state['stack_base'] = 'feature/integration'
         result = self.invoke('merge-guard.sh')
         self.assert_ok(result)
-        self.assertIn('ASYNC MERGE RECEIPT for #2, #1', result.stdout)
+        self.assertIn('ASYNC MERGE RECEIPT for #2, #1 (preflight target: feature/integration; accepted destination unconfirmed', result.stdout)
         self.assertIn('fixture-request', result.stdout)
         self.assertIn('PUT repos/team/repo/pulls/1/merge-async', self.calls.read_text())
         self.assertNotIn('PUT repos/team/repo/pulls/2', self.calls.read_text())
 
+    def test_native_queue_uses_guard_target_after_initial_read(self):
+        self.native_stack()
+        self.state.update(stack_base='feature/old', stack_target_moves='feature/current')
+        self.fixture.write_text(json.dumps(self.state))
+        result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
+            env=self.env,text=True,capture_output=True)
+        self.assert_ok(result)
+        self.assertIn('merge native stack through #1 into feature/current', result.stdout)
+        self.assertNotIn('feature/old', result.stdout)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_queue_escapes_markdown_target_only(self):
+        for fmt, expected in [('md', r'feature/a\|b'), ('tsv', 'feature/a|b')]:
+            self.native_stack()
+            self.state['stack_base']='feature/a|b'
+            self.fixture.write_text(json.dumps(self.state))
+            result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo','--format',fmt],
+                env=self.env,text=True,capture_output=True)
+            self.assert_ok(result)
+            self.assertIn('merge native stack through #1 into '+expected, result.stdout)
+
+    def test_guard_json_requires_read_only_check(self):
+        result=self.invoke('merge-guard.sh','--scope-json')
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
     def test_native_queue_reports_scope_not_parent_wait(self):
         self.native_stack()
+        self.state['stack_base'] = 'feature/integration'
         self.fixture.write_text(json.dumps(self.state))
         result = subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
                                 env=self.env,text=True,capture_output=True)
         self.assert_ok(result)
-        self.assertIn('merge native stack through #1', result.stdout)
+        self.assertIn('merge native stack through #1 into feature/integration', result.stdout)
         self.assertNotIn('parent #2', result.stdout)
 
 if __name__=='__main__': unittest.main()

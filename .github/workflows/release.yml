@@ -7,6 +7,11 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish artifacts for an explicitly selected existing v* tag
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -630,7 +635,7 @@ jobs:
           if-no-files-found: error
 
       - name: Assemble the release body from the changelog
-        if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
         env:
           GH_TOKEN: ${{ github.token }}
         # GitHub keeps the first 125,000 characters of a release body and drops
@@ -652,7 +657,7 @@ jobs:
           head -40 release-body.md
 
       - name: Create Release
-        if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*

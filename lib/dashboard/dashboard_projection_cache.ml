@@ -69,11 +69,11 @@ let candle_observation_sequence ~base_path ~request_sequence observation =
       Hashtbl.add candle_observations base_path (request_sequence, request_sequence, observation);
       request_sequence)
 
-let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
+let with_current_keeper_observations_using ~read ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
      Equipment, balances and supply share one fresh ledger view per response. *)
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
-  let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+  let candle = read () in
   let observation_sequence = candle_observation_sequence
     ~base_path:config.base_path ~request_sequence candle in
   let equipment = Candle_observe.equipment candle in
@@ -127,6 +127,15 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
      | Some (`Assoc _) -> `Assoc projected
      | _ -> `Assoc (set "candle" summary projected))
   | json -> json
+
+let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
+  with_current_keeper_observations_using
+    ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
+    ~config snapshot
+
+module For_test = struct
+  let with_current_keeper_observations = with_current_keeper_observations_using
+end
 
 let get_or_compute_snapshot_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in

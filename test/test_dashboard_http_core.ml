@@ -3408,6 +3408,7 @@ crown = %d
   let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
   let first = row () in
   let first_sequence = !observation_sequence in
+  let first_view = Candle_observe.read ~now:Time_compat.now ~base_path in
   let owner = match Keeper_id.Keeper_name.of_string keeper with
     | Ok owner -> owner | Error reason -> fail reason in
   let item = match Keeper_portrait_item.of_id "crown" with
@@ -3426,6 +3427,27 @@ crown = %d
   check bool "free purchase preserves observed outfit" true
     (Yojson.Safe.Util.member "portrait" first
      = Yojson.Safe.Util.member "portrait" purchased);
+  let purchased_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+  let project read = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read ~config snapshot in
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  let seed = project (fun () -> first_view) in
+  let newer = ref None in
+  (* A held B read finishes after the next request has already observed A.
+     Consecutive unchanged A reads may reuse an identity, but this gap cannot:
+     otherwise delayed B's request number could outrank the newer A identity. *)
+  let delayed = project (fun () ->
+    newer := Some (project (fun () -> first_view));
+    purchased_view) in
+  let newer = match !newer with Some json -> json | None -> fail "newer read did not run" in
+  check bool "newer overlapping read advances unchanged observation identity" true
+    (sequence newer > sequence seed);
+  check bool "held old read cannot outrank newer completed overlay" true
+    (sequence delayed < sequence newer);
+  let repeated = project (fun () -> first_view) in
+  check int "unchanged consecutive observation preserves reusable encoding identity"
+    (sequence newer) (sequence repeated);
   write_policy 1;
   let repriced = row () in
   check bool "price-only edit changes Item account revision" false

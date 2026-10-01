@@ -97,3 +97,9 @@ val operator_digest_json :
   ?include_workers:bool ->
   'a Tool_operator.context ->
   (Yojson.Safe.t, string) result
+
+module For_test : sig
+  val with_current_keeper_observations :
+    read:(unit -> Candle_observe.t) -> config:Workspace_utils.config ->
+    Yojson.Safe.t -> Yojson.Safe.t
+end

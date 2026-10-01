@@ -291,7 +291,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertIn('/actions/runs?', self.calls.read_text())
         self.assertNotIn('PUT ', self.calls.read_text())
 
-    def test_native_custom_base_and_closed_lower_member(self):
+    def test_native_custom_base_and_merged_lower_member(self):
         self.native_stack()
         self.state['stack_base'] = 'trunk'
         self.state['prs']['2'].update(base='trunk',pr_state='closed',merged=True,reviews=[])
@@ -299,6 +299,30 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assert_ok(result)
         self.assertIn('WOULD MERGE #1 through #1', result.stdout)
         self.assertNotIn('/pulls/2/reviews', self.calls.read_text())
+
+    def test_native_closed_unmerged_lower_member_prevents_write(self):
+        for args in (('--check',), ()):
+            with self.subTest(args=args):
+                self.native_stack()
+                self.state['prs']['2'].update(pr_state='closed', merged=False, reviews=[])
+                result = self.invoke('merge-guard.sh', *args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('#2 is closed without merging', result.stderr)
+                self.assertNotIn('WOULD MERGE', result.stdout)
+                calls = self.calls.read_text()
+                self.assertNotIn('PUT ', calls)
+                self.assertNotIn('POST ', calls)
+
+    def test_native_closed_unmerged_upper_member_is_outside_scope(self):
+        self.native_stack()
+        self.state['prs']['3'].update(pr_state='closed', merged=False)
+        result = self.invoke('merge-guard.sh', '--check')
+        self.assert_ok(result)
+        self.assertIn('WOULD MERGE #2, #1 through #1', result.stdout)
+        calls = self.calls.read_text()
+        self.assertNotIn('/pulls/3', calls)
+        self.assertNotIn('PUT ', calls)
+        self.assertNotIn('POST ', calls)
 
     def test_native_membership_drift_prevents_write(self):
         self.native_stack()

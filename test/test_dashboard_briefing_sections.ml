@@ -105,6 +105,45 @@ let test_cache_is_scoped_to_workspace_and_actor () =
         [config_a, "alice", "A/alice"; config_a, "bob", "A/bob";
          config_b, "alice", "B/alice"])
 
+let test_cluster_cache_partition_and_capacity () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Workspace.default_config base in
+      let clustered = { config with backend_config =
+        { config.backend_config with cluster_name = "briefing-test" } } in
+      let seed config marker = Briefing.seed_cache ~config
+        ~cached_at:(Unix.gettimeofday ()) (`Assoc ["marker", `String marker]) in
+      seed config "default"; seed clustered "cluster";
+      List.iter (fun (config, marker) ->
+        let json = Dashboard_briefing_sections.json ~config ~sw
+          ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field json "marker" marker)
+        [config, "default"; clustered, "cluster"];
+      for i = 1 to Env_config.Cache.max_entries + 1 do
+        Briefing.seed_cache ~config ~actor:(string_of_int i) (`Assoc [])
+      done;
+      check bool "actor cache bounded" true
+        (Briefing.cache_count () <= Env_config.Cache.max_entries))
+
+let test_cold_follower_does_not_compute () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Workspace.default_config base in
+      Briefing.with_refresh_in_flight ~config (fun () ->
+        let json = Dashboard_briefing_sections.json ~config ~sw
+          ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field json "status" "pending";
+        check bool "existing refresh retained" true
+          (Yojson.Safe.Util.(json |> member "refreshing" |> to_bool))))
+
 let test_briefing_cold_call_returns_pending () =
   (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
      This avoids blocking the dashboard on cold-start computation. *)
@@ -411,6 +450,10 @@ let () =
     [
       ( "deterministic",
         [
+          test_case "cluster partition and bounded actor owners" `Quick
+            test_cluster_cache_partition_and_capacity;
+          test_case "cold follower reuses refresh" `Quick
+            test_cold_follower_does_not_compute;
           test_case "cold call returns pending" `Quick
             test_briefing_cold_call_returns_pending;
           test_case "force refresh without cache returns pending" `Quick

@@ -26,6 +26,8 @@ let criteria_json () =
 
 type cache_state = {
   mutex : Eio.Mutex.t;
+  mutable users : int;
+  mutable last_used : float;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
   mutable refresh_in_flight : bool;
@@ -35,6 +37,8 @@ type cache_state = {
 let create_cache () =
   {
     mutex = Eio.Mutex.create ();
+    users = 0;
+    last_used = 0.0;
     cached_at = 0.0;
     cached_json = None;
     refresh_in_flight = false;
@@ -51,19 +55,48 @@ let actor_name = function
 let caches : ((string * string), cache_state) Hashtbl.t = Hashtbl.create 8
 let caches_mutex = Eio.Mutex.create ()
 
-let cache_for ~(config : Workspace.config) ~actor_name =
-  Eio.Mutex.use_rw ~protect:true caches_mutex (fun () ->
-    let key = config.base_path, actor_name in
-    match Hashtbl.find_opt caches key with
-    | Some cache -> cache
-    | None ->
-      let cache = create_cache () in
-      Hashtbl.add caches key cache;
-      cache)
+(* A lease prevents eviction between lookup and claiming refresh ownership.
+   The table lock is always acquired before an entry lock. *)
+let with_cache ~config ~actor_name f =
+  let cache = Eio.Mutex.use_rw ~protect:true caches_mutex (fun () ->
+    let key = Workspace_utils.masc_root_dir config, actor_name in
+    let found = Hashtbl.find_opt caches key in
+    let found = match found with
+      | Some _ -> found
+      | None ->
+        if Hashtbl.length caches >= Env_config.Cache.max_entries then (
+          let oldest = Hashtbl.fold (fun key cache oldest ->
+            let idle = cache.users = 0 &&
+              with_cache_lock cache (fun () -> not cache.refresh_in_flight) in
+            if not idle then oldest else
+            match oldest with
+            | Some (_, used) when used <= cache.last_used -> oldest
+            | _ -> Some (key, cache.last_used)) caches None in
+          Option.iter (fun (key, _) -> Hashtbl.remove caches key) oldest);
+        if Hashtbl.length caches >= Env_config.Cache.max_entries then None
+        else let cache = create_cache () in
+          Hashtbl.add caches key cache; Some cache
+    in
+    Option.iter (fun cache -> cache.users <- cache.users + 1;
+      cache.last_used <- Unix.gettimeofday ()) found;
+    found) in
+  Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_rw ~protect:true caches_mutex (fun () ->
+      Option.iter (fun cache -> cache.users <- cache.users - 1) cache)))
+    (fun () -> f cache)
 
 (* ── For_test ───────────────────────────────────────────────────── *)
 
 module For_test = struct
+  let cache_count () = Eio.Mutex.use_rw ~protect:true caches_mutex
+      (fun () -> Hashtbl.length caches)
+  let with_refresh_in_flight ~config f =
+    with_cache ~config ~actor_name:"dashboard" (function
+      | None -> invalid_arg "briefing cache capacity exhausted"
+      | Some cache ->
+        with_cache_lock cache (fun () -> cache.refresh_in_flight <- true);
+        Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+          with_cache_lock cache (fun () -> cache.refresh_in_flight <- false))) f)
   let compact_keeper_json = Briefing_compactors.compact_keeper_json
   let compact_agent_json = Briefing_compactors.compact_agent_json
   let collect_metadata_gaps = Briefing_gaps.collect_metadata_gaps
@@ -71,23 +104,24 @@ module For_test = struct
   let reset_cache () =
     Eio.Mutex.use_rw ~protect:true caches_mutex (fun () -> Hashtbl.clear caches)
   let seed_cache ~config ?actor ?(cached_at = 0.0) ?last_error ?(refresh_in_flight = false) json =
-    let cache = cache_for ~config ~actor_name:(actor_name actor) in
-    with_cache_lock cache (fun () ->
+    with_cache ~config ~actor_name:(actor_name actor) (function
+    | None -> invalid_arg "briefing cache capacity exhausted"
+    | Some cache -> with_cache_lock cache (fun () ->
         cache.cached_at <- cached_at;
         cache.cached_json <- Some json;
         cache.refresh_in_flight <- refresh_in_flight;
-        cache.last_error <- last_error)
+        cache.last_error <- last_error))
 end
 
 (* ── Response envelope builders ─────────────────────────────────── *)
 
-let pending_json ~now ~last_error =
+let pending_json ?(refreshing = true) ~now ~last_error () =
   `Assoc
     [
       ("generated_at", `String now);
       ("cached", `Bool false);
       ("stale", `Bool false);
-      ("refreshing", `Bool true);
+      ("refreshing", `Bool refreshing);
       ("status", `String "pending");
       ("summary", `String "Generating briefing from the latest snapshot.");
       ("provenance", `String "narrative");
@@ -209,7 +243,11 @@ let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Ti
     | Some server_sw -> server_sw
     | None -> sw
   in
-  if should_start then
+  let release ?error () = Eio.Cancel.protect (fun () ->
+    with_cache_lock cache (fun () ->
+      cache.refresh_in_flight <- false;
+      Option.iter (fun detail -> cache.last_error <- Some detail) error)) in
+  if should_start then try
     Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
         (try
            let clock =
@@ -232,12 +270,15 @@ let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Ti
                    cache.refresh_in_flight <- false;
                    cache.last_error <- Some reason)
          with
-         | Eio.Cancel.Cancelled _ as e -> raise e
+         | Eio.Cancel.Cancelled _ as e ->
+           release ();
+           raise e
          | exn ->
-           with_cache_lock cache (fun () ->
-               cache.refresh_in_flight <- false;
-               cache.last_error <- Some (Printexc.to_string exn)));
+           release ~error:(Printexc.to_string exn) ());
         `Stop_daemon)
+  with
+  | Eio.Cancel.Cancelled _ as e -> release (); raise e
+  | exn -> release ~error:(Printexc.to_string exn) ()
 
 (* ── Public entry point ─────────────────────────────────────────── *)
 
@@ -245,7 +286,10 @@ let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_t
   let now_ts = Unix.gettimeofday () in
   let now_iso = Masc_domain.now_iso () in
   let actor_name = actor_name actor in
-  let cache = cache_for ~config ~actor_name in
+  with_cache ~config ~actor_name (function
+  | None -> pending_json ~refreshing:false ~now:now_iso
+      ~last_error:(Some "Briefing cache capacity is busy; retry later.") ()
+  | Some cache ->
   let cached_json, is_fresh, refresh_in_flight, last_error =
     with_cache_lock cache (fun () ->
         let cached_json = cache.cached_json in
@@ -254,7 +298,10 @@ let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_t
           | Some _ -> now_ts -. cache.cached_at < cache_ttl_sec
           | None -> false
         in
-        (cached_json, is_fresh, cache.refresh_in_flight, cache.last_error))
+        let already_refreshing = cache.refresh_in_flight in
+        if cached_json = None && not force && not already_refreshing then
+          cache.refresh_in_flight <- true;
+        (cached_json, is_fresh, already_refreshing, cache.last_error))
   in
   match cached_json with
   | Some cached_json ->
@@ -267,23 +314,25 @@ let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_t
         annotate_delivery_state cached_json ~cached:true ~stale:true
           ~refreshing:true ~last_error)
   | None ->
-      if force then (
+      if force || refresh_in_flight then (
         if not refresh_in_flight then
           start_async_refresh ~cache ~actor_name ~config ~sw ~clock ~proc_mgr ();
-        pending_json ~now:now_iso ~last_error)
-      else (
-        (* Synchronous cold-start: compute the first briefing inline so the
-           caller gets an immediate "ok" result instead of "pending".
-           Subsequent calls hit the cache or the async refresh path. *)
-        match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
-        | Ok result_json ->
-            with_cache_lock cache (fun () ->
-                cache.cached_json <- Some result_json;
-                cache.cached_at <- Unix.gettimeofday ();
-                cache.last_error <- None);
-            result_json
-        | Error reason ->
-            (* Retain the failed observation on the first pending response. *)
-            if not refresh_in_flight then
-              start_async_refresh ~cache ~actor_name ~config ~sw ~clock ~proc_mgr ();
-            pending_json ~now:now_iso ~last_error:(Some reason))
+        pending_json ~now:now_iso ~last_error ())
+      else
+        (* The cold caller claimed ownership with the snapshot above. Followers
+           observe pending until this computation publishes or releases it. *)
+        Fun.protect
+          ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+            with_cache_lock cache (fun () -> cache.refresh_in_flight <- false)))
+          (fun () ->
+            match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
+            | Ok result_json ->
+                with_cache_lock cache (fun () ->
+                  cache.cached_json <- Some result_json;
+                  cache.cached_at <- Unix.gettimeofday ();
+                  cache.last_error <- None);
+                result_json
+            | Error reason ->
+                with_cache_lock cache (fun () -> cache.last_error <- Some reason);
+                pending_json ~refreshing:false ~now:now_iso
+                  ~last_error:(Some reason) ()))

@@ -3295,10 +3295,11 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          (* The sections owner already caches successful data and coordinates
             refresh. Read that owner on every poll, including after a failure. *)
-         Http.Response.json_value ~compress:true ~request:req
-           (Domain_pool_ref.submit_io_or_inline (fun () ->
-              dashboard_briefing_sections_http_json ~state ~sw ~clock req))
-           reqd
+         let json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           dashboard_briefing_sections_http_json ~state ~sw ~clock req) in
+         let status = if Dashboard_cache.is_timeout_envelope json then
+           `Gateway_timeout else `OK in
+         Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->

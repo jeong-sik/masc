@@ -9,6 +9,8 @@ val json :
   Yojson.Safe.t
 
 module For_test : sig
+  val cache_count : unit -> int
+  val with_refresh_in_flight : config:Workspace.config -> (unit -> 'a) -> 'a
   val compact_keeper_json : Yojson.Safe.t -> Yojson.Safe.t
   val compact_agent_json : Masc_domain.agent -> Yojson.Safe.t
   val reset_cache : unit -> unit

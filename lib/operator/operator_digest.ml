@@ -241,26 +241,26 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     Some attention_item
 
 let keeper_attention_projection_items config =
-  let keeper_names =
-    (match Keeper_meta_store.keeper_names_result config with
-     | Ok names -> names
-     | Error detail ->
-       Log.Keeper.warn "keeper_attention_projection_items: keeper names unread: %s" detail;
-       [])
-  in
-  let status_attention =
-    keeper_names
-    |> List.filter_map (fun name ->
+  let ( let* ) = Result.bind in
+  let* keeper_names = Keeper_meta_store.keeper_names_result config in
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
       match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) -> keeper_attention_projection config meta
-      | Ok None | Error _ -> None)
+      | Error detail -> Error ("keeper attention " ^ name ^ ": " ^ detail)
+      | Ok None -> collect acc rest
+      | Ok (Some meta) ->
+        match keeper_attention_projection config meta with
+        | None -> collect acc rest
+        | Some item -> collect (item :: acc) rest
   in
+  let* status_attention = collect [] keeper_names in
   let connector_attention =
     keeper_names
     |> List.filter_map (fun keeper_name ->
       connector_attention_projection ~base_path:config.base_path ~keeper_name)
   in
-  status_attention @ connector_attention
+  Ok (status_attention @ connector_attention)
 
 let workspace_state_json config =
   if not (Workspace.is_initialized config) then
@@ -314,7 +314,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     match Operator_action_constants.target_type_of_string target_type with
     | Some Operator_action_constants.Workspace ->
         let confirm_scope = pending_confirm_scope ?actor config in
-        let keeper_attention =
+        let* keeper_attention =
           keeper_attention_projection_items config
         in
         let attention_items =

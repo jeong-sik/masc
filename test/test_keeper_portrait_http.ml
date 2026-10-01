@@ -25,7 +25,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
           status=Candle_event.Done {completed_at=at}}) task_ids;
-       candidate_task_ids=task_ids;candidate_keepers=[keeper]}}
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
   ]
 ;;

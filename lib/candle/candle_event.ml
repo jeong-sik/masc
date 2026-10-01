@@ -54,6 +54,7 @@ type body =
       ; tasks : (string * task_lookup) list
       ; candidate_task_ids : string list
       ; candidate_keepers : string list
+      ; candidate_task_keepers : (string * string option) list
       }
   | Unattributed of
       { goal_id : string
@@ -163,6 +164,8 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
       , `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks) )
     ; "candidate_task_ids", text_list c.candidate_task_ids
     ; "candidate_keepers", text_list c.candidate_keepers
+    ; "candidate_task_keepers", `List (List.map (fun (task_id, keeper) ->
+        `Assoc ["task_id", `String task_id; "keeper", nullable_text keeper]) c.candidate_task_keepers)
     ]
   | Unattributed u ->
     [ "goal_id", `String u.goal_id
@@ -285,6 +288,15 @@ let lookup_of_json json =
   | unknown -> Error (Printf.sprintf "%s: unknown state %S" context unknown)
 ;;
 
+let candidate_keeper_of_json json =
+  let context = "candidate Keeper eligibility" in
+  let* fields = Candle_json.object_fields ~context json in
+  let* task_id, fields = Candle_json.field ~context "task_id" Candle_json.as_non_blank fields in
+  let* keeper, fields = Candle_json.field ~context "keeper"
+    (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (task_id, keeper)
+
 let candidates_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
@@ -297,8 +309,10 @@ let candidates_of_fields ~context fields =
   let* candidate_keepers, fields =
     field "candidate_keepers" (Candle_json.as_list Candle_json.as_non_blank) fields
   in
+  let* candidate_task_keepers, fields =
+    field "candidate_task_keepers" (Candle_json.as_list candidate_keeper_of_json) fields in
   let* () = Candle_json.finish ~context fields in
-  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers })
+  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers; candidate_task_keepers })
 ;;
 
 let unattributed_of_fields ~context fields =

@@ -260,6 +260,7 @@ let test_a_missing_unattributed_is_written_on_the_next_pass () =
             ; tasks = []
             ; candidate_task_ids = []
             ; candidate_keepers = []
+            ; candidate_task_keepers = []
             }
       }
     ];
@@ -386,7 +387,7 @@ let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
           [ { E.at = at "2026-09-29T05:30:00Z"
             ; body = E.Candidates {goal_id;request_id="req-1";verification_run_id="run-1";
                 tasks=List.map (fun id -> id, E.Deleted) task_ids;
-                candidate_task_ids=[];candidate_keepers=[]} }
+                candidate_task_ids=[];candidate_keepers=[];candidate_task_keepers=[]} }
           ; { E.at = at "2026-09-29T05:30:00Z"
             ; body = E.Unattributed { goal_id; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates }
             }
@@ -423,6 +424,7 @@ let test_candidates_written_by_another_worker_meanwhile_are_not_repeated () =
                   ; tasks = []
                   ; candidate_task_ids = []
                   ; candidate_keepers = [ "keeper-a" ]
+                  ; candidate_task_keepers = []
                   }
             }
           ];
@@ -458,6 +460,7 @@ let test_a_payout_closed_while_its_missing_unattributed_was_being_written_is_lef
             ; tasks = []
             ; candidate_task_ids = []
             ; candidate_keepers = []
+            ; candidate_task_keepers = []
             }
       }
     ];

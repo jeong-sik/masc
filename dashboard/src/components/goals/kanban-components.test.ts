@@ -48,7 +48,7 @@ describe('TaskBacklog', () => {
     resetTaskBacklogState()
   })
 
-  it('rehydrates pending cleanup without the deleted Task and retries its exact deletion identity', async () => {
+  it.each([false, true])('rehydrates pending cleanup and retries exact identity despite refresh failure=%s', async refreshFails => {
     tasks.value = []
     vi.mocked(actions.fetchTaskDeletions).mockResolvedValue({
       receipts: [{ deletionId: 'delete-original', taskId: 'cleanup-target', requestedAt: '2026-09-09T00:00:00Z',
@@ -59,7 +59,9 @@ describe('TaskBacklog', () => {
       vi.mocked(actions.fetchTaskDeletions).mockResolvedValue({ receipts: [], copies: { kind: 'consistent' } })
       return { ok: true, errors: [] }
     })
-    vi.spyOn(store, 'refreshExecution').mockResolvedValue()
+    const refresh = vi.spyOn(store, 'refreshExecution')
+    if (refreshFails) refresh.mockRejectedValue(new Error('execution read unavailable'))
+    else refresh.mockResolvedValue()
     const first = render(h(TaskBacklog, {}))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('cleanup-target'))
     first.unmount()
@@ -129,6 +131,25 @@ describe('TaskBacklog', () => {
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     expect(document.body.textContent).toContain('Current confirmed description')
     expect(document.body.textContent).not.toContain('Obsolete late description')
+  })
+
+  it('releases the cleanup retry button after an execution read failure and retains real cleanup refusal', async () => {
+    tasks.value = []
+    vi.mocked(actions.fetchTaskDeletions).mockResolvedValue({
+      receipts: [{ deletionId: 'delete-retained', taskId: 'cleanup-retained', requestedAt: '2026-09-30T00:00:00Z',
+        cleanup: { kind: 'required', errors: ['link store unavailable'] } }], copies: { kind: 'consistent' },
+    })
+    const retry = vi.spyOn(actions, 'retryTaskDeletion').mockResolvedValue({ ok: false, errors: ['link store unavailable'] })
+    vi.spyOn(store, 'refreshExecution').mockRejectedValue(new Error('execution read unavailable'))
+    render(h(TaskBacklog, {}))
+    const button = await screen.findByRole('button', { name: '삭제 후 정리 재시도' })
+    fireEvent.click(button)
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('delete-retained'))
+    await waitFor(() => expect(button).not.toBeDisabled())
+    expect(screen.getByRole('alert')).toHaveTextContent('link store unavailable')
+    fireEvent.click(button)
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(button).not.toBeDisabled())
   })
 
   it('summarizes unclaimed priority pressure by oldest task age', () => {

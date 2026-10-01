@@ -1,3 +1,33 @@
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
 (* Confirmed obligations and durable Candidates go through the production
    payout worker. Only the model/source edges are controlled by these tests. *)
 open Alcotest
@@ -29,7 +59,8 @@ let with_workspace f =
       let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
       if not (String.starts_with ~prefix:base_path path) then fail "fixture escaped its workspace";
       Fs_compat.mkdir_p (Filename.dirname path);
-      Fs_compat.save_file path {|[payout]
+      Fs_compat.save_file path {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -89,7 +120,7 @@ let prepared ?request ?run ?due_date config goal_id =
 let paid config goal_id =
   List.filter_map (fun (event : E.t) -> match event.body with
     | E.Paid payment when payment.identity.goal_id = goal_id -> Some payment
-    | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Half_life_set _ | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
     | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) (events config)
 
 let one_payment config goal_id = match paid config goal_id with
@@ -165,6 +196,51 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
   check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
+
+let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
+  let scenario ~goal_id ~amount ~weight_max ~weight expected =
+    with_workspace @@ fun _env config ->
+    let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+    Fs_compat.save_file path (Printf.sprintf
+      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = 0\nsmall = 0\nmedium = %d\nlarge = 0\nepic = 0\n"
+      weight_max amount);
+    (match Candle_status.current ~base_path:config.base_path with
+     | Candle_config.Enabled policy -> check int "policy admits this exact amount" amount policy.payout.medium_milli
+     | Candle_config.Off | Candle_config.Disabled _ -> fail "the explicit representable policy was rejected");
+    let waiting = prepared ~due_date:None config goal_id in
+    let calls = ref [] in
+    (match drain config (make_runner ~weight calls) with
+     | [Candle_appraise.Settled settled] -> check string "exact Goal settled" goal_id settled
+     | _ -> fail "allowed large weights could not settle their obligation");
+    let payment = one_payment config goal_id in
+    check string "Paid retains the confirmed run" waiting.verification_run_id payment.identity.verification_run_id;
+    check int "configured grade amount stays exact" amount payment.total_milli;
+    check int "no lateness deduction" 1000 payment.coefficient;
+    check (list (pair string int)) "weights survive the serialized Paid evidence"
+      ["keeper-a",weight "keeper-a";"keeper-b",weight "keeper-b"]
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.weight) payment.allocations);
+    check (list (triple string int int)) "exact shares, amounts and name tie ordering"
+      (List.map (fun (keeper, amount) -> keeper,amount,amount) expected)
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.share_milli,a.amount_milli) payment.allocations);
+    let balance = match Candle_balance.of_events ~at:(ok (Candle_stamp.at ~now)) (events config) with
+      | Ok balance -> balance | Error error -> fail (Candle_balance.error_to_string error) in
+    List.iter (fun (keeper, paid) -> check int "ledger replay credits the allocation exactly" paid
+      (Candle_balance.balance balance ~keeper)) expected;
+    let supply = Candle_balance.supply balance in
+    check string "all and only the configured money was issued" (string_of_int amount) supply.issued_milli;
+    check string "no currency burned" "0" supply.burned_milli;
+    check string "circulation conserves the payout" (string_of_int amount) supply.circulating_milli;
+    ignore (drain config (make_runner ~weight calls));
+    check int "the settled Goal is paid once" 1 (List.length (paid config goal_id))
+  in
+  scenario ~goal_id:"max-weight-tie" ~amount:1 ~weight_max:max_int ~weight:(fun _ -> max_int)
+    ["keeper-a",1;"keeper-b",0];
+  List.iter (fun factor ->
+    scenario ~goal_id:"scaled-proportions" ~amount:10 ~weight_max:(2 * factor)
+      ~weight:(fun name -> if name="keeper-a" then 2 * factor else factor)
+      ["keeper-a",7;"keeper-b",3]) [1;max_int / 2];
+  scenario ~goal_id:"max-money-tie" ~amount:max_int ~weight_max:max_int ~weight:(fun _ -> max_int)
+    ["keeper-a",(max_int / 2) + 1;"keeper-b",max_int / 2]
 
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->
@@ -247,6 +323,47 @@ let test_transport_recovery_is_retried_by_pulse () =
     idle env);
   ignore (one_payment config "transport")
 
+let test_execution_rejection_waits_for_event_and_preserves_preceding_work () =
+  with_workspace @@ fun env config ->
+  let waiting = prepared config "execution-refusal" in
+  let accept = ref false in
+  let calls = ref [] in
+  let runner ~identity request =
+    match request with
+    | A.Relation _ when not !accept ->
+      calls := !calls @ [identity, request];
+      Error (A.Execution_rejected "fixture provider rejected the relation request")
+    | A.Grade _ | A.Relation _ | A.Weights _ -> make_runner calls ~identity request in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    await env "permanent relation refusal" (fun () ->
+      List.exists (fun (_, request) -> A.stage request = "relation") !calls);
+    idle env;
+    check (list string) "grade succeeded before the failed relation"
+      ["grade";"relation"] (List.map (fun (_, request) -> A.stage request) !calls);
+    let before = events config in
+    check int "execution refusal pays nobody" 0 (List.length (paid config waiting.goal_id));
+    (match Candle_payout.state ~goal_id:waiting.goal_id before with
+     | Candle_payout.Waiting current -> check bool "same confirmed obligation remains" true (current=waiting)
+     | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled ->
+       fail "execution refusal consumed or failed the obligation");
+    List.iter (fun () ->
+      Candle_payout_worker.pulse ();
+      idle env;
+      check int "maintenance pulse repeats neither grade nor relation" 2 (List.length !calls);
+      check bool "pulse appends no synthetic failure or payment fact" true
+        (events config = before)) [(); ()];
+    accept := true;
+    Candle_payout_worker.wake ();
+    await env "change event resumes the refused obligation" (fun () -> paid config waiting.goal_id <> []);
+    idle env);
+  let payment = one_payment config waiting.goal_id in
+  check string "resumed payment keeps its confirmed verifier" waiting.verification_run_id
+    payment.identity.verification_run_id;
+  check (list string) "one fresh complete appraisal follows the event"
+    ["grade";"relation";"grade";"relation";"relation";"relation";"weights"]
+    (List.map (fun (_, request) -> A.stage request) !calls)
+
 let test_unrelated_and_external_only_work_mint_nothing () =
   with_workspace @@ fun _env config ->
   ignore (prepared config "unrelated");
@@ -313,6 +430,59 @@ let test_arithmetic_alone_cannot_authorize_an_outsider () =
   (match result with Error (Candle_ledger.Refused _) -> () | _ -> fail "outsider was admitted by valid arithmetic");
   check int "no forged Paid row reaches the ledger" 0 (List.length (paid config waiting.goal_id))
 
+let test_settlement_requires_complete_snapshot_candidates () =
+  with_workspace @@ fun _env config ->
+  let waiting=prepared config "candidate-omission" in
+  let original=events config in
+  let identity : A.identity = {goal_id=waiting.goal_id;request_id=waiting.request_id;verification_run_id=waiting.verification_run_id} in
+  let payment ids weights =
+    let relations=List.map (fun task_id -> {A.task_id;relation=A.Related;trace=trace task_id}) ids in
+    Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+      ~grade_trace:(trace "grade") ~relations ~weights_trace:(trace "weights")
+      ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights |> ok in
+  let full=payment ["task-a";"task-b";"external"] ["keeper-a",1;"keeper-b",1] in
+  check bool "complete eligible Snapshot proof can settle" true
+    (Result.is_ok (Candle_payout.validate_settlement waiting original (E.Paid full)));
+  List.iter (fun keepers ->
+    let modified = List.map (fun (event : E.t) -> match event.body with
+      | E.Candidates c -> {event with body=E.Candidates {c with candidate_keepers=keepers}}
+      | _ -> event) original in
+    let forged = payment ["task-a";"task-b";"external"] (List.map (fun keeper -> keeper, 1) keepers) in
+    check bool "changing only durable Keeper set cannot redirect payout" true
+      (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
+    [["keeper-a";"keeper-b";"external-operator"];["keeper-a"]];
+  let mixed_eligibility = List.map (fun (event : E.t) -> match event.body with
+    | E.Candidates c -> {event with body=E.Candidates {c with
+        tasks=List.map (fun (id, task) -> id, (match task with
+          | E.Found task when id="task-b" -> E.Found {task with assignee=Some "keeper-a"}
+          | _ -> task)) c.tasks;
+        candidate_keepers=["keeper-a"];
+        candidate_task_keepers=["task-a",None;"task-b",Some "keeper-a";"external",None]}}
+    | _ -> event) original in
+  let only_ineligible_related = List.map (fun (r : A.task_relation) ->
+    {r with relation=(if r.task_id="task-a" then A.Related else A.Unrelated)}) full.relations in
+  let ineligible_payment = Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+    ~grade_trace:(trace "grade") ~relations:only_ineligible_related ~weights_trace:(trace "weights")
+    ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights:["keeper-a",1] |> ok in
+  check bool "another eligible task cannot grant an ineligible task its Keeper" true
+    (Result.is_error (Candle_payout.validate_settlement waiting mixed_eligibility (E.Paid ineligible_payment)));
+  List.iter (fun (omit_observation,omit_candidate) ->
+    let modified=List.map (fun (event : E.t) -> match event.body with
+      | E.Candidates c -> {event with body=E.Candidates {c with
+          tasks=(if omit_observation then List.remove_assoc "task-b" c.tasks else c.tasks);
+          candidate_task_ids=(if omit_candidate then List.filter ((<>) "task-b") c.candidate_task_ids else c.candidate_task_ids);
+          candidate_keepers=(if omit_candidate then List.filter ((<>) "keeper-b") c.candidate_keepers else c.candidate_keepers)}}
+      | _ -> event) original in
+    let forged=if omit_candidate then payment ["task-a";"external"] ["keeper-a",1] else full in
+    check bool "omitted eligible worker cannot redirect another worker's payout" true
+      (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
+    [false,true;true,false;true,true];
+  let missing_ineligible=List.map (fun (event : E.t) -> match event.body with
+    | E.Candidates c -> {event with body=E.Candidates {c with tasks=List.remove_assoc "pending" c.tasks}}
+    | _ -> event) original in
+  check bool "Snapshot coverage also requires ineligible task observations" true
+    (Result.is_error (Candle_payout.validate_settlement waiting missing_ineligible (E.Paid full)))
+
 let test_disable_during_appraisal_preserves_the_obligation () =
   List.iter (fun remove_file ->
     with_workspace @@ fun _env config ->
@@ -336,7 +506,7 @@ let test_disable_during_appraisal_preserves_the_obligation () =
 let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
   let historical_amount = max_int / 1000 in
-  let history = List.init 1000 (fun i ->
+  let history = List.concat (List.init 1000 (fun i ->
     let payment = Candle_payment.make
       ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
       ~grade:Candle_grade.Epic ~total_milli:historical_amount
@@ -344,9 +514,9 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
       ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
       ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
       ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
-    {E.at=confirmed_at;body=E.Paid payment}) in
+    funding_rows confirmed_at payment)) in
   append config history;
-  let waiting = prepared config "overflow" in
+  let waiting = prepared ~due_date:None config "overflow" in
   let calls = ref [] in
   (match drain config (make_runner calls) with
    | [Candle_appraise.Rejected _] -> ()
@@ -354,7 +524,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
   check bool "the actual appraisal reached its weight answer" true
     (List.exists (fun (_, request) -> A.stage request="weights") !calls);
   check int "the new payment was not appended" 0 (List.length (paid config waiting.goal_id));
-  let balance = match Candle_balance.of_events (events config) with
+  let balance = match Candle_balance.of_events ~at:(ok (Candle_stamp.at ~now)) (events config) with
     | Ok balance -> balance | Error error -> fail (Candle_balance.error_to_string error) in
   check int "prior money stays exact" (historical_amount * 1000)
     (Candle_balance.balance balance ~keeper:"keeper-a");
@@ -370,6 +540,36 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
     Candle_payout_worker.pulse ();
     idle env;
     check int "a deterministic ledger refusal is not retried by pulse" refused_calls (List.length !calls))
+
+let test_finite_overflow_retries_after_decay () =
+  with_workspace @@ fun _env config ->
+  let historical_amount = max_int / 1000 in
+  let history = List.concat (List.init 1000 (fun i ->
+    let payment = Candle_payment.make
+      ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
+      ~grade:Candle_grade.Epic ~total_milli:historical_amount
+      ~grade_trace:(trace "past-grade")
+      ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
+      ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
+      ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
+    funding_rows confirmed_at payment)) in
+  append config history;
+  let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+  let configured = Fs_compat.load_file path in
+  let off = "half_life = \"off\"" in
+  Fs_compat.save_file path ("half_life = 1" ^ String.sub configured (String.length off)
+    (String.length configured - String.length off));
+  let waiting = prepared ~due_date:None config "decay-overflow" in
+  let appraise = make_runner (ref []) in
+  (match Candle_appraise.settle_one ~now ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> () | _ -> fail "finite overflow was not retryable");
+  check int "retry adds no partial payment" 0 (List.length (paid config waiting.goal_id));
+  let later () = now () +. 3600. in
+  (match Candle_appraise.settle_one ~now:later ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Settled _ -> () | _ -> fail "decay did not free credit capacity");
+  (match Candle_appraise.settle_one ~now:later ~appraise ~base_path:config.base_path waiting with
+   | Candle_appraise.Superseded _ -> () | _ -> fail "settlement was repeated");
+  check int "decay recovery pays exactly once" 1 (List.length (paid config waiting.goal_id))
 
 let test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it () =
   with_workspace @@ fun env config ->
@@ -445,6 +645,7 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
       (match Server_candle_appraiser.For_testing.run ~base_path:config.base_path ~execute ~identity request with
        | Error (A.Transport_unavailable _) -> ()
        | Error (A.Invalid_response _) -> fail "missing prompt is a source failure"
+       | Error (A.Execution_rejected _) -> fail "missing prompt is a recoverable source failure"
        | Ok _ -> fail "missing prompt was accepted");
       check bool "missing prompt does not dispatch a provider" false !dispatched;
       let replayed = Runs.replay path in
@@ -465,15 +666,41 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
           Yojson.Safe.Util.(member "attempts" output = `List [])
       | _ -> fail "missing prompt lost its failed run outcome")
 
+let test_clock_reversal_retries_but_malformed_history_rejects () =
+  with_workspace @@ fun _env config ->
+  let waiting = prepared config "clock-catchup" in
+  let later () = now () +. 60. in
+  let future = ok (Candle_stamp.at ~now:later) in
+  append config [{E.at=future;body=E.Half_life_set Candle_decay.Off}];
+  let calls = ref [] in
+  (match Candle_appraise.settle_one ~now ~appraise:(make_runner calls)
+      ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> () | _ -> fail "early wall clock was not retryable");
+  check int "early clock appends no payment" 0 (List.length (paid config waiting.goal_id));
+  (match Candle_appraise.settle_one ~now:later ~appraise:(make_runner calls)
+      ~base_path:config.base_path waiting with
+   | Candle_appraise.Settled _ -> () | _ -> fail "clock catch-up did not settle");
+  check int "clock recovery pays exactly once" 1 (List.length (paid config waiting.goal_id));
+  let malformed = prepared config "malformed-history" in
+  append config [{E.at=confirmed_at;body=E.Half_life_set Candle_decay.Off}];
+  (match Candle_appraise.settle_one ~now:later ~appraise:(make_runner calls)
+      ~base_path:config.base_path malformed with
+   | Candle_appraise.Rejected _ -> () | _ -> fail "reversed historical order became retryable")
+
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      [test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
+      ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
+      ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
+      ;test_case "execution refusal holds through pulses and resumes on event" `Quick test_execution_rejection_waits_for_event_and_preserves_preceding_work
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
+      ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider
       ;test_case "disable during model call preserves waiting" `Quick test_disable_during_appraisal_preserves_the_obligation
       ;test_case "cumulative overflow refuses the real settlement" `Quick test_cumulative_overflow_refuses_the_real_settlement

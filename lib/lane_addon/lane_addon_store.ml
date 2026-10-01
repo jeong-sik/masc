@@ -139,16 +139,25 @@ let remove_binding t ~instance_id = protect (fun () ->
   Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
-let save_action t ~instance_id ~request_id json =
-  write t (action_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
-let load_action t ~instance_id ~request_id = protect (fun () ->
+(* Also sync existing ancestors: they may have been created by a preceding
+   attempt whose parent sync failed. A retry must establish the entire path. *)
+let sync_action_parent parent =
+  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let rec durable_action_directory ~sync_parent directory =
+  let parent = Filename.dirname directory in
+  if parent <> directory then (
+    durable_action_directory ~sync_parent parent;
+    (try Unix.mkdir directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "action receipt parent is not a directory"));
+    sync_parent parent)
+let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
-  match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_missing -> Ok None
-  | _ ->
-      let stat = Unix.stat path in
-      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
-      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
+  durable_action_directory ~sync_parent (Filename.dirname path);
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
+let save_action = save_action_with ~sync_parent:sync_action_parent
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
@@ -165,15 +174,105 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
-let bindings t = read_directory t "bindings"
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
-let append_observation t ~instance_id ~seq ~sources output =
+type record_verification = Visible | Durable
+let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
+let record_bytes fd size =
+  let buffer=Bytes.create size in
+  let rec read offset =
+    if offset=size then Ok () else
+    match Unix.read fd buffer offset (size-offset) with
+    | 0 -> Error "retained file shrank during read"
+    | count -> read (offset+count)
+    | exception Unix.Unix_error (Unix.EINTR,_,_) -> read offset in
+  let* ()=read 0 in
+  let rec end_of_record () =
+    match Unix.read fd (Bytes.create 1) 0 1 with
+    | 0 -> Ok (Bytes.to_string buffer)
+    | _ -> Error "retained file grew during read"
+    | exception Unix.Unix_error (Unix.EINTR,_,_) -> end_of_record () in
+  end_of_record ()
+let with_record_fd path fn =
+  let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+  match fn fd with
+  | result -> Unix.close fd;result
+  | exception exn ->
+    let backtrace=Printexc.get_raw_backtrace () in
+    (try Unix.close fd with Unix.Unix_error _ -> ());
+    Printexc.raise_with_backtrace exn backtrace
+let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
+  with_record_fd path (fun fd ->
+    let stat = Unix.fstat fd in
+    if stat.Unix.st_kind <> Unix.S_REG then Error "retained file is not a regular file"
+    else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
+    else
+      let* bytes=record_bytes fd stat.Unix.st_size in
+      let verify_bytes () =
+        let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
+        let* verified=record_bytes fd stat.Unix.st_size in
+        if verified<>bytes then Error "retained file changed during sync"
+        else if same_file stat (Unix.stat path) then Ok bytes
+        else Error "retained file changed during verification" in
+      match verification with
+      | Visible -> verify_bytes ()
+      | Durable ->
+        let parent=Filename.dirname path in
+        with_record_fd parent (fun parent_fd ->
+          let parent_stat=Unix.fstat parent_fd in
+          if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
+          else (
+            sync_file fd;sync_parent parent_fd;
+            let* bytes=verify_bytes () in
+            if same_file parent_stat (Unix.stat parent) then Ok bytes
+            else Error "retained file parent changed during sync"))))
+let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
+let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
+      else
+        (* No new receipt-size policy: use the observed file size to reject
+           growth between the path read and the exact descriptor verification. *)
+        let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
+          ~max_bytes:stat.Unix.st_size path in
+        Ok (Some (Yojson.Safe.from_string bytes)))
+let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
+type observation_write_error =
+  | Observation_rejected of string
+  | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
+      verification_error : string option }
+let observation_write_error_to_string = function
+  | Observation_rejected detail -> detail
+  | Publication_failed {failure;verification_error} ->
+      let detail=Fs_compat.atomic_replace_failure_to_string failure in
+      match verification_error with None -> detail
+      | Some error -> detail ^ "; publication verification: " ^ error
+let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
   let json = `Assoc ["sources", sources; "output", output_to_json output] in
+  let bytes = Yojson.Safe.to_string json in
   let relative = Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq) in
-  protect (fun () ->
-    if Fs_compat.file_exists (Filename.concat t.root relative)
-    then Error "observation sequence already committed"
-    else write t relative (Yojson.Safe.to_string json))
+  let* path = protect (fun () ->
+    let path = Filename.concat t.root relative in
+    if Fs_compat.file_exists path then Error "observation sequence already committed"
+    else (Fs_compat.mkdir_p (Filename.dirname path); Ok path))
+    |> Result.map_error (fun detail -> Observation_rejected detail) in
+  match replace_file path bytes with
+  | Ok () -> Ok ()
+  | Error failure ->
+    match failure.Fs_compat.stage with
+    | Fs_compat.Before_rename -> Error (Publication_failed {failure;verification_error=None})
+    | Fs_compat.After_rename ->
+      let verification_error = match bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+          ~verification:Visible ~max_bytes:(String.length bytes) path with
+        | Ok visible when visible=bytes -> None
+        | Ok _ -> Some "published bytes differ from the proposed observation"
+        | Error detail -> Some detail in
+      Error (Publication_failed {failure;verification_error})
+let append_observation = append_observation_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
 let observations t ~instance_id =
   let* values = read_directory t (observation_dir instance_id) in
   let rec loop acc = function
@@ -201,20 +300,6 @@ let sequence_of_row ~instance_id id =
          | _ -> Error "row identity has an invalid observation sequence")
 let record_path t instance_id seq =
   Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
-let bounded_file ~max_bytes path = protect (fun () ->
-  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
-  let channel = Unix.in_channel_of_descr fd in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let stat = Unix.fstat fd in
-    if stat.Unix.st_kind <> Unix.S_REG then Error "retained observation is not a regular file"
-    else if stat.Unix.st_size > max_bytes then Error "retained observation exceeds query byte envelope"
-    else
-      try
-        let bytes = really_input_string channel stat.Unix.st_size in
-        match input_char channel with
-        | _ -> Error "retained observation changed during query"
-        | exception End_of_file -> Ok bytes
-      with End_of_file -> Error "retained observation changed during query"))
 let decode_record bytes =
   protect (fun () ->
     match Yojson.Safe.from_string bytes with
@@ -241,17 +326,36 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
+(* A renamed observation can survive a failed binding write. Recover its
+   sequence for every retained reader; reads still verify the exact record. *)
+let bindings t =
+  let* values = read_directory t "bindings" in
+  let rec reconcile = function
+    | [] -> Ok []
+    | `Assoc fields :: rest ->
+        let* instance_id, sequence = match List.assoc_opt "instance_id" fields,
+            List.assoc_opt "observation_seq" fields with
+          | Some (`String id), Some (`Int seq) when seq >= 0 -> Ok (id, seq)
+          | _ -> Error "invalid retained binding sequence" in
+        let* retained = highwater t instance_id in
+        let* rest = reconcile rest in
+        Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
+          List.remove_assoc "observation_seq" fields) :: rest)
+    | _ -> Error "invalid retained binding" in
+  reconcile values
 let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
   then Error "invalid retained record byte envelope"
   else Ok (2 * max_bytes + envelope_bytes)
-let read_observation ~instance_id ~seq ~max_bytes t =
+let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t =
   if seq <= 0 then Error "observation sequence must be positive" else
   let* max_record_bytes = retained_read_limit max_bytes in
-  let* bytes = bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq) in
+  let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
+    ~max_bytes:max_record_bytes (record_path t instance_id seq) in
   let* _,output = decode_record bytes in
   Ok output
+let read_observation = read_observation_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
   let* found = highwater t instance_id in
@@ -491,3 +595,10 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
   Ok (`Assoc (("message", `String (Tool_output.encode_for_agent_core (Tool_output.Stored artifact)))
     :: ("keeper_artifact", Tool_output.normalized_artifact_ref_to_json artifact)
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
+
+module For_testing = struct
+  let save_action = save_action_with
+  let load_action = load_action_with
+  let append_observation = append_observation_with
+  let read_observation = read_observation_with
+end

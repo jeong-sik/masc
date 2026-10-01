@@ -41,7 +41,7 @@ import {
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
-import type { BoardPost } from '../../types'
+import type { BoardComment, BoardPost } from '../../types'
 import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, type BoardFlair, type BoardHearth } from '../../api'
 import { showToast } from '../common/toast'
 
@@ -403,6 +403,7 @@ describe('loadPostDetail', () => {
       } as any)
 
     await loadPostDetail('p1')
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
     expect(detailComments.value[0]?.id).toBe('c26')
     await loadOlderPostComments('p1')
     expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 5, 20)
@@ -429,6 +430,140 @@ describe('loadPostDetail', () => {
     expect(detailCommentPage.value.offset).toBe(0)
   })
 
+  it('loads a focused reply ancestor chain across two older pages', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [{ id: 'reply', parent_id: 'parent' }],
+        commentPage: { offset: 25, total: 45 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [{ id: 'parent', parent_id: 'root' }],
+        commentPage: { offset: 5, total: 45 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [{ id: 'root', parent_id: null }],
+        commentPage: { offset: 0, total: 45 },
+      } as any)
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(fetchBoardPost).toHaveBeenCalledTimes(3)
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 5, 20)
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(3, 'p1', 0, 5)
+    expect(detailComments.value.map(comment => [comment.id, comment.parent_id]))
+      .toEqual([['root', null], ['parent', 'root'], ['reply', 'parent']])
+  })
+
+  it('deduplicates overlapping ancestor pages without replacing retained comments', async () => {
+    const reply: BoardComment = {
+      id: 'reply', post_id: 'p1', parent_id: 'parent', author: 'keeper',
+      content: 'retained reply', created_at: '2026-09-30T00:00:00Z',
+    }
+    const parent: BoardComment = { ...reply, id: 'parent', parent_id: null, content: 'parent' }
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost(), comments: [reply],
+        commentPage: { offset: 20, total: 21 } })
+      .mockResolvedValueOnce({ ...makePost(),
+        comments: [parent, { ...reply, content: 'overlapping reply' }, parent],
+        commentPage: { offset: 0, total: 20 } })
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(detailComments.value).toEqual([parent, reply])
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not fetch older pages for a focused root already in the newest page', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+      comments: [{ id: 'root', parent_id: null }],
+      commentPage: { offset: 20, total: 40 },
+    } as any)
+
+    await loadPostDetail('p1', 'root')
+
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
+    expect(detailCommentPage.value.offset).toBe(20)
+  })
+
+  it('stops searching for a missing ancestor when older pages are exhausted', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+        comments: [{ id: 'reply', parent_id: 'missing' }],
+        commentPage: { offset: 20, total: 40 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+        comments: [{ id: 'unrelated', parent_id: null }],
+        commentPage: { offset: 0, total: 40 },
+      } as any)
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    expect(detailCommentPage.value.offset).toBe(0)
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['unrelated', 'reply'])
+  })
+
+  it('does not loop or fetch unrelated pages for an already loaded ancestor cycle', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+      comments: [{ id: 'reply', parent_id: 'parent' }, { id: 'parent', parent_id: 'reply' }],
+      commentPage: { offset: 20, total: 40 },
+    } as any)
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply', 'parent'])
+  })
+
+  it('keeps a newer detail authoritative when an older ancestor page returns late', async () => {
+    let resolveOlder!: (value: Awaited<ReturnType<typeof fetchBoardPost>>) => void
+    let markOlderRequested!: () => void
+    const olderRequested = new Promise<void>(resolve => { markOlderRequested = resolve })
+    const older = new Promise<Awaited<ReturnType<typeof fetchBoardPost>>>(resolve => { resolveOlder = resolve })
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+        comments: [{ id: 'reply', parent_id: 'root' }],
+        commentPage: { offset: 20, total: 40 },
+      } as any)
+      .mockImplementationOnce(() => { markOlderRequested(); return older })
+      .mockResolvedValueOnce({ ...makePost({ id: 'p2' }),
+        comments: [{ id: 'current', parent_id: null }],
+        commentPage: { offset: 20, total: 40 },
+      } as any)
+
+    const pending = loadPostDetail('p1', 'reply')
+    await olderRequested
+    await loadPostDetail('p2', 'current')
+    resolveOlder({ ...makePost({ id: 'p1' }),
+      comments: [{ id: 'root', parent_id: null }],
+      commentPage: { offset: 0, total: 40 },
+    } as any)
+    await pending
+
+    expect(detailPost.value?.id).toBe('p2')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['current'])
+    expect(detailCommentPage.value.offset).toBe(20)
+  })
+
+  it('refuses a non-advancing ancestor page instead of repeating requests', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+        comments: [{ id: 'reply', parent_id: 'missing' }],
+        commentPage: { offset: 20, total: 40 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1' }),
+        comments: [], commentPage: { offset: 20, total: 40 },
+      } as any)
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    expect(detailPost.value?.id).toBe('p1')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(detailCommentPage.value.offset).toBe(20)
+    expect(showToast).toHaveBeenCalledWith('이전 댓글을 불러오는 데 실패했습니다', 'error')
+  })
+
   it('leaves detailPost.closed undefined for an open post', async () => {
     vi.mocked(fetchBoardPost).mockResolvedValue({
       id: 'post-open',
@@ -447,5 +582,52 @@ describe('loadPostDetail', () => {
     await loadPostDetail('post-open')
 
     expect(detailPost.value?.closed).toBeUndefined()
+  })
+})
+
+describe('focused detail continuity', () => {
+  it('retains focus across a same-route action reload and resets it for another post', async () => {
+    const reply = { id: 'reply', parent_id: 'parent' } as BoardComment
+    const parent = { id: 'parent', parent_id: null } as BoardComment
+    vi.mocked(fetchBoardPost).mockImplementation(async (id, offset) => ({
+      ...makePost({ id }), comments: offset === 0 ? [parent] : [reply],
+      commentPage: { offset: offset === 0 ? 0 : 20, total: 21 },
+    } as any))
+    await loadPostDetail('focused-post', 'reply')
+    await loadPostDetail('focused-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['parent', 'reply'])
+    expect(vi.mocked(fetchBoardPost).mock.calls.slice(-2)).toEqual([
+      ['focused-post'], ['focused-post', 0, 20],
+    ])
+    await loadPostDetail('another-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(fetchBoardPost).toHaveBeenCalledTimes(5)
+  })
+
+  it('clears retained focus for an ordinary reopen of the same post', async () => {
+    vi.mocked(fetchBoardPost).mockImplementation(async (_id, offset) => ({
+      ...makePost({ id: 'reopened-post' }),
+      comments: offset === 0 ? [{ id: 'parent', parent_id: null }] : [{ id: 'reply', parent_id: 'parent' }],
+      commentPage: { offset: offset === 0 ? 0 : 20, total: 21 },
+    } as any))
+    await loadPostDetail('reopened-post', 'reply')
+    await loadPostDetail('reopened-post', null)
+    expect(fetchBoardPost).toHaveBeenCalledTimes(3)
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('keeps the successfully read post and pages when later ancestor paging fails', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'partial-post' }), comments: [{ id: 'reply', parent_id: 'parent' }],
+        commentPage: { offset: 40, total: 41 } } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'partial-post' }), comments: [{ id: 'parent', parent_id: 'root' }],
+        commentPage: { offset: 20, total: 41 } } as any)
+      .mockRejectedValueOnce(new Error('fixture older page unavailable'))
+    await loadPostDetail('partial-post', 'reply')
+    expect(detailPost.value?.id).toBe('partial-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['parent', 'reply'])
+    expect(detailCommentPage.value).toEqual({ offset: 20, total: 41 })
+    expect(showToast).toHaveBeenCalledWith('이전 댓글을 불러오는 데 실패했습니다', 'error')
   })
 })

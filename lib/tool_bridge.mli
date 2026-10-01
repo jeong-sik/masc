@@ -85,7 +85,16 @@ val to_agent_core_typed_result :
     provider normally receives a generic projection error. A typed
     [Proven_post_effect] failure whose artifact manifest is unavailable instead
     remains an error carrying the applied-effect warning and normalized artifact
-    retrieval handles; it never becomes success or retries manifest projection.
+    retrieval handles within the caller’s typed projection ceiling. When the full
+    envelope fits, [data] preserves the complete producer recovery descriptor.
+    Otherwise [data_omitted] explicitly withholds raw producer data and
+    [artifact_refs_omitted] counts handles that cannot fit, while retaining the
+    applied/no-repeat warning and current-target recovery instruction. Oversized
+    reference previews may be omitted without changing their blob identity. It
+    never becomes success or retries manifest projection. A custom ceiling too
+    small for the fixed envelope receives a bounded plain notice; the typed
+    error remains non-recoverable. The producer owns the recovery payload;
+    the bridge does not reconstruct domain fields.
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing

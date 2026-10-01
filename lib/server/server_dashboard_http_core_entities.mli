@@ -1,3 +1,7 @@
+val namespace_pause_status_json : Workspace.config -> (Yojson.Safe.t, string) result
+(** Read current workspace pause state without recovery or a publication cache.
+    An absent document has no authoritative boolean pause state. Invalid or
+    unreadable documents return an error without changing persisted bytes. *)
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t

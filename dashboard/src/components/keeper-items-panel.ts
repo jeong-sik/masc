@@ -1,7 +1,8 @@
+import { storedTokenRevision } from '../api/token-revision'
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
-import { ApiRequestError } from '../api/core'
+import { ApiRequestError, currentStoredTokenRevision } from '../api/core'
 import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
@@ -26,10 +27,11 @@ function candle(milli: string): string {
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const authority = executionWorkspaceAuthority.value
+  const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
-  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision])
+  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision, authRevision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
@@ -38,6 +40,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
       && executionWorkspaceAuthority.peek() === authority
+      && currentStoredTokenRevision() === authRevision
     fetchKeeperItems(keeper.name, controller.signal)
       .then(value => { if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value }) })
       .catch(error => {
@@ -47,7 +50,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
         if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
-  }, [identity, authority])
+  }, [identity, authority, authRevision])
 
   const current = reading.identity === identity
     && (reading.kind === 'loading' || reading.authority === authority)

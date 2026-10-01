@@ -5,6 +5,8 @@ import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
+const fetchDashboardExecution = vi.hoisted(() => vi.fn())
+vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
 vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
@@ -13,8 +15,9 @@ vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 import { KeeperItemsPanel } from './keeper-items-panel'
 import {
   executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration,
-  resetExecutionSnapshotGeneration, serverStatus,
+  resetExecutionSnapshotGeneration, serverStatus, refreshExecution,
 } from '../store'
+import { ApiRequestError, setStoredToken, clearStoredToken } from '../api/core'
 import { parseKeeperItems, type KeeperItemsReading } from '../api/schemas/keeper-items'
 
 const keeper = (name: string, head = 'crown') => ({ name, portrait: { state: 'ready', equipment: {
@@ -58,9 +61,40 @@ beforeEach(() => {
   observeWorkspace('/fixture/workspace-a')
 })
 
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('Keeper Item tab', () => {
+  it('shows the server request reason without an internal endpoint and supports missing detail', async () => {
+    fetchKeeperItems.mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503, detail: 'ledger unreadable' }))
+      .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503 }))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Item 계정을 읽지 못했습니다: ledger unreadable')
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await screen.findByText('Item 계정을 읽지 못했습니다: 계정 요청에 실패했습니다. 다시 시도해주세요.')
+    expect(screen.queryByText(/\/api\//)).toBeNull()
+  })
+
+  it('withdraws the visible account through execution warm-up and reads the recovered workspace', async () => {
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockResolvedValueOnce(account(['crown', 'beanie'], '300'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    vi.useFakeTimers()
+    fetchDashboardExecution.mockResolvedValue({ status: { project: 'initializing' } })
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('현재 작업 공간을 확인하는 중…')
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    expect(screen.queryByText('보유 1 / 18개')).toBeNull()
+    expect(screen.queryByTestId('portrait')).toBeNull()
+    vi.useRealTimers()
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+  })
+
   it('withdraws accounts across same-project A/B/A and refuses the first A read after returning', async () => {
     const firstARefresh = pendingAccount()
     const returningA = pendingAccount()
@@ -145,6 +179,42 @@ describe('Keeper Item tab', () => {
     expect(executionWorkspaceAuthority.peek()).not.toBe(beforeReconnect)
     expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
     expect(fetchKeeperItems).toHaveBeenCalledTimes(4)
+  })
+
+  it('withdraws old accounts and rejects old-token replies without a WebSocket', async () => {
+    const oldTokenRead = pendingAccount()
+    const loggedOutRead = pendingAccount()
+    const replacementRead = pendingAccount()
+    setStoredToken('fixture-token-a')
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockReturnValueOnce(oldTokenRead.promise)
+      .mockReturnValueOnce(loggedOutRead.promise)
+      .mockReturnValueOnce(replacementRead.promise)
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText('보유 1 / 18개')).toBeTruthy()
+    const workspace = executionWorkspaceAuthority.peek()
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      clearStoredToken()
+      // Resolve before effect cleanup: token admission must reject this reply.
+      oldTokenRead.resolve(account(['crown', 'beanie', 'book'], '900'))
+      await oldTokenRead.promise
+    })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(3))
+    expect(executionWorkspaceAuthority.peek()).toBe(workspace)
+    expect(screen.queryByText(/보유/)).toBeNull()
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    await act(async () => { setStoredToken('fixture-token-b') })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(4))
+    await act(async () => {
+      loggedOutRead.reject(new Error('previous credential failure'))
+      await loggedOutRead.promise.catch(() => {})
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+    await act(async () => { replacementRead.resolve(account(['book'], '400')) })
+    expect(await screen.findByText('0.400 Candle')).toBeTruthy()
+    expect(screen.queryByText('0.900 Candle')).toBeNull()
   })
 
   it('shows observed balance, prices, ownership and equipment', async () => {

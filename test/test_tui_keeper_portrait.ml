@@ -202,6 +202,59 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   check string "unavailable snapshot removes the old picture"
     (Masc_tui_graphics.delete_image ~image_id) (frame [])
 
+let test_observed_items_remain_visible_in_the_info_mosaic () =
+  let cache = Portrait.cache () in
+  let bare = Option.get (band ~cache ()) in
+  let body = Look.body_of_name alpha in
+  let check_equipment label equipment =
+    let equipped = Option.get (band ~cache ~equipment ()) in
+    check int (label ^ ": retains the mosaic rows") bare.Portrait.box.View.rows
+      equipped.Portrait.box.View.rows;
+    check int (label ^ ": retains the mosaic columns") bare.Portrait.box.View.cols
+      equipped.Portrait.box.View.cols;
+    check bool (label ^ ": changes the observed picture") false
+      (String.equal bare.Portrait.image.Draw.rgba equipped.Portrait.image.Draw.rgba);
+    check bool (label ^ ": changes the emitted terminal cells") false
+      (bare.Portrait.lines = equipped.Portrait.lines);
+    equipped
+  in
+  let check_accessory_pixels label equipment equipped =
+    let without_accessories =
+      Draw.For_testing.render_in_frame_of body Look.bare ~frame_of:equipment
+        Draw.still equipped.Portrait.box.View.size
+    in
+    check bool (label ^ ": accessory changes pixels within the same frame") false
+      (String.equal without_accessories.Draw.rgba equipped.Portrait.image.Draw.rgba);
+    let without_accessory_cells =
+      View.lines ~project View.Mosaic equipped.Portrait.box without_accessories
+    in
+    check bool (label ^ ": accessory remains visible in terminal cells") false
+      (without_accessory_cells = equipped.Portrait.lines)
+  in
+  List.iter
+    (fun item ->
+      let equipment = Keeper_portrait_item.preview item Look.bare in
+      let label = Keeper_portrait_item.id item in
+      let equipped = check_equipment label equipment in
+      match Keeper_portrait_item.slot item with
+      | Keeper_portrait_item.Base ->
+          let expected =
+            Draw.render_compact_posed body equipment Draw.still equipped.Portrait.box.View.size
+          in
+          check string (label ^ ": keeps the compact body and dish")
+            expected.Draw.rgba equipped.Portrait.image.Draw.rgba
+      | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
+      | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
+          check_accessory_pixels label equipment equipped)
+    Keeper_portrait_item.all;
+  let outfit = { Look.bare with face = Look.Glasses; neck = Look.Scarf;
+                  head = Look.Crown; hand = Look.Book } in
+  let equipped = check_equipment "complete outfit" outfit in
+  check_accessory_pixels "complete outfit" outfit equipped;
+  let restored = Option.get (band ~cache ()) in
+  check bool "removing the outfit restores the cached compact body" true
+    (restored.Portrait.image == bare.Portrait.image)
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
@@ -211,6 +264,8 @@ let () =
         ; test_case "the band is compact" `Quick test_the_band_is_compact
         ; test_case "the still portrait the name draws" `Quick
             test_the_still_portrait_the_name_draws
+        ; test_case "observed Items remain visible in the Info mosaic" `Quick
+            test_observed_items_remain_visible_in_the_info_mosaic
         ; test_case "facts stand beside the portrait" `Quick test_facts_stand_beside_the_portrait
         ] )
     ; ( "placement"

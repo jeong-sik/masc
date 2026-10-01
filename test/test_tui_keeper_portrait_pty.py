@@ -513,10 +513,13 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            balance[0] = "14000"
             recover(process, fd, output)
-            # Release before any new Item read: otherwise the new read's
-            # generation alone would supersede this response and hide a
-            # missing authority-boundary invalidation.
+            # Revision-aware Items automatically resumes the account read on
+            # ordinary roster cadence after authority recovers. Observe the
+            # successor before releasing the older held response; neither the
+            # retained screen nor a later frame may return to that old wallet.
+            frame(process, fd, output, lambda text: b"Balance 14.000 Candle" in text)
             start = len(output)
             release.set()
             assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
@@ -525,11 +528,12 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                 lambda: identity["probes"] >= probes + 2, timeout=10)
             assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            assert b"Account unavailable:" in text
+            assert b"Balance 14.000 Candle" in text
+            assert b"Account unavailable:" not in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
-            balance[0] = "14000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            balance[0] = "15000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 15.000 Candle")
             os.write(fd, b"q")
         finally:
             release.set()
@@ -538,7 +542,6 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
-
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())

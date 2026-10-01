@@ -250,7 +250,7 @@ let with_execution_workspace f =
     remove base_path);
   (match Masc.Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Masc.Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let config = Masc.Workspace.default_config base_path in
   (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Auto_judge with
    | Ok _ -> ()
@@ -325,7 +325,7 @@ let execute_through_gate
     match Masc.Keeper_approval_queue.pending_count_for_keeper_in_workspace
             ~base_path ~keeper_name:"settlement" with
     | Ok count -> count
-    | Error error -> fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   decision, result, !dispatch_count, pending, List.rev !chunks
 ;;
@@ -522,7 +522,7 @@ let test_observed_capture_is_returned_without_second_child () =
   (match Masc.Keeper_approval_queue.pending_count_for_keeper_in_workspace
            ~base_path ~keeper_name:"settlement" with
    | Ok count -> check int "no Judge or replay is pending" 0 count
-   | Error error -> fail (Masc.Keeper_approval_queue.storage_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
   check bool "the original completed status survives" true (returned.status = Unix.WEXITED 0);
   match returned.output_files with
   | None -> fail "authorized dispatch discarded the actual captured files"

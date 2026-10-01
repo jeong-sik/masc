@@ -99,12 +99,13 @@ def run(executable, *, mode, evidence_dir=None):
 
         fixtures["/api/v1/artifacts/" + sha] = fetch
 
-    def capture(output):
+    def capture(output, *, suffix=""):
         if evidence_dir is not None:
             evidence_dir.mkdir(parents=True, exist_ok=True)
             raw = bytes(output)
-            (evidence_dir / (mode + ".ansi")).write_bytes(raw)
-            (evidence_dir / (mode + ".txt")).write_text(
+            name = mode + ("-" + suffix if suffix else "")
+            (evidence_dir / (name + ".ansi")).write_bytes(raw)
+            (evidence_dir / (name + ".txt")).write_text(
                 "\n".join(line.rstrip() for line in h.screen_text(raw).decode(errors="replace").splitlines()) + "\n")
 
     def stage(process, fd, output, base_path):
@@ -126,6 +127,22 @@ def run(executable, *, mode, evidence_dir=None):
         h.wait_for_output(process, fd, output, CHAT, start=dismissed, timeout=5)
         title_end = h.end_of_needle(output, CHAT, dismissed)
         h.wait_for_output(process, fd, output, h.FRAME_END, start=title_end, timeout=5)
+
+    def wait_for_artifact_error(process, fd, output, *, start, reason):
+        # The notice shares a 100-column footer with key hints. Its reason may
+        # be truncated; require the visible reason and artifact label together
+        # on one row of the completed retained frame instead of its hidden tail.
+        h.wait_for_output(process, fd, output, reason, start=start, timeout=5)
+        reason_end = h.end_of_needle(output, reason, start)
+        h.wait_for_output(process, fd, output, h.FRAME_END, start=reason_end, timeout=5)
+        frame_end = output.find(h.FRAME_END, reason_end) + len(h.FRAME_END)
+        rows = h.screen_rows(bytes(output[:frame_end]))
+        target = b"sent image ../../label-only.png:"
+        if not any(target in row and reason in row for row in rows.values()):
+            raise AssertionError("artifact label and rejection reason were not visible in the same completed frame")
+        if b"a=T" in output[start:frame_end]:
+            raise AssertionError("a rejected artifact emitted image bytes")
+        capture(output[:frame_end], suffix="error")
 
     def interact(process, fd, _slave, output, base_path):
         try:
@@ -185,7 +202,7 @@ def run(executable, *, mode, evidence_dir=None):
                 wait_for_image(process, fd, output, start=start, title=STAGED_NAME.encode())
                 if request_count:
                     raise AssertionError("Ctrl-O fetched an older saved image instead of the newer attachment")
-                capture(output)
+                capture(output, suffix="open")
                 dismiss_image(process, fd, output)
                 if queue is not None:
                     queue.release_first_acceptance.set()
@@ -221,21 +238,22 @@ def run(executable, *, mode, evidence_dir=None):
             elif mode in ("success", "settled-history"):
                 title = b"newer-retained.png" if settled_history else b"../../label-only.png"
                 wait_for_image(process, fd, output, start=start, title=title)
+                capture(output, suffix="open")
                 dismiss_image(process, fd, output)
             else:
                 if mode in ("malformed", "missing-envelope"):
-                    error = b"sent image response requires sha256, bytes, and content"
+                    reason = b"sent image response requires"
                 elif mode in ("wrong-digest", "wrong-bytes"):
-                    error = b"sent image response does not match its recorded artifact"
+                    reason = b"sent image response does not"
                 elif mode == "corrupt-content":
-                    error = b"sent image content does not match its recorded digest"
+                    reason = b"sent image content does not"
                 else:
-                    error = b"fixture artifact unavailable"
-                h.wait_for_output(process, fd, output, error, start=start, timeout=5)
-                if b"a=T" in output[start:]:
-                    raise AssertionError("a rejected artifact emitted image bytes")
+                    reason = b"HTTP 503: fixture artifact"
+                wait_for_artifact_error(process, fd, output, start=start, reason=reason)
                 h.send_and_wait(process, fd, output, b"still-alive", h.composer_showing(b"still-alive"))
                 h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+                if b"a=T" in output[start:]:
+                    raise AssertionError("a rejected artifact emitted image bytes before the next draft edit")
             if not (queued or delayed_history) and len(request_count) != 1:
                 raise AssertionError("one preview made duplicate artifact requests")
             capture(output)

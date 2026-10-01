@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-10-01
+
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
@@ -585,6 +587,8 @@
 - Update retained-input and FIFO PTY waits to the current compact chat status markers without changing admission, retention, identity, or ordering assertions. (#40615)
 - Open full diagnostics before verifying grouped server-batch status in the PTY test, preserving the batch-size and single-row assertions. (#40617)
 - Restore process manager compilation by explicitly matching every signal group phase instead of triggering fatal warning 4. (#40630)
+- Clear Fusion read owners, retained runs, and priority receipts when TUI workspace authority changes, preventing delayed results from reviving the previous workspace's state (#40625).
+- Restore main executable builds after decoder and runtime integration: share strict memory-health field validation, retain pre-dispatch fallback and retryable Candle appraisals, declare the TUI core dependency, and resolve Goal/log renderer variants and workspace request declaration order. (#40633, #40635)
 
 ### Performance
 
@@ -690,6 +694,8 @@
 - Run the execution warm-up browser scenario in manual Item capture, preserving its own manifest and current focused-test source receipt. (#40466)
 - Ignore delayed warm-up/error responses after a newer execution publication was accepted, preserving its Item account authority (#40466).
 - Verify that a superseded warm-up reply also preserves current Candle balance and does not schedule a stale retry. (#40466)
+- Keep the shipped commit hook free of automatic local builds (#40412).
+- Offer native Fusion qualification only with its probe, Dune target and Dockerfiles in the source-owning #40410/#40614 branch; remove the unavailable target from this workflow (#40412).
 
 ## [0.48.0] - 2026-09-29
 

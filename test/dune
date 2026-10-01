@@ -4174,6 +4174,7 @@
  (libraries
   alcotest
   masc_tui_frame
+  masc_tui_theme
   masc_tui_markdown_render_cache
   masc_tui_message_layout))
 
@@ -7942,6 +7943,10 @@
 
 (include stanzas/test_tui_prompts_layout_pty.inc)
 (include stanzas/test_tui_recorded_diff_pan_pty.inc)
+
+
+
+
 
 
 (rule

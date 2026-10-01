@@ -169,7 +169,9 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-let task_line ~cols (task : task) =
+module Task_id_set = Set.Make (String)
+
+let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -199,28 +201,58 @@ let task_line ~cols (task : task) =
     Printf.sprintf "%s%s%s %s[%s]%s " status_color
       (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
   in
-  let suffix owner =
+  let suffix status owner =
     Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
       (priority_indicator task.priority)
   in
-  (* State and priority are never shortened. The remaining cells are shared
-     by the identifier, owner and title; each identifier gets at most a third
-     before the title takes the remainder. This bounds long owner names too.
-     Goal links appear only when the full title leaves room; detail keeps all
-     identifiers. The frame and leading space consume five cells. *)
-  let available = max 0 (cols - 5) in
-  let fixed_chrome = Message_layout.display_width (prefix "")
-    + Message_layout.display_width (suffix "") in
-  let share = max 0 (available - fixed_chrome) / 3 in
+  (* Preserve the Task number before spending cells on its owner and title.
+     The canonical prefix may yield on narrow screens, but its digits do not
+     share a truncation budget with unrelated fields. *)
+  let available = max 0 (framed_inner_width cols - 1) in
   let id = Terminal_text.single_line task.id in
-  let id = fit_width id (min share (Message_layout.display_width id)) in
+  let short_id =
+    if String.starts_with ~prefix:"task-" id then
+      let digits = String.sub id 5 (String.length id - 5) in
+      if digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits then digits else id
+    else id in
+  let status =
+    let required = Message_layout.display_width (prefix "")
+      + Message_layout.display_width (suffix status "")
+      + Message_layout.display_width id + Message_layout.display_width "Task" in
+    if required <= available then status
+    else match task.status with
+      | Masc_domain.Todo -> "todo"
+      | Masc_domain.Claimed _ -> "claimed"
+      | Masc_domain.InProgress _ -> "active"
+      | Masc_domain.AwaitingVerification _ -> "verify"
+      | Masc_domain.Done _ -> "done"
+      | Masc_domain.Cancelled _ -> "cancelled"
+  in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix status "") in
+  let fields = max 0 (available - fixed_chrome) in
+  let id = if Message_layout.display_width id + Message_layout.display_width "Task" <= fields
+    then id else short_id in
+  (* A row coordinate stays distinct when an opaque ID cannot fit. The
+     original identifier remains the selection key and is readable in detail. *)
+  let id =
+    if use_ordinals || Message_layout.display_width id > fields
+       || (not (String.equal id task.id)
+           && Task_id_set.mem id task_ids)
+    then Printf.sprintf "row %d" ordinal else id
+  in
+  let remainder = max 0 (fields - Message_layout.display_width id) in
+  let title = Terminal_text.single_line task.title in
+  (* A short title needs only its measured cells. Its spare allocation can
+     show the owner instead of padding beside a shortened identity. *)
+  let title_cells = min (remainder / 2) (Message_layout.display_width title) in
   let assignee =
-    fit_width assignee (min share (Message_layout.display_width assignee))
+    fit_width assignee
+      (min (remainder - title_cells) (Message_layout.display_width assignee))
   in
   let prefix = prefix id in
-  let suffix = suffix assignee in
+  let suffix = suffix status assignee in
   let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
-  let title = Terminal_text.single_line task.title in
   let goal_tag =
     if fixed + Message_layout.display_width title
        + Message_layout.display_width goal_tag <= available
@@ -523,7 +555,8 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   (* Labeled block: the label rides the first wrapped line and continuation
      lines keep the text column, so long handoff summaries stay readable. *)
   let labeled_lines label text =
-    let width = max 10 (cols - 16) in
+    (* The final body row has cols - 8 cells, including eleven label cells. *)
+    let width = max 1 (cols - 8 - 11) in
     (* The block has rows, so a line break in the text takes one instead of
        being spelled into the sentence. Of the 718 tasks on this workspace
        406 are written with line breaks. *)
@@ -541,7 +574,8 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     List.concat_map (fun item -> labeled_lines label item) items
   in
   let body_lines =
-    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+    labeled_lines "ID" (Terminal_text.single_line task.id)
+    @ (if String.equal task.description "" then [] else labeled_lines "what" task.description)
     @ (match task.handoff_context with
        | None -> []
        | Some handoff ->
@@ -643,6 +677,17 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Overview_tasks.work_rows state.tasks in
+  let task_ids =
+    Task_id_set.of_list
+      (List.map (fun (task : Tui_decode.task) -> Terminal_text.single_line task.id) rows)
+  in
+  let ordinal_labels =
+    Task_id_set.of_list (List.mapi (fun index _ -> Printf.sprintf "row %d" (index + 1)) rows)
+  in
+  (* A canonical ID may itself occupy the row-coordinate namespace. In
+     that population every row uses its unique coordinate, so no fallback
+     can impersonate a different Task. Detail and selection retain IDs. *)
+  let use_ordinals = not (Task_id_set.disjoint task_ids ordinal_labels) in
   let selected =
     Overview_tasks.work_selected_index state.tasks
       ~selected:(Overview_tasks.selection state.task_focus)
@@ -695,7 +740,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line ~cols task in
+             let line = " " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
@@ -11652,10 +11697,17 @@ let usage_lines ~cols (state : state) =
   List.concat_map
     (fun line ->
       if String.equal line "" then [ "" ]
+      else if Message_layout.display_width line <= framed_inner_width cols then [line]
       else
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
-        |> List.mapi (fun index text ->
-             if index = 0 then text else "   " ^ text))
+        let rec leading index =
+          if index < String.length line && Char.equal line.[index] ' '
+          then leading (index + 1) else index in
+        let indent_cells = leading 0 in
+        let indent = String.make indent_cells ' ' in
+        let body = String.sub line indent_cells (String.length line - indent_cells) in
+        Message_layout.split_styled_cells
+          ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+        |> List.map (fun text -> indent ^ text))
     lines
 
 let render_metrics (state : state) =

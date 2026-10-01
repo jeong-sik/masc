@@ -1,0 +1,14 @@
+{
+  "lib/auth/auth.ml": "5d90a1a2007d2e734f56bd282ee85677ce1685c5b139e5ee035fc5d6a5d428d6",
+  "lib/auth/auth.mli": "4bb65227187dea6cbb6a7dffbe1d659bbcd776f54b3c53ce2213181fa8baa9ac",
+  "lib/auth/auth_credential_base.ml": "430f44e0d4d3de77006dd5e0eae917f839e675e2df65a188e3aea9d5663c318e",
+  "lib/auth/auth_credential_token.ml": "07445f944f90d9e9744f364cb94d50497808f1996874708feaf2925ba851b2cb",
+  "lib/auth/auth_credential_token.mli": "f2a7e48febea60d9f4bee0cdb5094ddee81594e88acf46b94e20fc7e795e939d",
+  "lib/auth/auth_login.ml": "9fcce0cc3b937941acbeedc50a4155c5e5b083d9793b7894385949842b3d530f",
+  "lib/auth/auth_login.mli": "2be115568299e58b7b3c097d67f64a1475c8549d068990605b4dc1d3699ad7b8",
+  "test/test_auth_file_backed_transaction.ml": "ef6059d4e32f599fa3529561ccfeef811d552b7473eda9e4a32d7af929f48089",
+  "test/stanzas/test_auth_file_backed_transaction.inc": "d7ce7e798ecb1ee61b344b4b066e1d5d173b39d0f660dd249d0ea1399d725b3c",
+  "test/dune": "24d17637066ee82b3069f6a8dab2dbe1220e87706bee179d7e619dc109dbb802",
+  "docs/constitution.xml": "2dc13f98c40dbafb9555f2761a9f096497cf9765def7af26f1c7374f4bea4923",
+  "changelog.d/40214.md": "c18abee171b378c8073fdf5e5b1c04eed7fc4e5fc59ae8546a133b95483fe5f4"
+}

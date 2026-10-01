@@ -3,7 +3,8 @@ import type { ComponentChildren } from 'preact'
 import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
-import { keepers } from '../store'
+import { keepers, candleObservation, executionWorkspaceAuthority } from '../store'
+import { KeeperCandleBalance } from './candle-economy'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperBadge } from './keeper-badge'
 import { KeeperPortrait } from './keeper-portrait'
@@ -96,6 +97,10 @@ export function KeeperDetailHeaderInfo({
             phaseEnteredAtSec=${phaseEnteredAtSec}
           />
         </div>
+        <${KeeperCandleBalance}
+          reading=${executionWorkspaceAuthority.value ? candleObservation.value : { status: 'unavailable', reason: 'Workspace authority is being verified' }}
+          amount=${executionWorkspaceAuthority.value ? keeper.candle_balance_milli : undefined}
+        />
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
             ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}

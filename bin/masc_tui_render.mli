@@ -1,6 +1,7 @@
 (** Screen dispatch and shared rendering projections.
-    Board list, composer and read screens are owned by
-    {!Masc_tui_render_board}. *)
+    Workspace Code drawing and its viewport are owned by {!Masc_tui_render_code};
+    Board screens by {!Masc_tui_render_board}; MCP resource reading by
+    {!Masc_tui_render_resources}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
@@ -27,8 +28,6 @@ module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
-module File_icon = Masc_tui_file_icon
-module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
@@ -93,15 +92,6 @@ val tools_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 val render_tools :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-val code_pane_content_height : Masc_tui_types.state -> int
-val code_notes_viewport : Masc_tui_types.state -> int * int
-(** Wrapped memo row count and visible row count at the current file-pane
-    width. Memo navigation and drawing use the same physical rows. *)
-val code_history_viewport : Masc_tui_types.state -> int * int
-(** Physical history row count and visible row budget at the file-pane width. *)
-val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
-(** The record owning the top visible row. Coverage and failure rows have no
-    record and cannot be opened by Enter. *)
 val config_content_height : Masc_tui_types.state -> int
 val prompts_detail_viewport : Masc_tui_types.state -> int * int
 (** Wrapped selected prompt/asset row count and the detail's visible rows.
@@ -128,6 +118,15 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val task_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped physical row count and visible body height for the current Task
+    reading, including its metadata and the actual split-pane width. *)
+val planning_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical row count and reader height of the current Goal detail,
+    including its pinned action rows and actual split-pane width. *)
+val agenda_scroll_position : Masc_tui_types.state -> int
+(** The scroll currently drawn, following a selected target only during
+    target navigation. Page reading retains its own window. *)
 val presets_viewport : Masc_tui_types.state -> int * int
 (** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
@@ -152,7 +151,7 @@ val frame_choice :
 val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
-  Masc_tui_types.approval_row option *
+  Masc_tui_approvals_model.approval_row option *
   Masc_tui_press.press_target Masc_tui_hit.zones
 (** The frame without press marks, and where each marked text landed in it.
     Commit the zones only once the terminal accepts the frame. *)
@@ -166,8 +165,6 @@ val browser_lane_selection_scroll :
   Masc_tui_types.Browser_lane_view.t -> int
 (** Reveal the selected node's first wrapped row after explicit selection. *)
 
-val ask_question_scroll_limit : Masc_tui_types.state -> int
-val ask_question_page_size : Masc_tui_types.state -> int
 
 val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int

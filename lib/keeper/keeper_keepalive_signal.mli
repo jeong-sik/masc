@@ -148,6 +148,7 @@ val wakeup_keeper :
   string -> unit
 
 val wakeup_relevant_keeper_for_board_signal :
+  ?dispatch_attention:(Keeper_board_attention_candidate.candidate list -> unit) ->
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 (** Route typed immediate audiences to durable Keeper stimulus queues.
     Discoverable posts have no immediate recipient, so their durable Board

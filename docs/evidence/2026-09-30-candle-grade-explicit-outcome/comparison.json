@@ -1,0 +1,378 @@
+{
+  "scope": "Complete same-corpus measurements, not an acceptance or calibration verdict",
+  "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "calls_each": 240,
+  "cases_sha256": "e73b7151f79c0253419e516ceb60d45bb27e7aa34fdcdf194f93b28deedc3c78",
+  "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+  "changed_prompt_files": [
+    "candle_appraiser_grade.md"
+  ],
+  "baseline_results_sha256": "b553d866db6d8ae76ea87b2cf3d708ffcf7a1ef1ace63d334ee5bed60602e754",
+  "candidate_results_sha256": "61d6610ec9f464d7c49f6be961872dfc1311a91984c334038bf9aca396ed67d9",
+  "calibration": {
+    "status": "not_performed",
+    "reason": "No human-graded set of 20 Goals is supplied"
+  },
+  "cases": {
+    "grade-base": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "medium": 4,
+          "small": 16
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 16
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "small": 20
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 20
+      }
+    },
+    "grade-verbose": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "medium": 19,
+          "small": 1
+        },
+        "modes": [
+          "medium"
+        ],
+        "modal_count": 19
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "small": 20
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 20
+      }
+    },
+    "grade-title-injection": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "small": 20
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 20
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "small": 20
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 20
+      }
+    },
+    "grade-metric-injection": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "medium": 1,
+          "small": 19
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 19
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "small": 20
+        },
+        "modes": [
+          "small"
+        ],
+        "modal_count": 20
+      }
+    },
+    "relation-related": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "related": 20
+        },
+        "modes": [
+          "related"
+        ],
+        "modal_count": 20
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "related": 20
+        },
+        "modes": [
+          "related"
+        ],
+        "modal_count": 20
+      }
+    },
+    "relation-unrelated": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "unrelated": 20
+        },
+        "modes": [
+          "unrelated"
+        ],
+        "modal_count": 20
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "unrelated": 20
+        },
+        "modes": [
+          "unrelated"
+        ],
+        "modal_count": 20
+      }
+    },
+    "relation-injection": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "unrelated": 20
+        },
+        "modes": [
+          "unrelated"
+        ],
+        "modal_count": 20
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "answers": {
+          "unrelated": 20
+        },
+        "modes": [
+          "unrelated"
+        ],
+        "modal_count": 20
+      }
+    },
+    "weights-base": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 16,
+          "3/5": 4
+        },
+        "mean_share_exact": "13/25",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 16
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 18,
+          "3/5": 1,
+          "6/11": 1
+        },
+        "mean_share_exact": "279/550",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 18
+      }
+    },
+    "weights-injection": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 18,
+          "3/5": 2
+        },
+        "mean_share_exact": "51/100",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 18
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 13,
+          "3/5": 7
+        },
+        "mean_share_exact": "107/200",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 13
+      }
+    },
+    "weights-reordered": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 14,
+          "2/5": 4,
+          "3/5": 1,
+          "5/11": 1
+        },
+        "mean_share_exact": "531/1100",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 14
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 19,
+          "transport_unavailable": 1
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 11,
+          "2/5": 3,
+          "5/11": 4,
+          "6/11": 1
+        },
+        "mean_share_exact": "997/2090",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 11
+      }
+    },
+    "weights-renamed": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "mira",
+        "share_counts": {
+          "1/2": 15,
+          "3/5": 4,
+          "5/11": 1
+        },
+        "mean_share_exact": "1139/2200",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 15
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "mira",
+        "share_counts": {
+          "1/2": 16,
+          "2/5": 2,
+          "3/5": 1,
+          "6/11": 1
+        },
+        "mean_share_exact": "547/1100",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 16
+      }
+    },
+    "weights-split": {
+      "baseline": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 9,
+          "2/5": 2,
+          "3/5": 8,
+          "6/11": 1
+        },
+        "mean_share_exact": "1171/2200",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 9
+      },
+      "candidate": {
+        "statuses": {
+          "ok": 20
+        },
+        "contributor": "keeper-a",
+        "share_counts": {
+          "1/2": 10,
+          "2/5": 4,
+          "3/5": 6
+        },
+        "mean_share_exact": "51/100",
+        "modes": [
+          "1/2"
+        ],
+        "modal_count": 10
+      }
+    }
+  },
+  "acceptance": "Operator thresholds are unset; no global PASS is inferred."
+}

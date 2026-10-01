@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { focusedCommentNeedsAncestors } from './comment-context'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
@@ -28,8 +29,10 @@ import {
   detailComments,
   detailCommentPage,
   detailLoading,
+  detailReadPhase,
   detailLoadingOlder,
   detailPostId,
+  detailFocusedCommentId,
   loadOlderPostComments,
   commentText,
   commentSubmitting,
@@ -88,6 +91,28 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
       roots.push(c)
     }
   }
+  // A recently active reply keeps its entire thread in the newest-root window.
+  // Resolve each parent chain once; missing parents remain visible root rows.
+  const byId = new Map(comments.map(comment => [comment.id, comment]))
+  const rootIds = new Map<string, string | null>()
+  const visiting = new Set<string>()
+  const rootFor = (id: string): string | null => {
+    if (rootIds.has(id)) return rootIds.get(id) ?? null
+    if (visiting.has(id)) return null
+    visiting.add(id)
+    const comment = byId.get(id)
+    const root = comment?.parent_id && byId.has(comment.parent_id)
+      ? rootFor(comment.parent_id) : id
+    visiting.delete(id)
+    rootIds.set(id, root)
+    return root
+  }
+  const latest = new Map<string, number>()
+  comments.forEach((comment, index) => {
+    const root = rootFor(comment.id)
+    if (root !== null) latest.set(root, index)
+  })
+  roots.sort((left, right) => (latest.get(left.id) ?? 0) - (latest.get(right.id) ?? 0))
   return { roots, childrenMap }
 }
 
@@ -494,7 +519,7 @@ function CommentRouteFocusPanel({
               COMMENT ${commentId}
             </span>
             <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">
-              ${comment ? `author ${authorLabel}` : 'comment not loaded'}
+              ${comment ? `author ${authorLabel}` : detailLoading.value ? 'loading comment' : 'comment not found in this thread snapshot'}
             </span>
           </div>
         </div>
@@ -544,7 +569,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
   useEffect(() => {
     if (detailPostId.value !== post.id
-      || (focusedCommentId && !detailComments.value.some(comment => comment.id === focusedCommentId))) {
+      || detailFocusedCommentId.value !== focusedCommentId
+      || detailReadPhase.value === 'failed'
+      || (focusedCommentId && !detailLoading.value && detailCommentPage.value.offset > 0
+        && detailComments.value.some(comment => comment.id === focusedCommentId)
+        && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)
     }
   }, [post.id, focusedCommentId])

@@ -521,6 +521,33 @@ let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
        (A.candidate_id_of_signal ~keeper_name:"alpha" second))
 ;;
 
+(* A purged keeper's Board attention ledgers go with it: a same-name successor
+   must not inherit another keeper's Ready roots and quarantines. The plan
+   names both ledgers, and the path the purge removes is the file [record]
+   wrote. *)
+let test_purge_removes_both_board_attention_ledgers () =
+  let module Shutdown = Masc.Keeper_shutdown_types in
+  let plan =
+    Shutdown.dashboard_purge_artifact_plan
+      ~keeper_name:"alpha"
+      { Shutdown.requested_name = "alpha" }
+  in
+  Alcotest.(check bool)
+    "plan removes the candidate ledger"
+    true
+    (List.exists (fun entry -> entry = Shutdown.Keeper_board_attention_candidates_artifact) plan);
+  Alcotest.(check bool)
+    "plan removes the partition ledger"
+    true
+    (List.exists (fun entry -> entry = Shutdown.Keeper_board_attention_partitions_artifact) plan);
+  with_temp_base "board-attention-candidate-ledger-path" @@ fun base_path ->
+  ignore (record ~base_path (candidate (signal "post-ledger-path")));
+  Alcotest.(check bool)
+    "the ledger path is the file record wrote"
+    true
+    (Sys.file_exists (A.ledger_path ~base_path ~keeper_name:"alpha"))
+;;
+
 let test_edit_candidates_preserve_revision_identity () =
   with_temp_base "board-edit-candidates" @@ fun base_path ->
   let edited at =
@@ -1244,6 +1271,10 @@ let () =
             "an unreadable row does not hide the rest"
             `Quick
             test_unreadable_row_does_not_hide_the_rest
+        ; Alcotest.test_case
+            "a keeper purge removes both Board attention ledgers"
+            `Quick
+            test_purge_removes_both_board_attention_ledgers
         ; Alcotest.test_case
             "codec and context identity are strict"
             `Quick

@@ -15,7 +15,7 @@ const catalog = Object.entries({
   ...(id === 'crown' ? { price_milli: '200' } : {}),
 })))
 function account(owned, price) {
-  return { status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: owned,
+  return { status: 'ready', account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: owned,
     catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: price } : item) }
 }
 function gate() {
@@ -45,7 +45,7 @@ try {
       url: request.url(), error: request.failure()?.errorText ?? null,
     })
   })
-  await page.route('**/api/v1/keepers/rondo/items', async route => {
+  await page.route('**/api/v1/keepers/rondo/items?*', async route => {
     const reply = replies[requests.length]
     if (!reply) { errors.push('Unexpected additional Item read'); await route.abort(); return }
     const receipt = { index: requests.length + 1, root: reply.root,
@@ -65,6 +65,10 @@ try {
     } finally { reply.gate?.markFinished() }
   })
   await page.route('**/api/v1/keepers/rondo/portrait.png?*', route => route.fulfill({ status: 503 }))
+  await page.route('**/api/v1/dashboard/execution?force=1', async route => {
+    const snapshot = await page.evaluate(() => window.updateKeeperItemsWorkspaceFixture())
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshot) })
+  })
   async function absent(text) {
     if (await page.getByText(text, { exact: true }).count()) throw new Error(`Stale Item value visible: ${text}`)
   }
@@ -86,7 +90,7 @@ try {
   if (await page.getByText('착용 중', { exact: true }).count() !== 1) throw new Error('Fixed outfit marker missing')
   await capture('a-desktop')
   await capture('a-mobile', 360, 844)
-  const heldRead = page.waitForRequest('**/api/v1/keepers/rondo/items')
+  const heldRead = page.waitForRequest('**/api/v1/keepers/rondo/items?*')
   await page.getByRole('button', { name: '새로고침', exact: true }).click()
   await heldRead
   await oldA.started
@@ -98,7 +102,7 @@ try {
   await absent('0.200 Candle')
   await capture('b-desktop')
   await capture('b-mobile', 360, 844)
-  const returningRead = page.waitForRequest('**/api/v1/keepers/rondo/items')
+  const returningRead = page.waitForRequest('**/api/v1/keepers/rondo/items?*')
   await workspace('/fixture/keeper-items')
   await returningRead
   await currentA.started
@@ -128,7 +132,7 @@ try {
   if (requests.length !== 4) throw new Error(`Expected four scoped account reads, got ${requests.length}`)
   if (errors.length) throw new Error(`Browser fixture errors: ${errors.join(' | ')}`)
   await writeFile(`${artifactDir}/workspace-manifest.json`, JSON.stringify({
-    scope: 'Item component in a controlled workspace fixture; synthetic account responses, not production',
+    scope: 'CI preview Item component in a controlled workspace fixture; synthetic account responses, not production',
     source_sha: process.env.GITHUB_SHA ?? null, fixture_url: fixtureUrl, browser_version: browser.version(),
     fixed: { keeper: 'rondo', balance_milli: '800', head: 'crown', project: 'keeper-items-fixture' },
     transitions, requests, failures, captures, errors,

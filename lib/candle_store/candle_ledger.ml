@@ -101,15 +101,56 @@ let observe_settlement ~path error =
 
 (* A row is one JSON line. A complete store ends with a newline, so the piece
    after the last one is empty. *)
+module Goal_records = Map.Make (String)
+
+let record_goal (event : Candle_event.t) =
+  match event.body with
+  | Candle_event.Snapshot s -> Some s.goal_id
+  | Candle_event.Payout_owed p -> Some p.goal_id
+  | Candle_event.Candidates c -> Some c.goal_id
+  | Candle_event.Paid p -> Some p.identity.goal_id
+  | Candle_event.Unattributed u -> Some u.goal_id
+  | Candle_event.Payout_failed f -> Some f.goal_id
+  | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ -> None
+;;
+
+let remember records event =
+  match record_goal event with
+  | None -> records
+  | Some goal_id ->
+    let reversed = match Goal_records.find_opt goal_id records with
+      | Some events -> events | None -> [] in
+    Goal_records.add goal_id (event :: reversed) records
+;;
+
+(* Payout admission depends only on the same Goal's preceding records. Keep
+   their file order without rescanning unrelated payouts and purchases. *)
+let validate_record records (event : Candle_event.t) =
+  let admission = match event.body with
+    | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _ ->
+      let preceding = match record_goal event with
+        | None -> []
+        | Some goal_id ->
+          match Goal_records.find_opt goal_id records with
+          | None -> [] | Some reversed -> List.rev reversed in
+      Candle_payout.validate_record preceding event.body
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ -> Ok () in
+  Result.map (fun () -> remember records event) admission
+;;
+
 let parse_rows ~path bytes =
-  let rec go line_number acc = function
+  let rec go line_number records acc = function
     | [] | [ "" ] -> Ok (List.rev acc)
     | line :: rest ->
       (match Candle_event.of_line line with
-       | Ok event -> go (line_number + 1) (event :: acc) rest
+       | Ok event ->
+         (match validate_record records event with
+          | Ok records -> go (line_number + 1) records (event :: acc) rest
+          | Error detail -> Error (Row_rejected { path; line_number; detail }))
        | Error detail -> Error (Row_rejected { path; line_number; detail }))
   in
-  go 1 [] (String.split_on_char '\n' bytes)
+  go 1 Goal_records.empty [] (String.split_on_char '\n' bytes)
 ;;
 
 type snapshot_outcome =
@@ -185,15 +226,21 @@ let append ~path cursor suffix =
        | Other_failure -> Append_failed (store_error error)))
 ;;
 
-let encode events =
-  List.fold_left
-    (fun acc event ->
-       Result.bind acc (fun lines ->
-         Result.map (fun line -> line :: lines) (Candle_event.to_line event)))
-    (Ok [])
-    events
-  |> Result.map (fun lines ->
-    String.concat "" (List.rev_map (fun line -> line ^ "\n") lines))
+let encode ~preceding events =
+  let rec go records lines = function
+    | [] -> Ok (String.concat "" (List.rev_map (fun line -> line ^ "\n") lines))
+    | (event : Candle_event.t) :: rest ->
+      let arithmetic = match event.body with
+        | Candle_event.Paid payment -> Candle_payment.validate_for_append payment
+        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+        | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+        | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _ -> Ok () in
+      Result.bind arithmetic (fun () ->
+        Result.bind (validate_record records event) (fun records ->
+          Result.bind (Candle_event.to_line event) (fun line ->
+            go records (line :: lines) rest)))
+  in
+  go (List.fold_left remember Goal_records.empty preceding) [] events
 ;;
 
 let rec update ~base_path decide =
@@ -205,7 +252,7 @@ let rec update ~base_path decide =
      | Error error -> Error (Refused error)
      | Ok ([], result) -> Ok result
      | Ok ((_ :: _ as events), result) ->
-       (match encode events with
+       (match encode ~preceding:view.events events with
         | Error detail -> Error (Event_unwritable detail)
         | Ok suffix ->
           (match append ~path view.cursor suffix with

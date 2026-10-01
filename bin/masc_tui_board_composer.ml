@@ -66,25 +66,18 @@ let format_addressing_hint ~max_cells kind =
         Ansi.reset
   | Mentions targets ->
       let target_str = String.concat ", @" targets in
-      let max_target_len = max 10 (max_cells - 45) in
-      let truncated_targets =
-        if Masc_tui_message_layout.display_width target_str > max_target_len then
-          let rec fit len =
-            if len <= 0 then "..."
-            else
-              let sub = String.sub target_str 0 len in
-              if Masc_tui_message_layout.display_width (sub ^ "...") <= max_target_len then
-                sub ^ "..."
-              else
-                fit (len - 1)
-          in
-          fit (String.length target_str)
-        else
-          target_str
+      let prefix = "  [Mentions: @" in
+      let suffix = " -> notifies targeted keepers]" in
+      let cells = Masc_tui_message_layout.display_width in
+      let target_cells = max 0 (max_cells - cells prefix - cells suffix) in
+      let fit text width =
+        if cells text <= width then text
+        else Masc_tui_message_layout.fit_width text width
       in
-      Printf.sprintf "  %s[Mentions: @%s -> notifies targeted keepers]%s"
+      let line = prefix ^ fit target_str target_cells ^ suffix in
+      Printf.sprintf "%s%s%s"
         (Masc_tui_theme.tone Masc_tui_theme.Accent)
-        truncated_targets
+        (fit line (max 0 max_cells))
         Ansi.reset
   | Unsupported_broadcast selectors ->
       Printf.sprintf "  %s[Warning: unsupported broadcast @@%s (use @@all)]%s"

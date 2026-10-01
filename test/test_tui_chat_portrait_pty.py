@@ -408,6 +408,9 @@ def running_turn_keeps_the_portrait(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         try:
             open_chat(process, fd, output)
+            # Motion steps are carried by the diagnostic progress row.
+            # Select Full explicitly before measuring its redraws.
+            h.send_and_wait(process, fd, output, b"\x04\x04", b"tools:full")
             pictures = png_transfers(bytes(output))
             assert pictures, "chat sent no keeper portrait"
             row, column, alpha = pictures[-1]

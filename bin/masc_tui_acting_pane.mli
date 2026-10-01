@@ -181,6 +181,9 @@ type input = {
   keepers : keeper list option;
       (** [None] until this workspace's keeper files have been read: the header
           says the roster is not loaded rather than counting no keepers *)
+  trace_unavailable : (string * string) list;
+      (** Named identity failures in event attribution, independent of roster
+          completeness and lifecycle state. Fleet rows remain navigable. *)
   keepers_error : string option;
       (** A failed read makes the count unavailable. Retained rows remain
           usable for navigation; their presence does not prove a full count. *)
@@ -337,3 +340,7 @@ val legend : cols:int -> string
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)
+
+val trace_unavailable_summary : (string * string) list -> string option
+(** One summary row; complete reasons remain in each Keeper's scrollable
+    Info / Metadata reading and in the pane's scrollable failure rows. *)

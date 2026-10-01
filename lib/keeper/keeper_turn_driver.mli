@@ -482,6 +482,16 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
+  val official_client_observation :
+    runtime_id:string ->
+    model_id:string ->
+    prompt_sent_at:float option ->
+    now:float ->
+    (Runtime_agent.run_result, Agent_core.Error.t) result ->
+    Runtime_observation.runtime_observation option
+  (** Successful observations pass through unchanged. A failure is observed only
+      after the official client has reported transmitting the prompt. *)
+
   val apply_official_client_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

@@ -225,6 +225,7 @@ let render_family =
   [ "bin/masc_tui_render.ml"
   ; "bin/masc_tui_render_prim.ml"
   ; "bin/masc_tui_render_chat.ml"
+  ; "bin/masc_tui_render_approvals.ml"
   ]
 
 let test_the_drawing_does_not_measure_the_body_itself () =

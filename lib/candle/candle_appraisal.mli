@@ -13,7 +13,13 @@ type request =
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation
   | Weights_decided of (string * int) list
 type answer = { decision : decision; trace : trace }
-type error = Transport_unavailable of string | Invalid_response of string
+type error =
+  | Transport_unavailable of string
+  | Invalid_response of string
+  | Execution_rejected of string
+      (** A typed request, authentication or configuration refusal prevents
+          the declared executions from serving this request. Keep the obligation pending and await a
+          change event instead of replaying the same appraisal on a pulse. *)
 type runner = identity:identity -> request -> (answer, error) result
 val stage : request -> string
 val input : request -> Yojson.Safe.t

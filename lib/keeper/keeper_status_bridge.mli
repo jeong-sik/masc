@@ -52,7 +52,7 @@ val runtime_blocker_fields_json :
 
 type approval_queue_attention =
   | Approval_queue_ready of int
-  | Approval_queue_unavailable of Keeper_approval_queue.storage_error
+  | Approval_queue_unavailable of Keeper_approval_queue_result.storage_error
 
 val attention_fields_json_with_approval_queue :
   Workspace_utils.config ->

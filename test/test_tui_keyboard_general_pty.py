@@ -33,10 +33,13 @@ SOURCE_MODULES = (
     'bin/masc_tui_identity_updates.mli',
     'bin/masc_tui_identity_requests.ml',
     'bin/masc_tui_identity_requests.mli',
+    'bin/masc_tui_next_request_band.ml',
 )
 
 if __name__ == "__main__":
     started = time.monotonic()
-    keyboard.run_keyboard_regression(os.path.abspath(sys.argv[1]), group=0)
+    executable = os.path.abspath(sys.argv[1])
+    keyboard.run_next_request_readability_regression(executable)
+    keyboard.run_keyboard_regression(executable, group=0)
     finished = time.monotonic()
     print(f"tui keyboard general PTY regression: PASS start={started:.6f} end={finished:.6f}")

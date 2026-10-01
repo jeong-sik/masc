@@ -194,6 +194,8 @@
   masc_random_id
   masc_workspace
   masc_goal
+  masc_candle
+  masc_candle_config
   masc_candle_runtime
   masc_turn
   masc.masc_tool_dispatch

@@ -1,0 +1,58 @@
+{
+  "algorithm": "sha256",
+  "scope": "Assigned PR40241 publication source/evidence; manifest excludes itself",
+  "files": [
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "sha256": "843b3408805a3ab8378ab9e0b2375633c62faf88ad6146dd7af04d92598ed1ea"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.ts",
+      "sha256": "e656592642e05cdd20d48ee7e8539b92c28a2c780d079555805430822859a5fe"
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.ts",
+      "sha256": "f8a86378f5c6570b737f65701435ba02745636242b295ba57efdd85943d49279"
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.test.ts",
+      "sha256": "fe85585d123763fab414bf39a2baaf9985ae82c4eb3332020bb36dc70b8ed99a"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.test.ts",
+      "sha256": "4eb03f364523a83c40cbe6f4866cb611bfb9b318732ea6106d967d8e7008dbdd"
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.test.ts",
+      "sha256": "0a17d57c9434da43f362419a46c0e4827490c19f115601fb6aeb00b1f0b6dc8c"
+    },
+    {
+      "path": "changelog.d/40241.md",
+      "sha256": "1090e7d6dc5c4ffb23bcf7c3f4e62e1c8e646899d737e8722b06a8e78e6d037f"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/README.md",
+      "sha256": "cb3204f7d12166e2ecf39a356f5d8135c18ee642b4bb79ad2cb1c75e0ccb3b0d"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/composition.json",
+      "sha256": "b786d782a5722a565c427021e76c8a96ea8877c3daee405ba8648f09a1618d55"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/parent-bundle-failure.json",
+      "sha256": "993ce17d51ad4704124b88896df565bc2bc18044c0abd188e6516b47827bc1df"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/parent-bundle-job.log.gz",
+      "sha256": "65b665ab065b57a728c719a763e2ff1a31230b75656ade6b64c202b751546ea4"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/source-boundary.json",
+      "sha256": "398c3a8c6e947335cb54b88905fd13b9fd17025ae8e499ca95ed7c0a87c900ce"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/source-checks.json",
+      "sha256": "cf7ccd7e82daacac6e3fcf58d121b0ef7b57a8abc238b5847339969044b235c6"
+    }
+  ]
+}

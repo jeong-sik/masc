@@ -21,26 +21,52 @@ type task = {
           projected field. *)
 }
 
-type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+type keeper_origin =
+  | Persisted_keeper
+  | Declared_keeper of Keeper_declared_roster.requirement list
+  | Remote_keeper
 
-type keeper = {
-  k_origin : keeper_origin;
-  k_name : string;
+type keeper_identity = {
   k_trace_id : string;
-  k_paused : bool;
+  k_created_at : string;
+  k_updated_at : string;
+}
+
+type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
-      (** What the last proactive cycle came to, as the contract types it;
-          [None] for a declared keeper that has no runtime yet. Kept typed so
+      (** What the last proactive cycle came to, as the contract types it.
+          Kept typed so
           the screen names it in words: as a string it was the wire token
           ("never_started"), the one spelling no surface uses. *)
-  k_created_at : string;
-  k_updated_at : string;
 }
+
+type keeper = {
+  k_origin : keeper_origin;
+  k_name : string;
+  k_paused : bool;
+  k_identity : (keeper_identity, string) result;
+      (** A metadata failure withdraws trace attribution and timestamps, not
+          the independently observed Keeper name or lifecycle controls. *)
+  k_activity : keeper_activity option;
+      (** The public roster does not publish lifetime usage or current task.
+          Absence is an unavailable observation, never a zero measurement. *)
+}
+
+val keeper_trace_id : keeper -> (string, string) result
+(** Trace identity or the original metadata failure. *)
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+(** Independently readable identities and named failures, in roster order.
+    Failed identities never supply a correlation binding. *)
+val keeper_trace_projection : keeper list -> keeper_trace_projection
 
 (** Where a goal stands with the completion judge.
 
@@ -303,412 +329,6 @@ type system_log_snapshot = {
   sys_latest_seq : int;
 }
 
-(** A registered tool, as the inventory lists it. *)
-type tool_entry = {
-  tl_name : string;
-  tl_description : string;
-  tl_surfaces : string list;
-      (** Where the tool is visible: the MCP surface, keeper projections, and
-          so on. Empty means registered and projected nowhere. *)
-  tl_direct_call : bool;
-}
-
-type inventory_freshness =
-  | Warming
-      (** The server answered with its warming placeholder: it has not built
-          the inventory yet, so the empty list beside this is not an answer
-          about how many tools exist. *)
-  | Settled
-      (** The server answered from a built inventory. An empty list here does
-          mean no tools. *)
-
-(** Where one tool on the keeper's effective surface came from, as
-    [origin.kind] names it. Only a composition skill carries
-    [origin.skill_provenance], and it always carries the key: [skill_source_id]
-    is read from [skill_provenance.identity.source_id], and is [None] when the
-    producer sent [null] because it could not resolve the provenance. *)
-type effective_tool_origin =
-  | Descriptor_origin
-  | Instruction_skill_origin
-  | Composition_skill_origin of { skill_source_id : string option }
-  | Composition_control_origin
-  | Unrecognised_origin of string
-      (** A kind this build does not know, kept as the server spelled it so
-          the Tools column still draws it and the rest of the surface still
-          loads. Its provenance is not read. *)
-
-val effective_tool_origin_kind : effective_tool_origin -> string
-(** The [origin.kind] word the server sent. *)
-
-type effective_tool = {
-  et_name : string;
-  et_origin : effective_tool_origin;
-}
-
-type effective_tool_delivery =
-  | Effective_tools_delivered
-  | Effective_tools_suppressed_runtime_unsupported
-
-type skill_flow_dependency = {
-  sfd_node_id : string;
-  sfd_kind : string;
-}
-
-type skill_flow_node = {
-  sfn_id : string;
-  sfn_tool_name : string;
-  sfn_dependencies : skill_flow_dependency list;
-  sfn_batch_index : int;
-  sfn_execution_mode : string;
-}
-
-type skill_flow_batch = {
-  sfb_index : int;
-  sfb_execution_mode : string;
-  sfb_node_ids : string list;
-}
-
-type skill_flow = {
-  sf_nodes : skill_flow_node list;
-  sf_batches : skill_flow_batch list;
-}
-
-type skill_usage_row = {
-  su_keeper : string;
-  su_invocations : int;
-  su_deliveries : int;
-  su_actions : int;
-  su_last_used_at : string option;
-}
-
-type skills_catalog_surface = {
-  scs_name : string;
-  scs_kind : string;
-  scs_usage : skill_usage_row list;
-  scs_flow : skill_flow option;
-}
-
-type skill_rejection_diagnostic = {
-  srd_diagnostic : Agent_core.Skill_document.diagnostic;
-  srd_message : string;
-}
-
-type skill_rejection_reason =
-  | Skill_document_rejected of skill_rejection_diagnostic list
-  | Skill_document_unreadable
-  | Skill_exact_identity_duplicate
-  | Skill_invalid_package_id
-
-type skill_catalog_rejection = {
-  scr_source_index : int;
-  scr_source_id : string;
-  scr_package_id : string option;
-  scr_content_revision : string option;
-  scr_reason : skill_rejection_reason;
-}
-
-(** Where a configured Skill source stood when the catalog was built.
-
-    A source that is not [Skill_source_ready] contributes nothing, which is
-    the fact an operator asking "why is my Skill not loaded" needs first and
-    the one the screen could not answer: the catalog surfaces name skills,
-    never the roots they were looked for under. *)
-type skill_source_observation =
-  | Skill_source_ready of int
-      (** Candidate directories under the source root. Each is one Skill:
-          the scan is one level deep and reads that directory's SKILL.md. *)
-  | Skill_source_missing
-  | Skill_source_not_directory of string  (** The file kind found instead. *)
-  | Skill_source_unavailable of string  (** The operation that failed. *)
-  | Skill_source_unresolved
-      (** The configured anchor or path was refused, so no root was tried. *)
-
-type skill_catalog_source = {
-  scso_id : string;
-  scso_anchor : string;
-  scso_path : string option;
-      (** Configured path under the anchor. [None] for an absolute source,
-          whose location the server deliberately does not publish. *)
-  scso_access : string;
-  scso_observation : skill_source_observation;
-}
-(** One entry of the ordered discovery list, in the order it is consulted.
-    Earlier sources win, so the order is what decides which copy of a name
-    is effective. *)
-
-(** The [runtime.toml] Skill section as the catalog read it. *)
-type skill_catalog_config =
-  | Skill_config_configured of
-      { revision : string
-      ; resource_read_max_bytes : int option
-      }
-  | Skill_config_rejected of
-      { source_revision : string
-      ; diagnostics : string list
-      }
-      (** The section did not parse. The catalog still stands, on whatever
-          the defaults give, and nothing on screen used to say so. *)
-  | Skill_config_unreadable
-
-type skills_catalog_state =
-  | Skills_ready
-  | Skills_not_registered
-  | Skills_uninitialized
-  | Skills_invalid_workspace
-
-(** Coverage of current Keeper trace activation ledgers, not lifetime usage. *)
-type skill_usage_coverage = {
-  suc_ledgers_loaded : int;
-  suc_unavailable : string list;
-}
-
-(** One Skill name two catalog entries declare. The first entry for the name
-    in catalog order wins (Skill_catalog_snapshot.effective_projection):
-    [scsh_winner]. The two can sit in different sources, or in one source
-    whose directory names normalize to the same Skill name. A Keeper turn that
-    lists Skills by name gets the winner, when the winner loads;
-    [scsh_shadowed] is published but reaches a turn only when a Task names its
-    exact reference. Both carry the same name and differ in identity. *)
-type skill_catalog_shadow = {
-  scsh_winner : Skill_reference.identity;
-  scsh_shadowed : Skill_reference.identity;
-}
-
-type skills_catalog = {
-  sc_state : skills_catalog_state;
-  sc_config : skill_catalog_config option;
-      (** [None] for every state but [Skills_ready], which is the only one
-          that carries a snapshot. *)
-  sc_sources : skill_catalog_source list;
-  sc_surfaces : skills_catalog_surface list;
-  sc_rejections : skill_catalog_rejection list;
-  sc_shadows : skill_catalog_shadow list;
-  sc_usage_coverage : skill_usage_coverage option;
-}
-
-val skills_catalog_state_to_string : skills_catalog_state -> string
-val skill_diagnostic_code_to_string :
-  Agent_core.Skill_document.diagnostic -> string
-
-type effective_skill_load_reason =
-  | Skill_catalog_default
-  | Skill_keeper_profile
-  | Skill_task of string
-
-type effective_skill_profile = {
-  esp_reference : Skill_reference.t;
-  esp_name : string;
-  esp_kind : string;
-  esp_execution : string;
-  esp_body_bytes : int;
-  esp_discovery_bytes : int;
-  esp_load_reasons : effective_skill_load_reason list;
-  esp_node_count : int;
-  esp_batch_count : int;
-  esp_max_parallelism : int;
-  esp_flow : skill_flow option;
-}
-
-type configured_skill_name_unavailable = {
-  csn_name : string;
-  csn_reason : string;
-}
-(** A Skill name the Keeper profile selected that the turn's catalog does not
-    hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
-
-type effective_tool_surface =
-  | Effective_surface_available of {
-      ets_keeper_name : string;
-      ets_runtime_id : string;
-      ets_official_client_kind : string;
-      ets_tool_delivery : effective_tool_delivery;
-      ets_native_posture : string option;
-      ets_skill_snapshot_revision : string;
-      ets_skill_resource_read_max_bytes : int option;
-      ets_instruction_skills : Skill_reference.t list;
-      (* Documents the catalog could not read. Beside the skills rather than
-         missing from them: a skill left out is absent from what the Keeper
-         can call, and absence with no reason reads as a skill nobody
-         wrote. *)
-      ets_skills_left_out : string list;
-      (* Names the profile selected and the turn catalog does not carry. The
-         dashboard draws these under "Unavailable Skills"; the TUI reads the
-         same list so both renderers of this surface say it. *)
-      ets_unavailable_skill_names : configured_skill_name_unavailable list;
-      ets_composition_skills : Skill_reference.t list;
-      ets_skill_profiles : effective_skill_profile list;
-      ets_tool_surface_bytes : int;
-      ets_skill_tool_surface_bytes : int;
-      ets_skill_discovery_bytes : int;
-      ets_skill_eager_body_bytes : int;
-      ets_skill_body_bytes : int;
-      ets_tools : effective_tool list;
-      ets_tool_surface_sha256 : string option;
-    }
-  | Effective_surface_unavailable of {
-      ets_keeper_name : string;
-      ets_reason : string;
-      ets_detail : string;
-    }
-  | Effective_surface_warming of { ets_keeper_name : string }
-
-type skill_activation_projection =
-  | Skill_activations_available of {
-      sap_keeper_name : string;
-      sap_ledger : Keeper_skill_activation_ledger.t;
-    }
-  | Skill_activations_no_session of { sap_keeper_name : string }
-  | Skill_activations_unavailable of {
-      sap_keeper_name : string;
-      sap_reason : string;
-      sap_detail : string;
-    }
-
-type tool_snapshot = {
-  ts_tools : tool_entry list;
-  ts_count : int;
-  ts_freshness : inventory_freshness;
-      (** Whether the count above is an answer. *)
-  ts_effective : effective_tool_surface option;
-  ts_skill_activations : skill_activation_projection option;
-}
-
-type connector_connection =
-  | Connector_connected
-  | Connector_connected_unavailable
-  | Connector_disconnected
-  | Connector_offline
-  | Connector_stale
-
-type connector_binding = {
-  cb_channel_id : string;
-  cb_channel_name : string option;
-  cb_keeper_name : string;
-}
-
-type connector_name_kind =
-  | Connector_channel_name
-  | Connector_person_name
-  | Connector_server_name
-
-type connector_name_mapping = {
-  cnm_kind : connector_name_kind;
-  cnm_id : string;
-  cnm_name : string;
-}
-
-type connector_directory_state =
-  | Connector_directory_not_started
-  | Connector_directory_refreshing
-  | Connector_directory_complete
-  | Connector_directory_partial
-
-(** Where a websocket transport's gateway stands, as the Slack and Discord
-    gateway state machines report it on the wire ([gateway_state]). *)
-type connector_gateway_state =
-  | Connector_gateway_disconnected
-  | Connector_gateway_awaiting_hello
-  | Connector_gateway_identifying
-  | Connector_gateway_resuming
-  | Connector_gateway_connected
-  | Connector_gateway_reconnect_pending
-  | Connector_gateway_failed
-
-(** Where a polling transport stands, as the iMessage poller reports it on
-    the wire ([poll_state]). *)
-type connector_poll_state =
-  | Connector_poll_not_started
-  | Connector_poll_polling
-  | Connector_poll_degraded
-
-(** A connector the gate can deliver through, including the server-owned
-    configuration and route evidence an operator needs to act on it. *)
-type connector = {
-  cn_id : string;
-  cn_display_name : string;
-  cn_available : bool;  (** Configured and usable. *)
-  cn_connected : bool;
-      (** Reachable right now. Kept apart from [cn_available]: a connector can
-          be configured and unreachable, and the two call for different
-          actions. *)
-  cn_status : string;
-  cn_connection : connector_connection;
-  cn_channel : string option;
-  cn_error : string option;
-  cn_status_source : string option;
-  cn_gateway_state : connector_gateway_state option;
-  cn_poll_state : connector_poll_state option;
-  cn_endpoint : string option;
-  cn_status_path : string option;
-  cn_binding_store_path : string option;
-  cn_binding_store_read_ok : bool option;
-  cn_binding_store_error : string option;
-  cn_updated_at : string option;
-  cn_binding_source : string option;
-  cn_trigger_policy : string option;
-  cn_reply_mode : string option;
-  cn_chat_db_path : string option;
-  cn_bot_user_id : string option;
-  cn_bot_user_name : string option;
-  cn_bot_token_present : bool option;
-  cn_app_token_present : bool option;
-  cn_gate_healthy : bool option;
-  cn_pid : int option;
-  cn_guild_count : int option;
-  cn_directory_state : connector_directory_state option;
-  cn_directory_server_count : int option;
-  cn_directory_channel_count : int option;
-  cn_directory_person_count : int option;
-  cn_directory_authentication_failed : string list;
-  cn_directory_permission_denied : string list;
-  cn_directory_errors : string list;
-  cn_directory_updated_at : string option;
-  cn_workspace_id : string option;
-  cn_server_names_path : string option;
-  cn_channel_names_path : string option;
-  cn_people_names_path : string option;
-  cn_name_mappings : connector_name_mapping list;
-  cn_name_mapping_scope : string option;
-  cn_names_error : string option;
-  cn_bindings : connector_binding list;
-}
-
-type connector_name_page = {
-  cnp_connector_id : string;
-  cnp_kind : connector_name_kind;
-  cnp_mapping_scope : string;
-  cnp_current_workspace_id : string option;
-  cnp_path : string;
-  cnp_after_id : string option;
-  cnp_next_after_id : string option;
-  cnp_total : int;
-  cnp_has_more : bool;
-  cnp_mappings : connector_name_mapping list;
-}
-
-val decode_connector_name_page :
-  Yojson.Safe.t -> (connector_name_page, string) result
-
-val connector_with_name_pages :
-  connector -> pages:connector_name_page list -> error:string option -> connector
-
-(** A connector row the TUI could not read. The row is refused on its own,
-    so the rows beside it still decode and draw. *)
-type connector_refusal = {
-  cr_row : int;  (** Position in the server's [connectors] list. *)
-  cr_connector_id : string option;
-      (** The row's [connector_id], when the row carries one. *)
-  cr_reason : string;
-}
-
-type connector_snapshot = {
-  cs_connectors : connector list;
-  cs_refused : connector_refusal list;
-  cs_total : int;
-  cs_active : int;  (** How many the server counted as available. *)
-}
-
 (** One runtime row shared by the Keeper picker and Runtime surface.
     [ro_is_default] is derived from the document's top-level
     [default_runtime], not the row's independent binding flag. *)
@@ -716,6 +336,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -759,6 +383,7 @@ type runtime_resolved_lane = {
 }
 
 type runtime_resolved_snapshot = {
+  rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
@@ -857,212 +482,6 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
-(** One of the six conditions the memory keeper reports. The server derives the
-    wire's [severity] and [target] from this code, and the decoder rejects a
-    payload where they disagree, so the code alone identifies the alert. *)
-type memory_alert_code =
-  | Snapshot_read_error
-  | Source_snapshot_read_error
-  | Librarian_stopped
-  | Librarian_failures
-  | Librarian_starvation
-  | Vision_ingest_errors
-
-(** The severity the server is contractually required to send for a code. *)
-val memory_alert_severity : memory_alert_code -> [ `Warn | `Error ]
-
-(** The wire also carries [value] and [threshold]; neither is kept. Every count
-    a [value] would report is already drawn from {!memory_keeper_health} two
-    lines above the alert, and the server pins [threshold] to [0.0] for all six
-    codes. The decoder still requires and range-checks both, so a payload that
-    starts meaning something by them fails loudly instead of passing unread. *)
-type memory_alert = {
-  ma_code : memory_alert_code;
-  ma_label : string;
-  ma_message : string;
-}
-
-(** How the keeper's last durable Librarian pass ended, one constructor per
-    server [pass_end]. [Pass_stopped] and [Pass_raised] carry the server's
-    account of why; the other endings have none. An ending this build does not
-    know fails the decode. *)
-type memory_librarian_pass_end =
-  | Pass_off
-  | Pass_lane_unconfigured
-  | Pass_drained
-  | Pass_not_committed
-  | Pass_stopped of string
-  | Pass_raised of string
-
-(** Why a Librarian pass journaled a failure, one constructor per server
-    [librarian_failure_kind]. A kind this build does not know fails the
-    decode. *)
-type memory_librarian_failure_kind =
-  | Failure_prompt_render
-  | Failure_execution_clock_unavailable
-  | Failure_exact_setup
-  | Failure_exact_execution
-  | Failure_domain_output_invalid
-  | Failure_absorb_judgment
-  | Failure_memory_snapshot_write
-  | Failure_runtime_context_unavailable
-  | Failure_lane_cancelled
-  | Failure_unhandled_exception
-
-(** The server's account of why a pass stopped or crashed; [None] for the
-    endings that carry none. *)
-val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
-
-(** RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
-   because the Librarian stands behind the start the provider last
-   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
-   [Stalled_unmeasured] is a file the gap is read from that did not read:
-   neither "no gap" nor a gap. *)
-type memory_librarian_stall_cause =
-  | Stall_meta_unreadable
-  | Stall_turn_records_unreadable
-  | Stall_turn_boundary_refused
-  | Stall_snapshot_unreadable
-  | Stall_read_position_unreadable
-
-type memory_librarian_stalled =
-  | Stalled_gap of {
-      mls_gap_start_atom : int;
-      mls_gap_end_atom : int;
-    }
-  | Stalled_unmeasured of {
-      mls_cause : memory_librarian_stall_cause;
-      mls_detail : string;
-    }
-
-(* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
-   standing, and what its last pass and its journal say. [None] in a field is
-   "not measured", which the header prints as such; it is not zero. *)
-type memory_librarian_health = {
-  mlh_state : memory_librarian_pass_end option;
-  mlh_measured_at : float option;
-  mlh_unread_atom_turns : int option;
-  mlh_unread_official_turns : int option;
-  mlh_continuity_unread_atoms : int option;
-      (** How far the continuity snapshot trails the Librarian's read
-          position. A different lag from [mlh_unread_atom_turns], which is
-          the durable round's: the two fall behind separately. [None] is
-          "cannot say" -- no snapshot, an unreadable one, or one from
-          another trace -- and is not the same as caught up. *)
-  mlh_last_success_at : float option;
-  mlh_last_failure_kind : memory_librarian_failure_kind option;
-  mlh_stalled : memory_librarian_stalled option;
-      (** [None] while the Librarian point is at or past the start the
-          provider last accepted, or when there is no accepted start yet. *)
-}
-
-type memory_context_frontier = {
-  mcf_trace_id : string;
-  mcf_end_atom : int;
-  mcf_boundary_line : int;
-}
-type memory_context_position = {
-  mcpo_trace_id : string;
-  mcpo_end_atom : int;
-}
-type memory_context_input =
-  | Context_summarized of memory_context_frontier
-  | Context_absorbed of memory_context_position
-      (** The request started at the Librarian's durable position; nothing
-          summarizes what lies before it. *)
-  | Context_without_snapshot
-  | Context_not_applied
-
-type memory_context_prepared = {
-  mcp_prepared_at : float;
-  mcp_runtime_id : string;
-  mcp_input : memory_context_input;
-  mcp_request_bytes : int;
-}
-type memory_context_cycle = {
-  mcc_saved : memory_context_frontier option;
-  mcc_saved_unreadable : bool;
-  mcc_read_position : int option;
-      (** Where the Librarian has read to, beside where its snapshot cuts
-          ([mcc_saved]). A request starts at the cut and carries the atoms up
-          to here, so the two apart is what the turn pays; the distance is the
-          subtraction and is not a field (#37793). *)
-  mcc_read_position_unreadable : bool;
-      (** The position file could not be read, which is why there is no
-          number. A keeper that has read nothing has neither. *)
-  mcc_rewriting_through : int option;
-      (** Where a snapshot being rewritten from atom 0 has to reach before a
-          request starts from it. Always past [mcc_saved]'s cut; [None] on a
-          snapshot that is not being rewritten. *)
-  mcc_prepared : memory_context_prepared option;
-  mcc_synthesis : Keeper_continuity_observation.synthesis option;
-}
-
-type memory_keeper_health = {
-  mkh_keeper_id : string;
-  mkh_revision : int;
-  mkh_updated_at : float option;
-  mkh_facts : int;
-  mkh_observed_facts : int;
-  mkh_derived_facts : int;
-  mkh_support_invalidations : int;
-  mkh_snapshot_bytes : int;
-  mkh_added : int;
-  mkh_removed : int;
-  mkh_snapshot_present : bool;
-  mkh_context_cycle : memory_context_cycle;
-  mkh_librarian : memory_librarian_health;
-  mkh_librarian_failures : int;
-  mkh_vision_ingest_errors : int;
-  mkh_vision_ingest_error_reasons : (string * int) list;
-  mkh_read_error : string option;
-  mkh_source_revision : int;
-  mkh_source_facts : int;
-  mkh_source_invalidations : int;
-  mkh_source_snapshot_bytes : int;
-  mkh_source_snapshot_present : bool;
-  mkh_source_read_error : string option;
-  mkh_alerts : memory_alert list;
-}
-
-(** A keeper row this build could not read, and why. The other rows still
-    decode, so one row from a newer server does not blank the pane.
-    [mkr_keeper_id] is [None] when the row's own [keeper_id] could not be read
-    either. *)
-type memory_keeper_refusal = {
-  mkr_keeper_id : string option;
-  mkr_reason : string;
-}
-
-type memory_health_snapshot = {
-  mhs_generated_at : float;
-  mhs_keepers : memory_keeper_health list;
-  mhs_refused_keepers : memory_keeper_refusal list;
-  mhs_total_facts : int;
-  mhs_total_observed_facts : int;
-  mhs_total_derived_facts : int;
-  mhs_total_support_invalidations : int;
-  mhs_total_snapshot_bytes : int;
-  mhs_total_source_facts : int;
-  mhs_total_source_invalidations : int;
-  mhs_total_source_snapshot_bytes : int;
-  mhs_total_librarian_failures : int;
-  mhs_total_librarian_unread_turns : int option;
-  mhs_total_librarian_continuity_unread_atoms : int;
-      (** Summed over the keepers whose continuity lag could be taken. *)
-  mhs_total_librarian_continuity_unmeasured : int;
-      (** How many keepers it could not be taken for, so the sum above is not
-          read as a caught-up fleet. *)
-  mhs_total_vision_ingest_errors : int;
-  mhs_total_read_errors : int;
-  mhs_total_source_read_errors : int;
-  mhs_warn_alerts : int;
-  mhs_error_alerts : int;
-  mhs_starving_keepers : int;
-}
-
-(** One verdict the harness recorded: which gate ran on which task, what it
-    decided, and which evaluator decided it. *)
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -1206,7 +625,14 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 
 type keeper_runtime = {
   kr_name : string;
+  kr_identity : (keeper_identity, string) result;
+      (** The server's brief metadata, decoded separately so a missing trace
+          or timestamp does not hide independently valid lifecycle controls.
+          The metadata name must agree with [kr_name]. *)
   kr_portrait : keeper_portrait;
+  kr_candle_balance_milli : string option;
+  kr_candle_account_revision : (string option, string) result;
+  (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -1229,11 +655,17 @@ type keeper_runtime = {
     [kr_next_action] is [None] when the runtime named no action, which is not
     the same as naming one that means "nothing to do". *)
 
+val keeper_of_runtime : keeper_runtime -> keeper
+(** Project the public row into a remote Keeper. No local metadata, task or
+    usage measurements are inferred from the runtime state. *)
+
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, configuration_errors, truncated, total)]. Explicit metadata errors
-    are retained per keeper without discarding readable rows. A row whose [status] or lifecycle [phase] is
+    [(rows, configuration_errors, truncated, total, candle)]. Explicit metadata errors
+    are retained per keeper without discarding readable rows. Malformed Candle
+    fields produce an [Error] observation and withdraw every balance while
+    keeping the readable Keeper lifecycle rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.
 
@@ -2333,15 +1765,6 @@ type transport_health = {
 val decode_transport_health :
   Yojson.Safe.t -> (transport_health, string) result
 
-val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
-(** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
-
-val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
-(** Reads the /api/v1/skills snapshot: per-skill usage rows and flows. *)
-
-val decode_connector_snapshot :
-  Yojson.Safe.t -> (connector_snapshot, string) result
-
 val decode_runtime_resolved_snapshot :
   Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
 (** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
@@ -2375,12 +1798,6 @@ val decode_repository_snapshot :
 
 val decode_repository_change_snapshot :
   Yojson.Safe.t -> (repository_change_snapshot, string) result
-
-val decode_memory_health_snapshot :
-  Yojson.Safe.t -> (memory_health_snapshot, string) result
-(** Decode the fleet memory-health snapshot served at
-    [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
-    required: a keeper the server left out is invisible here, not defaulted. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

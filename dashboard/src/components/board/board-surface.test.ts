@@ -11,10 +11,10 @@ import {
 } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
-import { createPost } from '../../api'
-import { requestBoardContextInference } from '../../api/board'
+import { createPost, fetchBoardPost } from '../../api'
+import { requestBoardContextInference, voteComment } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -36,12 +36,15 @@ vi.mock('../../store', async (importOriginal) => {
   }
 })
 
-vi.mock('../../router', () => ({
-  route: { value: { tab: 'board', params: {}, postId: null } },
-  navigate: vi.fn(),
-  navigateToPost: vi.fn(),
-  hashForRoute: vi.fn(() => '#board'),
-}))
+vi.mock('../../router', async () => {
+  const { signal } = await import('@preact/signals')
+  return {
+    route: signal({ tab: 'board', params: {}, postId: null }),
+    navigate: vi.fn(),
+    navigateToPost: vi.fn(),
+    hashForRoute: vi.fn(() => '#board'),
+  }
+})
 
 vi.mock('../../api', () => ({
   currentDashboardActor: vi.fn(() => 'dashboard-test'),
@@ -61,6 +64,7 @@ vi.mock('../../api/actions', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  voteComment: vi.fn().mockResolvedValue(undefined),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
     supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
@@ -257,6 +261,13 @@ describe('BoardSurface Component', () => {
     boardFlairsError.value = false
     resetBoardLatencyMetrics()
     selectedBoardPostId.value = null
+    detailPostId.value = null
+    detailPost.value = null
+    detailFocusedCommentId.value = null
+    detailComments.value = []
+    detailCommentPage.value = { offset: 0, total: 0 }
+    detailLoading.value = false
+    detailReadPhase.value = 'idle'
     boardComposerMode.value = 'post'
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'sangsu', status: 'active' },
@@ -265,6 +276,28 @@ describe('BoardSurface Component', () => {
     messages.value = []
     shellAuthSummary.value = null
     route.value = { params: {} } as any
+  })
+
+  it('clears retained full-view focus when returning to the same compact thread', async () => {
+    const post = makePost({ id: 'focused-back', title: 'Retained selected thread', author: 'keeper' })
+    const latest = { ...post, comments: [], commentPage: { offset: 20, total: 20 } }
+    vi.mocked(fetchBoardPost).mockResolvedValue(latest)
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    detailPostId.value = post.id
+    detailPost.value = post
+    detailFocusedCommentId.value = 'old-focused-comment'
+    detailCommentPage.value = { offset: 20, total: 21 }
+    // Back navigation retains selection/detail signals without a PostCard click.
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(detailFocusedCommentId.value).toBeNull())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id)
+    // Compact vote/reply refreshes omit focus and must retain the null context.
+    await loadPostDetail(post.id)
+    expect(detailFocusedCommentId.value).toBeNull()
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(fetchBoardPost).mock.calls.every(args => args.length === 1)).toBe(true)
   })
 
   it('renders empty state when there are no posts', () => {
@@ -604,6 +637,160 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
+  })
+
+  it.each([true, false])('retries an initially failed focused read without a selected panel (in feed: %s)', async (inFeed) => {
+    const post = makePost({ id: 'failed-focus-revisit', title: 'Retry focused post', author: 'keeper' })
+    const reply = { id: 'focused-recovered', post_id: post.id, parent_id: null, author: 'keeper', content: 'Recovered focused comment', created_at: post.created_at }
+    boardPosts.value = inFeed ? [post] : []
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    vi.mocked(fetchBoardPost).mockReset().mockRejectedValueOnce(new Error('temporary transport failure'))
+      .mockResolvedValue({ ...post, comments: [reply], commentPage: { offset: 0, total: 1 } } as any)
+    const first = render(h(BoardSurface, null))
+    await waitFor(() => expect(detailReadPhase.value).toBe('failed'))
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
+    expect(selectedBoardPostId.value).toBeNull()
+    first.unmount()
+    route.value = { tab: 'board', params: {} } as any
+    const feed = render(h(BoardSurface, null))
+    expect(selectedBoardPostId.value).toBeNull()
+    feed.unmount()
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    const second = render(h(BoardSurface, null))
+    await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
+    await waitFor(() => expect(within(screen.getByTestId('board-comment-route-focus')).getByText('author keeper')).toBeInTheDocument())
+    expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([
+      [post.id, undefined, undefined, 'focused-recovered'],
+      [post.id, undefined, undefined, 'focused-recovered'],
+    ])
+    second.unmount()
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
+    await waitFor(() => expect(within(screen.getByTestId('board-comment-route-focus')).getByText('author keeper')).toBeInTheDocument())
+    expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('reuses a pending focused read across visits instead of starting another transport', async () => {
+    const post = makePost({ id: 'pending-focus-revisit', title: 'Pending focused post', author: 'keeper' })
+    const reply = { id: 'pending-focused-comment', post_id: post.id, parent_id: null, author: 'keeper', content: 'Pending read completed comment', created_at: post.created_at }
+    let resolveRead!: (value: Awaited<ReturnType<typeof fetchBoardPost>>) => void
+    vi.mocked(fetchBoardPost).mockReset().mockReturnValue(new Promise(resolve => { resolveRead = resolve }))
+    boardPosts.value = [post]
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    const first = render(h(BoardSurface, null))
+    await waitFor(() => expect(detailReadPhase.value).toBe('loading'))
+    first.unmount()
+    route.value = { tab: 'board', params: {} } as any
+    const feed = render(h(BoardSurface, null))
+    feed.unmount()
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(screen.getByText(post.title)).toBeInTheDocument())
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
+    resolveRead({ ...post, comments: [reply], commentPage: { offset: 0, total: 1 } } as Awaited<ReturnType<typeof fetchBoardPost>>)
+    await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
+    await waitFor(() => expect(within(screen.getByTestId('board-comment-route-focus')).getByText('author keeper')).toBeInTheDocument())
+    expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(fetchBoardPost).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([true, false])('replaces an off-feed pending read on a new post route (old reply first: %s)', async (oldReplyFirst) => {
+    const postA = makePost({ id: 'off-feed-a', title: 'Previous off-feed post', author: 'keeper' })
+    const postB = makePost({ id: 'off-feed-b', title: 'Current off-feed post', author: 'keeper' })
+    type Detail = Awaited<ReturnType<typeof fetchBoardPost>>
+    let resolveA!: (value: Detail) => void
+    let resolveB!: (value: Detail) => void
+    const readA = new Promise<Detail>(resolve => { resolveA = resolve })
+    const readB = new Promise<Detail>(resolve => { resolveB = resolve })
+    vi.mocked(fetchBoardPost).mockReset().mockReturnValueOnce(readA).mockReturnValueOnce(readB)
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: postA.id } } as any
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postA.id))
+    expect(detailLoading.value).toBe(true)
+
+    route.value = { tab: 'board', params: { post: postB.id } } as any
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postB.id))
+    expect(detailPostId.value).toBe(postB.id)
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+    const resultA = { ...postA, comments: [], commentPage: { offset: 0, total: 0 } } as Detail
+    const resultB = { ...postB, comments: [], commentPage: { offset: 0, total: 0 } } as Detail
+    if (oldReplyFirst) {
+      resolveA(resultA)
+      await readA
+      expect(detailPostId.value).toBe(postB.id)
+      expect(detailLoading.value).toBe(true)
+      expect(detailPost.value).toBeNull()
+    }
+    resolveB(resultB)
+    await waitFor(() => expect(screen.getByText(postB.title)).toBeInTheDocument())
+    if (!oldReplyFirst) {
+      resolveA(resultA)
+      await readA
+    }
+    expect(detailPostId.value).toBe(postB.id)
+    expect(detailPost.value?.id).toBe(postB.id)
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(detailLoading.value).toBe(false)
+    expect(screen.queryByText(postA.title)).not.toBeInTheDocument()
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not reload an off-feed detail when the server resolves a missing focus', async () => {
+    const post = makePost({ id: 'missing-focus-post', title: 'Missing focus result', author: 'keeper' })
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: post.id, comment: 'deleted-reply' } } as any
+    vi.mocked(fetchBoardPost).mockReset().mockResolvedValue({
+      ...post, comments: [{ id: 'latest', post_id: post.id, author: 'keeper',
+        content: 'Latest retained comment', created_at: post.created_at }],
+      commentPage: { offset: 20, total: 21, revision: 'current' },
+    } as any)
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(screen.getByText(post.title)).toBeInTheDocument())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(detailReadPhase.value).toBe('loaded')
+    expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith(post.id, undefined, undefined, 'deleted-reply')
+  })
+
+  it('clears focused-route ancestry when returning to a retained compact thread', async () => {
+    const post = makePost({ id: 'retained-thread', title: 'Retained thread', author: 'keeper', post_kind: 'direct' })
+    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at }
+    const parent = { ...reply, id: 'older-parent', parent_id: null, content: 'Older parent' }
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    detailPostId.value = post.id
+    detailPost.value = post
+    detailFocusedCommentId.value = reply.id
+    detailComments.value = [parent, reply]
+    detailCommentPage.value = { offset: 0, total: 21 }
+    detailLoading.value = false
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    vi.mocked(fetchBoardPost).mockReset().mockResolvedValue({
+      ...post, comments: [reply], commentPage: { offset: 20, total: 21 },
+    } as any)
+
+    const view = render(h(BoardSurface, null))
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('← 게시판으로 돌아가기'))
+    route.value = { tab: 'board', params: {} } as any
+    // Exercise returning to the retained thread on a fresh surface.
+    view.unmount()
+    render(h(BoardSurface, null))
+
+    await waitFor(() => expect(detailFocusedCommentId.value).toBeNull())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(selectedBoardPostId.value).toBe(post.id)
+    const compact = screen.getByTestId('bd-thread-detail')
+    fireEvent.click(within(compact).getByRole('button', { name: '댓글 추천' }))
+    await waitFor(() => expect(voteComment).toHaveBeenCalledWith(reply.id, 'up'))
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([[post.id], [post.id]])
+    expect(detailCommentPage.value).toEqual({ offset: 20, total: 21 })
+    expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
   })
 
   it('renders sub-board rail and filters posts by sub-board', () => {

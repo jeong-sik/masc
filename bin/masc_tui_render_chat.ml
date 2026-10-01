@@ -809,7 +809,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              | Tui_decode.Declared_keeper requirements ->
                "아직 시작하지 않음 · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
-             | Persisted_keeper -> status ^ " · —"
+             | Persisted_keeper | Remote_keeper -> status ^ " · —"
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
@@ -3045,18 +3045,30 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let room =
-          framed_inner_width chat_cols - 2
-          - Message_layout.display_width row.lead
-          - Message_layout.display_width row.keys
-        in
+        let keys = match state.msg_tool_visibility, state.msg_live with
+          | (Tools_compact | Tools_results), Some live
+            when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
+              && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
+                   ~now:(Unix.gettimeofday ()) > 0 ->
+              row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
+          | (Tools_full | Tools_compact | Tools_results), _ -> row.keys in
+        let lead_room = max 0 (framed_inner_width chat_cols - 2
+          - Message_layout.display_width keys) in
+        let lead =
+          if Message_layout.display_width row.lead <= lead_room then row.lead
+          else fit_width row.lead lead_room in
+        let room = lead_room - Message_layout.display_width lead in
         let rest =
           if Message_layout.display_width row.rest <= room then row.rest
           else fit_width row.rest (max 0 room)
         in
         box_line chat_buf chat_cols
-          (Printf.sprintf "  %s%s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
-             (Theme.recede ()) rest row.keys Ansi.reset))
+          (Printf.sprintf "  %s%s%s%s%s%s%s"
+             (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
+              | Tools_compact | Tools_results ->
+                  if Masc_tui_types.keeper_message_activity_needs_attention state
+                  then Theme.warn () else Theme.recede ()) lead Ansi.reset
+             (Theme.recede ()) rest keys Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
@@ -3161,7 +3173,9 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Buffer.length state.msg_input > 0 then
-             " · Enter queues your line; it sends when this turn ends"
+             (match send_disposition state ~keeper_name with
+              | Updates _ -> " · Enter:send update; Ctrl-T:queue"
+              | Sends -> " · Enter:send")
            else ""
          in
          (* The gate and the prompt describe the same held call. Drawn apart,
@@ -3395,9 +3409,11 @@ let render_keeper_message (state : state) =
             match pending_count with
             | 0 -> "Enter:send update"
             | waiting ->
-                Printf.sprintf
-                  "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
-                  waiting)
+                if state.msg_tool_visibility = Tools_full then
+                  Printf.sprintf
+                    "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
+                    waiting
+                else "Enter:send update  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
       in
       match disposition with
       | Updates _ -> queue_hint ()
@@ -3560,11 +3576,21 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
       let portrait =
-        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-        | Keeper_control.Present runtime ->
-            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
-              ~rows:pane_rows ~cols:keeper_roster_pane_cols
-        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+        match List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers with
+        | None -> None
+        | Some keeper ->
+          (match (keeper_reading state keeper).Keeper_control.liveness with
+           | Keeper_control.Present runtime ->
+             (match runtime.kr_portrait with
+              | Tui_decode.Ready equipment ->
+                Masc_tui_chat_portrait.shown ~name:keeper_name
+                  ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
+              | Tui_decode.Unavailable _ -> None)
+           | Keeper_control.Unobserved | Keeper_control.Absent
+           | Keeper_control.Invalid _ -> None)
       in
       let roster_rows = match portrait with
         | None -> pane_rows

@@ -291,13 +291,27 @@ let test_client_turn_total_is_diagnostic_not_occupancy () =
     | Error detail -> fail detail)
 ;;
 
+let test_provider_window_is_used_for_occupancy () =
+  with_temp_workspace (fun config ->
+    append_record config
+      (sample_record ~input_tokens:(Some 414_200)
+         ~context_window:(Some 1_000_000)
+         ~provider_context_window:(Some 828_400) ());
+    let fields = Projection.context_fields ~config ~keeper_name:"beta"
+        ~current_trace_id:sample_trace in
+    check bool "uses reported usable context" true
+      (field fields "context_max" = `Int 828_400);
+    check bool "half of the actual window" true
+      (field fields "context_ratio" = `Float 0.5))
+;;
+
 let test_per_request_overflow_is_unavailable_not_clamped () =
   with_temp_workspace (fun config ->
     append_record
       config
       (sample_record
          ~input_tokens:(Some 310_209)
-         ~context_window:(Some 272_000)
+         ~context_window:(Some 1_000_000)
          ~provider_context_window:(Some 272_000)
          ());
     let fields =
@@ -369,6 +383,8 @@ let () =
             test_cumulative_usage_is_diagnostic_not_occupancy
         ; test_case "client-turn total is diagnostic, not occupancy" `Quick
             test_client_turn_total_is_diagnostic_not_occupancy
+        ; test_case "provider window occupancy" `Quick
+            test_provider_window_is_used_for_occupancy
         ; test_case "per-request overflow is unavailable, not clamped" `Quick
             test_per_request_overflow_is_unavailable_not_clamped
         ; test_case "every projected shape decodes" `Quick

@@ -613,10 +613,12 @@ status: reference
     `Awaiting_receipt`(서버로 POST 전송을 시작했으나 수신 영수증을 아직 받지 못한 상태),
     `Keeper_queued`(서버 진입이 승인되어 Keeper 큐에 안착했으나 턴 실행이 시작되지 않은 상태),
     `Rechecking_delivery`(재연결이나 전달 상태를 재확인 중인 상태, 과거 Queued 영수증이 있더라도 확인 중엔 재확인으로 표시).
-  - 상태별 건수와 뷰포트 예산: 단일 합산 숫자로 뭉개지 않고 `queued at Keeper`·`awaiting receipt`·
-    `rechecking delivery` 건수를 분리 표시한다. 80열 좁은 터미널 환경에서도 총 대기 건수,
-    상태별 세부 근거, 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를 별도 행으로 배치하며,
-    단축키 가이드(`Ctrl-T:queue`)를 보존한다.
+  - 상태별 건수와 뷰포트 예산: 기본 compact/results 화면은 총 대기 건수와 전달·우선 순서
+    확인 상태를 한 요약 행에 표시한다. 실패와 재확인 상태는 요약에서 숨기지 않는다.
+    `Tools_full`(`Ctrl-D` 두 번 또는 `/tools full`)은 `queued at Keeper`·`awaiting receipt`·
+    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를
+    별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
+    큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
     작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
   - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기
@@ -1429,7 +1431,7 @@ status: reference
 
 **Connector Connection (커넥터 연결)**
 : Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
-  (`Masc.Tui_decode.connector_connection`) — `Connector_connected`·
+  (`Masc.Tui_decode_connectors.connector_connection`) — `Connector_connected`·
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
   `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
   `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
@@ -1442,7 +1444,7 @@ status: reference
   `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
   번만 그린다.
   → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
-  [Tui_decode.connector_connection](../../lib/tui_decode.mli)
+  [Tui_decode_connectors.connector_connection](../../lib/tui_decode_connectors.mli)
 
 ## Collaboration State
 
@@ -1567,8 +1569,8 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 8종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 소유한 장신구의 슬롯별 착용은
+    기록되는 사건은 9종(`HalfLifeSet`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
@@ -1579,15 +1581,16 @@ status: reference
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
   - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
-    필수 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
-    빈 파일이나 `[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
+    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
+    빈 파일이나 `half_life`·`[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
-    반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
-    원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
-    유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
+    잔액(`Candle_balance.of_events`)은 기록된 `HalfLifeSet` 경계를 따라 정수 연산으로
+    지수 감쇠한다. `"off"`는 감쇠를 끄며, 새 설정은 권한 있는 변경 경로가 정책 사건을
+    덧붙인 시점부터 적용된다. 읽기 전용 관측은 정책을 발행하지 않는다.
+    감쇠량과 구매 차감은 소각량에 반영하고 발행·소각·유통량을 투영한다.
+    원장의 과거 사실과 아이템 소유권은 지워지지 않으며 Task·Goal·Board 상태도 만료시키지 않는다.
   → [Candle_event](../../lib/candle/candle_event.mli) ·
   [Candle_balance](../../lib/candle/candle_balance.mli) ·
   [Candle_config](../../lib/candle_config/candle_config.mli) ·
@@ -2162,10 +2165,13 @@ status: reference
   - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
-  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
-    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
-    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
-    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+  - 구성 확인과 병합: PR의 REST stack 메타데이터와 Stacks API로 Native Stack인지 먼저 확인한다.
+    API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 선택한 PR까지의 미병합 하위 PR을
+    비동기 병합 API로 함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
+    포함된 각 PR의 현재 head·독립 승인·판정을 검토하고 병합 직전에 스택 구성과 head를 다시 확인한다.
+    stack이 없는 일반 브랜치 체인은 부모부터 병합하고 이후 실제 base와 diff를 다시 확인한다.
+    base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.
+    Native Stack 병합은 비동기 API 접수와 완료를 구분해 확인한다.
     → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
   - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이

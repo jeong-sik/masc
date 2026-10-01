@@ -427,6 +427,8 @@ type registry_entry = {
 }
 
 and turn_observation = {
+  observation_token : Keeper_turn_observation_token.t;
+      (** Process-local ownership; not a persisted operation or display ID. *)
   turn_id : int;
       (** Per-keeper turn counter at turn start (matches
           [meta.runtime.usage.total_turns] + 1). *)

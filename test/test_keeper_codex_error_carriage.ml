@@ -66,6 +66,9 @@ let test_every_variant_lands_in_its_class () =
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
   check "spawn_failed" (Codex.Spawn_failed "no exe") "provider:unavailable";
+  check "reasoning effort admission failed"
+    (Codex.Reasoning_effort_admission_failed {model="fixture";detail="no advertised tier"})
+    "provider:unavailable";
   (* Split from [Spawn_failed] by RFC-0454 P2: a client that died after it
      started is a closed connection, and the pane needs to say so without
      reading the rendered sentence. Rotation is unchanged —

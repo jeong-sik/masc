@@ -545,7 +545,12 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       ~comment_line_count:detail_line_count
       ~comment_rows:comment_content_rows
       ~body_scroll:state.board_scroll
-      ~comment_scroll:state.board_comment_scroll
+      ~comment_scroll:(match state.board_comment_landing with
+        | None -> state.board_comment_scroll
+        | Some comment_id ->
+            (match Board_read_layout.initial_comment_offset document ~comment_id with
+             | Some offset -> offset
+             | None -> state.board_comment_scroll))
   in
   (* box_top/box_bottom draw no border in the borderless geometry this
      pane already uses (see their definitions) -- they would only add
@@ -597,7 +602,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
   let post =
     match detail with
-    | Board_detail.Ready (detail_post, _) -> detail_post
+    | Board_detail.Ready (detail_post, _, _) -> detail_post
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
         list_post
   in
@@ -693,7 +698,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     match detail with
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
         false
-    | Board_detail.Ready (_, comments) -> comments <> []
+    | Board_detail.Ready (_, comments, _) -> comments <> []
   in
   let side_layout =
     if has_detail_content then Layout.board_read_side_layout ~cols
@@ -794,6 +799,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      Ansi.reset))
       in
       let body_lines = body_lines @ reference_lines @ related_lines in
+      let initial_comment_offset = ref None in
       let detail_lines =
         match detail with
         | Board_detail.Absent ->
@@ -806,7 +812,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                   (max 1 (framed_inner_width comment_wrap_cols - 2))
               ^ Ansi.reset
             ]
-        | Board_detail.Ready (_, comments) ->
+        | Board_detail.Ready (_, comments, landing) ->
             (* A reply and the thing it answers used to sit at one indent in clock
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
@@ -818,6 +824,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             let comment_lines =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
                 (fun () ->
+                  let row_offset = ref 0 in
                   ordered
                   |> List.concat_map
               (fun (depth, c) ->
@@ -865,7 +872,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      ~max_cells:content_width
                      ~sanitize:Terminal_text.single_line c.bc_content
                  in
-                 match lines with
+                 let rendered = match lines with
                  | [ line ] when Message_layout.display_width line <= joined_budget ->
                      [ heading ^ "  " ^ line ]
                  | lines ->
@@ -884,25 +891,34 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                          [ identity; timestamp ]
                      in
                      metadata
-                     @ List.map (fun line -> content_prefix ^ line) lines))
+                     @ List.map (fun line -> content_prefix ^ line) lines in
+                 if landing = Some c.bc_id then
+                   initial_comment_offset := Some (c.bc_id, !row_offset);
+                 row_offset := !row_offset + List.length rendered;
+                 rendered))
             in
-            if List.length comments < post.bp_comment_count then
+            if List.length comments < post.bp_comment_count then begin
+              (* The retained comment identity is only a scroll anchor here;
+                 rendered link ids still pass through Terminal_text above. *)
+              initial_comment_offset :=
+                Option.map (fun (comment_id, row) -> comment_id, row + 1)
+                  !initial_comment_offset;
               Printf.sprintf "  Showing %d of %d comments (o: all comments)"
                 (List.length comments) post.bp_comment_count
               :: comment_lines
-            else
+            end else
               (* The post header already counts the complete thread. Keep
                  the small comment viewport for its actual comment rows. *)
               comment_lines
       in
-      (body_lines, detail_lines))
+      (body_lines, detail_lines, !initial_comment_offset))
   in
   let rows_started = Masc_tui_frame_timing.start_stage () in
   let total_lines = Board_read_layout.body_line_count document in
   let detail_line_count = Board_read_layout.comment_line_count document in
   let detail_comment_count =
     match detail with
-    | Board_detail.Ready (_, comments) -> List.length comments
+    | Board_detail.Ready (_, comments, _) -> List.length comments
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> 0
   in
   (* [board_read_allocation] and [board_read_side_allocation] share field
@@ -925,7 +941,12 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             ~body_line_count:total_lines ~body_rows:content_height
             ~comment_line_count:detail_line_count ~comment_rows:comment_height
             ~body_scroll:state.board_scroll
-            ~comment_scroll:state.board_comment_scroll
+            ~comment_scroll:(match state.board_comment_landing with
+              | None -> state.board_comment_scroll
+              | Some comment_id ->
+                  (match Board_read_layout.initial_comment_offset document ~comment_id with
+                   | Some offset -> offset
+                   | None -> state.board_comment_scroll))
         in
         for i = 0 to content_height - 1 do
           let idx = i + scroll.body_offset in

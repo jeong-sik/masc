@@ -787,16 +787,16 @@ let surface_strip (state : state) ~cols =
      label and the cell each read entry [i], and a list answers that by
      walking. Ten entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_types.visible_surface_ring state) in
+  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
   let n = Array.length ring in
-  let active = Masc_tui_types.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match Masc_tui_types.approvals_surface_pending state with
+        (match Masc_tui_approvals_model.approvals_surface_pending state with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -860,7 +860,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
+      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
       | _ -> false
     in
     let entry =
@@ -1120,19 +1120,19 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
       (* Every kind of pending approval the Approvals surface lists, read to
          the two facts the pane states: whose, and for which tool. *)
       List.map
-        (fun (row : approval_row) ->
+        (fun (row : Masc_tui_approvals_model.approval_row) ->
           match row with
-          | Keeper_tool_row held ->
+          | Masc_tui_approvals_model.Keeper_tool_row held ->
               { Pane.approval_keeper = held.kta_keeper; approval_tool = held.kta_tool }
-          | Gate_row pending ->
+          | Masc_tui_approvals_model.Gate_row pending ->
               { Pane.approval_keeper = pending.gp_keeper
               ; approval_tool = pending.gp_display_tool
               }
-          | Operator_row item ->
+          | Masc_tui_approvals_model.Operator_row item ->
               { Pane.approval_keeper = item.ap_actor
               ; approval_tool = item.ap_delegated_tool
               })
-        (Masc_tui_types.approval_items state)
+        (Masc_tui_approvals_model.approval_items state)
   ; chunks
   ; changes = acting_pane_changes state
   ; call_order = state.acting_pane_call_order

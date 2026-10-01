@@ -8414,6 +8414,23 @@ let picker_default_runtime =
     ; ("rate_limit_resets_at", `Null)
     ]
 
+let picker_exact_runtime =
+  `Assoc
+    [ ("id", `String "exact.embed")
+    ; ("provider", `String "Local")
+    ; ("provider_id", `String "exact")
+    ; ("model", `String "embed")
+    ; ("exact_slot_group", `String "slots")
+    ; ("effective_max_context", `Int 8192)
+    ; ("max_context_source", `String "capability")
+    ; ("max_output_tokens", `Null)
+    ; ("declared_reasoning_effort", `Null)
+    ; ("is_local", `Bool true)
+    ; ("is_default", `Bool false)
+    ; ("rate_limited", `Bool false)
+    ; ("rate_limit_resets_at", `Null)
+    ]
+
 let runtime_resolved_json =
   `Assoc
     [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
@@ -8423,24 +8440,7 @@ let runtime_resolved_json =
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
     ; ( "runtimes"
-      , `List
-          [ picker_default_runtime
-          ; `Assoc
-              [ ("id", `String "exact.embed")
-              ; ("provider", `String "Local")
-              ; ("provider_id", `String "exact")
-              ; ("model", `String "embed")
-              ; ("exact_slot_group", `String "slots")
-              ; ("effective_max_context", `Int 8192)
-              ; ("max_context_source", `String "capability")
-              ; ("max_output_tokens", `Null)
-              ; ("declared_reasoning_effort", `Null)
-              ; ("is_local", `Bool true)
-              ; ("is_default", `Bool false)
-              ; ("rate_limited", `Bool false)
-              ; ("rate_limit_resets_at", `Null)
-              ]
-          ] )
+      , `List [ picker_default_runtime; picker_exact_runtime ] )
     ; ( "lanes"
       , `List
           [ `Assoc
@@ -8478,7 +8478,7 @@ let test_runtime_rate_limit_requires_an_observation () =
        let json =
          runtime_resolved_json
          |> replace_assoc_field "default_runtime" (row value)
-         |> replace_assoc_field "runtimes" (`List [ row value ])
+         |> replace_assoc_field "runtimes" (`List [ row value; picker_exact_runtime ])
        in
        match Tui_decode.decode_runtime_resolved json with
        | Ok _ -> Alcotest.fail "unknown rate-limit observation decoded as ready"
@@ -8493,9 +8493,9 @@ let test_decode_runtime_resolved () =
       |> replace_assoc_field "max_context_source" (`String source) in
     let json = runtime_resolved_json
       |> replace_assoc_field "default_runtime" row
-      |> replace_assoc_field "runtimes" (`List [row]) in
+      |> replace_assoc_field "runtimes" (`List [row; picker_exact_runtime]) in
     match Tui_decode.decode_runtime_resolved json with
-    | Ok ([runtime], _) ->
+    | Ok ([runtime; _], _) ->
       Alcotest.(check string) "scoped context keeps runtime picker usable" source
         (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
     | Ok _ -> Alcotest.fail "scoped runtime missing from picker"

@@ -1061,12 +1061,17 @@ const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(nu
 export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
   = acceptedExecutionWorkspace
 
+function withdrawExecutionWorkspaceAuthority(): void {
+  acceptedExecutionWorkspace.value = null
+  candleObservation.value = { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+}
+
 function acceptExecutionWorkspace(
   epoch: string | null,
   workspaceRoot: unknown,
 ): void {
   if (epoch === null || typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') {
-    acceptedExecutionWorkspace.value = null
+    withdrawExecutionWorkspaceAuthority()
     return
   }
   const previous = acceptedExecutionWorkspace.peek()
@@ -1127,7 +1132,7 @@ export function invalidateExecutionSnapshotGeneration(
     }
     executionPublicationEpoch = epoch
     candleObservationSequenceWatermark = -1
-    acceptedExecutionWorkspace.value = null
+    withdrawExecutionWorkspaceAuthority()
     executionReconnectPreviousEpoch = null
     executionPublicationGenerationWatermark = generation
     return true
@@ -1148,8 +1153,7 @@ export function resetExecutionSnapshotGeneration(): void {
   executionReconnectAwaitingHttp = true
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
-  acceptedExecutionWorkspace.value = null
-  candleObservation.value = { status: 'unavailable', reason: 'Execution authority changed' }
+  withdrawExecutionWorkspaceAuthority()
 }
 
 /** Hydrate all execution-related signals from a raw data payload.
@@ -1259,7 +1263,9 @@ export function hydrateExecutionSnapshot(
       ? executionMessages
       : mergeMessages(messages.value, executionMessages)
   }
-  candleObservation.value = readCandleRosterObservation(data.candle, data.keepers)
+  candleObservation.value = acceptedExecutionWorkspace.peek() === null
+    ? { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+    : readCandleRosterObservation(data.candle, data.keepers)
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   keeperRosterObservationRevision.value += 1
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
@@ -1343,7 +1349,6 @@ async function doFetchExecution(): Promise<void> {
       throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
     }
     console.warn('[Dashboard] execution fetch error:', err)
-    if (requestGeneration !== executionHydrationRequestGeneration) return
     acceptedExecutionWorkspace.value = null
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }

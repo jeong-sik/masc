@@ -130,7 +130,7 @@ let with_fixture ?acquire ?observe_step f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
-              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ -> Ok (Masc.Lane_addon_broadcast_delivery.External_sender,[]));
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.External_sender,[]));
                 project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
@@ -799,6 +799,18 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
     |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
   check string "explicit private Broadcast commits" "committed"
     (member "delivery" original |> text "status");
+  let alias_context : Tool_misc.context =
+    {config;agent_name="bound-session-alias";help_schemas=[]} in
+  let alias_args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "verified-alias-send"] in
+  let alias_result = match Tool_misc.dispatch
+    ~lane_access:(Lane_addon_sources.Keeper owner) alias_context
+    ~name:"masc_lane_evidence" ~args:alias_args with
+    | Some result -> result | None -> fail "Lane evidence facade was not dispatched" in
+  check bool "verified Keeper alias can send as its canonical Lane owner" true
+    (Tool_result.is_success alias_result);
+  check string "alias Broadcast commits under the verified Keeper" "committed"
+    (Tool_result.data alias_result |> member "delivery" |> text "status");
   let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   let store = Store.create ~root:store_root in
   let broadcast_id = member "delivery" original |> member "receipt" |> text "request_id" in
@@ -813,7 +825,7 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
   remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
   Runtime.For_testing.reset ();
   Runtime.register_fleet_backend {
-    snapshot=(fun ~config:_ ~caller:_ -> fail "cached private retry must retain its accepted audience");
+    snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "cached private retry must retain its accepted audience");
     project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
   check bool "unverified claimed owner cannot retrieve cached private evidence" true
     (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
@@ -882,7 +894,7 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
     let projected_authorities=ref [] in
     let calls = ref [] and immediate_calls = ref 0 in
     let install () = Runtime.register_fleet_backend {
-      snapshot=(fun ~config:_ ~caller:_ -> Ok (!sender_authority,!roster));
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (!sender_authority,!roster));
       project=(fun ~config:_ ~sender_authority ~delivery ~recipient ->
         projected_authorities:=sender_authority::!projected_authorities;
         calls := (recipient,delivery.Workspace_broadcast.request_id)::!calls;
@@ -999,7 +1011,7 @@ let test_fleet_service_isolates_blocked_recipient_and_admissions () =
     let release,_=Eio.Promise.create () in
     let calls=ref [] in
     Runtime.register_fleet_backend {
-      snapshot=(fun ~config:_ ~caller:_ -> Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender,
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender,
         ["keeper-a";"keeper-b"]));
       project=(fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
         calls:=(delivery.Workspace_broadcast.request_id,recipient)::!calls;
@@ -1103,7 +1115,7 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     check Alcotest.int "inspection and preservation never rebroadcast" 1 !attempts;
     let projections = ref [] in
     Runtime.register_fleet_backend {
-      snapshot=(fun ~config:_ ~caller:_ -> fail "recovery must retain the admitted empty audience");
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "recovery must retain the admitted empty audience");
       project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
     unwrap (Runtime.recover_fleet ~config ~sw);
     await clock (fun () -> fleet_complete config "failed-send");

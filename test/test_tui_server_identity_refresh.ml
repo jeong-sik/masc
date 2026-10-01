@@ -63,6 +63,22 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+let test_broadcast_retry_scope_follows_verified_workspace () =
+  let scope reading = Masc_tui_types.broadcast_workspace_scope
+    ~local_base_path:"/workspace/local" reading in
+  let original = identity "/workspace/local" in
+  let restarted = { original with Tui_decode.sid_binary_commit = "after-restart";
+    sid_uptime = Some "new process" } in
+  Alcotest.(check (option string)) "port-independent workspace retry scope"
+    (scope (Some original)) (scope (Some restarted));
+  Alcotest.(check bool) "another MASC store has another scope" true
+    (scope (Some original) <> scope (Some { restarted with sid_masc_root = "/workspace/other/.masc" }));
+  Alcotest.(check (option string)) "foreign workspace refuses admission" None
+    (scope (Some (identity "/workspace/foreign")));
+  Alcotest.(check (option string)) "unread server refuses admission" None (scope None);
+  Alcotest.(check (option string)) "booting server refuses admission" None
+    (scope (Some { original with sid_state_ready = Some false }))
+
 (* The keeper, task and log lists start empty and are read only once the server
    vouches for this workspace, so before that an empty list is not an empty
    workspace (#35747). *)
@@ -94,6 +110,8 @@ let () =
             test_workspace_identity_matches_canonical_paths
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
+        ; Alcotest.test_case "Broadcast retry uses verified workspace store" `Quick
+            test_broadcast_retry_scope_follows_verified_workspace
         ; Alcotest.test_case "local rows are unread until read" `Quick
             test_local_rows_are_unread_until_the_workspace_is_read
         ] )

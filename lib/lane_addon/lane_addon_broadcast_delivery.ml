@@ -4,6 +4,16 @@ type t = {root : string; io : Fs_compat.private_jsonl_transaction_io_for_testing
 type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int
 type sender_authority = Keeper_sender | External_sender
+let sender_snapshot ~caller ~access ~registered =
+  let registered = List.sort_uniq String.compare registered in
+  match access with
+  | Lane_addon_sources.Operator_configuration -> Ok (External_sender,registered)
+  | Lane_addon_sources.Keeper keeper when String.equal keeper caller ->
+      if List.mem keeper registered
+      then Ok (Keeper_sender,List.filter (fun name -> not (String.equal name keeper)) registered)
+      else Ok (External_sender,registered)
+  | Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated ->
+      Error "Fleet sender lacks verified authority"
 type payload = {sender_authority:sender_authority;caller:string;operation_id:Request_id.t;artifact_sha256:string;
                 content:string;recipients:string list}
 type record = {payload:payload;workspace_request_id:Request_id.t;

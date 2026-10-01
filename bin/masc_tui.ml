@@ -4797,7 +4797,8 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   let host = server_peer_host and port = state.port in
   let broadcast_path=Filename.concat
     (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-lane-broadcast.jsonl" in
-  let broadcast_scope=Yojson.Safe.to_string (`List [`String host;`Int port]) in
+  let broadcast_scope=Masc_tui_types.broadcast_workspace_scope
+    ~local_base_path:state.local_base_path state.server_identity in
   let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
   let perform () =
     let ( let* ) = Result.bind in
@@ -4864,28 +4865,35 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
           | Addons.Evidence _,`Assoc fields -> List.assoc_opt "broadcast" fields=Some (`Bool true)
           | _ -> false in
         let credential=Masc_tui_http.bind_credential () in
-        let* principal = if not broadcast then Ok None
+        let* scope = if not broadcast then Ok None
           else if not broadcast_workspace_verified then Error (`Request
             "Verify the server workspace before sharing evidence via Broadcast")
-          else (request_result (Masc_tui_http.lane_broadcast_principal_bound
-            ~credential ~host ~port) |> Result.map Option.some) in
-        let* body = match principal with
-          | None -> Ok body
-          | Some principal -> request_result (Masc_tui_lane_broadcast_pending.prepare
-              ~path:broadcast_path ~scope:broadcast_scope ~credential:principal body) in
+          else (match broadcast_scope with
+            | Some scope -> Ok (Some scope)
+            | None -> Error (`Request "Verify the server workspace before sharing evidence via Broadcast")) in
+        let* principal = match scope with
+          | None -> Ok None
+          | Some _ -> (request_result (Masc_tui_http.lane_broadcast_principal_bound
+              ~credential ~host ~port) |> Result.map Option.some) in
+        let* body = match principal,scope with
+          | None,_ -> Ok body
+          | Some principal,Some scope -> request_result (Masc_tui_lane_broadcast_pending.prepare
+              ~path:broadcast_path ~scope ~credential:principal body)
+          | Some _,None -> Error (`Request "Broadcast workspace scope is unavailable") in
         let post = if broadcast then Masc_tui_http.post_json_bound ~credential
           else Masc_tui_http.post_json in
         let* receipt = request_result (post ~host ~port
           ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body)) in
-        let diagnostic = match principal with
-          | None -> None
-          | Some principal ->
+        let diagnostic = match principal,scope with
+          | None,_ -> None
+          | Some principal,Some scope ->
               (match Masc_tui_lane_broadcast_pending.acknowledge
-                ~path:broadcast_path ~scope:broadcast_scope ~credential:principal ~request:body receipt with
+                ~path:broadcast_path ~scope ~credential:principal ~request:body receipt with
                | Ok () -> None
                | Error detail -> Some (Addons.Request_failure
-                   ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail))) in
+                   ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail)))
+          | Some _,None -> Some (Addons.Request_failure "Broadcast workspace scope is unavailable") in
         (match inspect () with
          | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
          | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))

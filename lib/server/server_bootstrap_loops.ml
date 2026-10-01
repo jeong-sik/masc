@@ -1882,17 +1882,10 @@ let start_keeper_loops_owned
     mention_outcome
   in
   Lane_addon_runtime.register_fleet_backend {
-    snapshot=(fun ~config ~caller ->
+    snapshot=(fun ~config ~caller ~access ->
       let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
-      let same name=String.equal (String.lowercase_ascii (String.trim name))
-        (String.lowercase_ascii (String.trim caller)) in
-      let sender_authority=match Keeper_identity.Keeper_id.of_string caller with
-        | Some _ when List.exists (fun (entry : Keeper_registry.registry_entry) -> entry.name=caller) registered ->
-            Lane_addon_broadcast_delivery.Keeper_sender
-        | Some _ | None -> Lane_addon_broadcast_delivery.External_sender in
-      Ok (sender_authority,List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-        if same entry.name then None else Some entry.name) registered
-        |> List.sort_uniq String.compare));
+      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
+        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
     project=(fun ~config ~sender_authority ~delivery ~recipient ->
       append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
         ~sender_authority delivery ~keeper_name:recipient);

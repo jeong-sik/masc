@@ -74,7 +74,7 @@ type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
   project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
     recipient:string -> (unit,string) result;
 }
@@ -1037,7 +1037,7 @@ let fleet_store m = Fleet_ledger.create ~root:(Filename.concat (Lane_addon_store
 let observe_fleet_settlement (receipt : Fleet_ledger.receipt) =
   Option.iter (fun detail -> Log.Misc.warn "Lane Fleet durable result has descriptor settlement failure: %s" detail)
     receipt.settlement_error
-let admit_fleet m ~config ~caller ~request_id evidence =
+let admit_fleet m ~config ~caller ~access ~request_id evidence =
   let* backend = match !fleet_backend with Some value -> Ok value
     | None -> Error "Fleet delivery host boundary is unavailable" in
   let* fields=object_ evidence in let* content=text fields "message" in
@@ -1053,7 +1053,7 @@ let admit_fleet m ~config ~caller ~request_id evidence =
   let* previous=offload (fun () -> Fleet_ledger.find ledger ~caller ~operation_id) |> fleet_result in
   let* sender_authority,recipients=match previous with
     | Some receipt -> Ok (receipt.record.payload.sender_authority,receipt.record.payload.recipients)
-    | None -> backend.snapshot ~config ~caller in
+    | None -> backend.snapshot ~config ~caller ~access in
   let payload : Fleet_ledger.payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
   let* receipt=offload (fun () -> Fleet_ledger.admit ledger payload) |> fleet_result in
   observe_fleet_settlement receipt;
@@ -1289,7 +1289,7 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
                      | Some id -> Ok id | None -> Error "Broadcast request identity is missing" in
                    let* operation=match broadcast_request_id with
                      | Some value -> Ok value | None -> Error "Broadcast operation identity is missing" in
-                   let* record=admit_fleet m ~config ~caller ~request_id:operation evidence in
+                   let* record=admit_fleet m ~config ~caller ~access ~request_id:operation evidence in
                    let* () = if Fleet_ledger.Request_id.to_string record.workspace_request_id<>request_id then
                      Error "Fleet durable identity contradicts prepared evidence" else Ok () in
                    m.fleet_nudge ();

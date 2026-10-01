@@ -10978,6 +10978,19 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  (* Tools callbacks use their own generation, independent of Keeper reads.
+     Retire that owner before any same-named Keeper can appear on another root. *)
+  state.tools_request_generation <- state.tools_request_generation + 1;
+  state.tools_read_inflight <- None;
+  state.tools_inventory <- None;
+  state.tools_error <- None;
+  state.skills_catalog <- None;
+  state.skills_catalog_error <- None;
+  state.tools_async_observation <- None;
+  state.tools_async_observation_error <- None;
+  state.tools_skill_evidence <- None;
+  state.tools_skill_cursor <- 0;
+  state.tools_scroll <- 0;
   state.msg_loaded_pages <- [];
   (* Detail requests belong to the authority that launched them. Removing
      their pending tokens rejects late replies, including A -> B -> A; the

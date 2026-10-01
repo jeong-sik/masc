@@ -1069,6 +1069,79 @@ def connector_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def tools_workspace_withdrawal(binary: str) -> None:
+    fixtures = h.skills_usage_clarity_http_fixtures()
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    old_started, old_release, old_returned = (threading.Event() for _ in range(3))
+    new_started, new_release = threading.Event(), threading.Event()
+    counts = {"a": 0, "b": 0}
+
+    def inventory(marker):
+        return 200, {
+            "tool_inventory": {"count": 0, "tools": []},
+            "effective_keeper_surface": {
+                "status": "available", "keeper_name": "alpha", "runtime_id": "fixture.tools",
+                "official_client_kind": "agent_core", "tool_delivery": {"status": "delivered"},
+                "native_posture": None, "skill_snapshot_revision": "c" * 64,
+                "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
+                "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "unavailable_skill_names": [], "count": 1,
+                "tools": [{"name": marker, "origin": {"kind": "descriptor"}}],
+                "tool_surface_sha256": None,
+            },
+            "skill_activations": {"status": "no_session", "keeper_name": "alpha"},
+        }
+
+    def tools():
+        with wire.lock:
+            phase = wire.phase
+            counts[phase] += 1
+            ordinal = counts[phase]
+        if phase == "a" and ordinal > 1:
+            old_started.set()
+            assert old_release.wait(timeout=30), "old Tools fixture not released"
+            old_returned.set()
+            return inventory("workspace_a_late_forbidden")
+        if phase == "b":
+            new_started.set()
+            assert new_release.wait(timeout=30), "new Tools fixture not released"
+            return inventory("workspace_b_current_tools")
+        return inventory("workspace_a_initial_tools")
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health, "/health?full=1": wire.health,
+        "/api/v1/dashboard/tools?keeper=alpha": tools, "/api/v1/dashboard/tools": tools})
+
+    def interact(process, fd, _slave, output, _base):
+        def await_screen(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
+        try:
+            h.tab_until(process, fd, output, b"MASC System")
+            h.send_and_wait(process, fd, output, b"t", b"workspace_a_initial_tools")
+            assert h.wait_for_fixture_event(process, fd, output, old_started, timeout=WAIT_SECONDS)
+            wire.publish("b")
+            await_screen(lambda text: b"MISMATCH local " in text, "B authority did not become current")
+            assert b"workspace_a_initial_tools" not in screen(output), "old cached inventory survived withdrawal"
+            assert h.wait_for_fixture_event(process, fd, output, new_started, timeout=WAIT_SECONDS), "old pending slot blocked B read"
+            new_release.set()
+            await_screen(lambda text: b"workspace_b_current_tools" in text, "current B inventory did not load")
+            old_release.set()
+            assert h.wait_for_fixture_event(process, fd, output, old_returned, timeout=WAIT_SECONDS)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: counts["b"] >= 2, timeout=WAIT_SECONDS), "current polling did not resume"
+            h.drain_until_quiet(process, fd, output)
+            visible = screen(output)
+            assert b"workspace_b_current_tools" in visible and b"workspace_a_late_forbidden" not in visible, visible
+            os.write(fd, b"q")
+        finally:
+            old_release.set()
+            new_release.set()
+    h.run_terminal_scenario(binary,
+        description="Tools workspace withdrawal clears cached inventory and supersedes held same-Keeper reads",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1080,6 +1153,7 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    tools_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)

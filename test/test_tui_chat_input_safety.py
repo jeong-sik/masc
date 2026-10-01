@@ -91,7 +91,7 @@ def approval_typing(binary: str, decision: str) -> None:
         try:
             open_chat(process, fd, output)
             h.send_and_wait(process, fd, output, b"first", h.composer_showing(b"first"))
-            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             # Approval arrives while the operator is already writing NEXT.
             h.send_and_wait(process, fd, output, b"ma", h.composer_showing(b"ma"))
             before = len(output)
@@ -258,7 +258,7 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
         try:
             open_chat(process, fd, output)
             h.send_and_wait(process, fd, output, b"trigger-error", b"trigger-error")
-            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             before = len(output)
             show_failure.set()
             h.wait_for_output(

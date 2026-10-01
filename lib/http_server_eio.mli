@@ -64,7 +64,8 @@ module Response : sig
   (** Resolve the status for a JSON value response: [Some `OK] or [None]
       (the default) plus a registered recognizer match reclassifies the
       response to 504 [Gateway_timeout]; any other explicit status wins.
-      Exposed for unit tests of the [#28400] out-of-band contract. *)
+      Shared with the HTTP/2 JSON-value responders so both transports apply
+      the same timeout-envelope contract. *)
   val timeout_envelope_status_override
     :  ?status:Httpun.Status.t
     -> Yojson.Safe.t

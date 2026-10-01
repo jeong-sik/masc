@@ -115,5 +115,52 @@ let test_wire_parity () =
     ) ["identity", true, None; "gzip", true, Some "gzip"; "gzip", false, None]
   ) [None; Some pool]
 
+let test_timeout_status_on_wire () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let key = "test-h2-json-timeout-status" in
+  Dashboard_cache.invalidate key;
+  Fun.protect ~finally:(fun () -> Dashboard_cache.invalidate key) (fun () ->
+    (* Exercise the real producer's exception-to-envelope boundary without
+       waiting on a wall-clock deadline. The HTTP response must expose it. *)
+    let envelope = Dashboard_cache.get_or_compute_with_timeout key ~ttl:1.
+        ~clock:(Eio.Stdenv.clock env) ~timeout_sec:1.
+        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+    check bool "cache produced a timeout envelope" true
+      (Dashboard_cache.is_timeout_envelope envelope);
+    List.iter (fun installed ->
+      Executor_pool_ref.For_testing.with_pool_option installed @@ fun () ->
+      List.iter (fun encoder ->
+        List.iter (fun encoding ->
+          List.iter (fun (explicit_status, json, expected) ->
+            let status, headers, body = wire_response
+              ~headers:["accept-encoding", encoding] "/dashboard-timeout"
+              ~handler:(fun reqd ->
+                let extra_headers = ["access-control-allow-origin", "https://dashboard.example"] in
+                match encoder with
+                | Inline -> Response.h2_respond_json_value
+                    ?status:explicit_status ~extra_headers reqd json
+                | Worker -> Response.h2_respond_json_value_on_cpu
+                    ?status:explicit_status ~extra_headers reqd json) in
+            check int "wire status reflects timeout or explicit refusal" expected status;
+            check (option string) "timeout keeps CORS" (Some "https://dashboard.example")
+              (List.assoc_opt "access-control-allow-origin" headers);
+            check (option string) "timeout has complete wire body"
+              (Some (string_of_int (String.length body)))
+              (List.assoc_opt "content-length" headers);
+            let decoded = match List.assoc_opt "content-encoding" headers with
+              | Some "gzip" -> gunzip body
+              | None -> body
+              | Some other -> fail ("unexpected encoding: " ^ other) in
+            check string "envelope body is preserved" (Yojson.Safe.to_string json) decoded
+          ) [None, envelope, 504; Some `OK, envelope, 504;
+             Some `Bad_request, envelope, 400; Some `Misdirected_request, envelope, 421;
+             None, `Assoc ["ok", `Bool true], 200]
+        ) ["identity"; "gzip"]
+      ) [Inline; Worker]
+    ) [None; Some pool])
+
 let () = run "H2 worker JSON" ["wire", [
-  test_case "identity, gzip, headers and fresh JSON with and without pool" `Quick test_wire_parity]]
+  test_case "identity, gzip, headers and fresh JSON with and without pool" `Quick test_wire_parity;
+  test_case "timeout envelope status survives both JSON response paths" `Quick test_timeout_status_on_wire]]

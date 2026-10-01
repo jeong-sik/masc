@@ -2,13 +2,17 @@ open Alcotest
 module Chat = Masc_tui_chat_portrait
 module View = Masc_tui_portrait_view
 module Portrait = Masc_tui_keeper_portrait
+module Look = Keeper_portrait_look
 
 let project = Masc_tui_terminal_palette.For_testing.best_color_for_level
   ~level:Masc_tui_terminal_palette.True_color
 let pixels = View.Pixels {cell_width = 10; cell_height = 20}
 
 let prepare cache ?(display = pixels) ?(rows = 28) ?(cols = 34)
-    ?(portrait = Keeper_portrait_equipment.Ready Keeper_portrait_look.bare) name =
+    ?equipment ?(portrait = Keeper_portrait_equipment.Ready Keeper_portrait_look.bare) name =
+  let portrait = match equipment with
+    | Some value -> Keeper_portrait_equipment.Ready value
+    | None -> portrait in
   Chat.prepare cache ~display ~project ~name ~portrait ~rows ~cols
 
 let test_space_and_identity () =
@@ -29,6 +33,24 @@ let test_space_and_identity () =
   check bool "changing the conversation changes the portrait" false
     (String.equal p.image.Keeper_portrait_draw.rgba
       (Option.get beta.placement).image.Keeper_portrait_draw.rgba)
+
+let test_observed_equipment () =
+  let cache = Portrait.cache () in
+  let bare = Option.get (prepare cache "alpha") in
+  let bare_image = (Option.get bare.placement).image in
+  let equipment = { Look.bare with face = Look.Glasses; head = Look.Crown } in
+  let dressed = Option.get (prepare cache ~equipment "alpha") in
+  let dressed_placement = Option.get dressed.placement in
+  check bool "same conversation reflects newly observed clothes" false
+    (String.equal bare_image.Keeper_portrait_draw.rgba
+      dressed_placement.image.Keeper_portrait_draw.rgba);
+  check int "clothing preserves roster space" bare.roster_rows dressed.roster_rows;
+  let repeat = Option.get (prepare cache ~equipment "alpha") in
+  check bool "unchanged observed clothing reuses the picture" true
+    (dressed_placement.image == (Option.get repeat.placement).image);
+  let restored = Option.get (prepare cache "alpha") in
+  check bool "restored outfit reuses its own cached picture" true
+    (bare_image == (Option.get restored.placement).image)
 
 let test_four_selectable_roster_rows_are_the_boundary () =
   let cache = Portrait.cache () in
@@ -74,5 +96,6 @@ let test_observed_equipment_and_unavailable () =
 let () = run "chat portrait" ["conversation identity and layout", [
   test_case "uses observed equipment and suppresses unavailable readings" `Quick test_observed_equipment_and_unavailable;
   test_case "owns its space and follows the conversation" `Quick test_space_and_identity;
+  test_case "follows observed clothing without taking roster space" `Quick test_observed_equipment;
   test_case "reserves four selectable roster rows at the boundary" `Quick test_four_selectable_roster_rows_are_the_boundary;
   test_case "yields to space and colour preferences" `Quick test_small_and_colourless]]

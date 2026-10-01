@@ -1817,10 +1817,10 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) :
+let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
     (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port with
+  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->

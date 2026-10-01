@@ -1,0 +1,1 @@
+{"command": ["pnpm", "exec", "tsc", "--noEmit", "--pretty", "false"], "exit": 0, "finished": "2026-09-30T13:56:14.766564+00:00"}

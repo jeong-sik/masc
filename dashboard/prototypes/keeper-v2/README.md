@@ -60,5 +60,4 @@ Requires network for the React/Babel CDN scripts and Google Fonts.
   cap and are not exported yet. The `Avatar` component falls back to sigil
   badges via `onError`, so the page renders without them.
 
-Note: the mock display strings include `~/.masc` paths, which is why this
-directory must stay out of the `check-ssot.sh` R6 scan roots (bin/lib/scripts/docs).
+Note: the mock display strings include `~/.masc` paths.

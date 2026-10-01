@@ -29,7 +29,7 @@ let relevance_choices =
     ~describe:(function
       | Settled Judgment.Relevant ->
         Some
-          "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient."
+          "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient."
       | Settled Judgment.Not_relevant ->
         Some
           "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act."
@@ -38,12 +38,19 @@ let relevance_choices =
 
 let relevance_question_id = "relevance"
 
-let relevance_question ~choices candidate =
+(* The keeper and its interests are in the question, and the state carries
+   only the signal. With the keeper's role in the state, Jev answered relevant
+   far more often: on 2026-10-01, over 26 cases where the two shapes
+   disagreed, a blind judge reading the production rule sided with this
+   shape 23 times. The same shape lets one request carry a question per
+   keeper for the same signal. *)
+let relevance_question ~choices ~interests candidate =
   Typesafeai_types.choice_of_set
     ~instructions:
       (Printf.sprintf
-         "Does the current Board signal in items[0] itself require concrete attention, review, or action from keeper %S for one of keeper_role.board_interests? General topic or capability overlap is not sufficient. Choose uncertain when you cannot establish either decision from the supplied signal."
-         candidate.Keeper_board_attention_candidate.keeper_name)
+         "Does the Board signal in state.signal itself require concrete attention, review, or action from keeper %S for one of its board interests %s? General topic or capability overlap is not sufficient. Choose uncertain when you cannot establish either decision from the supplied signal."
+         candidate.Keeper_board_attention_candidate.keeper_name
+         (Yojson.Safe.to_string (`List (List.map (fun interest -> `String interest) interests))))
     choices
 ;;
 
@@ -67,16 +74,20 @@ let rationale
 
 let judge_candidate ?clock ~destinations ~candidate () =
   let* choices = relevance_choices in
-  let* state =
-    Keeper_board_attention_candidate.singleton_judgment_request
-      candidate
+  let* interests = Keeper_board_attention_candidate.board_interests candidate in
+  let state =
+    `Assoc
+      [ ( "signal"
+        , Keeper_board_attention_candidate.signal_to_yojson
+            candidate.Keeper_board_attention_candidate.signal )
+      ]
   in
   let* evaluated =
     Typesafeai_client.evaluate
       ?clock
       ~destinations
       ~state
-      ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
+      ~questions:[ relevance_question_id, relevance_question ~choices ~interests candidate ]
       ()
     |> Result.map_error Typesafeai_client.failure_to_string
   in
@@ -114,4 +125,54 @@ let judge_candidate ?clock ~destinations ~candidate () =
         }
     ; confidence = decided.Typesafeai_types.confidence
     }
+;;
+
+let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_candidate.candidate list) () =
+  match candidates with
+  | [] -> Ok []
+  | first :: _ ->
+    let* choices = relevance_choices in
+    let signal = Keeper_board_attention_candidate.signal_to_yojson first.signal in
+    let rec questions seen = function
+      | [] -> Ok []
+      | candidate :: rest ->
+        let id = candidate.Keeper_board_attention_candidate.candidate_id in
+        if List.mem id seen then Error "typesafeai: duplicate candidate identity"
+        else if Keeper_board_attention_candidate.signal_to_yojson candidate.signal <> signal
+        then Error "typesafeai: event batch contains different signals"
+        else
+          let* interests = Keeper_board_attention_candidate.board_interests candidate in
+          let* tail = questions (id :: seen) rest in
+          Ok ((id, relevance_question ~choices ~interests candidate) :: tail)
+    in
+    let* questions = questions [] candidates in
+    let* evaluated =
+      Typesafeai_client.evaluate ?clock ~destinations
+        ~state:(`Assoc ["signal", signal]) ~questions ()
+      |> Result.map_error Typesafeai_client.failure_to_string
+    in
+    let response = evaluated.Typesafeai_client.response in
+    let provenance =
+      { Keeper_board_attention_candidate.destination_uri = evaluated.destination.destination_uri
+      ; answering_model_id = response.model
+      ; request_body_sha256 = evaluated.request_body_sha256
+      }
+    in
+    let decode candidate =
+      let* answer =
+        match List.assoc_opt candidate.Keeper_board_attention_candidate.candidate_id response.answers with
+        | Some answer -> Ok answer
+        | None -> Error "typesafeai: response missing candidate answer"
+      in
+      let* decided = Typesafeai_types.decode_choice choices answer in
+      Ok
+        { assessment =
+            (match decided.Typesafeai_types.choice with
+             | Settled decision -> Decided { Judgment.decision; rationale = rationale decided }
+             | Uncertain -> Needs_review (rationale decided))
+        ; provenance
+        ; confidence = decided.confidence
+        }
+    in
+    Ok (List.map (fun candidate -> candidate, decode candidate) candidates)
 ;;

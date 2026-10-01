@@ -763,8 +763,7 @@ let run_keeper_cycle
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the
-                  layer stays absent — the keeper_status tool still carries
-                  the full typed answer. *)
+                  layer stays absent. *)
                let repository_freshness =
                  match
                    Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()

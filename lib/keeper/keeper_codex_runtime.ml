@@ -632,16 +632,19 @@ let codex_error_to_core_error = function
                seconds
          ; phase = None
          })
-  (* Idle after [turn/start] was accepted is ambiguous: the upstream turn may
-     still be executing and committing effects. Rotation would run the goal a
-     second time, so this stays non-rotating; session recovery
-     ([Transport_interrupted]) owns reconciliation. *)
+  (* Keep timeout evidence available to candidate backpressure for the next
+     turn. [observe_failed_dispatch] records the ambiguous dispatch separately,
+     so the driver's effect fence still forbids replay within this turn. *)
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = true } ->
-    Agent_core.Error.Internal
-      (Printf.sprintf
-         "Codex app-server stream was idle for %.3fs after turn/start was \
-          accepted (not rotated: the upstream turn may still commit)"
-         seconds)
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf
+               "Codex app-server stream was idle for %.3fs after turn/start was \
+                accepted; completion is unconfirmed"
+               seconds
+         ; phase = Some Llm_provider.Http_client.Cli_stdout_idle
+         })
   (* Server-reported "interrupted" turn status and host graceful shutdown:
      not a provider fault, so rotation to another runtime would re-run a turn
      that was intentionally stopped. Both stay off the rotation chain — the
@@ -751,6 +754,29 @@ let native_posture_note = function
        A refused built-in write does not mean the workspace is read-only."
     ]
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
+;;
+
+(* A dispatched turn may have effects even if no tool/text notification made
+   it back to MASC. Preserve that uncertainty before mapping its failure into
+   provider evidence. Setup failures submitted no turn and remain rotatable. *)
+let observe_failed_dispatch ~observe_transport_uncertain = function
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Timeout { turn_accepted = true; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = true; _ } ->
+    observe_transport_uncertain ()
+  | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Unsupported_server_request _
+  | Runtime_codex_app_server.Context_window_exceeded _
+  | Runtime_codex_app_server.Turn_failed _
+  | Runtime_codex_app_server.Stopped_by_host _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
@@ -1448,9 +1474,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         | _, Some detail -> Error (internal_error detail)
         | _, None -> settle_host_stop stop)
      | Error error ->
-       (match error with
-        | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
-        | _ -> ());
+       observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then
          read_usage_after_quota_refusal
@@ -1810,6 +1834,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
 
 module For_testing = struct
   let note_transport_uncertainty = note_transport_uncertainty
+  let observe_failed_dispatch = observe_failed_dispatch
   let observe_stream_native_action ~turn_count ~observe event =
     match
       codex_stream_callback

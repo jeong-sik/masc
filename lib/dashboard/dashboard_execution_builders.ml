@@ -368,6 +368,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       `Assoc
         ([
            ("name", `String name);
+           ("portrait", member_assoc "portrait" keeper);
            ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
            ("tone", `String (Dashboard_utils.string_of_tone tone));

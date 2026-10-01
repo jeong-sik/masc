@@ -19,6 +19,7 @@ val all : t list
 val slots : slot list
 val slot : t -> slot
 val slot_id : slot -> string
+val slot_of_id : string -> slot option
 val empty_id : slot -> string
 (** The explicit empty label in an equipment snapshot. It is not a catalog
     item and {!of_id} refuses it. *)

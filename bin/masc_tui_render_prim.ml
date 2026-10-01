@@ -1,8 +1,6 @@
-(** Rendering primitives shared across the surfaces.
-
-    Every value here is reached by at least 10 of the screen
-    renderers, and the set is closed: nothing in it refers back to a
-    single surface's code. That is what lets it compile before them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -99,6 +97,8 @@ let clamped_scroll_now (state : state) = function
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Keeper_logs_scroll { cols; _ } ->
+      Keeper_logs_scroll { scroll = state.log_scroll; cols }
   | Acting _ -> Acting state.acting_scroll
   | Acting_selection _ ->
       Acting_selection (state.acting_scroll, state.acting_cursor)
@@ -186,6 +186,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
+  (* Logs use their own bounded Metrics_tail movement through the key path. *)
+  | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
@@ -2973,6 +2975,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -3013,7 +3016,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
+    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error with
    | None -> ()
@@ -3055,7 +3058,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       match Rows.at diff_rows_window (i + scroll) with
       | None -> box_empty buf cols
       | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+          box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above and the reading needs no row of its own. *)
@@ -3083,6 +3086,7 @@ let render_repository_changes_diff (state : state) ~path =
          | Some _ | None -> None)
     ; ds_error = state.repository_changes_diff_error
     ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
@@ -5041,3 +5045,32 @@ let answering_lines (state : state) =
    fixed-chrome rule, applied before the panel exists rather than patched
    after (see boxed_surface_chrome_rows for the precedent). *)
 let answering_preview_rows = 3
+
+(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
+   header ("▸ /", "▸ Resources") with no row above it. Every other surface
+   opens on its name, the clock and the connection badge, and the badge is the
+   row that says the server has gone; on these two nothing did. The title row
+   sits above both panes, so each pane gives up one row to it. *)
+let pane_surface_title_rows = 1
+
+let pane_surface_title (state : state) ~name =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%s  %02d:%02d:%02d  %s"
+    (screen_title (" MASC " ^ name))
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    (connection_badge state)
+
+(* The row between the strip and the title, then the title. Every other
+   surface draws that row first -- a gap on its own, the box's top edge beside
+   a roster -- and its title under it. The two pane surfaces drew the title
+   first and left the row to the pane, so alone on the surface the gap fell
+   between the title and the pane's own heading: the title sat one row higher
+   than on every other screen, and the heading read as a second, detached
+   block. Beside the other pane the list's box draws its top edge on that row,
+   so a split frame keeps it there. The row count is the same either way. *)
+let pane_surface_header buf cols (state : state) ~name ~split =
+  if not split then box_top buf cols;
+  box_line buf cols (pane_surface_title state ~name)
+
+let pane_surface_content_height ~rows =
+  max 1 (framed_content_height ~rows - pane_surface_title_rows)

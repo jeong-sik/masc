@@ -1,0 +1,18 @@
+Headc6677251ad98639c7cbc4390eecef7c690390caa (run metadata), focused36681385350 SUCCESS.
+Raw SHA256: 37c2ce1c1ee658c0ee18b4607ff88e80e00e93ba73bfc8438b2aed95f79708fe
+Actual Activity layout, Repositories and Changes newline suites passed. The Activity executable fixture runs30/40/60/80/120cols × color/NO_COLOR at18rows without optional skips. It checks visible failed result/path tail/cell width, path/CJK Task title/Execution/Task ID/result through Context pages, Home and selected record changes. Text comparison removes whitespace: byte-exact spacing is not proved.
+Refresh/stale/overlay input isolation/Enter target remain outside this fixture. No production, required-check, merge or installed-update proof.
+Later probe verification: artifact download completed, all four manifest hashes passed, and the binary reported c6677251ad98639c7cbc4390eecef7c690390caa. Separate100x30 color fixture captures and limitations are recorded in workspace-activity-ci-capture.json. They do not prove installation or production.
+
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_workspace_activity_layout_pty: start 2026-09-30T07:30:50Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_workspace_activity_layout_pty.py ../bin/masc_tui.exe)
+Workspace Activity responsive rows and full context: PASS
+[targeted] test_tui_workspace_activity_layout_pty: OK in 47s
+[targeted] test_tui_keyboard_input-repositories: start 2026-09-30T07:31:37Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe repositories)
+tui Repositories regression: PASS
+[targeted] test_tui_keyboard_input-repositories: OK in 17s
+[targeted] test_tui_keyboard_input-changes-newline: start 2026-09-30T07:31:54Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe changes-newline)
+tui Changes newline projection regression: PASS

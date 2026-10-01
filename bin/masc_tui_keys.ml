@@ -1276,10 +1276,10 @@ let code_notes_bindings =
 let code_history_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Act "H" "close"
-  ; b Navigate "Esc" "back"
+  ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]
 
@@ -1498,7 +1498,8 @@ let footer_hints_git_changes =
 
 let footer_hints_git_diff =
   hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
      ; b Act "p" "open PR"
      ; b Act "t/g" "task / goal"
@@ -1621,6 +1622,11 @@ let here_marker = " \xc2\xb7 you are here"
    them on the five tabs where they do nothing. *)
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
+  | Detail_items ->
+      [ b Navigate "j/k" "preview"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "first/last"
+      ]
   | Detail_github ->
       [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
       ; b Act "P" "token" ~help:"set fine-grained PAT / token"
@@ -1863,7 +1869,7 @@ let help_sections_for_state (state : state) =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "b" "browser"
+    [ b Navigate "b" "choose browser"
     ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"

@@ -1,0 +1,226 @@
+{
+  "feature": "rotation",
+  "scope": "full pinned current-main source composition only; no local typecheck, Dune, native, runtime, network or CI",
+  "checked_at": "2026-09-30T05:12:03.677484+00:00",
+  "main_baseline": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "immediate_local_parent": "fcaaecff6d051f964e16b65b796ce67140441df7",
+  "checked_source_commit": "c1dd72b3b8f22260ccc053bf68f0c21c4a3094b7",
+  "original_own_delta_parent": "fedf36b9bc",
+  "original_feature_source": "2849c75934",
+  "previous_published_api_head": "040761c68ae64cc7165ca9c3f570e086c2354d01",
+  "extraction": "own allowed-path net feature delta; parent fixture/main overlays excluded; test/dune only actual additive native registration",
+  "parent_delta_manifest": [
+    "changelog.d/40182.md",
+    "docs/audits/2026-09-30-token-rotation-authority.md",
+    "docs/evidence/2026-09-30-token-rotation-authority/README.md",
+    "docs/evidence/2026-09-30-token-rotation-authority/SHA256SUMS",
+    "docs/evidence/2026-09-30-token-rotation-authority/current-main-composition.json",
+    "docs/evidence/2026-09-30-token-rotation-authority/determinism-check.txt",
+    "docs/evidence/2026-09-30-token-rotation-authority/diff-check.txt",
+    "docs/evidence/2026-09-30-token-rotation-authority/fragment-check.txt",
+    "docs/evidence/2026-09-30-token-rotation-authority/ignore-lint.txt",
+    "docs/evidence/2026-09-30-token-rotation-authority/parse-only.txt",
+    "docs/evidence/2026-09-30-token-rotation-authority/private-retirement-label-followup.json",
+    "docs/evidence/2026-09-30-token-rotation-authority/provenance.json",
+    "docs/evidence/2026-09-30-token-rotation-authority/public-auth-fixture-followup.json",
+    "lib/auth/auth.mli",
+    "lib/auth/auth_credential_base.ml",
+    "lib/auth/auth_credential_token.ml",
+    "lib/auth/auth_credential_token.mli",
+    "lib/server/server_runtime_startup_credentials.ml",
+    "test/dune",
+    "test/stanzas/test_auth_token_rotation_transaction.inc",
+    "test/test_auth_rotate_shared_tokens_10304.ml",
+    "test/test_auth_token_rotation_transaction.ml"
+  ],
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/server/server_runtime_startup_credentials.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_rotate_shared_tokens_10304.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_token_rotation_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "fcaaecff6d051f964e16b65b796ce67140441df7",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_credential_token.mli",
+        "lib/server/server_runtime_startup_credentials.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-ignore-without-comment-diff.sh",
+        "--base",
+        "fcaaecff6d051f964e16b65b796ce67140441df7",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "New ignore sites are justified.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "fcaaecff6d051f964e16b65b796ce67140441df7",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in fcaaecff6d051f964e16b65b796ce67140441df7...HEAD, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> \"\" ->\nlib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field \"note\") ~default:\"\")\n--\nlib/keeper/keeper_sandbox_factory.ml-78-    let actual_network =\nlib/keeper/keeper_sandbox_factory.ml:79:      Option.value t.default_network_override ~default:effective_network\n--\nlib/keeper/keeper_tool_in_process_runtime.ml-135-      ?cycle_grant:gate_grant\nlib/keeper/keeper_tool_in_process_runtime.ml:136:      ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))\nlib/dashboard/dashboard_execution_helpers.ml-44-  in\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_credential_token.mli",
+        "lib/server/server_runtime_startup_credentials.ml",
+        "test/test_auth_rotate_shared_tokens_10304.ml",
+        "test/test_auth_token_rotation_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "source_sha256": {
+    "changelog.d/40182.md": "51228d50dbfa7e9b8da63d0f3c6e76ea37d71ee46fef624f4ccec1530683d9b8",
+    "docs/audits/2026-09-30-token-rotation-authority.md": "80efc5abdafb8494903e0af8e56903f9aa0bd82f5f95246ce62cd93c432ddc7a",
+    "lib/auth/auth.mli": "c5ac5d41060abb0bc0b127077eff9059878fcff020eb863e3bbd95c89d43cc88",
+    "lib/auth/auth_credential_base.ml": "841edc36e7e0e7aa60120fd417f486387fb53c9da2f70ae57a381cf74a42325c",
+    "lib/auth/auth_credential_token.ml": "c3b2b97b8beba91ac793c2fc3ca4c7b8879de2a300f70cc1ba989aec9eb4dedd",
+    "lib/auth/auth_credential_token.mli": "b5885db5cb8c5705818954e3b9b9e351cf5abfb3514e5d83e8e2f69da2707552",
+    "lib/server/server_runtime_startup_credentials.ml": "8d4948f5cd24e029f135b9b39b161973cc37bd8a82cbc838c088b17d98494f23",
+    "test/dune": "77ae7781e18655f0cc7246d8c18958774c2628bc4221b54931287f2c000aab57",
+    "test/stanzas/test_auth_token_rotation_transaction.inc": "9f6c38881d5a493d79291bb60bf006a302ab31d3106112b1a05cde679fb90718",
+    "test/test_auth_rotate_shared_tokens_10304.ml": "352b240f495aa617e63fdc54d585d1d7db7015b1069dd3113cbf1a971542b62a",
+    "test/test_auth_token_rotation_transaction.ml": "805857b223ae3245055ff6e9108797822f6102299367b5f2ecdd08092501af1e"
+  },
+  "critical_preserved_parent_source_sha256": {
+    "test/test_dos_tools.ml": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+    "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+    "lib/keeper/keeper_dos_controller.mli": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7"
+  },
+  "retired_keeper_exact_block_sha256": {
+    "lib/keeper/keeper_dos_controller.ml": "03e60f32e42deabee0e6d234cd11cb8c49e1b661dfb4849d042512c741f8fb7b",
+    "lib/keeper/keeper_dos_controller.mli": "0fe533a36f9a4bd70101932211b193743412b418b8aab3cdcd3bb017a0f9d536"
+  },
+  "test_dune_registration_only_verified": true,
+  "native_registrations": [
+    "test_credential_expiry",
+    "test_auth_token_prune_transaction",
+    "test_auth_token_rotation_transaction"
+  ],
+  "native_execution": "not_run_locally",
+  "documentation_followup": "Only audit provenance refreshed after source checks; source is unchanged from checked_source_commit."
+}

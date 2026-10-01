@@ -4,6 +4,7 @@ import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
+import tomllib
 from pathlib import Path
 
 
@@ -12,16 +13,23 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def validate_result(row, runtime_id):
+def validate_result(row, runtime_id, case):
     receipt = row['receipt']
     if row['status'] == 'ok':
         require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
                 'successful result classification or slot mismatch')
         require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
+        validate_answer(row['answer'], expected_schema(case))
+        responses = [attempt for attempt in receipt['output']['attempts']
+                     if attempt['kind'] == 'response']
+        require(bool(responses) and all(attempt['slot'] == runtime_id
+                and same_json(attempt['output'], row['answer']) for attempt in responses),
+                'successful response observations disagree with result')
     else:
         require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
         code = {'invalid_response': 'candle_appraisal_rejected',
                 'transport_unavailable': 'candle_appraisal_unavailable'}[row['status']]
+        require(receipt['selected_slot'] == runtime_id, 'failed selected slot disagrees with dispatch')
         require(receipt['status'] == 'failed' and receipt['code'] == code,
                 'failed result classification mismatch')
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
@@ -57,6 +65,38 @@ def expected_schema(case):
         'minimum': 0, 'maximum': data['weight_max']} for name in data['keepers']})})
 
 
+def validate_answer(value, schema):
+    kind = schema['type']
+    if kind == 'object':
+        require(type(value) is dict and set(value) == set(schema['properties']),
+                'successful answer violates stage schema')
+        for key, child in schema['properties'].items():
+            validate_answer(value[key], child)
+    elif kind == 'string':
+        require(type(value) is str and value in schema['enum'],
+                'successful answer violates stage schema')
+    else:
+        require(kind == 'integer' and type(value) is int
+                and schema['minimum'] <= value <= schema['maximum'],
+                'successful answer violates stage schema')
+
+
+def validate_runtime(raw, plan):
+    config = tomllib.loads(raw.decode())
+    lane = config['runtime']['exact_output_lanes']['candle_appraiser']
+    runtime_id = plan['runtime_id']
+    require(lane['slots'] == [runtime_id] and lane['cli_slots'] == [],
+            'prepared runtime slots disagree with plan')
+    provider_id, _ = runtime_id.split('.', 1)
+    provider = config['providers'][provider_id]
+    require(lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
+            'prepared output limit disagrees with plan')
+    require(provider['exact-body-timeout-s'] == plan['evaluation_overrides']['exact-body-timeout-s'],
+            'prepared timeout disagrees with plan')
+    require(provider['credentials'] == {'type': 'env', 'key': plan['credential_env']},
+            'prepared credential reference disagrees with plan')
+
+
 def expected_input(case):
     data = case['input']
     if case['stage'] != 'weights':
@@ -71,6 +111,8 @@ def expected_input(case):
 
 def audit(workspace, evidence, resources, *, runtime_config=None):
     plan = json.loads((workspace/'plan.json').read_text())
+    exit_code = json.loads((evidence/'exit.json').read_text())['exit_code']
+    require(type(exit_code) is int and exit_code == 0, 'retained evaluation exit is not zero')
     metadata = json.loads((evidence/'metadata.json').read_text())
     require(same_json(metadata['plan'], plan), "audit check failed: same_json(metadata['plan'], plan)")
     require(metadata['build']['commit_source'] == 'embedded', "audit check failed: metadata['build']['commit_source'] == 'embedded'")
@@ -89,6 +131,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
     if runtime_config is not None:
         require(sha(runtime_config.read_bytes()) == plan['runtime_config_sha256'],
                 'prepared runtime configuration hash disagrees with plan')
+        validate_runtime(runtime_config.read_bytes(), plan)
     prompt_bodies = {}
     for name, digest in plan['prompt_sha256'].items():
         prompt_raw = (resources/'prompts'/name).read_bytes()
@@ -144,7 +187,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         prompt_hashes[case['id']].add(sha(prompt['rendered'].encode()))
         input_hashes[case['id']].add(sha(encoded_input.encode()))
         require(receipt['output']['semantic_verification'] == 'not_performed', "audit check failed: receipt['output']['semantic_verification'] == 'not_performed'")
-        validate_result(row, plan['runtime_id'])
+        validate_result(row, plan['runtime_id'], case)
         dispatch = [attempt for attempt in receipt['output']['attempts'] if attempt['kind'] == 'dispatch']
         require(len(dispatch) == 1, 'audit check failed: len(dispatch) == 1')
         require(dispatch[0]['slot'] == plan['runtime_id'], "audit check failed: dispatch[0]['slot'] == plan['runtime_id']")

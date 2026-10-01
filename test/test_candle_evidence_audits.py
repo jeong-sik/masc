@@ -82,6 +82,7 @@ class CandleEvidenceAudits(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, '', 'refused evidence must not emit a successful report')
         self.assertIn(error, result.stderr)
+        return {}
 
     def test_candidate_binary_is_bound_to_independent_artifact_record(self):
         bundle = self.root/'candidate'
@@ -341,6 +342,100 @@ class CandleEvidenceAudits(unittest.TestCase):
                 # Require the new classification guard, not a later registry
                 # mismatch caused by the intentionally changed receipt.
                 self.run_audit(script, bundle, bundle, error=expected)
+
+
+    def test_candidate_exit_and_runtime_declarations(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        script = CANDIDATE/'audit-candidate.py'
+        for exit_code in (73, False):
+            write_json(bundle/'exit.json', {'exit_code': exit_code})
+            self.run_audit(script, bundle, bundle, error='retained evaluation exit is not zero')
+        shutil.copyfile(CANDIDATE/'exit.json', bundle/'exit.json')
+        runtime = bundle/'.masc/config/runtime.toml'
+        original = runtime.read_text()
+        original_plan = json.loads((bundle/'plan.json').read_text())
+        for before, after, error in [
+            ('"slots" = ["glm-coding.glm-5.3-flash"]', '"slots" = ["other.model"]', 'runtime slots'),
+            ('"cli_slots" = []', '"cli_slots" = ["other.model"]', 'runtime slots'),
+            ('"max_output_tokens" = 4096', '"max_output_tokens" = 3', 'output limit'),
+            ('"exact-body-timeout-s" = 1200.0', '"exact-body-timeout-s" = 1.0', 'timeout'),
+            ('"key" = "ZAI_API_KEY_SB"', '"key" = "OTHER_KEY"', 'credential reference'),
+        ]:
+            with self.subTest(error=error, after=after):
+                runtime.write_text(original.replace(before, after))
+                plan = copy.deepcopy(original_plan)
+                plan['runtime_config_sha256'] = hashlib.sha256(runtime.read_bytes()).hexdigest()
+                write_json(bundle/'plan.json', plan)
+                metadata = json.loads((bundle/'metadata.json').read_text())
+                metadata['plan'] = plan
+                write_json(bundle/'metadata.json', metadata)
+                self.run_audit(script, bundle, bundle, error=error)
+
+    def test_candidate_validates_answers_responses_and_failed_slot(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        script = CANDIDATE/'audit-candidate.py'
+        original = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        for stage, answer in [('grade', {'grade':'banana'}), ('relation', {'relation':'banana'}),
+                              ('weights', {'weights': {}})]:
+            with self.subTest(stage=stage):
+                rows = copy.deepcopy(original)
+                row = next(row for row in rows if row['stage'] == stage and row['status'] == 'ok')
+                row['answer'] = row['receipt']['output']['result'] = answer
+                for attempt in row['receipt']['output']['attempts']:
+                    if attempt['kind'] == 'response':
+                        attempt['output'] = answer
+                write_rows(bundle/'results.jsonl', rows)
+                rewrite_fixture_registry(bundle, rows)
+                self.run_audit(script, bundle, bundle, error='answer violates stage schema')
+        for missing in (False, True):
+            rows = copy.deepcopy(original)
+            row = next(row for row in rows if row['stage'] == 'grade' and row['status'] == 'ok')
+            attempts = row['receipt']['output']['attempts']
+            if missing:
+                row['receipt']['output']['attempts'] = [a for a in attempts if a['kind'] != 'response']
+            else:
+                next(a for a in attempts if a['kind'] == 'response')['output'] = {'grade':'epic'}
+            write_rows(bundle/'results.jsonl', rows)
+            rewrite_fixture_registry(bundle, rows)
+            self.run_audit(script, bundle, bundle, error='response observations disagree')
+        rows = copy.deepcopy(original)
+        row = next(row for row in rows if row['status'] != 'ok')
+        row['receipt']['selected_slot'] = 'other.model'
+        write_rows(bundle/'results.jsonl', rows)
+        rewrite_fixture_registry(bundle, rows)
+        self.run_audit(script, bundle, bundle, error='failed selected slot disagrees')
+
+    def test_survey_failure_completion_and_unverified_prompt_commit(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        for filename in ('freeze.json', 'frozen-audit.json'):
+            record = json.loads((bundle/filename).read_text())
+            record['prompt_commit'] = '0'*40
+            write_json(bundle/filename, record)
+        result = self.run_audit(script, bundle, bundle)
+        self.assertEqual(result['prompt_source_verification'],
+                         'retained_bytes_verified_source_commit_unverified')
+        self.assertNotIn('prompt_commit', result)
+        rows = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        for status, code in [('invalid_response', 'candle_appraisal_rejected'),
+                             ('transport_unavailable', 'candle_appraisal_unavailable')]:
+            row = rows[0]
+            row.update(status=status, answer='fixture failure')
+            row['receipt'].update(status='failed', code=code, detail='fixture failure')
+            row['receipt']['output']['result'] = {'error':'fixture failure'}
+            write_rows(bundle/'results.jsonl', rows)
+            rewrite_fixture_registry(bundle, rows)
+            self.run_audit(script, bundle, bundle)
+            original = [json.loads(line) for line in (bundle/'exact-lane-runs-v6.jsonl').read_text().splitlines()]
+            for field in ('code', 'detail'):
+                with self.subTest(status=status, field=field):
+                    events = copy.deepcopy(original)
+                    events[1]['completion'][field] = 'contradiction'
+                    write_rows(bundle/'exact-lane-runs-v6.jsonl', events)
+                    self.run_audit(script, bundle, bundle, error='registry failure code or detail disagrees')
 
 
 if __name__ == '__main__':

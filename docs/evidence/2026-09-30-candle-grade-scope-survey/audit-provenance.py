@@ -4,6 +4,7 @@ import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
+import tomllib
 from pathlib import Path
 
 
@@ -12,16 +13,23 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
-def validate_result(row, runtime_id):
+def validate_result(row, runtime_id, case):
     receipt = row['receipt']
     if row['status'] == 'ok':
         require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
                 'successful result classification or slot mismatch')
         require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
+        validate_answer(row['answer'], expected_schema(case))
+        responses = [attempt for attempt in receipt['output']['attempts']
+                     if attempt['kind'] == 'response']
+        require(bool(responses) and all(attempt['slot'] == runtime_id
+                and same_json(attempt['output'], row['answer']) for attempt in responses),
+                'successful response observations disagree with result')
     else:
         require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
         code = {'invalid_response': 'candle_appraisal_rejected',
                 'transport_unavailable': 'candle_appraisal_unavailable'}[row['status']]
+        require(receipt['selected_slot'] == runtime_id, 'failed selected slot disagrees with dispatch')
         require(receipt['status'] == 'failed' and receipt['code'] == code,
                 'failed result classification mismatch')
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
@@ -55,6 +63,38 @@ def expected_schema(case):
     data = case['input']
     return object_schema({'weights': object_schema({name: {'type': 'integer',
         'minimum': 0, 'maximum': data['weight_max']} for name in data['keepers']})})
+
+
+def validate_answer(value, schema):
+    kind = schema['type']
+    if kind == 'object':
+        require(type(value) is dict and set(value) == set(schema['properties']),
+                'successful answer violates stage schema')
+        for key, child in schema['properties'].items():
+            validate_answer(value[key], child)
+    elif kind == 'string':
+        require(type(value) is str and value in schema['enum'],
+                'successful answer violates stage schema')
+    else:
+        require(kind == 'integer' and type(value) is int
+                and schema['minimum'] <= value <= schema['maximum'],
+                'successful answer violates stage schema')
+
+
+def validate_runtime(raw, plan):
+    config = tomllib.loads(raw.decode())
+    lane = config['runtime']['exact_output_lanes']['candle_appraiser']
+    runtime_id = plan['runtime_id']
+    require(lane['slots'] == [runtime_id] and lane['cli_slots'] == [],
+            'prepared runtime slots disagree with plan')
+    provider_id, _ = runtime_id.split('.', 1)
+    provider = config['providers'][provider_id]
+    require(lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
+            'prepared output limit disagrees with plan')
+    require(provider['exact-body-timeout-s'] == plan['evaluation_overrides']['exact-body-timeout-s'],
+            'prepared timeout disagrees with plan')
+    require(provider['credentials'] == {'type': 'env', 'key': plan['credential_env']},
+            'prepared credential reference disagrees with plan')
 
 
 def expected_input(case):
@@ -105,6 +145,7 @@ def main():
     corpus = (args.workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "Evidence validation failed: sha(corpus) == plan['cases_sha256']")
     require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "Evidence validation failed: sha((args.workspace / '.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")
+    validate_runtime((args.workspace/'.masc/config/runtime.toml').read_bytes(), plan)
     prompt_bodies = {}
     for name, digest in plan['prompt_sha256'].items():
         prompt_raw = (args.workspace/'prompts'/name).read_bytes()
@@ -160,7 +201,7 @@ def main():
         prompt_hashes[case['id']].add(sha(prompt['rendered'].encode()))
         input_hashes[case['id']].add(sha(encoded_input.encode()))
         require(receipt['output']['semantic_verification'] == 'not_performed', "Evidence validation failed: receipt['output']['semantic_verification'] == 'not_performed'")
-        validate_result(row, plan['runtime_id'])
+        validate_result(row, plan['runtime_id'], case)
         dispatch = [attempt for attempt in receipt['output']['attempts'] if attempt['kind'] == 'dispatch']
         require(len(dispatch) == 1, 'Evidence validation failed: len(dispatch) == 1')
         require(dispatch[0]['slot'] == plan['runtime_id'], "Evidence validation failed: dispatch[0]['slot'] == plan['runtime_id']")
@@ -197,6 +238,9 @@ def main():
             completed.add(run_id)
             completion = event['completion']
             require(completion['outcome'] == receipt['status'], "Evidence validation failed: completion['outcome'] == receipt['status']")
+            if receipt['status'] == 'failed':
+                require(completion['code'] == receipt['code'] and completion['detail'] == receipt['detail'],
+                        'registry failure code or detail disagrees with receipt')
             require(completion['selected_slot'] == receipt['selected_slot'], "Evidence validation failed: completion['selected_slot'] == receipt['selected_slot']")
             require(completion['elapsed_s'] == receipt['elapsed_s'], "Evidence validation failed: completion['elapsed_s'] == receipt['elapsed_s']")
             side, reference, expected = 'output', completion['output'], receipt['output']
@@ -211,6 +255,7 @@ def main():
             'reported trial order disagrees with registry registration order')
     result = {
         'scope': 'Provenance and structural checks, not semantic acceptance',
+        'prompt_source_verification': 'retained_bytes_verified_source_commit_unverified',
         'source_commit': plan['source_commit'], 'runtime_id': plan['runtime_id'],
         'executable_sha256': metadata['build']['executable_sha256'],
         'results_sha256': sha(raw), 'complete_pairs': len(seen), 'unique_run_ids': len(run_ids),

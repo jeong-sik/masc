@@ -7981,10 +7981,16 @@
 
 (include stanzas/test_candle_purchase_flow.inc)
 
+(include stanzas/test_tui_remote_workspace_history_pty.inc)
+
+(include stanzas/test_tui_item_workspace_authority_pty.inc)
+
 (test
  (name test_sse_wire_payload)
  (modules test_sse_wire_payload)
  (libraries alcotest masc.sse_wire))
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+
+(include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)

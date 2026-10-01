@@ -13,6 +13,8 @@ module Snapshot_read : sig
 
   val idle : t
   val start : intent:intent -> t -> t * request option
+  val invalidate : t -> t
+  (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
 end = struct
   type request = int
@@ -20,6 +22,8 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+
+  let invalidate state = { state with pending = None }
 
   let start ~intent state =
     match intent, state.pending with
@@ -87,6 +91,8 @@ let server_is_booting
   | Ok { Tui_decode.sid_state_ready = Some true | None; _ } | Error _ -> false
 ;;
 
+type workspace_authority = Workspace_authority of int
+
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
@@ -94,6 +100,11 @@ type workspace_identity =
       { local_base_path : string
       ; server_base_path : string
       }
+
+type workspace_input_identity =
+  { wi_base_path : string
+  ; wi_masc_root : string
+  }
 
 (* Whether the rows kept from this workspace's own directory -- agents, tasks,
    keepers, their logs -- were read from it. They are read only once the server
@@ -112,17 +123,46 @@ let canonical_path path =
     | Unix.Unix_error _ -> path
 ;;
 
+(* A bundle or action belongs to one complete server workspace identity.
+   Dynamic health counters do not change that authority; missing identity or
+   a booting successor cannot authorize use of an earlier observation. *)
+let server_workspace_matches ~expected reading =
+  match expected, reading with
+  | Some before, Ok after ->
+      before.Tui_decode.sid_base_path <> "" && before.sid_masc_root <> ""
+      && String.equal (canonical_path before.sid_base_path) (canonical_path after.Tui_decode.sid_base_path)
+      && String.equal (canonical_path before.sid_masc_root) (canonical_path after.sid_masc_root)
+      && not (server_is_booting reading)
+  | None, (Ok _ | Error _) | Some _, Error _ -> false
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    let local_masc_root = canonical_path
+      (Filename.concat local_base_path Masc.Common.masc_dirname) in
+    let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
+       || String.equal server_masc_root "" || server_is_booting reading
     then Workspace_identity_unread
     else if String.equal local_base_path server_base_path
+         && String.equal local_masc_root server_masc_root
     then Workspace_identity_match
     else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+(* Retained input belongs to the complete observed server workspace. Local
+   match/mismatch is a permission classification, not a durable input key. *)
+let workspace_input_identity_of_server = function
+  | Some identity when identity.Tui_decode.sid_state_ready <> Some false ->
+      let wi_base_path = canonical_path identity.sid_base_path in
+      let wi_masc_root = canonical_path identity.sid_masc_root in
+      if wi_base_path = "" || wi_masc_root = "" then None
+      else Some { wi_base_path; wi_masc_root }
+  | Some _ | None -> None
 ;;
 
 type event = {
@@ -4957,11 +4997,11 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
-type message_draft = {
-  draft_text : string;
-  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
-  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : msg_anchor option;
+type keeper_composer_draft = {
+  kcd_text : string;
+  kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
+  kcd_since : msg_anchor option;
 }
 
 (* Home links identify destinations, never an inferred approval target. The
@@ -5229,6 +5269,9 @@ type state = {
   mutable server_identity: Tui_decode.server_identity option;
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
+  mutable workspace_authority: workspace_authority;
+  mutable suspended_keeper_inputs: (workspace_input_identity option * Masc_tui_keeper_chat_queue.t) list;
+  mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -6276,9 +6319,7 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  (* The entire unsent payload belongs to its Keeper, including image-only
-     drafts. Restoring another target cannot inherit its staged media. *)
-  mutable msg_drafts: (string * message_draft) list;
+  mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -7436,7 +7477,7 @@ let keeper_reading (state : state) (keeper : keeper) :
   ; liveness =
       (match keeper.k_origin with
        | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
-       | Persisted_keeper ->
+       | Persisted_keeper | Remote_keeper ->
          Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
@@ -7779,15 +7820,18 @@ let acting_pane_layout (state : state) =
       if state.view = Overview then Masc_tui_acting_pane.Hidden
       else Masc_tui_acting_pane.Narrow
 
-(** New Keeper messages require a complete roster observation. [state.keepers]
-    may intentionally retain the previous complete roster while a detail or log
-    view survives a transient metadata read failure, so membership alone is not
-    authorization for an external effect. *)
+(** Local metadata may retain old rows during a failed read. Remote rows are
+    available to HTTP observation and lifecycle controls; chat submission still
+    requires the shared workspace for attachments and spilled paste files. *)
 let keeper_available_for_new_message (state : state) keeper_name =
-  Option.is_none state.keepers_error
-  && List.exists
-       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-       state.keepers
+  match List.find_opt
+    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) state.keepers with
+  | None -> false
+  | Some { k_origin = Tui_decode.Persisted_keeper | Declared_keeper _; _ } ->
+    state.workspace_identity = Workspace_identity_match
+    && Option.is_none state.keepers_error
+  | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
+    false
 
 (* The composer is where the operator's keys go: the chat pane, whichever
    half of it has the cursor, or the composer row on another surface once it
@@ -7827,7 +7871,8 @@ let next_keeper_message_target (state : state) =
     | Some current -> Option.is_some (inflight_for_keeper state current)
   in
   if
-    Option.is_some state.keepers_error
+    not (List.exists (fun (keeper : keeper) ->
+      keeper_available_for_new_message state keeper.k_name) state.keepers)
     || Option.is_some state.msg_live
     || this_pane_has_a_request_in_flight
   then
@@ -8033,6 +8078,9 @@ let create_state
   keeper_message_focus = Right_pane;
   server_identity = None;
   local_base_path;
+  workspace_authority = Workspace_authority 0;
+  workspace_cancellations = [];
+  suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
      then Workspace_identity_match
@@ -8765,6 +8813,17 @@ let local_rows_page (state : state) ~error =
       (match state.local_workspace with
        | Local_workspace_unread -> None
        | Local_workspace_read -> Some ())
+
+(* A remote roster is its own observation, never evidence of a local read. *)
+let keeper_rows_page (state : state) ~error =
+  match state.workspace_identity with
+  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
+  | Workspace_identity_mismatch _ ->
+    empty_page_of ~error ~snapshot:
+      (match state.keeper_roster with
+       | Masc_tui_keeper_control.Roster_unobserved -> None
+       | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
 
 (* What the Resources pane says under its header when no error is showing and
    there is no row to draw, and [None] when there is one. The pane flattened
@@ -10723,22 +10782,21 @@ let runtime_pick_column_widths ~cols items =
    link it, and this is the first of those screens whose row count a test
    reads. *)
 let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
-      0 keepers
-  in
-  let tokens =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
-      0 keepers
-  in
-  let cost =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
-      0.0 keepers
-  in
-  turns, tokens, cost
+  List.fold_left
+    (fun totals (keeper : Tui_decode.keeper) ->
+      match totals, keeper.k_activity with
+      | Some (turns, tokens, cost), Some activity ->
+        Some (turns + activity.k_total_turns, tokens + activity.k_total_tokens,
+              cost +. activity.k_total_cost_usd)
+      | None, _ | _, None -> None)
+    (Some (0, 0, 0.)) keepers
+
+let keeper_assignment_activity keepers =
+  match aggregate_keeper_stats keepers with
+  | None -> " (activity not observed)"
+  | Some (turns, _, cost) when turns > 0 ->
+    Printf.sprintf " (%d turns, $%.2f)" turns cost
+  | Some _ -> ""
 
 (* The authority line under the Runtime title: where every reading on this
    screen comes from, and what the last probe found. It is one sentence of
@@ -10797,11 +10855,14 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match state.keepers with
           | [] -> []
           | keepers ->
-              let turns, tokens, cost = aggregate_keeper_stats keepers in
-              [ Printf.sprintf
-                  "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-                  (List.length keepers) turns (format_context_tokens tokens) cost
-              ]
+              let summary = match aggregate_keeper_stats keepers with
+                | None -> "activity not observed"
+                | Some (turns, tokens, cost) ->
+                  Printf.sprintf "%d turns · %s tok · $%.2f"
+                    turns (format_context_tokens tokens) cost
+              in
+              [ Printf.sprintf "fleet: %d keepers · %s"
+                  (List.length keepers) summary ]
         in
         [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
         @ fleet_note @ [ config ] @ probe_only_note @ probe_note

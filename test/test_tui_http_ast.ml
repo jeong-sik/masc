@@ -599,10 +599,21 @@ let test_keeper_chat_uses_current_async_contract () =
   check int "chat send does not keep the root switch alive on exit" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");
-  check bool "chat send runs in a cancellable daemon fiber" true
+  check int "chat send delegates once to its workspace job owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork_daemon"
-     >= 1);
+       ~binding_name:"launch_keeper_request" ~callee:"fork_workspace_job");
+  check int "workspace jobs do not keep the root switch alive" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork");
+  check int "workspace job owner runs one daemon fiber" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork_daemon");
+  check int "workspace job owns a cancellation context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.sub");
+  check int "workspace withdrawal cancels the owned context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.cancel");
   check bool "async completion checks request identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"apply_keeper_chat_result"
@@ -1346,7 +1357,7 @@ let test_tui_current_projection_wiring () =
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"load_from_masc_dir"
+       ~binding_name:"replace_keeper_rows"
        ~callee:"Metrics_tail.reconcile_selection"
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
@@ -1568,7 +1579,9 @@ let test_the_screen_does_not_read_the_servers_bind_address () =
 
 let test_server_identity_is_revalidated_on_every_refresh () =
   let main_path = "bin/masc_tui.ml" in
-  check int "each full refresh asks the compact identity probe once" 1
+  (* Surface collection is bracketed by identity probes so a same-port
+     workspace replacement cannot publish a mixed-authority bundle. *)
+  check int "each full refresh probes identity before and after collecting surfaces" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"load_http_surfaces" ~callee:"load_server_identity");
   check int "identity-known cache gating is absent" 0
@@ -1587,9 +1600,14 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
+  (* Both an unconfirmed request identity and a failed full refresh withdraw
+     through the same transition owner. *)
+  check int "unconfirmed identity and failed refresh both withdraw through their owner" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading");
   (* Failed refreshes must feed Error through the same transition. The pure
      server-identity test proves that this projection turns Error into None. *)
-  check int "a failed refresh clears current identity" 1
+  check int "unconfirmed identity and failed refresh both clear current identity" 2
     (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
        ~module_path:main_path ~binding_name:"apply_async_message"
        ~callee:"apply_server_identity_reading" ~position:1

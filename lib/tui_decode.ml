@@ -16,22 +16,49 @@ type task = {
   goal_ids : string list;
 }
 
-type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+type keeper_origin =
+  | Persisted_keeper
+  | Declared_keeper of Keeper_declared_roster.requirement list
+  | Remote_keeper
 
-type keeper = {
-  k_origin : keeper_origin;
-  k_name : string;
+type keeper_identity = {
   k_trace_id : string;
-  k_paused : bool;
+  k_created_at : string;
+  k_updated_at : string;
+}
+
+type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
-  k_created_at : string;
-  k_updated_at : string;
 }
+
+type keeper = {
+  k_origin : keeper_origin;
+  k_name : string;
+  k_paused : bool;
+  k_identity : (keeper_identity, string) result;
+  k_activity : keeper_activity option;
+}
+
+let keeper_trace_id keeper =
+  Result.map (fun identity -> identity.k_trace_id) keeper.k_identity
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+
+let keeper_trace_projection keepers =
+  let bindings, unavailable = List.fold_left (fun (bindings, unavailable) keeper ->
+      match keeper_trace_id keeper with
+      | Ok trace -> (keeper.k_name, trace) :: bindings, unavailable
+      | Error reason -> bindings, (keeper.k_name, reason) :: unavailable)
+      ([], []) keepers in
+  { bindings = List.rev bindings; unavailable = List.rev unavailable }
 
 (* One row of GET /api/v1/gate/keepers. That route is [masc_keeper_list], which
    renders [status] through [Keeper_status_runtime.keeper_surface_status] — the
@@ -84,6 +111,7 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 
 type keeper_runtime = {
   kr_name : string;
+  kr_identity : (keeper_identity, string) result;
   kr_portrait : keeper_portrait;
   kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
@@ -563,25 +591,31 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   {
     k_origin = Persisted_keeper;
     k_name = meta.name;
-    k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
     k_paused = meta.paused;
-    k_current_task_id =
-      Option.map Keeper_id.Task_id.to_string meta.current_task_id;
-    k_total_turns = usage.total_turns;
-    k_total_tokens = usage.total_tokens;
-    k_total_cost_usd = usage.total_cost_usd;
-    k_last_turn_ts;
-    k_last_proactive_outcome = Some proactive.last_outcome;
-    k_created_at = meta.created_at;
-    k_updated_at = meta.updated_at;
+    k_identity = Ok {
+      k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
+      k_created_at = meta.created_at;
+      k_updated_at = meta.updated_at;
+    };
+    k_activity = Some {
+      k_current_task_id =
+        Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+      k_total_turns = usage.total_turns;
+      k_total_tokens = usage.total_tokens;
+      k_total_cost_usd = usage.total_cost_usd;
+      k_last_turn_ts;
+      k_last_proactive_outcome = Some proactive.last_outcome;
+    };
   }
 
 let keeper_of_declaration (row : Keeper_declared_roster.t) =
   { k_origin = Declared_keeper row.requirements; k_name = row.name;
-    k_trace_id = ""; k_paused = false; k_current_task_id = None;
-    k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.;
-    k_last_turn_ts = ""; k_last_proactive_outcome = None;
-    k_created_at = ""; k_updated_at = "" }
+    k_paused = false; k_activity = None;
+    k_identity = Error "Keeper has not started" }
+
+let keeper_of_runtime row =
+  { k_origin = Remote_keeper; k_name = row.kr_name; k_paused = row.kr_paused;
+    k_identity = row.kr_identity; k_activity = None }
 
 let decode_keeper json =
   let* meta = Keeper_meta_json_parse.meta_of_json json in
@@ -5464,6 +5498,22 @@ let decode_overview_goals json =
   let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
   Ok (List.concat nodes)
 
+let decode_keeper_roster_identity ~name json =
+  let* metadata_name = required_string_field json "name" in
+  let* () =
+    if String.equal metadata_name name then Ok ()
+    else Error "Keeper brief metadata names a different Keeper"
+  in
+  let* raw_trace_id = required_string_field json "trace_id" in
+  let* trace_id = Keeper_id.Trace_id.of_string raw_trace_id in
+  let k_trace_id = Keeper_id.Trace_id.to_string trace_id in
+  let* k_created_at = required_string_field json "created_at" in
+  let* k_updated_at = required_string_field json "updated_at" in
+  if List.exists (fun value -> String.trim value = "")
+       [ k_trace_id; k_created_at; k_updated_at ] then
+    Error "Keeper brief identity fields must not be empty"
+  else Ok { k_trace_id; k_created_at; k_updated_at }
+
 let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
@@ -5503,6 +5553,7 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
      declaration there; a second top-level copy would be a second place to
      update. *)
   let* row_meta = required_object_field json "meta" in
+  let kr_identity = decode_keeper_roster_identity ~name:kr_name row_meta in
   let* kr_sandbox_profile = required_string_field row_meta "sandbox_profile" in
   let* kr_runtime_blocker_summary =
     required_nullable_string_field json "runtime_blocker_summary"
@@ -5518,6 +5569,7 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
   in
   Ok
     { kr_name
+    ; kr_identity
     ; kr_portrait
     ; kr_candle_balance_milli = candle_balance_milli
     ; kr_candle_account_revision = account_revision

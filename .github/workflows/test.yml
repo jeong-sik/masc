@@ -459,6 +459,33 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload remote TUI equipped portrait evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-remote-tui-portrait
+          path: ${{ runner.temp }}/candle-remote-tui-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload remote workspace history terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-remote-workspace-history
+          path: ${{ runner.temp }}/tui-remote-workspace-history/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Item workspace authority terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-item-workspace-authority
+          path: ${{ runner.temp }}/tui-item-workspace-authority/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload the full Dune suite log
         if: always()
         uses: actions/upload-artifact@v7

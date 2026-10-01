@@ -1195,22 +1195,24 @@ let credential_owner_discovery_in_transaction (Credential_transaction config) =
 ;;
 
 
-let list_current_credentials config =
-  with_credential_transaction config (fun transaction ->
-    let ( let* ) = Result.bind in
-    let* names, _orphans = credential_owner_discovery_in_transaction transaction in
-    let rec collect credentials = function
-      | [] -> Ok (List.rev credentials)
-      | name :: rest ->
-        let* current = current_credential_in_transaction transaction name in
-        (match current with
-         | None -> collect credentials rest
-         | Some credential -> collect (credential :: credentials) rest)
-    in
-    collect [] names)
-  |> Result.join
+let list_current_credentials_in_transaction transaction =
+  let ( let* ) = Result.bind in
+  let* names, _orphans = credential_owner_discovery_in_transaction transaction in
+  let rec collect credentials = function
+    | [] -> Ok (List.rev credentials)
+    | name :: rest ->
+      let* current = current_credential_in_transaction transaction name in
+      (match current with
+       | None -> collect credentials rest
+       | Some credential -> collect (credential :: credentials) rest)
+  in
+  collect [] names
 ;;
 
+let list_current_credentials config =
+  with_credential_transaction config list_current_credentials_in_transaction
+  |> Result.join
+;;
 
 (* Prune adds deletion authority only after current-store discovery. Rotation
    uses the same current records without inheriting a deletion manifest. *)

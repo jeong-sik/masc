@@ -201,11 +201,23 @@ let test_meter_width_is_bounded () =
   let text = String.concat "\n" separate in
   check bool "one passed reset keeps the other account's report age" true
     (contains ~affix:"Claude Max" text && contains ~affix:"heard 3m00s ago" text);
+  check bool "the past-reset card keeps the reset state" true
+    (contains ~affix:"reset time passed" text);
   let observed = Unix.localtime 1790170000.0 in
-  let clock = Printf.sprintf "%02d:%02d" observed.Unix.tm_hour observed.Unix.tm_min in
-  check bool "the past-reset card names the actual observed clock" true
-    (contains ~affix:"reset time passed" text
-     && contains ~affix:("Last report " ^ clock) text);
+  let current = Unix.localtime now in
+  let clock =
+    if observed.Unix.tm_year = current.Unix.tm_year
+       && observed.Unix.tm_yday = current.Unix.tm_yday
+    then Printf.sprintf "%02d:%02d" observed.Unix.tm_hour observed.Unix.tm_min
+    else Printf.sprintf "%02d-%02d %02d:%02d"
+      (observed.Unix.tm_mon + 1) observed.Unix.tm_mday
+      observed.Unix.tm_hour observed.Unix.tm_min
+  in
+  (* At 70 cells the dated form can wrap after its date. A wider card keeps
+     the complete local observation clock together for this exact assertion. *)
+  let clock_card = String.concat "\n" (reported_section ~width:90) in
+  check bool "the past-reset card names the actual local observed clock" true
+    (contains ~affix:("Last report " ^ clock) clock_card);
   List.iter (fun line -> check bool "separate cards fit the supplied width" true
     (Masc_tui_message_layout.display_width line <= 70)) separate
 

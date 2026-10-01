@@ -4,4 +4,4 @@
 
 (test
  (name test_voice_wizard_session)
- (libraries alcotest masc_tui_types masc.voice_wizard masc.voice_setup))
+ (libraries alcotest masc_tui_voice_wizard_session masc.voice_wizard masc.voice_setup))

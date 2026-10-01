@@ -1276,9 +1276,9 @@ let code_notes_bindings =
 let code_history_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Act "H" "close"
   ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]
@@ -1869,7 +1869,7 @@ let help_sections_for_state (state : state) =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "b" "browser"
+    [ b Navigate "b" "choose browser"
     ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"

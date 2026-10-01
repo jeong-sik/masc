@@ -10681,7 +10681,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  c:stagehand  h:observations  Esc:back"
+      | Some _, _ -> "↑/↓:choose  Enter:use browser  r:reload connections  Esc:cancel"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene ->
@@ -10692,9 +10692,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | None -> "" in
           let article_hint =
             if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
-          action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+          "b:choose browser  " ^ action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
-          "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
+          "b:choose browser  m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -10759,14 +10759,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push (coordinator_status_row state ~style status);
       match view.client_picker with
       | Some cursor ->
-          c.push_styled ~style:(Theme.info ()) "  Choose a connected browser";
+          c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
           let room = max 1 (budget - 4) in
           let start = max 0 (cursor - room + 1) in
-          listed_clients view |> List.iteri (fun index (client : client) ->
+          browser_choices view |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
-              let line = Printf.sprintf "  %s%s · %s" (browser_name client.browser)
-                (if Some client = view.selected_client then " (selected)" else "") (Terminal_text.single_line client.client_id) in
+              let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
+                ^ (if browser_choice_selected view choice then " (current)" else "") in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
           (match browser_lane_picker_empty_line view with
@@ -10793,8 +10793,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                (match browser_label view with
                 | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
                 | None -> "  Live • b:choose browser • a:automation • c:stagehand")
-             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live • c:stagehand"
-             | Stagehand -> "  Stagehand browser • g:URL • o:open / x:close • l:live • a:automation");
+             | Automation -> "  Independent browser • b:choose browser • g:URL • o:open / x:close • l:live • c:stagehand"
+             | Stagehand -> "  Stagehand Chromium • b:choose browser • g:URL • o:open / x:close • l:live • a:automation");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page
@@ -14897,7 +14897,7 @@ let voice_body_line_styled buf cols ~style content =
   List.iter (box_line_styled buf cols ~style) (voice_body_rows cols content)
 ;;
 
-let render_voice_wizard (state : state) (session : voice_wizard_session) =
+let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
@@ -14962,7 +14962,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
      box_line head cols
        (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
              (Terminal_text.single_line session.vws_input)) Ansi.reset
-          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
   (match session.vws_step with
    | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
    | Voice_wizard.Model | Voice_wizard.Voice ->

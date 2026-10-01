@@ -22,6 +22,8 @@ let with_workspace f =
   with_workspace_at (Filename.temp_dir "token-prune-transaction-" "") f
 
 (* A fixed clock leaves issuance's live bearers far from the expired fixture. *)
+let read path = In_channel.with_open_bin path In_channel.input_all
+
 let now = 1_735_689_600.
 let expired = "2000-01-01T00:00:00Z"
 
@@ -424,12 +426,12 @@ let test_normalized_canonical_survives_uuid_cleanup_failure () =
   let uuid = match credential.id with Some id -> Auth.credential_file base_path
       (Masc_domain.Credential_id.to_string id) | None -> fail "fixture needs UUID" in
   let before_uuid = read uuid in
-  let retirement = Auth_credential_base.with_credential_transaction base_path (fun transaction ->
-    let snapshot = auth_ok (Auth_credential_base.credential_prune_snapshot_in_transaction transaction) in
-    let _, authority = List.find (fun (current, _) -> current.Masc_domain.agent_name = "Alice") snapshot.credentials in
-    Unix.unlink uuid; Unix.mkdir uuid 0o700;
-    Auth_credential_base.retire_prune_credential_in_transaction transaction authority) |> auth_ok in
-  check bool "UUID failure is explicit" true (Result.is_error retirement);
+  let retirement = Prune.For_testing.run_after_snapshot ~base_path ~now
+      ~after_snapshot:(fun () -> Unix.unlink uuid; Unix.mkdir uuid 0o700)
+    |> auth_ok in
+  (match retirement with
+   | [{ Prune.agent_name = "Alice"; reason = Prune.Expired; outcome = Prune.Failed _ }] -> ()
+   | _ -> fail "UUID cleanup failure must preserve the canonical owner for retry");
   check bool "normalized canonical remains retryable" true
     (Sys.file_exists (Auth.credential_file base_path "Alice"));
   Unix.rmdir uuid; Auth.save_private_text_file uuid before_uuid;

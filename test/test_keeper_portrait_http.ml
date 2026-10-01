@@ -392,7 +392,7 @@ let test_router_preview_is_read_only () =
   with_router (fun ~config router ->
     let current = get ~router (path ~size:"72" keeper) in
     let equipment () = require_ok Fun.id
-      (Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper) in
+      (Candle_equipment.current ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper) in
     let before = equipment () in
     let preview_id = match before.Keeper_portrait_look.face with
       | Keeper_portrait_look.Glasses -> "shades"
@@ -804,7 +804,8 @@ beanie = %d
         let response = get ~router ~token:operator "/api/v1/gate/keepers?detailed=true" in
         check int "operator roster succeeds" 200 response.status;
         Yojson.Safe.from_string response.body) in
-    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
+    let roster = public_roster () in
+    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
     (match require_ok Fun.id candle with
      | Candle_observation.Ready supply ->

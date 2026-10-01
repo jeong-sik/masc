@@ -202,10 +202,11 @@ let test_logs_keep_repainting_after_status_arrives () =
 let test_schedule_responses_follow_keeper_and_generation () =
   let keeper name : Types.keeper =
     { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
-    ; k_trace_id = "trace"; k_paused = false; k_current_task_id = None
-    ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
-    ; k_last_turn_ts = ""; k_last_proactive_outcome = None
-    ; k_created_at = ""; k_updated_at = "" }
+    ; k_paused = false
+    ; k_identity = Ok { k_trace_id = "trace"; k_created_at = ""; k_updated_at = "" }
+    ; k_activity = Some { k_current_task_id = None
+        ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
+        ; k_last_turn_ts = ""; k_last_proactive_outcome = None } }
   in
   let snapshot count : Types.schedule_snapshot =
     { scs_status = "ok"; scs_read_error = None; scs_request_count = Some count

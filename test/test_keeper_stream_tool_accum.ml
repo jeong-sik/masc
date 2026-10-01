@@ -1206,7 +1206,12 @@ let test_official_receipt_does_not_certify_sibling_or_corrupt_scope () =
   check int "receipt does not seal or advance whole scope" 0 (A.current_stream_scope t);
   (match A.record_official_execution_id t ~block_index:2 ~tool_call_id:"reused" ~execution_id with
    | Error _ -> () | Ok _ -> fail "execution reused for sibling");
+  A.on_event t message_stop_reason;
+  A.on_event t Agent_core.Types.MessageStop;
   check int "outer failure keeps only committed sibling" 1
+    (List.length (A.to_tool_calls_for_failure t));
+  open_call 3;
+  check int "late content after failed MessageStop cannot erase committed result" 1
     (List.length (A.to_tool_calls_for_failure t));
   start_runtime_attempt t;
   A.on_event t (message_start "fallback");

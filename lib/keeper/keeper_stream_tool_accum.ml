@@ -778,6 +778,8 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
 ;;
 
 let on_event t (evt : Agent_core.Types.sse_event) =
+  if List.mem t.current_stream_scope t.failed_scopes then ()
+  else begin
   if scope_is_sealed t t.current_stream_scope then advance_to_empty_scope t;
   (match evt with
    | Agent_core.Types.MessageStart { id; model; usage } ->
@@ -1015,6 +1017,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
         t.finalized
   | Agent_core.Types.Connected
   | Agent_core.Types.Ping -> ()
+  end
 ;;
 
 let to_tool_calls t =

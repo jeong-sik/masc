@@ -680,11 +680,13 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Runtime_shutting_down
   | Runtime_codex_app_server.Process_exited _
   | Runtime_codex_app_server.Turn_input_write_failed _
-  | Runtime_codex_app_server.Timeout _ ->
+  | Runtime_codex_app_server.Timeout { turn_accepted = true; _ } ->
     Keeper_official_client_session_store.Transport_interrupted
+  | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
   | Runtime_codex_app_server.Invalid_config _ ->
-    (* Local configuration and selected-catalog admission finish before
-       thread/start or turn/start; no vendor execution needs recovery. *)
+    (* The client marks a completed turn/start write before it can time out.
+       Admission timeouts and config refusals therefore executed no turn and
+       can release the claim without making a settled conversation ambiguous. *)
     Keeper_official_client_session_store.Pre_dispatch_failed
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _

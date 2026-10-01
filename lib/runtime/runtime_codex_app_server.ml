@@ -2166,7 +2166,7 @@ let sub_agent_overrides =
    suppresses both shell and unified exec registration; disable both explicitly.
    Native_full retains its explicitly selected vendor execution surface.
    Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
-let client_argv ?context_catalog (config : config) =
+let client_argv ?context_catalog ?auto_compact_limit (config : config) =
   [ config.cli_path; "app-server"; "--stdio" ]
   @ (match context_catalog with
      | None -> []
@@ -2174,11 +2174,10 @@ let client_argv ?context_catalog (config : config) =
   @ (match config.context_window with
      | None -> []
      | Some tokens ->
-       [ "-c"; Printf.sprintf "model_context_window=%d" tokens
-       (* Ask for the declared nominal window; Codex applies its own model
-          compaction headroom. An account-local smaller threshold is not MASC
-          runtime policy and must not silently survive this override. *)
-       ; "-c"; Printf.sprintf "model_auto_compact_token_limit=%d" tokens ])
+       [ "-c"; Printf.sprintf "model_context_window=%d" tokens ])
+  @ (match auto_compact_limit with
+     | None -> [] (* Custom models retain the client's fallback metadata. *)
+     | Some tokens -> ["-c"; Printf.sprintf "model_auto_compact_token_limit=%d" tokens])
   @ (match config.isolated_home with
      | None -> []
      | Some home ->
@@ -2191,7 +2190,7 @@ let client_argv ?context_catalog (config : config) =
   @ sub_agent_overrides
 ;;
 
-let with_spawned_client ?context_catalog ~mgr ~clock ~cwd config run =
+let with_spawned_client ?context_catalog ?auto_compact_limit ~mgr ~clock ~cwd config run =
   let selected_home = match config.isolated_home with
     | Some home -> Some home
     | None -> config.account_home in
@@ -2210,7 +2209,7 @@ let with_spawned_client ?context_catalog ~mgr ~clock ~cwd config run =
             |> List.filter (fun entry -> env_key entry <> "CODEX_HOME")
             |> fun entries -> Array.of_list (("CODEX_HOME=" ^ path) :: entries))
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-        (client_argv ?context_catalog config)
+        (client_argv ?context_catalog ?auto_compact_limit config)
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
@@ -2295,11 +2294,12 @@ let with_spawned_client ?context_catalog ~mgr ~clock ~cwd config run =
            }))
 ;;
 
-let run_spawned ?context_catalog ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
+let run_spawned ?context_catalog ?auto_compact_limit ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
   with_spawned_client
     ?context_catalog
+    ?auto_compact_limit
     ~mgr
     ~clock
     ~cwd
@@ -2466,9 +2466,10 @@ let context_admission_cache = Hashtbl.create 8
 let context_admission_cache_mutex = Mutex.create ()
 let context_admission_identity ~cwd config =
   Eio_guard.run_in_systhread ~label:"codex-context-revision" (fun () ->
-  let selected_home = match config.isolated_home with
-    | Some home -> Some home | None -> effective_account_home config.account_home in
-  let* environment = client_environment selected_home in
+  let source_home = match config.isolated_home with
+    | Some home -> Some home | None -> config.account_home in
+  let selected_home = effective_account_home source_home in
+  let* environment = client_environment source_home in
   let fingerprint path =
     try
       let stat = Unix.stat path in
@@ -2525,7 +2526,12 @@ let admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config =
       let* home = Eio_guard.run_in_systhread ~label:"codex-context-home" (fun () ->
         Runtime_verification_codex_home.prepare ~preserve_model_catalog:true ?source_home ~directory ())
         |> Result.map_error (fun detail -> Invalid_config detail) in
-      let* environment = client_environment (Some home) in
+      let* environment = client_environment source_home in
+      (* Relocate only the CLI store. Credential filtering must remain identical
+         to execution, including inherited auth when no account was selected. *)
+      let environment = environment |> Array.to_list
+        |> List.filter (fun entry -> env_key entry <> "CODEX_HOME")
+        |> fun entries -> Array.of_list (("CODEX_HOME=" ^ home) :: entries) in
       let overrides = Runtime_verification_codex_home.cli_overrides ~home
         |> List.concat_map (fun value -> ["-c"; value]) in
       let diagnostics = Buffer.create 128 in
@@ -2537,18 +2543,18 @@ let admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config =
         with Yojson.Json_error _ -> Error (Invalid_config "Codex context catalog is not JSON") in
       let* admitted = Runtime_codex_context_admission.resolve ~model ~requested catalog
         |> Result.map_error (fun error -> Invalid_config (Runtime_codex_context_admission.error_to_string error)) in
-      Log.Runtime_agent.info "Codex context admitted model=%s requested=%d client_maximum=%s usable_input=%d"
+      Log.Runtime_agent.info "Codex context admitted model=%s requested=%d client_maximum=%s usable_input=%s"
         model admitted.requested
         (match admitted.maximum with None -> "unbounded_by_catalog" | Some maximum -> string_of_int maximum)
-        admitted.usable_input;
+        (match admitted.usable_input with None -> "client_fallback" | Some tokens -> string_of_int tokens);
       let* _, after_revision = context_admission_identity ~cwd:protocol_cwd config in
       if revision <> after_revision then
         Error (Invalid_config "Codex connection changed during context admission; retry with the current connection")
       else (
         if cacheable then
           Mutex.protect context_admission_cache_mutex (fun () ->
-            Hashtbl.replace context_admission_cache cache_key (revision, model, requested, payload));
-        Ok (Some payload)))
+            Hashtbl.replace context_admission_cache cache_key (revision, model, requested, (payload, admitted.usable_input)));
+        Ok (Some (payload, admitted.usable_input))))
 ;;
 
 let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
@@ -2588,12 +2594,13 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
       (match
          (try
             let* context_catalog = admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config in
-            let context_catalog = Option.map (fun payload ->
+            let auto_compact_limit = Option.bind context_catalog snd in
+            let context_catalog = Option.map (fun (payload, _) ->
               let path = Filename.temp_file "masc-codex-admitted-models-" ".json" in
               Out_channel.with_open_bin path (fun channel -> output_string channel payload);
               path) context_catalog in
             Fun.protect ~finally:(fun () -> Option.iter Sys.remove context_catalog) (fun () ->
-            run_spawned ?context_catalog
+            run_spawned ?context_catalog ?auto_compact_limit
               ~mgr
               ~clock
               ~cwd

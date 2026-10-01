@@ -309,6 +309,13 @@ let test_accepted_transport_failure_fences_replay_but_routes_timeout () =
     ; Codex.Turn_input_write_failed "partial write"
     ];
   let before_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = false} in
+  Alcotest.(check bool) "admission timeout releases the session transiently" true
+    (Map.recovery_failure_of_client_error before_dispatch
+     = Masc.Keeper_official_client_session_store.Pre_dispatch_failed);
+  Alcotest.(check bool) "accepted timeout keeps ambiguous transport recovery" true
+    (Map.recovery_failure_of_client_error
+       (Codex.Timeout {seconds = 300.; turn_accepted = true})
+     = Masc.Keeper_official_client_session_store.Transport_interrupted);
   let observation = Atomic.make Effect.No_effect_observed in
   Map.observe_failed_dispatch
     ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)

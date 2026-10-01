@@ -2075,6 +2075,67 @@ let test_context_catalog_dependency_invalidates_admission () =
         check string "new smaller catalog refuses before another thread" before (Fs_compat.load_file capture_path)))
 ;;
 
+let test_context_admission_inherits_auth_and_invalidates_cache () =
+  let directory = Filename.temp_dir "codex-context-auth-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
+    let probes = Filename.concat directory "probes" in
+    Out_channel.with_open_bin probes (fun _ -> ());
+    Masc_test_deps.with_process_env "CODEX_HOME" (Some directory) (fun () ->
+    Masc_test_deps.with_process_env "CODEX_ACCESS_TOKEN" (Some "fixture-access") (fun () ->
+    Masc_test_deps.with_process_env "AWS_ACCESS_KEY_ID" (Some "fixture-aws") (fun () ->
+      with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+        (fun path ->
+          let source = Fs_compat.load_file path in
+          let source = source |> String.split_on_char '\n' |> List.concat_map (fun line ->
+            if String.starts_with ~prefix:"if [ \"$1\" = debug ]" line then
+              [ "[ -n \"${OPENAI_API_KEY:-}\" ] || exit 81"
+              ; "[ \"${CODEX_ACCESS_TOKEN:-}\" = fixture-access ] || exit 82"
+              ; "[ \"${AWS_ACCESS_KEY_ID:-}\" = fixture-aws ] || exit 83"
+              ; "if [ \"$1\" = debug ]; then printf 'probe\\n' >> " ^ shell_quote probes ^ "; fi"
+              ; line ] else [line]) |> String.concat "\n" in
+          Out_channel.with_open_bin path (fun out -> output_string out source);
+          List.iter (fun key ->
+            Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some key) (fun () ->
+              match run_fixture ~context_window:400000 path with
+              | Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
+            ["fixture-first"; "fixture-first"; "fixture-second"];
+          check int "credential revision invalidates cached admission" 2
+            (List.length (In_channel.with_open_bin probes In_channel.input_lines)))))))
+;;
+
+let test_context_catalog_absence_keeps_custom_client_model () =
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+    (fun path ->
+      let source = Fs_compat.load_file path |> String.split_on_char '\n'
+        |> List.map (fun line ->
+          if String.starts_with ~prefix:"if [ \"$1\" = debug ]" line then
+            "if [ \"$1\" = debug ]; then printf '%s\\n' '{\"models\":[]}'; exit 0; fi"
+          else line) |> String.concat "\n" in
+      Out_channel.with_open_bin path (fun out -> output_string out source);
+      match run_fixture ~context_window:400000 path with
+      | Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+let test_context_catalog_timeout_is_pre_dispatch () =
+  let capture = Filename.temp_file "codex-admission-timeout-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~capture_path:capture [] (fun path ->
+      let source = Fs_compat.load_file path |> String.split_on_char '\n'
+        |> List.map (fun line ->
+          if String.starts_with ~prefix:"if [ \"$1\" = debug ]" line
+          then "if [ \"$1\" = debug ]; then exec sleep 30; fi"
+          else line) |> String.concat "\n" in
+      Out_channel.with_open_bin path (fun out -> output_string out source);
+      (match run_fixture ~context_window:400000 ~admission_timeout_s:0.05 path with
+       | Error (Runtime_codex_app_server.Timeout {turn_accepted = false; _} as error) ->
+           check bool "catalog timeout releases session without ambiguous recovery" true
+             (Keeper_codex_runtime.For_testing.recovery_failure_of_client_error error
+              = Keeper_official_client_session_store.Pre_dispatch_failed)
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "stalled admission dispatched a turn");
+      check string "no app-server request was dispatched" "" (Fs_compat.load_file capture)))
+;;
+
 let test_selected_client_context_admission () =
   let module Admission = Runtime_codex_context_admission in
   let catalog maximum = `Assoc ["models", `List [`Assoc
@@ -2084,8 +2145,11 @@ let test_selected_client_context_admission () =
     match Admission.resolve ~model:"gpt-fixture" ~requested (catalog 1000000) with
     | Ok admitted ->
       check int "nominal request remains operator intent" requested admitted.requested;
-      check int "input headroom is reported separately" (requested / 100 * 95) admitted.usable_input
+      check (option int) "input headroom is reported separately" (Some (requested / 100 * 95)) admitted.usable_input
     | Error error -> fail (Admission.error_to_string error)) [272000; 400000; 1000000];
+  (match Admission.resolve ~model:"provider-custom" ~requested:400000 (catalog 1000000) with
+   | Ok { maximum = None; usable_input = None; _ } -> ()
+   | _ -> fail "absent custom model must retain client fallback metadata");
   (match Admission.resolve ~model:"gpt-fixture" ~requested:1000000 (catalog 872000) with
    | Error (Admission.Requested_above_maximum {requested=1000000; maximum=872000; _}) -> ()
    | _ -> fail "a client ceiling must reject a larger declaration");
@@ -2137,7 +2201,7 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
         (match context_window with
          | None -> []
          | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens;
-             "-c"; Printf.sprintf "model_auto_compact_token_limit=%d" tokens]) @
+             "-c"; Printf.sprintf "model_auto_compact_token_limit=%d" (tokens / 100 * 95)]) @
         (match native with
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
@@ -7410,6 +7474,12 @@ let () =
             test_context_catalog_dependency_invalidates_admission
         ; test_case "context admission cache retains coexisting declarations" `Quick
             test_context_admission_cache_keeps_coexisting_windows
+        ; test_case "context admission preserves inherited auth and refreshes its cache" `Quick
+            test_context_admission_inherits_auth_and_invalidates_cache
+        ; test_case "custom model absent from catalog still starts" `Quick
+            test_context_catalog_absence_keeps_custom_client_model
+        ; test_case "catalog timeout is a pre-dispatch failure" `Quick
+            test_context_catalog_timeout_is_pre_dispatch
         ; test_case "selected client context admits supported start and resume windows" `Quick
             test_selected_client_context_admission
         ; test_case "invalid context window is refused before dispatch" `Quick

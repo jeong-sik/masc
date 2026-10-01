@@ -147,14 +147,13 @@ let producer ~access bindings s =
         match phase with
         | Types.Attached | Types.Observing | Types.Failed _ -> Ok (value::rest)
         | Types.Detached | Types.Detaching -> Ok rest in
-  (* Hidden and absent producers share a result; establish visibility before
-     validating or counting the selected lifecycle records. *)
+  (* Do not parse hidden producer metadata or count it as an ambiguous owner. *)
   let readable = List.filter (fun value ->
-    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~access value)) bindings in
+    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~bindings ~access value)) bindings in
   let* candidates = live (List.filter matches readable) in
   match candidates with
   | [value] ->
-      let* () = Lane_addon_runtime.authorize_retained_read ~access value in
+      let* () = Lane_addon_runtime.authorize_retained_read ~bindings ~access value in
       let* instance = get "instance_id" text value in
       let* sequence = get "observation_seq" integer value in
       let* package = field "package" value in
@@ -324,8 +323,8 @@ let handle_with ~io ?access ~config ~caller args =
 
 let handle = handle_with ~io:real_cursor_io
 module For_testing = struct
-  let handle ~replace_cursor_file ~sync_file ~sync_parent =
-    handle_with ~io:{replace_cursor_file;sync_file;sync_parent}
+  let handle ?access ~replace_cursor_file ~sync_file ~sync_parent ~config ~caller args =
+    handle_with ~io:{replace_cursor_file;sync_file;sync_parent} ?access ~config ~caller args
   let observe ~sync_file ~sync_parent =
     observe_with ~io:{real_cursor_io with sync_file;sync_parent}
 end

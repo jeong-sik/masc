@@ -4,10 +4,13 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let read_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
-    Lane_addon_runtime.read_declaration ?caller ~access ~config args
-  let save_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
-    Lane_addon_runtime.save_declaration ?caller ~access ~config args
+  let fixture_access caller access = Option.value access ~default:(match caller with
+    | None -> Lane_addon_sources.Operator_configuration
+    | Some keeper -> Lane_addon_sources.Keeper keeper)
+  let read_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
+  let save_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
   let dispatch ?caller ?access ~config ~operation args =
     let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration
@@ -169,6 +172,124 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       (Result.is_ok (Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config
         (request ~mode:"create" ~file_name:"operator.toml" bytes))))
 
+let test_operator_reassignment_revokes_old_document_owner () =
+  with_fixture (fun _clock config directory _root _started ->
+    let registry = Fusion_run_registry.global () in
+    List.iter (fun (run_id, keeper) ->
+      Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"default"
+        ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.)
+      ["editor-owner-a", "editor-keeper"; "editor-owner-b", "next-keeper"];
+    let bytes ?(manifest_path="../../package.toml") run_id = Printf.sprintf {|id="private-transfer"
+run_id="editor-world"
+manifest_path=%S
+[binding]
+sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
+|} manifest_path run_id in
+    ignore (unwrap (Runtime.save_declaration ~caller:"editor-keeper" ~config
+      (request ~mode:"create" ~file_name:"transfer.toml" (bytes "editor-owner-a"))));
+    ignore (reconcile config directory);
+    let path = Filename.concat directory "transfer.toml" in
+    let read_as caller = Runtime.read_declaration ~caller ~config
+      (`Assoc ["source_path", `String path]) in
+    let declaration_denial name = match Runtime.read_declaration ~caller:"foreign-keeper" ~config
+        (`Assoc ["source_path", `String (Filename.concat directory name)]) with
+      | Error error -> error.Editor.code, error.message, error.current
+      | Ok _ -> fail "foreign declaration read unexpectedly succeeded" in
+    check bool "private and absent declarations expose the same complete error" true
+      (declaration_denial "transfer.toml" = declaration_denial "absent.toml");
+    write path (bytes "editor-owner-b");
+    check bool "old owner cannot read reassigned bytes before reconciliation" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path ((bytes "editor-owner-b") ^ "\n[unrelated]\nvalue = [");
+    check bool "malformed replacement cannot reuse stale owner authority" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path (bytes ~manifest_path:"../../missing-package.toml" "editor-owner-b");
+    check bool "private replacement with missing package cannot disclose its source" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path (bytes "editor-owner-b");
+    ignore (reconcile config directory);
+    check bool "old owner remains denied after journal reassignment" true
+      (Result.is_error (read_as "editor-keeper"));
+    check bool "new verified owner can read the reassigned document" true
+      (Result.is_ok (read_as "next-keeper"));
+    let upstream_denial installation_id = Runtime.dispatch ~caller:"foreign-keeper" ~config
+        ~operation:Runtime.Attach (`Assoc [
+          "manifest_path", `String (Filename.concat _root ".masc/package.toml");
+          "run_id", `String "editor-world";
+          "binding", `Assoc ["sources", `List [`Assoc [
+            "source_id", `String "upstream"; "kind", `String "lane_output";
+            "installation_id", `String installation_id;
+            "selection", `String "latest_completed"]]]]) in
+    let private_denial = upstream_denial "private-transfer" in
+    check (result string string) "private upstream reaches the ownership denial"
+      (Error "upstream installation is unavailable to this caller")
+      (Result.map Yojson.Safe.to_string private_denial);
+    check bool "private and absent upstreams expose one denial" true
+      (private_denial = upstream_denial "absent-installation");
+    write path (declaration ~id:"private-transfer" ());
+    ignore (reconcile config directory);
+    check bool "private-to-shared reconciliation revokes exclusive Keeper authority" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    check bool "shared declaration remains readable by other Keepers" true
+      (Result.is_ok (read_as "another-keeper")))
+
+let test_shared_saves_do_not_claim_keeper_ownership () =
+  with_fixture (fun _clock config directory _root _started ->
+    let bytes = declaration ~id:"shared-editor" () in
+    ignore (save config (request ~mode:"create" ~file_name:"shared.toml" bytes));
+    let path = Filename.concat directory "shared.toml" in
+    let read_as keeper = Runtime.read_declaration ~caller:keeper ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    let edit = read_as "first-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"first-keeper" ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (read_as "other-keeper");
+    check bool "shared save leaves no exclusive Keeper ownership" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    let edit = read_as "other-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~mode:"create" ~file_name:"local.toml" (declaration ~id:"local-editor" ())))))
+
+let test_unconfirmed_shared_save_withdraws_private_owner () =
+  with_fixture (fun _clock config directory _root _started ->
+    let run_id = "unconfirmed-private-source" in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let private_bytes = Printf.sprintf {|id="private-save"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
+|} run_id in
+    let receipt = unwrap (Runtime.save_declaration ~caller:"editor-keeper" ~config
+      (request ~mode:"create" ~file_name:"private.toml" private_bytes)) in
+    let revision = text "source_revision" (member "document" receipt) in
+    let shared = declaration ~id:"private-save" () in
+    let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory))) path source in
+    let writer ~directory request = Editor.For_testing.write ~replace_file ~directory request in
+    let saved = Runtime.For_testing.with_declaration_writer writer (fun () ->
+      Runtime.save_declaration ~caller:"editor-keeper" ~config
+        (request ~revision ~mode:"save" ~file_name:"private.toml" shared)) |> unwrap in
+    check string "visible shared save returns its durability receipt" "unconfirmed"
+      (member "write" saved |> text "durability");
+    let path = Filename.concat directory "private.toml" in
+    let observed = Runtime.read_declaration ~caller:"another-keeper" ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    check string "shared bytes remain readable after private ownership withdrawal" shared
+      (text "source_text" observed);
+    check bool "another Keeper can edit the now shared declaration" true
+      (Result.is_ok (Runtime.save_declaration ~caller:"another-keeper" ~config
+        (request ~revision:(text "source_revision" observed) ~mode:"save" ~file_name:"private.toml"
+          (declaration ~id:"private-save" ~value:"second-owner" ())))))
+
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in
   let created = save config (request ~mode:"create" ~file_name:"observer.toml" original) in
@@ -182,7 +303,8 @@ let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun
   check bool "Keeper gets a real failed outcome" false (Tool_result.is_success conflict);
   let details = Tool_result.data conflict in
   check string "typed conflict survives tool boundary" "revision_conflict" (text "code" details);
-  check string "current raw document accompanies conflict" edited (member "current" details |> text "source_text");
+  check bool "Keeper conflict does not disclose a racing document" true
+    (member "current" details = `Null);
   let current = read config directory "observer.toml" in
   List.iter (fun args ->
     match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args with
@@ -301,8 +423,13 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick
       test_keeper_declaration_cannot_capture_another_fusion_owner;
+  test_case "unconfirmed shared save withdraws private ownership" `Quick
+      test_unconfirmed_shared_save_withdraws_private_owner;
+  test_case "operator reassignment replaces private document authority" `Quick
+      test_operator_reassignment_revokes_old_document_owner;
     test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
   test_case "conflict and invalid candidate preserve active installation" `Quick test_conflicts_and_invalid_candidates_preserve_active;
   test_case "invalid source and missing package remain repairable" `Quick test_invalid_existing_source_can_be_repaired;

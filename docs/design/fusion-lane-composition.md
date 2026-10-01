@@ -157,8 +157,8 @@ Container lifecycle and the delivery recipient are fixture callbacks. Artifact
 reads exercise the real reader; they do not demonstrate a model understanding
 or using the report. No Docker isolation, credential separation, Broadcast
 publication, or production Keeper action is established by this scenario.
-Its native execution remains pending targeted CI. The 14 Fusion Python MCP
-package scenarios passed on the integration checkout.
+Run the native composition test and the Python MCP package suites against the
+composed head; historical receipts do not establish execution of a later merge.
 
 ## Explicit report sharing
 

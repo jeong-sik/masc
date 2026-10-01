@@ -417,7 +417,8 @@ let context_flow_uses_declared_connections () =
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
-      "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
+      "installation_id":"project-observer","output_id":"events","selection":"latest_completed"},
+      {"source_id":"external-fusion","kind":"fusion_run","run_id":"retained-fusion-run"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];

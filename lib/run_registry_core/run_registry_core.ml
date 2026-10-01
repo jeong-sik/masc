@@ -153,11 +153,17 @@ module Make (Payload : Payload) = struct
     ; status : status
     }
 
+  module Id_map = Map.Make (String)
+
+  type observer_index = { device:int; inode:int; boundary:int; modified:float; changed:float;
+    line_no:int; rows:entry Id_map.t }
+
   type t =
     { entries : entry list Atomic.t
     ; path : string option
     ; mutation_mutex : Cross_context_mutex.t
     ; replay_status : replay_status
+    ; mutable observer_index : observer_index option
     }
 
   type event =
@@ -171,7 +177,6 @@ module Make (Payload : Payload) = struct
         ; completion : Payload.completion
         }
 
-  module Id_map = Map.Make (String)
   module Row_map = Map.Make (Int)
 
   (* Positions count the nonblank rows visited by [fold_appended_lines], not
@@ -248,6 +253,7 @@ module Make (Payload : Payload) = struct
     { entries = Atomic.make []
     ; path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; observer_index = None
     ; replay_status = Not_replayed
     }
 
@@ -669,7 +675,54 @@ module Make (Payload : Payload) = struct
     get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
-  let fold_replay_entries path =
+  let completed_from_log t ~id =
+    Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
+      match t.path with
+      | None -> Ok None
+      | Some path ->
+        try
+          let before = Unix.stat path in
+          let cached = match t.observer_index with
+            | Some index when index.device = before.Unix.st_dev && index.inode = before.Unix.st_ino
+                && before.Unix.st_size >= index.boundary
+                && (before.Unix.st_size > index.boundary
+                    || (index.modified = before.Unix.st_mtime && index.changed = before.Unix.st_ctime)) -> Some index
+            | Some _ | None -> None in
+          let from, rows, line_no = match cached with
+            | Some index -> index.boundary, index.rows, index.line_no
+            | None -> 0, Id_map.empty, 1 in
+          let (reading, line_no), boundary = Fs_compat.fold_appended_lines
+            ~path ~from ~init:(Ok rows, line_no)
+            ~f:(fun (reading, line_no) line ->
+              let reading = Result.bind reading (fun rows ->
+                match parse_event_line ~path ~line_no line with
+                | Error detail -> Error detail
+                | Ok (Some (Register r)) ->
+                  Ok (Id_map.add r.id {id=r.id;started_at=r.started_at;
+                    registration=r.registration;status=Running} rows)
+                | Ok (Some (Complete c)) ->
+                  (match Id_map.find_opt c.id rows with
+                   | Some entry -> Ok (Id_map.add c.id {entry with status=Completed c.completion} rows)
+                   | None -> Error "completion has no matching registration")
+                | Ok None -> Ok rows) in
+              reading, line_no + 1) in
+          let after = Unix.stat path in
+          if before.Unix.st_dev <> after.Unix.st_dev || before.Unix.st_ino <> after.Unix.st_ino
+             || before.Unix.st_size <> after.Unix.st_size || boundary <> after.Unix.st_size
+             || before.Unix.st_mtime <> after.Unix.st_mtime || before.Unix.st_ctime <> after.Unix.st_ctime
+          then Error "run history contains an incomplete or changing tail"
+          else Result.map (fun rows ->
+            t.observer_index <- Some {device=after.Unix.st_dev;inode=after.Unix.st_ino;boundary;
+              modified=after.Unix.st_mtime;changed=after.Unix.st_ctime;line_no;rows};
+            match Id_map.find_opt id rows with
+            | Some ({status=Completed _;_} as entry) -> Some entry
+            | Some {status=Running;_} | None -> None) reading
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn))
+  ;;
+
+  let fold_replay_entries ?(retain_completed_history = false) path =
     let unread =
       { retained_entries = []
       ; rows = Id_map.empty
@@ -694,7 +747,8 @@ module Make (Payload : Payload) = struct
               | Ok None -> entries, rows, malformed, line_no + 1
               | Ok (Some event) ->
                 let entries = apply_event entries event in
-                let rows =
+                let entries = if retain_completed_history then prune entries else entries in
+                let rows = if retain_completed_history then Id_map.empty else
                   match event with
                   | Register { id; _ } ->
                     Id_map.add id
@@ -741,9 +795,9 @@ module Make (Payload : Payload) = struct
         unread)
   ;;
 
-  let replay path =
+  let replay_with_policy ~retain_completed_history path =
     let existed = Fs_compat.file_exists path in
-    let snapshot = fold_replay_entries path in
+    let snapshot = fold_replay_entries ~retain_completed_history path in
     (match snapshot.malformed with
      | [] -> ()
      | first :: _ as errors ->
@@ -752,13 +806,14 @@ module Make (Payload : Payload) = struct
          Payload.name
          (List.length errors)
          first);
-    if snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
+    if not retain_completed_history && snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
     then (
       (* See [compact_replay_log]: it reports failure; replay still publishes the parsed state. *)
       ignore (compact_replay_log path snapshot));
     { entries = Atomic.make snapshot.retained_entries
     ; path = Some path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; observer_index = None
     ; replay_status =
         if not existed then Log_absent
         else Replayed
@@ -769,6 +824,10 @@ module Make (Payload : Payload) = struct
           }
     }
   ;;
+
+  let replay path = replay_with_policy ~retain_completed_history:false path
+  let replay_with_retained_history path =
+    replay_with_policy ~retain_completed_history:true path
 
   (* A row the current decoder refuses can never be read again: the field it
      carries was hard cut, and production holds no compatibility reader for it.

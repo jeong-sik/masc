@@ -5784,6 +5784,10 @@ type state = {
      has to close its file on the way out: killed outright it would leave a
      header with no length in it. *)
   mutable voice_stop_requested: Masc.Voice_bridge.stop_request option;
+  (* A workspace withdrawal invalidates this capture even if the same
+     workspace becomes current again before its completion reaches the loop.
+     Keep [voice_capture] occupied until that completion releases the device. *)
+  mutable voice_capture_withdrawn: bool;
   (* Continuous mode: the keeper whose row re-arms a capture after each
      transcript, until the operator turns it off. Separate from
      [voice_capture], which is the capture running right now — between two
@@ -6795,21 +6799,30 @@ let withdraw_voice_capture (state : state) =
   state.voice_level_db <- None;
   (* Keep the occupied capture until its callback, so returning to the
      composer cannot start a second microphone while this one shuts down. *)
-  if Option.is_some state.voice_capture then
+  if Option.is_some state.voice_capture then begin
+    state.voice_capture_withdrawn <- true;
     request_voice_stop state Masc.Voice_bridge.Discard
+  end
 
 let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
+type voice_completion =
+  | Voice_current of Masc.Voice_bridge.stop_request
+  | Voice_withdrawn
+
 (* The transcript may already be in the mailbox when the reader opens.
    Settle ownership before deciding whether its text can reach the draft. *)
-let settle_voice_transcript (state : state) ~keeper =
+let settle_voice_capture (state : state) ~keeper =
   if state.voice_capture <> Some keeper then None
   else begin
-    let disposition = Option.value state.voice_stop_requested
-        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    let disposition =
+      if state.voice_capture_withdrawn then Voice_withdrawn
+      else Voice_current (Option.value state.voice_stop_requested
+          ~default:Masc.Voice_bridge.Keep_what_was_heard) in
     state.voice_capture <- None;
+    state.voice_capture_withdrawn <- false;
     state.voice_level_db <- None;
     Some disposition
   end
@@ -8276,6 +8289,7 @@ let create_state
   voice_capture = None;
   voice_level_db = None;
   voice_stop_requested = None;
+  voice_capture_withdrawn = false;
   voice_continuous = None;
   voice_floor = None;
   quit_armed = false;

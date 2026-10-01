@@ -358,19 +358,24 @@ let test_reader_discards_active_and_queued_voice () =
      already queued before the reader was opened. *)
   Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
   check bool "late transcript is discarded" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
-     = Some Masc.Voice_bridge.Discard);
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some Tui_types.Voice_withdrawn);
   check (option string) "completion releases microphone" None state.Tui_types.voice_capture;
   check bool "duplicate completion has no owner" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst" = None);
+    (Tui_types.settle_voice_capture state ~keeper:"analyst" = None);
   check string "existing draft survives reader entry" "reviewed draft"
     (Buffer.contents state.Tui_types.msg_input);
   (* A fresh capture explicitly started after returning remains usable. *)
   state.Tui_types.voice_capture <- Some "analyst";
   state.Tui_types.voice_stop_requested <- None;
   check bool "fresh capture delivers" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
-     = Some Masc.Voice_bridge.Keep_what_was_heard)
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Keep_what_was_heard));
+  state.Tui_types.voice_capture <- Some "analyst";
+  Tui_types.request_voice_stop state Masc.Voice_bridge.Discard;
+  check bool "operator discard remains a current capture" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Discard))
 ;;
 
 let test_workspace_withdrawal_discards_queued_voice () =
@@ -393,8 +398,8 @@ let test_workspace_withdrawal_discards_queued_voice () =
     Tui_types.withdraw_voice_capture state;
     Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
     check bool "queued transcript remains discarded" true
-      (Tui_types.settle_voice_transcript state ~keeper:"analyst"
-       = Some Masc.Voice_bridge.Discard);
+      (Tui_types.settle_voice_capture state ~keeper:"analyst"
+       = Some Tui_types.Voice_withdrawn);
     check (option string) "completion releases microphone"
       None state.Tui_types.voice_capture;
     check (option string) "completion cannot restart continuous mode"

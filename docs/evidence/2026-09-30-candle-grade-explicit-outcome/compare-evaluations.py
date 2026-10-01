@@ -8,27 +8,32 @@ import json
 from pathlib import Path
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def load_run(directory):
     plan = json.loads((directory / "plan.json").read_text())
     cases_raw = (directory / "cases.json").read_bytes()
-    assert hashlib.sha256(cases_raw).hexdigest() == plan["cases_sha256"]
+    require((hashlib.sha256(cases_raw).hexdigest() == plan["cases_sha256"]), 'validation failed: hashlib.sha256(cases_raw).hexdigest() == plan["cases_sha256"]')
     cases = {case["id"]: case for case in json.loads(cases_raw)}
     raw = (directory / "results.jsonl").read_bytes()
-    assert raw.endswith(b"\n"), "partial result line"
+    require((raw.endswith(b"\n")), "partial result line")
     rows = [json.loads(line) for line in raw.splitlines()]
-    assert len(rows) == plan["planned_calls"], "wait for the entire frozen run"
+    require((len(rows) == plan["planned_calls"]), "wait for the entire frozen run")
     pairs = {(row["case_id"], row["trial"]) for row in rows}
-    assert pairs == {(case_id, trial) for case_id in cases for trial in range(1, plan["trials"] + 1)}
-    assert len(pairs) == len(rows), "duplicate case/trial"
-    assert len({row["receipt"]["run_id"] for row in rows}) == len(rows)
+    require((pairs == {(case_id, trial) for case_id in cases for trial in range(1, plan["trials"] + 1)}), 'validation failed: pairs == {(case_id, trial) for case_id in cases for trial in range(1, plan["trials"] + 1)}')
+    require((len(pairs) == len(rows)), "duplicate case/trial")
+    require((len({row["receipt"]["run_id"] for row in rows}) == len(rows)), 'validation failed: len({row["receipt"]["run_id"] for row in rows}) == len(rows)')
     metadata = json.loads((directory / "metadata.json").read_text())
-    assert metadata["plan"] == plan
-    assert metadata["build"]["commit"] == plan["source_commit"]
-    assert json.loads((directory / "exit.json").read_text())["exit_code"] == 0
+    require((metadata["plan"] == plan), 'validation failed: metadata["plan"] == plan')
+    require((metadata["build"]["commit"] == plan["source_commit"]), 'validation failed: metadata["build"]["commit"] == plan["source_commit"]')
+    require((json.loads((directory / "exit.json").read_text())["exit_code"] == 0), 'validation failed: json.loads((directory / "exit.json").read_text())["exit_code"] == 0')
     summaries = {}
     for case_id, case in cases.items():
         selected = [row for row in rows if row["case_id"] == case_id]
-        assert all(row["stage"] == case["stage"] for row in selected)
+        require((all(row["stage"] == case["stage"] for row in selected)), 'validation failed: all(row["stage"] == case["stage"] for row in selected)')
         valid = [row for row in selected if row["status"] == "ok"]
         tally = {"statuses": dict(Counter(row["status"] for row in selected))}
         if case["stage"] == "weights":
@@ -54,14 +59,14 @@ def main():
     args = parser.parse_args()
     baseline, base_meta, base_cases, base_hash = load_run(args.baseline)
     candidate, candidate_meta, candidate_cases, candidate_hash = load_run(args.candidate)
-    assert {key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
-        key: value for key, value in candidate.items() if key != "prompt_sha256"}
-    assert base_meta["build"]["executable_sha256"] == candidate_meta["build"]["executable_sha256"]
+    require(({key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
+        key: value for key, value in candidate.items() if key != "prompt_sha256"}), 'validation failed: {key: value for key, value in baseline.items() if key != "prompt_sha256"} == {\n        key: value for key, value in candidate.items() if key != "prompt_sha256"}')
+    require((base_meta["build"]["executable_sha256"] == candidate_meta["build"]["executable_sha256"]), 'validation failed: base_meta["build"]["executable_sha256"] == candidate_meta["build"]["executable_sha256"]')
     changed = [name for name in baseline["prompt_sha256"] if baseline["prompt_sha256"][name] != candidate["prompt_sha256"][name]]
-    assert changed == ["candle_appraiser_grade.md"], "only the reviewed Grade prompt may change"
+    require((changed == ["candle_appraiser_grade.md"]), "only the reviewed Grade prompt may change")
     prompt_source = json.loads((args.candidate / "prompt-source.json").read_text())
-    assert prompt_source["binary_commit"] == candidate["source_commit"]
-    assert prompt_source["prompt_sha256"] == candidate["prompt_sha256"]
+    require((prompt_source["binary_commit"] == candidate["source_commit"]), 'validation failed: prompt_source["binary_commit"] == candidate["source_commit"]')
+    require((prompt_source["prompt_sha256"] == candidate["prompt_sha256"]), 'validation failed: prompt_source["prompt_sha256"] == candidate["prompt_sha256"]')
     print(json.dumps({
         "scope": "Complete same-corpus measurements, not an acceptance or calibration verdict",
         "binary_commit": baseline["source_commit"], "prompt_commit": prompt_source["prompt_commit"],

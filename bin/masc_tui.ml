@@ -359,12 +359,6 @@ let move_runtime_config_cursor state ~delta =
 (* The columns the Identity pane wraps its notice at. Asked of the terminal
    the same way {!surface_rows} asks for its rows, so the key handler counts
    the lines the renderer is about to draw. *)
-(* The query the list is showing, which is the empty one whenever the filter
-   is not open. Asked here so the renderer, the cursor and the keys all read
-   the same list. *)
-let identity_query (state : state) =
-  Option.value state.identity_filter ~default:""
-
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
   Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
@@ -422,13 +416,13 @@ let move_identity_cursor (state : state) ~delta =
   | Some (_, providers) ->
       let count =
         List.length
-          (Masc_tui_types.identity_connectable ~query:(identity_query state)
+          (Masc_tui_identity_model.identity_connectable ~query:(Masc_tui_identity_input.current_query state)
              providers)
       in
       if count > 0 then begin
-        let query = identity_query state in
+        let query = Masc_tui_identity_input.current_query state in
         let cursor =
-          Masc_tui_types.identity_cursor_clamped ~query ~providers
+          Masc_tui_identity_model.identity_cursor_clamped ~query ~providers
             state.identity_cursor
         in
         let cursor = Masc_tui_scroll.cursor_move ~count ~delta cursor in
@@ -442,16 +436,16 @@ let move_identity_cursor (state : state) ~delta =
             state.detail_scroll <-
               Masc_tui_scroll.ensure_visible
                 ~cursor:
-                  (Masc_tui_types.identity_provider_line
+                  (Masc_tui_identity_model.identity_provider_line
                      ~summary:
-                       (Masc_tui_types.identity_summary ~providers ~query)
+                       (Masc_tui_identity_model.identity_summary ~providers ~query)
                      ~notice:
-                       (Masc_tui_types.identity_notice
+                       (Masc_tui_identity_model.identity_notice
                           ~cols:(identity_pane_columns state)
                           state.identity_attempt_error
-                       @ Masc_tui_types.identity_app_form_rows
+                       @ Masc_tui_identity_model.identity_app_form_rows
                            state.identity_app_form
-                       @ Masc_tui_types.identity_filter_rows ~providers
+                       @ Masc_tui_identity_model.identity_filter_rows ~providers
                            state.identity_filter)
                      ~index:cursor)
                 ~height state.detail_scroll
@@ -1550,6 +1544,32 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
       Error detail
     end
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
+(* Capture the endpoint authority before an extracted request can suspend. *)
+let capture_workspace_check state ~mailbox =
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let host = server_peer_host in
+  let port = state.port in
+  check_workspace_request state ~mailbox ~authority ~identity ~host ~port
+
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
    reply already queued before withdrawal; admitted server effects remain. *)
@@ -1584,23 +1604,6 @@ let fork_workspace_job state ~sw run =
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     Printexc.raise_with_backtrace exn backtrace
 
-(* The server this screen reads. It runs on this machine, so the address is
-   loopback and there is nothing to configure.
-
-   It used to read MASC_HOST, which is the *server's* bind address
-   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
-   [configured_bind_host]). That answers a different question -- which
-   interfaces to accept on -- and its documented non-default values are the
-   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
-   exists to name as "every interface" rather than a reachable peer. Setting
-   it the way the server's own help recommends therefore pointed this screen
-   at an address that is not a destination.
-
-   Reading it also made a second setting: the roster, the task backlog, the
-   keeper metrics and the context occupancy are read from [base_path] on
-   local disk, and nothing checked that the two named the same machine. With
-   one of them gone there is nothing left to disagree. *)
-let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* A request owns both its cancellation context and its completion. Recheck the
    endpoint before dispatch: an unchanged port can now serve another root. *)
@@ -3096,72 +3099,6 @@ let launch_keeper_deletions state ~mailbox ?retry () =
     | None -> enqueue_async mailbox (Keeper_deletions_loaded
         (generation, Error "Eio switch is unavailable")))
 
-let launch_resources_list state ~mailbox =
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let host = server_peer_host in
-  let port = state.port in
-  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
-  let session = state.mcp_session in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Resources_listed result)
-    (fun () ->
-      let session_result =
-        match session with
-        | Some session_id -> Ok session_id
-        | None ->
-            Masc_tui_http.open_mcp_session ~host ~port
-              ~client_version:Runtime_build_version.current
-      in
-      match session_result with
-      | Error detail -> Error detail
-      | Ok session_id ->
-          (match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-           | Error detail -> Error detail
-           | Ok () -> Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id ~request_id))
-
-let launch_resource_read state ~mailbox ~uri =
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let same_resource =
-    match state.resource_content with
-    | Some (current, _) -> String.equal current uri
-    | None -> false
-  in
-  state.resource_pending_uri <- Some uri;
-  if not same_resource then begin
-    state.resource_content <- None;
-    state.resource_content_error <- None;
-    state.resource_scroll <- 0
-  end;
-  let host = server_peer_host in
-  let port = state.port in
-  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
-  let session = state.mcp_session in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Resource_read (uri,
-      Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read result))
-    (fun () ->
-      let session_result =
-        match session with
-        | Some session_id -> Ok session_id
-        | None ->
-            Masc_tui_http.open_mcp_session ~host ~port
-              ~client_version:Runtime_build_version.current
-      in
-      match session_result with
-      | Error detail -> Error detail
-      | Ok session_id ->
-          (match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-           | Error detail -> Error detail
-           | Ok () -> Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id ~request_id ~uri))
-
-(* The Code surface's two loads: one directory level, one whole file. Plain
-   HTTP GETs forked off the render loop, answered on the async mailbox and
-   stamped with what they answer for, so a slow reply cannot dress a newer
-   selection. *)
-(* The scope, as the two optional query axes the fetchers take. The match
-   is exhaustive: a fourth scope must decide its axis here. *)
 let tree_diff_base_ref = "HEAD"
 
 let pr_number_of_subject subject =
@@ -3320,98 +3257,6 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
    in the GitHub tab as it arrives so the operator can read the code and
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
-let launch_github_login state ~mailbox keeper_name =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let host = server_peer_host in
-  let port = state.port in
-  (* Read once, at the key press: ticking another scope while the device flow
-     waits on the browser must not change what this login asked for. *)
-  let scopes = state.github_login_scopes in
-  let run () =
-    match Eio_context.get_clock_opt () with
-    | None ->
-        enqueue_async mailbox
-          (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
-    | Some clock ->
-        let reader = Masc_tui_sse_lines.create () in
-        let flush_lines chunk =
-          let lines =
-            Masc_tui_sse_lines.feed reader chunk
-            |> List.filter_map (fun line ->
-                   let line = String.trim line in
-                   if String.length line > 6
-                      && String.sub line 0 6 = "data: "
-                   then
-                     let payload =
-                       String.sub line 6 (String.length line - 6)
-                     in
-                     match Yojson.Safe.from_string payload with
-                     | `Assoc fields -> (
-                         match List.assoc_opt "text" fields with
-                         | Some (`String text) ->
-                             Some (String.split_on_char '\n' text)
-                         | _ -> (
-                             match List.assoc_opt "message" fields with
-                             | Some (`String message) ->
-                                 Some [ "error: " ^ message ]
-                             | _ -> Some [ payload ]))
-                     | _ | (exception Yojson.Json_error _) ->
-                         Some [ payload ]
-                   else None)
-            |> List.concat
-            |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
-            |> List.filter (fun line -> String.trim line <> "")
-          in
-          if lines <> [] then
-            enqueue_async mailbox (Github_login_lines (keeper_name, lines))
-        in
-        let result =
-          try
-            let ( let* ) = Result.bind in
-            let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-            Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
-              ~port ~keeper_name ~scopes
-              ~on_chunk:flush_lines
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Github_login_finished (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      fork_workspace_job state ~sw run
-  | None ->
-      enqueue_async mailbox
-        (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
-
-let launch_github_token_save state ~mailbox keeper_name token =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        let ( let* ) = Result.bind in
-        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-        Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Github_token_saved (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      fork_workspace_job state ~sw run
-  | None ->
-      enqueue_async mailbox
-        (Github_token_saved (keeper_name, Error "Eio switch is unavailable"))
-
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -3807,198 +3652,6 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
                 item.partition_id,
                 Masc_tui_http.Post_unanswered "Eio switch is unavailable")
              items ))
-
-let launch_github_identity_view state ~mailbox keeper_name =
-  let enqueue_async = workspace_enqueue state in
-  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Github_identity_view_loaded (request, result)))
-    (fun () ->
-      Masc_tui_loader.load_keeper_github_identity_view ~host ~port
-        ~keeper_name)
-
-let launch_identity_view state ~mailbox keeper_name =
-  let enqueue_async = workspace_enqueue state in
-  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Identity_providers_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name)
-
-(* Throw or clear one attached service's switch. Off keeps the token and
-   catalog; the keeper's turns stop being handed that provider's tools. *)
-let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-        else Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
-          ~provider_id ~enabled
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox
-      (Identity_switch_set (keeper_name, provider_id, enabled, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      fork_workspace_job state ~sw run
-  | None ->
-      enqueue_async mailbox
-        (Identity_switch_set
-           (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
-
-(* Begin a login. The answer is a URL the operator has to open; nothing is
-   written to the keeper until the browser comes back to the server. *)
-(* Recording an app the operator made. Answers on the same notice line a
-   failed attempt uses -- what an operator wants after pressing save is one
-   sentence saying whether it took, in the place they are already reading. *)
-let launch_identity_app_save state ~mailbox
-      ~(form : Masc_tui_types.identity_app_form) =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let keeper_name = Option.map (fun (keeper : keeper) -> keeper.k_name)
-    (selected_keeper state) in
-  let host = server_peer_host in
-  let port = state.port in
-  let provider_id = form.Masc_tui_types.iaf_provider in
-  let client_id = form.Masc_tui_types.iaf_client_id in
-  let client_secret = form.Masc_tui_types.iaf_client_secret in
-  let scopes = form.Masc_tui_types.iaf_scopes in
-  let run () =
-    let result =
-      try
-        match
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else Masc_tui_http.post_keeper_oauth_client ~host ~port ~provider_id
-            ~client_id ~client_secret ~scopes
-        with
-        | Error err -> Error err
-        | Ok json ->
-          Masc.Tui_decode.decode_oauth_client_saved json
-          |> Result.map_error (fun detail ->
-            "app recorded, but the reply could not be read: " ^ detail)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_app_saved (keeper_name, provider_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-    fork_workspace_job state ~sw run
-  | None ->
-    enqueue_async mailbox
-      (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable"))
-
-let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let request = start_identity_login_request state ~keeper_name ~provider_id in
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        match
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
-            ~provider_id
-        with
-        | Error err -> Login_failed err
-        | Ok json -> (
-            match json with
-            | `Assoc fields -> (
-                match List.assoc_opt "attached" fields with
-                | Some (`Bool true) ->
-                    let msg =
-                      match List.assoc_opt "message" fields with
-                      | Some (`String m) -> m
-                      | _ -> label ^ ": credentials attached."
-                    in
-                    enqueue_async mailbox (Identity_refreshed (keeper_name, Ok ()));
-                    Login_attached msg
-                | _ -> (
-                    match List.assoc_opt "authorize_url" fields with
-                    | Some (`String url) ->
-                        let provider_id =
-                          match List.assoc_opt "provider" fields with
-                          | Some (`String id) -> id
-                          | Some _ | None -> provider_id
-                        in
-                        (* Opened here, on this fiber, because the URL is about
-                           nine hundred characters and a pane truncates it -- an
-                           operator cannot select what is not on screen. It is
-                           still printed below, wrapped, for the machine that has
-                           no opener. *)
-                        (if authority = state.workspace_authority then
-                           match Masc_tui_browser.open_url url with
-                           | Ok _ | Error _ -> ());
-                        Login_started { provider_id; label; url }
-                    | Some _ | None ->
-                        Login_failed "the server answered without an authorize_url"))
-            | _ ->
-                Login_failed "the server answered with something this cannot read")
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Login_failed (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_login_started (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      fork_workspace_job state ~sw run
-  | None ->
-      enqueue_async mailbox
-        (Identity_login_started
-           (request, Login_failed "Eio switch is unavailable"))
-
-(* Ask every attached service again what tools it has. An operator action
-   rather than a timer: a stale catalog is visible and fixable, while a timer
-   is a network call nobody asked for. *)
-let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
-  let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        List.fold_left
-          (fun acc provider_id ->
-            match acc with
-            | Error _ as err -> err
-            | Ok () -> (
-                match
-                  if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-                  else Masc_tui_http.post_keeper_identity_refresh ~host ~port
-                    ~keeper_name ~provider_id
-                with
-                | Ok _ -> Ok ()
-                | Error err -> Error (provider_id ^ ": " ^ err)))
-          (Ok ()) provider_ids
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_refreshed (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      fork_workspace_job state ~sw run
-  | None ->
-      enqueue_async mailbox
-        (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let enqueue_async = workspace_enqueue state in
@@ -5871,7 +5524,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
        | Config_voice -> launch_voice_config_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
-   | Resources -> launch_resources_list state ~mailbox
+   | Resources -> Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox)
    | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
    | Metrics ->
        (* Usage is the top-level account reading. Explicit telemetry entry
@@ -10546,7 +10199,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;
-      launch_github_identity_view state ~mailbox keeper.k_name
+      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
   | Detail_identity ->
       state.identity_view <- None;
       state.identity_view_error <- None;
@@ -10555,7 +10208,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.identity_cursor <- 0;
       state.identity_attempt_error <- None;
       state.identity_filter <- None;
-      launch_identity_view state ~mailbox keeper.k_name
+      Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
   | Detail_channels -> launch_connectors_load state ~mailbox
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
@@ -10971,7 +10624,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
            && Option.is_none
              (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
                 ~keeper:keeper.k_name) ->
-           launch_identity_view state ~mailbox keeper.k_name
+           Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
        | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
@@ -14051,102 +13704,26 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       Masc_tui_resources_updates.listed state result
   | Resource_read (uri, result) ->
       Masc_tui_resources_updates.read_done state ~uri result
-  | Github_identity_view_loaded (request, result) -> (
-      let keeper_name = request.drr_keeper in
-      let current = Masc_tui_types.finish_detail_read state request in
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
-      in
-      if current && still_selected then
-        match result with
-        | Ok lines ->
-            state.github_identity_view <- Some (keeper_name, lines);
-            state.github_identity_view_error <- None
-        | Error detail ->
-            state.github_identity_view_error <- Some detail)
+  | Github_identity_view_loaded (request, result) ->
+      Masc_tui_identity_updates.github_view_loaded state request result
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
-      (match result with
-       | Ok () ->
-           report_action state "system"
-             (Printf.sprintf "%s: %s switched %s" keeper_name provider_id
-                (if enabled then "on" else "off"));
-           (* Re-read rather than patch what is on screen: the switch the
-              server just wrote is the answer. *)
-           if keeper_detail_target_matches state keeper_name then
-             launch_identity_view state ~mailbox keeper_name
-       | Error detail ->
-           present_identity_notice state ~keeper_name:(Some keeper_name)
-             ( Masc_tui_types.Notice_bad
-             , Printf.sprintf "switch %s: %s" provider_id detail ))
-  | Identity_providers_loaded (request, result) -> (
-      let keeper_name = request.drr_keeper in
-      let current = Masc_tui_types.finish_detail_read state request in
-      if current then
-        (match result with
-         | Ok providers -> retire_identity_logins state ~keeper_name ~providers
-         | Error _ -> ());
-      if current && keeper_detail_target_matches state keeper_name then
-        match result with
-        | Ok providers ->
-            state.identity_view <- Some (keeper_name, providers);
-            state.identity_view_error <- None
-        | Error detail -> state.identity_view_error <- Some detail)
+      Masc_tui_identity_updates.switch_set state ~keeper_name ~provider_id ~enabled
+        ~report:(report_action state) ~notice:(present_identity_notice state)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
+          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
+  | Identity_providers_loaded (request, result) ->
+      Masc_tui_identity_updates.providers_loaded state request result
   | Identity_login_started (request, result) ->
-      let keeper_name = request.ilr_keeper in
-      let current = finish_identity_login_request state request in
-      if current then
-        (match result with
-         | Login_started { provider_id; label; url } ->
-             remember_identity_login state
-               { ils_keeper = keeper_name; ils_provider = provider_id
-               ; ils_label = label; ils_url = url };
-             if keeper_detail_target_matches state keeper_name then
-               state.identity_attempt_error <- None;
-             report_action state "system"
-               (Printf.sprintf "%s: %s login started" keeper_name provider_id)
-         | Login_attached msg ->
-             forget_identity_login state ~keeper_name ~provider_id:request.ilr_provider;
-             present_identity_notice state ~keeper_name:(Some keeper_name)
-               (Masc_tui_types.Notice_ok, msg)
-         | Login_failed detail ->
-             present_identity_notice state ~keeper_name:(Some keeper_name)
-               (Masc_tui_types.Notice_bad, detail))
-      else
-        report_action state "system"
-          (Printf.sprintf "%s: previous %s login response received; newer attempt retained"
-             keeper_name request.ilr_provider)
+      Masc_tui_identity_updates.login_started state request
+        ~report:(report_action state) ~notice:(present_identity_notice state) result
   | Identity_app_saved (keeper_name, provider_id, result) ->
-      present_identity_notice state ~keeper_name
-        (match result with
-         | Ok 0 ->
-           ( Masc_tui_types.Notice_ok
-           , Printf.sprintf
-               "%s: app recorded. No scopes given, so the service's own list \
-                is what will be asked for."
-               provider_id )
-         | Ok count ->
-           ( Masc_tui_types.Notice_ok
-           , Printf.sprintf "%s: app recorded, asking for %d scope%s."
-               provider_id count (if count = 1 then "" else "s") )
-         | Error detail ->
-           (Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail))
+      Masc_tui_identity_updates.app_saved ~keeper_name ~provider_id
+        ~notice:(present_identity_notice state) result
   | Identity_refreshed (keeper_name, result) ->
-      (* The action still completed for its original Keeper. A delayed result
-         cannot clear the reading or file its error under a new selection. *)
-      if keeper_detail_target_matches state keeper_name then
-        (match result with
-         | Ok () ->
-             state.identity_view <- None;
-             state.identity_view_error <- None;
-             launch_identity_view state ~mailbox keeper_name
-         | Error detail -> state.identity_view_error <- Some detail)
-      else
-        report_action state "system"
-          (match result with
-           | Ok () -> Printf.sprintf "%s: identity refreshed" keeper_name
-           | Error detail -> Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail)
+      Masc_tui_identity_updates.refreshed state ~keeper_name
+        ~report:(report_action state)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
+          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | Account_login_event (view, generation, event) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -14223,39 +13800,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
-      (* Append under the stamped view; a login for another keeper than the
-         one on screen still lands on its own stamp. *)
-      let existing =
-        match state.github_identity_view with
-        | Some (stamp, lines_before) when String.equal stamp keeper_name ->
-            lines_before
-        | Some _ | None -> [ "# github login" ]
-      in
-      state.github_identity_view <- Some (keeper_name, existing @ lines);
-      state.github_identity_view_error <- None
-  | Github_login_finished (keeper_name, result) -> (
-      (match result with
-       | Ok () -> report_action state "system" (keeper_name ^ ": github login stream ended")
-       | Error detail ->
-           report_action state "error" (keeper_name ^ ": github login: " ^ detail));
-      launch_github_identity_view state ~mailbox keeper_name)
-  | Github_token_saved (keeper_name, result) -> (
-      (match result with
-       | Ok json ->
-           report_action state "system" (keeper_name ^ ": github token saved");
-           state.github_token_save_status <-
-             Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
-           state.github_identity_view <-
-             Some
-               ( keeper_name
-               , Masc_tui_github_identity.view_lines
-                   ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json );
-           state.github_identity_view_error <- None
-       | Error detail ->
-           report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
-           state.github_token_save_status <-
-             Some ((Theme.bad ()) ^ "✗ Token save failed: " ^ detail ^ Ansi.reset));
-      launch_github_identity_view state ~mailbox keeper_name)
+      Masc_tui_github_ui.login_lines state ~keeper_name lines
+  | Github_login_finished (keeper_name, result) ->
+      Masc_tui_github_ui.login_finished ~keeper_name
+        ~report:(fun level detail -> report_action state level detail)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
+  | Github_token_saved (keeper_name, result) ->
+      Masc_tui_github_ui.token_saved state ~keeper_name
+        ~report:(fun level detail -> report_action state level detail)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | System_logs_loaded result -> apply_system_logs_load state result
   | Schedules_loaded (request, result) -> (
       match Snapshot_read.settle state.schedules_read request with
@@ -18731,7 +18284,7 @@ and is loaded on demand through keeper_skill.
                 state.lane_addons <- Some (Masc_tui_lane_addons.paste_action
                   ~text:paste.Masc_tui_paste.text view)
             | Some ({ draft = Some draft; _ } as view) ->
-                state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text) }
+                state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text) }
             | Some _ | None -> ())
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
@@ -18754,7 +18307,7 @@ and is loaded on demand through keeper_skill.
              state.account_login
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
-             Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
+             Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text
            in
            (match text_target with
             | None -> ()
@@ -18825,34 +18378,11 @@ and is loaded on demand through keeper_skill.
                the composer path would put it in a chat draft -- a credential
                in a message nobody meant to write. *)
             | Some Text_identity_app_form ->
-                Option.iter
-                  (fun form ->
-                    state.identity_app_form <-
-                      Some
-                        (match form.Masc_tui_types.iaf_field with
-                         | Masc_tui_types.App_client_id ->
-                           { form with
-                             Masc_tui_types.iaf_client_id =
-                               form.Masc_tui_types.iaf_client_id ^ text
-                           }
-                         | Masc_tui_types.App_client_secret ->
-                           { form with
-                             Masc_tui_types.iaf_client_secret =
-                               form.Masc_tui_types.iaf_client_secret ^ text
-                           }
-                         | Masc_tui_types.App_scopes ->
-                           { form with
-                             Masc_tui_types.iaf_scopes =
-                               form.Masc_tui_types.iaf_scopes ^ text
-                           }))
-                  state.identity_app_form
+           Masc_tui_identity_input.paste_form state text
             | Some Text_identity_filter ->
-                state.identity_filter <-
-                  Some (Option.value state.identity_filter ~default:"" ^ text);
-                state.identity_cursor <- 0
+           Masc_tui_identity_input.paste_filter state text
             | Some Text_github_token ->
-                let current = Option.value state.github_token_input ~default:"" in
-                state.github_token_input <- Some (current ^ text)
+                Masc_tui_github_ui.paste_token state text
             (* A board post holds many lines, so this one takes the paste
                whole rather than on one line. It does not spill to a file the
                way the chat draft does: that file is written into the keeper's
@@ -20791,56 +20321,8 @@ and is loaded on demand through keeper_skill.
           secret rather than leaving it in the process. *)
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_identity_app_form -> (
-           match state.identity_app_form with
-           | None -> ()
-           | Some form -> (
-               let set text =
-                 state.identity_app_form <-
-                   Some
-                     (match form.Masc_tui_types.iaf_field with
-                      | Masc_tui_types.App_client_id ->
-                        { form with Masc_tui_types.iaf_client_id = text }
-                      | Masc_tui_types.App_client_secret ->
-                        { form with Masc_tui_types.iaf_client_secret = text }
-                      | Masc_tui_types.App_scopes ->
-                        { form with Masc_tui_types.iaf_scopes = text })
-               in
-               let current =
-                 match form.Masc_tui_types.iaf_field with
-                 | Masc_tui_types.App_client_id -> form.Masc_tui_types.iaf_client_id
-                 | Masc_tui_types.App_client_secret ->
-                   form.Masc_tui_types.iaf_client_secret
-                 | Masc_tui_types.App_scopes -> form.Masc_tui_types.iaf_scopes
-               in
-               match k with
-               | "esc" -> state.identity_app_form <- None
-               | "\127" | "\b" ->
-                 set (Masc_tui_message_layout.drop_last_utf8_scalar current)
-               | "\r" | "\n" -> (
-                   match form.Masc_tui_types.iaf_field with
-                   | Masc_tui_types.App_client_id ->
-                     state.identity_app_form <-
-                       Some
-                         { form with
-                           Masc_tui_types.iaf_field =
-                             Masc_tui_types.App_client_secret
-                         }
-                   | Masc_tui_types.App_client_secret ->
-                     state.identity_app_form <-
-                       Some
-                         { form with
-                           Masc_tui_types.iaf_field = Masc_tui_types.App_scopes
-                         }
-                   | Masc_tui_types.App_scopes ->
-                     launch_identity_app_save state ~mailbox:async_messages
-                       ~form;
-                     state.identity_app_form <- None)
-               | s
-                 when (String.length s = 1 && Char.code s.[0] >= 32)
-                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                 set (current ^ s)
-               | _ -> ()))
+              = Some Text_identity_app_form ->
+           Masc_tui_identity_input.app_form_key state ~save:(fun ~form -> Masc_tui_identity_requests.launch_app_save state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~form) k
        | Some k
          when (state.view = Runtime || state.view = Lanes)
               && (match state.runtime_lane_pick with
@@ -21033,73 +20515,15 @@ and is loaded on demand through keeper_skill.
         | Some ("T" | "t")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity
-               && not compact_viewport -> (
-            match (selected_keeper state, state.identity_view) with
-            | Some keeper, Some (stamp, providers)
-              when String.equal stamp keeper.k_name -> (
-                match
-                  Masc_tui_types.identity_cursor_provider
-                    ~query:(identity_query state) ~providers
-                    state.identity_cursor
-                with
-                | Some (provider_id, _) -> (
-                    let row =
-                      List.find_map
-                        (function
-                          | Masc_tui_types.Identity_declared
-                              { idp_id
-                              ; idp_tools
-                              ; idp_enabled
-                              ; idp_switch_problem
-                              ; _
-                              }
-                            when String.equal idp_id provider_id ->
-                              Some (idp_tools, idp_enabled, idp_switch_problem)
-                          | Masc_tui_types.Identity_declared _
-                          | Masc_tui_types.Identity_unreadable _ -> None)
-                        providers
-                    in
-                    match row with
-                    | Some (Some _, enabled, None) ->
-                        state.identity_attempt_error <- None;
-                        launch_identity_switch state ~mailbox:async_messages
-                          ~keeper_name:keeper.k_name ~provider_id
-                          ~enabled:(enabled = Some false)
-                    | Some (Some _, _, Some problem) ->
-                        state.identity_attempt_error <-
-                          Some
-                            ( Masc_tui_types.Notice_bad
-                            , "switch store unreadable: " ^ problem )
-                    | Some (None, _, _) | None ->
-                        report_action state "system"
-                          "connect it first; the switch is for an attached service")
-                | None -> ())
-            | Some _, (Some _ | None) | None, _ -> ())
+               && not compact_viewport ->
+           Masc_tui_identity_input.toggle state
+             ~switch:(fun ~keeper_name ~provider_id ~enabled -> Masc_tui_identity_requests.launch_switch state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~enabled)
+             ~report:(fun level detail -> report_action state level detail)
         | Some ("A" | "a")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity
-               && not compact_viewport -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 Masc_tui_types.identity_cursor_provider
-                   ~query:(identity_query state) ~providers
-                   state.identity_cursor
-               with
-               | Some (provider_id, label) ->
-                 state.identity_attempt_error <- None;
-                 state.identity_app_form <-
-                   Some
-                     { Masc_tui_types.iaf_provider = provider_id
-                     ; iaf_label = label
-                     ; iaf_field = Masc_tui_types.App_client_id
-                     ; iaf_client_id = ""
-                     ; iaf_client_secret = ""
-                     ; iaf_scopes = ""
-                     }
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+               && not compact_viewport ->
+           Masc_tui_identity_input.open_app_form state
        (* The Identity list narrows as you type, which the row search above
           deliberately does not: sixty-seven rows is a list to look things up
           in rather than scroll. While it is open every printable key is
@@ -21108,68 +20532,14 @@ and is loaded on demand through keeper_skill.
           than characters and keep moving the cursor through what is left. *)
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_identity_filter -> (
-           let query = Option.value state.identity_filter ~default:"" in
-           let narrow text =
-             state.identity_filter <- Some text;
-             (* Back to the top: the row the cursor was on may not be in the
-                shorter list, and keeping the index would move the marker to
-                whatever happens to sit there now. *)
-             state.identity_cursor <- 0
-           in
-           match k with
-           | "esc" -> state.identity_filter <- None
-           | "up" -> move_identity_cursor state ~delta:(-1)
-           | "down" -> move_identity_cursor state ~delta:1
-           | "\127" | "\b" ->
-             if String.equal query ""
-             then state.identity_filter <- None
-             else narrow (Masc_tui_message_layout.drop_last_utf8_scalar query)
-           | "\r" | "\n" -> (
-               match (selected_keeper state, state.identity_view) with
-               | Some keeper, Some (stamp, providers)
-                 when String.equal stamp keeper.k_name -> (
-                   match
-                     Masc_tui_types.identity_cursor_provider
-                       ~query:(identity_query state) ~providers
-                       state.identity_cursor
-                   with
-                   | Some (provider_id, label) ->
-                     state.identity_attempt_error <- None;
-                     launch_identity_login state ~mailbox:async_messages
-                       ~keeper_name:keeper.k_name ~provider_id ~label
-                   | None -> ())
-               | Some _, (Some _ | None) | None, _ -> ())
-           | s
-             when (String.length s = 1 && Char.code s.[0] >= 32)
-                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-             narrow (query ^ s)
-           | _ -> ())
+              = Some Text_identity_filter ->
+           Masc_tui_identity_input.filter_key state
+             ~move_cursor:(fun ~delta -> move_identity_cursor state ~delta)
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~label) k
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_github_token -> (
-           let draft = Option.value state.github_token_input ~default:"" in
-           match k with
-           | "esc" ->
-               state.github_token_input <- None
-           | "\127" | "\b" ->
-               state.github_token_input <-
-                 Some (Masc_tui_message_layout.drop_last_utf8_scalar draft)
-           | "\r" | "\n" -> (
-               match selected_keeper state with
-               | Some keeper ->
-                   let token = String.trim draft in
-                   state.github_token_input <- None;
-                   if not (String.equal token "") then (
-                     state.github_token_save_status <-
-                       Some (Ansi.dim ^ "Saving GitHub token…" ^ Ansi.reset);
-                     launch_github_token_save state ~mailbox:async_messages keeper.k_name token)
-               | None -> state.github_token_input <- None)
-           | s
-             when (String.length s = 1 && Char.code s.[0] >= 32)
-                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-               state.github_token_input <- Some (draft ^ s)
-           | _ -> ())
+              = Some Text_github_token ->
+           Masc_tui_github_ui.token_key state ~save:(fun keeper token -> Masc_tui_github_requests.launch_token_save state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~check:(capture_workspace_check state ~mailbox:async_messages) keeper token) k
        | Some "/"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
@@ -21792,7 +21162,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
-               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri))
+               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~uri))
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
@@ -21870,49 +21240,18 @@ and is loaded on demand through keeper_skill.
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
-           (match selected_keeper state with
-            | Some keeper ->
-                let asked =
-                  match state.github_login_scopes with
-                  | [] -> "gh's default scopes"
-                  | scopes ->
-                      "+"
-                      ^ String.concat ", +"
-                          (List.map
-                             Masc.Keeper_github_identity.login_scope_to_string
-                             scopes)
-                in
-                state.github_identity_view <-
-                  Some
-                    ( keeper.k_name,
-                      [ "# github login";
-                        "(starting gh device flow with " ^ asked ^ "\xe2\x80\xa6)" ] );
-                launch_github_login state ~mailbox:async_messages keeper.k_name
-            | None -> ())
+           Masc_tui_github_ui.start_login state ~login:(fun keeper -> Masc_tui_github_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~check:(capture_workspace_check state ~mailbox:async_messages) keeper)
        | Some digit
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github
               && String.length digit = 1
               && digit.[0] >= '1'
-              && digit.[0] <= '9' -> (
-           (* The digit the tab printed beside the scope. Both sides index
-              [all_login_scopes], so what the screen numbered and what this
-              ticks are the same list. *)
-           match
-             List.nth_opt Masc.Keeper_github_identity.all_login_scopes
-               (Char.code digit.[0] - Char.code '1')
-           with
-           | Some scope ->
-               state.github_login_scopes <-
-                 (if List.mem scope state.github_login_scopes then
-                    List.filter (fun s -> s <> scope) state.github_login_scopes
-                  else scope :: state.github_login_scopes)
-           | None -> ())
+              && digit.[0] <= '9' ->
+           Masc_tui_github_ui.toggle_scope state ~index:(Char.code digit.[0] - Char.code '1')
        | Some ("P" | "p")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
-           state.github_token_input <- Some "";
-           state.github_token_save_status <- None
+           Masc_tui_github_ui.open_token state
        (* The number the Identity tab printed. Both sides index
           [identity_connectable], so what the screen numbered and what this
           starts are the same list. *)
@@ -21921,45 +21260,15 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_identity
               && String.length digit = 1
               && digit.[0] >= '1'
-              && digit.[0] <= '9' -> (
-           let wanted = Char.code digit.[0] - Char.code '1' in
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 List.nth_opt
-                   (Masc_tui_types.identity_connectable
-                      ~query:(identity_query state) providers)
-                   wanted
-               with
-               | Some (provider_id, label) ->
-                   (* Left where the operator pressed, so the marker and the
-                      arrows carry on from the row they just started. *)
-                   state.identity_cursor <- wanted;
-                   state.identity_attempt_error <- None;
-                   launch_identity_login state ~mailbox:async_messages
-                     ~keeper_name:keeper.k_name ~provider_id ~label
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+              && digit.[0] <= '9' ->
+           Masc_tui_identity_input.start_numbered state
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~label)
+             ~index:(Char.code digit.[0] - Char.code '1')
        | Some ("R" | "r")
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name ->
-               let attached =
-                 List.filter_map
-                   (function
-                     | Masc_tui_types.Identity_declared
-                         { idp_id; idp_tools = Some _; _ } -> Some idp_id
-                     | Masc_tui_types.Identity_declared _
-                     | Masc_tui_types.Identity_unreadable _ -> None)
-                   providers
-               in
-               if attached <> [] then
-                 launch_identity_refresh state ~mailbox:async_messages
-                   ~keeper_name:keeper.k_name ~provider_ids:attached
-           | Some _, (Some _ | None) | None, _ -> ())
+              && state.detail_tab = Detail_identity ->
+           Masc_tui_identity_input.refresh_attached state
+             ~refresh:(fun ~keeper_name ~provider_ids -> Masc_tui_identity_requests.launch_refresh state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_ids)
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval
@@ -21972,7 +21281,7 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
-           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri)
+           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~uri)
        | Some "J" when state.view = Resources ->
            state.resource_scroll <-
              Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
@@ -23499,7 +22808,7 @@ and is loaded on demand through keeper_skill.
                 | Config_runtime | Config_models | Config_themes ->
                     launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
-                launch_resources_list state ~mailbox:async_messages
+                Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages)
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
@@ -24602,21 +23911,9 @@ and is loaded on demand through keeper_skill.
           the cursor is the only way to reach a row. *)
        | Some "\r" | Some "\n"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 Masc_tui_types.identity_cursor_provider
-                   ~query:(identity_query state) ~providers
-                   state.identity_cursor
-               with
-               | Some (provider_id, label) ->
-                   state.identity_attempt_error <- None;
-                   launch_identity_login state ~mailbox:async_messages
-                     ~keeper_name:keeper.k_name ~provider_id ~label
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+              && state.detail_tab = Detail_identity ->
+           Masc_tui_identity_input.start_cursor state
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~label)
        | Some ("\r" | "\n" | "right") when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()

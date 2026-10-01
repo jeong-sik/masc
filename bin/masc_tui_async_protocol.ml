@@ -72,11 +72,6 @@ type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
 
-type identity_login_result =
-  | Login_started of { provider_id : string; label : string; url : string }
-  | Login_attached of string
-  | Login_failed of string
-
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
@@ -507,12 +502,12 @@ type async_msg =
       string * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_types.identity_provider list, string) result
+      Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
   | Identity_switch_set of
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of identity_login_request * identity_login_result
+  | Identity_login_started of identity_login_request * Masc_tui_identity_model.identity_login_result
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string option * string * (int, string) result
       (** presentation Keeper, provider id, then recorded scope count *)

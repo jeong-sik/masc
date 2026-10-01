@@ -70,6 +70,45 @@ def contexts(output):
 
 
 class FusionReport(unittest.TestCase):
+    def test_rejects_stale_rows_and_incomplete_coverage_scope(self):
+        captured = upstream(project(detail()), sequence=2)
+        for kind in ("stale_row", "missing_scope", "partial_scope"):
+            with self.subTest(kind=kind):
+                invalid = copy.deepcopy(captured)
+                observation = invalid["observations"][0]
+                if kind == "stale_row":
+                    observation["output"]["rows"][0]["id"] = "projection-1/1/stale"
+                elif kind == "missing_scope":
+                    del observation["producer"]["coverage_scope"]
+                else:
+                    observation["producer"]["coverage_scope"] = "selected_only"
+                self.assertTrue(call("fusion-report", [invalid])["isError"])
+
+    def test_rejects_inconsistent_fusion_capture_identity(self):
+        captured = upstream(project(detail()))
+        for kind in ("blank_owner", "different_event", "failure_on_completed"):
+            with self.subTest(kind=kind):
+                invalid = copy.deepcopy(captured)
+                status, result = invalid["observations"][0]["output"]["rows"]
+                if kind == "blank_owner":
+                    status["fields"]["fusion_run"]["keeper"] = " \t"
+                    result["fields"]["board_post"]["origin"]["fusion_producer"] = " \t"
+                elif kind == "different_event":
+                    result["fields"]["source_event_id"] = "another-capture"
+                else:
+                    status["fields"]["fusion_run"].update(failure_code="provider_error", error="failed")
+                self.assertTrue(call("fusion-report", [invalid])["isError"])
+
+    def test_missing_input_summary_does_not_claim_retained_reports(self):
+        missing = upstream(project(detail()), complete=False)
+        missing["observations"] = []
+        result = call("fusion-report", [missing])
+        self.assertFalse(result["isError"])
+        self.assertEqual(result["structuredContent"]["rows"], [])
+        self.assertFalse(result["structuredContent"]["coverage"][0]["complete"])
+        self.assertEqual(result["content"][0]["text"],
+                         "No Fusion reports are available; inspect structuredContent coverage for missing inputs.")
+
     def test_result_relation_identifies_paired_status(self):
         captured = upstream(project(detail()))
         for relation in (None, [], ["projection-1/1/other"], ["one", "two"]):

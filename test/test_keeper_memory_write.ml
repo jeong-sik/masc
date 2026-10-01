@@ -762,14 +762,14 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     | reference :: _ ->
       (match Yojson.Safe.from_string reference with
        | json ->
-         (match Masc.Tool_output.normalized_artifact_ref_of_json json with
-          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
-            (match Masc.Tool_blob_store.fetch
-               (Masc.Tool_blob_store.create ~base_path:config.base_path)
+         (match Tool_output.normalized_artifact_ref_of_json json with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
+            (match Tool_blob_store.fetch
+               (Tool_blob_store.create ~base_path:config.base_path)
                ~sha256:artifact.sha256 with
              | Ok (Some body) -> body
              | Ok None -> Alcotest.fail "recall artifact is missing"
-             | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error))
+             | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
           | _ -> prompt)
        | exception Yojson.Json_error _ -> prompt)
     | [] -> prompt
@@ -896,8 +896,8 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
   Alcotest.(check bool) "no-reader fallback identifies the invalidated source" true
     (contains ~needle:source_path without_reader
      && contains ~needle:"reason=source_changed" without_reader);
-  let blob_root = Masc.Tool_blob_store.root_dir
-      (Masc.Tool_blob_store.create ~base_path) in
+  let blob_root = Tool_blob_store.root_dir
+      (Tool_blob_store.create ~base_path) in
   let saved_blob_root = blob_root ^ ".saved" in
   Sys.rename blob_root saved_blob_root;
   Fs_compat.save_file blob_root "not a directory";
@@ -1133,8 +1133,8 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
         let reference = List.hd (List.rev (String.split_on_char '\n' prompt))
           |> Yojson.Safe.from_string in
-        let body = match Masc.Tool_output.normalized_artifact_ref_of_json reference with
-          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
+        let body = match Tool_output.normalized_artifact_ref_of_json reference with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
             let execution, page = Masc.Keeper_artifact_read.handle_with_page
                 ~base_path ~args:(`Assoc ["sha256", `String artifact.sha256]) in
             (match page with

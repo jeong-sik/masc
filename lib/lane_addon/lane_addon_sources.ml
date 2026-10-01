@@ -249,9 +249,9 @@ let has_native_fusion binding =
     | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> false) sources)
 
 let authorized_fusion_run ~access ~run_id =
-  match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-  | None -> Error "Fusion run is unavailable to this caller"
-  | Some run ->
+  match Fusion_run_registry.get_for_observer (Fusion_run_registry.global ()) ~run_id with
+  | Error _ | Ok None -> Error "Fusion run is unavailable to this caller"
+  | Ok (Some run) ->
       let* () = match access with
         | Operator_configuration -> Ok ()
         | Keeper keeper when String.equal keeper run.Fusion_run_registry.keeper -> Ok ()

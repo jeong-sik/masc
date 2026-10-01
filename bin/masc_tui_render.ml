@@ -14938,6 +14938,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
+  let head = Buffer.create 256 in
   let selector label items cursor draw =
     let position =
       if items = [] then "0/0"

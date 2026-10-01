@@ -8,7 +8,6 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
 CARET = "▏".encode()
-MARK = "▸".encode()
 
 
 def settle(process, fd, output, keys):
@@ -17,7 +16,14 @@ def settle(process, fd, output, keys):
 
 
 def selected(rows, needle):
-    matches = [row for row in rows.values() if b"    " + MARK + b" " in row and needle in row]
+    # The fixture ids encode the expected cursor. The fixed selector header
+    # names the role, its position and its value above the scrolling body.
+    label, _, suffix = needle.rpartition(b"-")
+    prefix = b"  " + label + b" " + str(int(suffix) + 1).encode() + b"/32: "
+    # Voice headers show the endpoint's display name; Enter sends its id.
+    value = b"Voice " + suffix if label == b"voice" else needle
+    matches = [row for row in rows.values()
+               if prefix + value in row]
     if len(matches) != 1:
         raise AssertionError(f"expected visible selection {needle!r}: {rows!r}")
 

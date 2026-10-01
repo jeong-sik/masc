@@ -2165,6 +2165,7 @@ def run_terminal_scenario(
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
     launch_count: int = 1,
+    startup_frame_marker: bytes | None = None,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2322,15 +2323,20 @@ def run_terminal_scenario(
                     timeout=30.0,
                 )
                 if not starts_in_chat:
+                    # A narrow viewport can clip the workspace label. Such a
+                    # scenario names a visible surface marker and still waits
+                    # for its complete frame; terminal-control checks below
+                    # and after exit remain independent of label width.
+                    frame_marker = workspace_rendered if startup_frame_marker is None else startup_frame_marker
                     wait_for_output(
                         process,
                         master_fd,
                         output,
-                        workspace_rendered,
+                        frame_marker,
                         start=0,
                         timeout=3.0,
                     )
-                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                    frame_offset = output.find(frame_marker) + len(frame_marker)
                 else:
                     frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
@@ -15181,9 +15187,9 @@ def run_http_badge_refresh_regression(executable: str) -> None:
 def run_http_conditional_read_regression(executable: str) -> None:
     """A dashboard read sends the tag of the answer it kept, and a 304 answers
     with that answer. The briefing is the first read of every full pass and
-    the goal tree the last one on the Overview, so a slow goal tree keeps one
-    pass out across several ticks; the briefing's tag must still go out on
-    the pass after it."""
+    the goal tree belongs to Work. Opening Work admits its goal read, so a
+    slow goal tree keeps one pass out across several ticks; the briefing's
+    tag must still go out on the pass after it."""
     fixtures = overview_event_http_fixtures()
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
@@ -15192,6 +15198,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
     briefing_body = json.dumps(briefing_payload).encode()
     briefing_tag = 'W/"briefing-fixture"'
     reads = {"untagged": 0, "tagged": 0}
+    goal_reads = {"total": 0, "delayed": 0}
     slow_goals = threading.Event()
     slow_goals_done = threading.Event()
 
@@ -15209,7 +15216,9 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
 
     def answer_goals() -> HttpResponse:
+        goal_reads["total"] += 1
         if slow_goals.is_set() and not slow_goals_done.is_set():
+            goal_reads["delayed"] += 1
             # Longer than three refresh ticks at refresh=0.5.
             time.sleep(1.6)
             slow_goals_done.set()
@@ -15244,11 +15253,15 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
         if b"HTTP 304" in output:
             raise AssertionError("a 304 reached the screen as a refusal")
+        goals_before_work = goal_reads["total"]
         slow_goals.set()
+        palette_go(process, master_fd, output, b"go Work", b"MASC Work")
         if not wait_for_fixture_state(
             process, master_fd, output, slow_goals_done.is_set, timeout=4.0
         ):
             raise AssertionError("the slow goal tree read did not finish")
+        if goal_reads["total"] <= goals_before_work or goal_reads["delayed"] != 1:
+            raise AssertionError(f"Work did not own exactly one delayed goal read: {goal_reads!r}")
         reads_after_slow = reads["tagged"] + reads["untagged"]
         if not wait_for_fixture_state(
             process, master_fd, output,

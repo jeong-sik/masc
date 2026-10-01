@@ -6099,11 +6099,18 @@ let test_same_model_context_windows_coexist () =
   let cfg = match Runtime_toml.parse_string text with
     | Ok cfg -> cfg | Error errs -> failf "coexisting config: %s" (render_parse_errors errs) in
   check int "one model definition" 1 (List.length cfg.models);
+  let inventory = Runtime_wizard_inventory.to_json cfg |> Yojson.Safe.Util.member "runtimes" |> Yojson.Safe.Util.to_list in
   List.iter (fun (provider_id, expected) ->
     let binding = List.find (fun (binding : Runtime_schema.binding) -> binding.provider_id = provider_id) cfg.bindings in
     let runtime = match Runtime_instance.of_binding cfg binding with
       | Ok runtime -> runtime | Error _ -> fail "coexisting binding must materialize" in
     check string "shared provider API model" "gpt-6.1-sol" runtime.model.api_name;
+    let row = List.find (fun row -> Yojson.Safe.Util.(row |> member "provider_id" |> to_string) = provider_id) inventory in
+    check int "wizard keeps the served binding declaration" expected
+      Yojson.Safe.Util.(row |> member "max_context" |> to_int);
+    check string "wizard reports the declaration scope"
+      (Runtime_instance.resolve_max_context_of_runtime runtime |> Option.get |> snd |> Runtime_instance.max_context_source_to_string)
+      Yojson.Safe.Util.(row |> member "max_context_source" |> to_string);
     check int "independent served window" expected (Runtime_instance.max_context_of_runtime runtime))
     ["standard", 272000; "medium", 400000; "large", 1000000]
 ;;

@@ -1791,8 +1791,8 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
+  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
+  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list * (unit, string) result
@@ -18282,7 +18282,7 @@ and is loaded on demand through keeper_skill.
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let name = profile.Masc.Tui_decode.esp_name in
+      let name = profile.Masc.Tui_decode_tools.esp_name in
       let host = server_peer_host in
       let port = state.port in
       (match

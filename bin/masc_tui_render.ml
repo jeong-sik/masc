@@ -671,7 +671,12 @@ let render_work_tasks (state : state) =
       let link_error = match state.goal_task_links with
         | Goal_links_read_failed reason -> Some reason
         | Goal_links_not_read | Goal_links_read _ -> None in
-      (match List.filter_map Terminal_text.optional_single_line [state.tasks_error; link_error] with
+      let reasons =
+        [ Terminal_text.optional_single_line state.tasks_error
+        ; Terminal_text.optional_single_line link_error
+        ]
+        |> List.filter_map Fun.id in
+      (match reasons with
        | [] -> ()
        | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
       c.push "";

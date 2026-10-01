@@ -34,10 +34,23 @@ P3는 모아서 후속 청소로 처리한다. 자기 변경은 자기가 승인
 verdict: PASS head: <40-hex SHA> by: <reviewer>
 ```
 
+리뷰 시작 전에 저장소 checkout 에서 인증된 `gh`, Git, Python 3, `jq` 로 head·base·전체 diff 식별자를 캡처한다.
+
 ```sh
-bash scripts/review/approve-guard.sh --check --repo jeong-sik/masc --pr <N> --head <SHA>
-bash scripts/review/approve-guard.sh --repo jeong-sik/masc --pr <N> --head <SHA> --body <review-file>
+# repo 와 pr 을 리뷰할 저장소와 PR 번호로 지정한다.
+snapshot=$(gh api "repos/$repo/pulls/$pr")
+head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
+review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
+review_diff=$(python3 scripts/review/review-diff.py \
+  --repo "$repo" --base "$review_base" --head "$head")
+# 전체 diff 와 소스 문맥을 읽고 review-body.md 에 판정과 증거를 기록한다.
+bash scripts/review/approve-guard.sh --check --repo "$repo" --pr "$pr" --head "$head"
+bash scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
+  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
 ```
+
+게시에는 `--body`, `--review-base`, `--review-diff` 가 모두 필요하다. 변경 범위가 달라지면 다시 리뷰하고
+증거를 캡처한다. 읽지 않은 변경을 승인하려고 diff 식별자만 갱신하지 않는다.
 
 `approve-guard.sh`는 현재 head와 신뢰할 수 있는 독립 승인, 최신 FAIL/HOLD와 미해결 변경 요청을 확인한다.
 일반 head에는 Actions API를 읽지 않는다. GitHub 계정 제한 때문에 자기 PR에 공식 APPROVE를 쓸 수 없으면

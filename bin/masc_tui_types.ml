@@ -13,6 +13,8 @@ module Snapshot_read : sig
 
   val idle : t
   val start : intent:intent -> t -> t * request option
+  val invalidate : t -> t
+  (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
 end = struct
   type request = int
@@ -20,6 +22,8 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+
+  let invalidate state = { state with pending = None }
 
   let start ~intent state =
     match intent, state.pending with
@@ -87,6 +91,8 @@ let server_is_booting
   | Ok { Tui_decode.sid_state_ready = Some true | None; _ } | Error _ -> false
 ;;
 
+type workspace_authority = Workspace_authority of int
+
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
@@ -94,6 +100,11 @@ type workspace_identity =
       { local_base_path : string
       ; server_base_path : string
       }
+
+type workspace_input_identity =
+  { wi_base_path : string
+  ; wi_masc_root : string
+  }
 
 (* Whether the rows kept from this workspace's own directory -- agents, tasks,
    keepers, their logs -- were read from it. They are read only once the server
@@ -112,17 +123,46 @@ let canonical_path path =
     | Unix.Unix_error _ -> path
 ;;
 
+(* A bundle or action belongs to one complete server workspace identity.
+   Dynamic health counters do not change that authority; missing identity or
+   a booting successor cannot authorize use of an earlier observation. *)
+let server_workspace_matches ~expected reading =
+  match expected, reading with
+  | Some before, Ok after ->
+      before.Tui_decode.sid_base_path <> "" && before.sid_masc_root <> ""
+      && String.equal (canonical_path before.sid_base_path) (canonical_path after.Tui_decode.sid_base_path)
+      && String.equal (canonical_path before.sid_masc_root) (canonical_path after.sid_masc_root)
+      && not (server_is_booting reading)
+  | None, (Ok _ | Error _) | Some _, Error _ -> false
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    let local_masc_root = canonical_path
+      (Filename.concat local_base_path Masc.Common.masc_dirname) in
+    let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
+       || String.equal server_masc_root "" || server_is_booting reading
     then Workspace_identity_unread
     else if String.equal local_base_path server_base_path
+         && String.equal local_masc_root server_masc_root
     then Workspace_identity_match
     else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+(* Retained input belongs to the complete observed server workspace. Local
+   match/mismatch is a permission classification, not a durable input key. *)
+let workspace_input_identity_of_server = function
+  | Some identity when identity.Tui_decode.sid_state_ready <> Some false ->
+      let wi_base_path = canonical_path identity.sid_base_path in
+      let wi_masc_root = canonical_path identity.sid_masc_root in
+      if wi_base_path = "" || wi_masc_root = "" then None
+      else Some { wi_base_path; wi_masc_root }
+  | Some _ | None -> None
 ;;
 
 type event = {
@@ -3282,6 +3322,22 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+type code_lsp_query = {
+  clq_scope : code_workspace_scope;
+  clq_file : string Masc_tui_fetched.request;
+  clq_question : string;
+  clq_symbol : string;
+  clq_line : int;
+}
+
+let code_lsp_query_equal left right =
+  left.clq_scope = right.clq_scope
+  && Masc_tui_fetched.same_request ~equal:String.equal left.clq_file right.clq_file
+  && String.equal left.clq_question right.clq_question
+  && String.equal left.clq_symbol right.clq_symbol
+  && Int.equal left.clq_line right.clq_line
+;;
+
 (* Scope and path together name one thing to fetch. The same relative path
    under two scopes is two different things -- two histories, two directory
    listings -- so a request and the reply that comes back for it are the same
@@ -3595,7 +3651,7 @@ type memory_state =
   | Memory_starving
   | Memory_read_error
 
-let memory_state (k : Tui_decode.memory_keeper_health) =
+let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
@@ -3612,7 +3668,7 @@ let memory_state (k : Tui_decode.memory_keeper_health) =
   else if
     List.exists
       (fun alert ->
-        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
+        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
@@ -4961,11 +5017,11 @@ type usage_section = Usage_plan | Usage_trend | Usage_keepers
 let next_usage_section = function
   | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
 
-type message_draft = {
-  draft_text : string;
-  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
-  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : msg_anchor option;
+type keeper_composer_draft = {
+  kcd_text : string;
+  kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
+  kcd_since : msg_anchor option;
 }
 
 (* Home links identify destinations, never an inferred approval target. The
@@ -5234,6 +5290,9 @@ type state = {
   mutable server_identity: Tui_decode.server_identity option;
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
+  mutable workspace_authority: workspace_authority;
+  mutable suspended_keeper_inputs: (workspace_input_identity option * Masc_tui_keeper_chat_queue.t) list;
+  mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -5729,7 +5788,10 @@ type state = {
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
   mutable board_detail:
-    (board_post * board_comment list) Masc_tui_board_detail.t;
+    (board_post * board_comment list * string option) Masc_tui_board_detail.t;
+  mutable board_comment_landing: string option;
+  (** Pending initial numeric-page comment identity. Cleared when a frame
+      returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
@@ -5805,6 +5867,7 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
   (* The schedule list and its cursor. The snapshot keeps the server's
@@ -5886,11 +5949,11 @@ type state = {
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
-  mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_inventory: Masc.Tui_decode_tools.tool_snapshot option;
   mutable tools_request_generation: int;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
-  mutable skills_catalog: Tui_decode.skills_catalog option;
+  mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
@@ -5905,7 +5968,7 @@ type state = {
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
-  mutable connectors: Tui_decode.connector_snapshot option;
+  mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
   (* A binding write landed while a load was in flight; read once more when
@@ -5975,7 +6038,7 @@ type state = {
   mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
   mutable workspace_activity_cursor: int;
   mutable workspace_activity_context_scroll: int option;
-  mutable memory_health: Tui_decode.memory_health_snapshot option;
+  mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
@@ -6066,6 +6129,7 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
   (* Where a definition jump left from, newest first: scope, directory,
      open file (if any), its cursor and scroll. B walks back through it.
      Bounded so a long session cannot grow it without limit. *)
@@ -6278,9 +6342,7 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  (* The entire unsent payload belongs to its Keeper, including image-only
-     drafts. Restoring another target cannot inherit its staged media. *)
-  mutable msg_drafts: (string * message_draft) list;
+  mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -6489,8 +6551,8 @@ let reconcile_keeper_message_focus (state : state) ~cols =
 (* One selection shared by Tools actions, pinned heading and document. *)
 let tools_skill_profiles (state : state) =
   match state.tools_inventory with
-  | Some { Tui_decode.ts_effective =
-             Some (Tui_decode.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
+  | Some { Masc.Tui_decode_tools.ts_effective =
+             Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
       ets_skill_profiles
   | Some _ | None -> []
 
@@ -7438,7 +7500,7 @@ let keeper_reading (state : state) (keeper : keeper) :
   ; liveness =
       (match keeper.k_origin with
        | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
-       | Persisted_keeper ->
+       | Persisted_keeper | Remote_keeper ->
          Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
@@ -7705,8 +7767,18 @@ let apply_workspace_activity_read state request result =
   state.workspace_activity_cursor <- (match retained with Some index -> index | None -> cursor);
   if Option.is_none retained then state.workspace_activity_context_scroll <- None
 
+let set_code_scope state scope =
+  if state.code_scope <> scope then begin
+    state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
+    state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_lsp_note <- None;
+    state.code_target_line <- None
+  end;
+  state.code_scope <- scope
+;;
+
 let enter_keeper_code_file state ~keeper ~path =
-  state.code_scope <- Code_scope_keeper keeper;
+  set_code_scope state (Code_scope_keeper keeper);
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
@@ -7781,15 +7853,18 @@ let acting_pane_layout (state : state) =
       if state.view = Overview then Masc_tui_acting_pane.Hidden
       else Masc_tui_acting_pane.Narrow
 
-(** New Keeper messages require a complete roster observation. [state.keepers]
-    may intentionally retain the previous complete roster while a detail or log
-    view survives a transient metadata read failure, so membership alone is not
-    authorization for an external effect. *)
+(** Local metadata may retain old rows during a failed read. Remote rows are
+    available to HTTP observation and lifecycle controls; chat submission still
+    requires the shared workspace for attachments and spilled paste files. *)
 let keeper_available_for_new_message (state : state) keeper_name =
-  Option.is_none state.keepers_error
-  && List.exists
-       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-       state.keepers
+  match List.find_opt
+    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) state.keepers with
+  | None -> false
+  | Some { k_origin = Tui_decode.Persisted_keeper | Declared_keeper _; _ } ->
+    state.workspace_identity = Workspace_identity_match
+    && Option.is_none state.keepers_error
+  | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
+    false
 
 (* The composer is where the operator's keys go: the chat pane, whichever
    half of it has the cursor, or the composer row on another surface once it
@@ -7829,7 +7904,8 @@ let next_keeper_message_target (state : state) =
     | Some current -> Option.is_some (inflight_for_keeper state current)
   in
   if
-    Option.is_some state.keepers_error
+    not (List.exists (fun (keeper : keeper) ->
+      keeper_available_for_new_message state keeper.k_name) state.keepers)
     || Option.is_some state.msg_live
     || this_pane_has_a_request_in_flight
   then
@@ -8036,6 +8112,9 @@ let create_state
   keeper_message_focus = Right_pane;
   server_identity = None;
   local_base_path;
+  workspace_authority = Workspace_authority 0;
+  workspace_cancellations = [];
+  suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
      then Workspace_identity_match
@@ -8261,6 +8340,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_comment_landing = None;
   board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
@@ -8294,6 +8374,7 @@ let create_state
   planning_sort = Planning_sort_phase_priority;
   goal_action_armed = None;
   goal_action_error = None;
+  goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;
   schedules_error = None;
@@ -8451,6 +8532,7 @@ let create_state
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
+  code_lsp_query = Masc_tui_fetched.initial;
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
@@ -8768,6 +8850,17 @@ let local_rows_page (state : state) ~error =
        | Local_workspace_unread -> None
        | Local_workspace_read -> Some ())
 
+(* A remote roster is its own observation, never evidence of a local read. *)
+let keeper_rows_page (state : state) ~error =
+  match state.workspace_identity with
+  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
+  | Workspace_identity_mismatch _ ->
+    empty_page_of ~error ~snapshot:
+      (match state.keeper_roster with
+       | Masc_tui_keeper_control.Roster_unobserved -> None
+       | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
+
 (* What the Resources pane says under its header when no error is showing and
    there is no row to draw, and [None] when there is one. The pane flattened
    the list to [] before asking, so a read that answered with no resources and
@@ -9012,6 +9105,7 @@ type clamped_scroll =
   | Runtime_detail_scroll of int
   | Runtime_params_scroll of int
   | System_log_detail_scroll of int
+  | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -9095,7 +9189,8 @@ let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read (body, comments) ->
       state.board_scroll <- body;
-      state.board_comment_scroll <- comments
+      state.board_comment_scroll <- comments;
+      state.board_comment_landing <- None
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
@@ -9115,7 +9210,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
       state.log_wrap_cols <- Some cols
-  | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Planning_detail_scroll value
+  | Planning_confirmation_scroll (value, _) -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
       state.lane_run_detail_content_height <- content_height
@@ -9477,7 +9573,7 @@ let memory_back (state : state) =
     | None -> Memory_leaves
 
 let visible_memory_keepers (state : state) =
-  let open Tui_decode in
+  let open Masc.Tui_decode_memory_health in
   let raw_keepers =
     match state.memory_health with
     | None -> []
@@ -9487,7 +9583,7 @@ let visible_memory_keepers (state : state) =
     match state.memory_overview_sort with
     | Mem_overview_facts ->
         List.sort
-          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+          (fun (a : Masc.Tui_decode_memory_health.memory_keeper_health) (b : Masc.Tui_decode_memory_health.memory_keeper_health) ->
             if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
             else String.compare a.mkh_keeper_id b.mkh_keeper_id)
           raw_keepers
@@ -10477,6 +10573,30 @@ type runtime_pick_fact =
 
 (* A runtime whose provider is refusing work right now: its quota window is
    exhausted or this process holds an active rate limit. *)
+(* Read the account window from the same resolved snapshot as the runtime.
+   These are account observations, not proof that this model call was refused.
+   A reset timestamp or a successful endpoint probe cannot clear the report. *)
+let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
+    (runtime : Tui_decode.runtime_option) =
+  let open Masc.Tui_decode_usage in
+  match resolved.rrs_usage, runtime.ro_quota_scope with
+  | Error detail, _ -> Error detail
+  | Ok _, None -> Error "account usage scope unavailable"
+  | Ok usage, Some scope ->
+    match List.find_opt (fun account -> String.equal account.pua_scope scope)
+            usage.puws_accounts with
+    | None -> Error "account usage not reported"
+    | Some { pua_state = Account_not_reported_since_start; _ } ->
+        Error "account usage not reported since server start"
+    | Some { pua_state = Account_reported (first, rest); _ } ->
+        Ok (List.filter (fun window ->
+          match window.puw_role with
+          | Role_counts_other_use | Role_unclassified_limit -> false
+          | Role_gates_model_calls ->
+              match window.puw_utilization with
+              | Utilization_fraction value -> Float.compare value 1.0 >= 0
+              | Utilization_percent value -> value >= 100) (first :: rest))
+
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
@@ -10724,22 +10844,21 @@ let runtime_pick_column_widths ~cols items =
    link it, and this is the first of those screens whose row count a test
    reads. *)
 let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
-      0 keepers
-  in
-  let tokens =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
-      0 keepers
-  in
-  let cost =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
-      0.0 keepers
-  in
-  turns, tokens, cost
+  List.fold_left
+    (fun totals (keeper : Tui_decode.keeper) ->
+      match totals, keeper.k_activity with
+      | Some (turns, tokens, cost), Some activity ->
+        Some (turns + activity.k_total_turns, tokens + activity.k_total_tokens,
+              cost +. activity.k_total_cost_usd)
+      | None, _ | _, None -> None)
+    (Some (0, 0, 0.)) keepers
+
+let keeper_assignment_activity keepers =
+  match aggregate_keeper_stats keepers with
+  | None -> " (activity not observed)"
+  | Some (turns, _, cost) when turns > 0 ->
+    Printf.sprintf " (%d turns, $%.2f)" turns cost
+  | Some _ -> ""
 
 (* The authority line under the Runtime title: where every reading on this
    screen comes from, and what the last probe found. It is one sentence of
@@ -10798,11 +10917,14 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match state.keepers with
           | [] -> []
           | keepers ->
-              let turns, tokens, cost = aggregate_keeper_stats keepers in
-              [ Printf.sprintf
-                  "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-                  (List.length keepers) turns (format_context_tokens tokens) cost
-              ]
+              let summary = match aggregate_keeper_stats keepers with
+                | None -> "activity not observed"
+                | Some (turns, tokens, cost) ->
+                  Printf.sprintf "%d turns · %s tok · $%.2f"
+                    turns (format_context_tokens tokens) cost
+              in
+              [ Printf.sprintf "fleet: %d keepers · %s"
+                  (List.length keepers) summary ]
         in
         [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
         @ fleet_note @ [ config ] @ probe_only_note @ probe_note
@@ -11014,7 +11136,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       listing ~error:state.connectors_error
         (match state.connectors with
          | None -> 0
-         | Some s -> List.length s.Tui_decode.cs_connectors)
+         | Some s -> List.length s.Masc.Tui_decode_connectors.cs_connectors)
   (* The authority row above the list is wrapped to the terminal width, which
      this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
      [runtime_scrolled] with the width, as it does for the Memory overview. *)
@@ -11072,504 +11194,6 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
    searchable and [texts] is the same decoded list the row cursor names, in
    the same order -- a match index is a cursor position. [None] keeps "/"
    closed on that surface. *)
-(* One list under one cursor: the calls keepers are holding first (they run
-   out in [kta_timeout_sec]; the operator actions keep), then the operator
-   actions. The two kinds answer through different routes, so the row is a
-   sum the key handler matches on rather than a shape it infers. *)
-type approval_row =
-  | Keeper_tool_row of Tui_decode.keeper_tool_approval
-  | Gate_row of Tui_decode.gate_pending
-      (** A durable Gate approval — an external-service write among them.
-          It keeps: nobody watching loses nothing. Answered through the
-          dashboard resolve route. *)
-  | Operator_row of Masc_tui_operator_projection.approval_item
-
-let operator_approval_items (state : state) =
-  match state.approval_snapshot with
-  | Some snapshot -> snapshot.aps_items
-  | None -> []
-
-let approval_items (state : state) =
-  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
-  @ List.map (fun pending -> Gate_row pending) state.gate_pending
-  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
-
-(* Everything on the Approvals surface waiting on the operator: the three
-   approval row kinds plus the questions keepers have open. The surface
-   answers both -- that is why it fetches asks -- so its ring entry, badge
-   and alert colour must all count the same thing. One count here, not
-   three copies that can drift: with zero approvals and one open question
-   the entry still has to be reachable, or the question has nowhere to be
-   seen from. The badge number is therefore the SUM of approval rows and open
-   questions, not an approval count: a badge of 3 may be three approvals,
-   three questions, or a mix. *)
-(* The questions behind the count, so the three places that say how many there
-   are cannot count different things: this surface's title, the block heading
-   above the questions themselves, and the badge below. [None] is a reading
-   that has not come back, which is not the same answer as a reading with no
-   question in it -- the block draws nothing for the first and says so for the
-   second. *)
-let approvals_open_questions (state : state) =
-  Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
-
-(* The questions themselves. One ask can carry several, and counting the asks
-   under the word "question" understated the work: the live surface read
-   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
-   ask holding two, with "+2 more questions" three rows below saying so. *)
-let approvals_open_question_count (state : state) =
-  match approvals_open_questions state with
-  | Some rows ->
-      List.fold_left
-        (fun total (row : Masc.Tui_decode_asks.ask_row) ->
-          total + List.length row.Masc.Tui_decode_asks.ar_questions)
-        0 rows
-  | None -> 0
-
-(* One list the Approvals surface draws, as its last poll left it.
-
-   - [List_read]: the last poll answered, and the rows on screen are its rows.
-   - [List_not_read Approval_unread]: no poll has answered yet.
-   - [List_not_read (Approval_failed cause)]: the last poll failed and nothing
-     from an earlier one is on screen. A failed confirm-queue read clears its snapshot
-     ([apply_approvals_load]), and a first poll that fails has nothing to keep.
-   - [List_not_read (Approval_stale cause)]: the last poll failed and the
-     rows on screen are an
-     earlier poll's. The held-call, Gate and question polls replace their rows
-     only on [Ok], so those rows can name calls the server no longer holds.
-   - [List_not_read (Approval_unavailable detail)]: the server answered and
-     said the store behind the list could not be read. The Gate snapshot sends
-     [approval_queue: null] with [approval_queue_state] in this case.
-
-   Every place that has to know whether a list was read -- the strip entry,
-   the Dashboard approvals count, the Approvals title and the empty queue --
-   reads it from here, so none of them keeps its own list of fields. *)
-type approval_not_read =
-  | Approval_unread
-  | Approval_failed of string
-  | Approval_stale of string
-  | Approval_unavailable of string
-
-type approval_list_reading =
-  | List_read
-  | List_not_read of approval_not_read
-
-type approvals_reading =
-  { confirm_queue : approval_list_reading
-  ; held_calls : approval_list_reading
-  ; gate_queue : approval_list_reading
-  ; questions : approval_list_reading
-  }
-
-(* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
-   step as it sets [approvals_error], so a snapshot on screen is always the
-   last answer. *)
-let confirm_queue_reading (state : state) =
-  match (state.approval_snapshot, state.approvals_error) with
-  | Some _, _ -> List_read
-  | None, Some cause -> List_not_read (Approval_failed cause)
-  | None, None -> List_not_read Approval_unread
-
-let kept_rows_reading ~observed ~error =
-  match (observed, error) with
-  | false, None -> List_not_read Approval_unread
-  | false, Some cause -> List_not_read (Approval_failed cause)
-  | true, Some cause -> List_not_read (Approval_stale cause)
-  | true, None -> List_read
-
-let gate_queue_reading (state : state) =
-  match
-    kept_rows_reading ~observed:state.gate_snapshot_observed ~error:state.gate_error
-  with
-  | List_read ->
-      (match state.gate_queue_unavailable with
-       | Some detail -> List_not_read (Approval_unavailable detail)
-       | None -> List_read)
-  | List_not_read _ as reading -> reading
-
-(* The questions' snapshot doubles as their "observed" mark: [apply_asks_load]
-   sets it on the first [Ok] and never clears it. *)
-let approvals_questions_reading (state : state) =
-  kept_rows_reading ~observed:(Option.is_some state.asks_snapshot)
-    ~error:state.asks_error
-
-let approvals_reading (state : state) =
-  { confirm_queue = confirm_queue_reading state
-  ; held_calls =
-      kept_rows_reading ~observed:state.keeper_tool_approvals_observed
-        ~error:state.keeper_tool_approvals_error
-  ; gate_queue = gate_queue_reading state
-  ; questions = approvals_questions_reading state
-  }
-
-let list_is_read = function
-  | List_read -> true
-  | List_not_read _ -> false
-
-(* The three lists that hold approval rows, by the name the title and the
-   empty queue give each. The questions are drawn in their own block, which
-   says for itself when they were not read. *)
-let approval_row_lists (reading : approvals_reading) =
-  [ ("confirm queue", reading.confirm_queue)
-  ; ("held calls", reading.held_calls)
-  ; ("Gate queue", reading.gate_queue)
-  ]
-
-let approvals_surface_pending (state : state) =
-  List.length (approval_items state) + approvals_open_question_count state
-
-(* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all four came back.
-
-   The strip entry and the Dashboard approvals count both call this, so the
-   entry leaves the strip exactly when the count is drawn without "?".
-   An unreadable Gate store with every other list empty keeps the entry:
-   an entry that is gone reads as "nothing is waiting". *)
-let approvals_reading_current (state : state) =
-  let reading = approvals_reading state in
-  List.for_all list_is_read
-    (reading.questions :: List.map snd (approval_row_lists reading))
-
-(* The Dashboard approvals count. The "?" tail marks a count no source will
-   stand behind; it does not say which way the number is wrong, because a
-   dropped confirm queue leaves it short and a stale held-call or Gate list
-   can leave it long. The Approvals title says which list it was. *)
-let approvals_count_label (state : state) =
-  let on_screen = approvals_surface_pending state in
-  if approvals_reading_current state then string_of_int on_screen
-  else Printf.sprintf "%d?" on_screen
-
-let approval_item_needs_person = function
-  | Keeper_tool_row _ | Operator_row _ -> true
-  | Gate_row (pending : Tui_decode.gate_pending) ->
-      match pending.gp_phase with
-      | Gate_human_required -> true
-      | Gate_queued | Gate_judging | Gate_blocked -> false
-
-let approvals_human_pending (state : state) =
-  List.length (List.filter approval_item_needs_person (approval_items state))
-  + approvals_open_question_count state
-
-let home_request_of_approval = function
-  | Keeper_tool_row held ->
-      Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }
-  | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
-  | Operator_row item -> Home_operator_request item.ap_token
-
-(* Current successes survive another source's failure. Stale snapshots are
-   reachable through their source reading, never offered as current requests. *)
-let home_decision_rows (state : state) =
-  let reading = approvals_reading state in
-  let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
-  let approval_rows =
-    approval_items state
-    |> List.filter_map (fun row ->
-      let current, who, why, kind, request_id = match row with
-        | Keeper_tool_row held ->
-            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
-        | Gate_row pending ->
-            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
-        | Operator_row item ->
-            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
-      in
-      if current && approval_item_needs_person row then
-        Some (Home_request (home_request_of_approval row),
-              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
-                (String.trim (Masc_tui_message_layout.fit_middle 12 (clean request_id))) (clean why))
-      else None)
-  in
-  let questions =
-    if list_is_read reading.questions then
-      Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
-          let why = match row.ar_context, row.ar_questions with
-            | Some reason, _ -> reason
-            | None, question :: _ -> question.aq_prompt
-            | None, [] -> "open question"
-          in
-          Home_request (Home_question row.ar_id),
-          Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
-            (String.trim (Masc_tui_message_layout.fit_middle 12 (clean row.ar_id))) (clean why))
-    else []
-  in
-  let source_notes =
-    approval_row_lists reading @ ["questions", reading.questions]
-    |> List.filter_map (fun (name, status) -> match status with
-        | List_read -> None
-        | List_not_read _ -> Some (name ^ " not fully read"))
-  in
-  let approvals =
-    let notes =
-      match state.approval_snapshot with
-      | Some snapshot when snapshot.aps_hidden_count > 0 ->
-          source_notes @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
-      | Some _ | None -> source_notes
-    in
-    match notes with
-    | [] ->
-        let count =
-          List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
-        in
-        if count = 0 then []
-        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
-    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
-  in
-  let goals = match state.goals_to_confirm with
-    | Masc_tui_agenda.Read rows ->
-        List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
-          Home_request (Home_goal_confirmation row.goal_id),
-          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
-    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
-    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
-  in
-  let tasks = match state.operator_stalled with
-    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | Read rows ->
-        List.map (fun (row : Masc_tui_agenda.stalled) ->
-          Home_request (Home_operator_task row.task_id),
-          Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
-  in
-  (* Equality is kind plus authoritative request ID, never a Keeper/task
-     grouping key. Distinct calls belonging to one Keeper remain distinct. *)
-  List.fold_left (fun rows ((action, label) as row) ->
-    match List.assoc_opt action rows with
-    | None -> rows @ [row]
-    | Some previous when action = Home_agenda ->
-        List.map (fun (key, text) ->
-          if key = action then key, previous ^ "; " ^ label else key, text) rows
-    | Some _ -> rows) [] (approval_rows @ questions @ goals @ tasks @ approvals)
-
-let clear_ask_answering state =
-  state.ask_answer_mode <- Ask_browsing;
-  state.ask_draft <- None;
-  state.ask_text_entry <- None;
-  state.pending_ask_submit <- None
-
-let reconcile_home_request_detail state =
-  match state.home_opened_request with
-  | None -> ()
-  | Some request ->
-      let expected_surface = match request with
-        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _ -> Approvals
-        | Home_goal_confirmation _ | Home_operator_task _ -> Planning
-      in
-      if state.view <> expected_surface then begin
-        state.home_opened_request <- None;
-        (match state.followed_from with
-         | Some (Overview, _) -> state.followed_from <- None
-         | Some _ | None -> ())
-      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
-        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
-        state.home_opened_request <- None;
-        state.approval_detail_open <- false;
-        state.pending_approval_action <- None;
-        state.followed_from <- None;
-        state.view <- Overview
-      end else
-        match request with
-        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
-            Option.iter (fun index -> state.approval_cursor <- index)
-              (List.find_index (fun row -> home_request_of_approval row = request)
-                 (approval_items state))
-        | Home_question ask_id ->
-            Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
-                 (Option.value ~default:[] (approvals_open_questions state)))
-        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
-        | Home_operator_task task_id -> state.task_detail_id <- Some task_id
-
-let home_continue_rows (state : state) =
-  let last =
-    match state.home_last_chat, state.opening_mode with
-    | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
-    | Session_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
-    | Unconfirmed_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · save durability unconfirmed")
-    | No_chat_receipt, Masc_tui_config.Last (Some name) ->
-        Some (Keeper_id.Keeper_name.to_string name, "")
-    | Unreadable_chat_receipt _, _
-    | No_chat_receipt, (Masc_tui_config.Last None | Masc_tui_config.Overview
-                       | Masc_tui_config.Keeper _) -> None
-  in
-  let resume =
-    match last with
-    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
-                   && keeper_available_for_new_message state name ->
-        [ Home_resume name,
-          "Continue with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-          ^ save_notice ]
-    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
-                         && Option.is_some state.keepers_error ->
-        [ Home_read_last name,
-          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-          ^ save_notice
-          ^ " · roster unavailable; read history" ]
-    | Some _ | None -> []
-  in
-  let choose =
-    match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
-    | Workspace_identity_match, Local_workspace_read, None, [] ->
-        [ Home_create_keeper,
-          (match state.home_last_chat, last with
-           | Unreadable_chat_receipt _, _ ->
-               "Create a Keeper · conversation history unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-               "Create a Keeper · last conversation "
-               ^ Masc.Tui_terminal_text.sanitize_terminal_text name ^ " unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
-               "Create a Keeper  · choose who will take the work") ]
-    | _ ->
-        [ Home_choose_keeper,
-          (match resume with
-           | [] ->
-               (match state.home_last_chat, last with
-                | Unreadable_chat_receipt _, _ ->
-                    "Conversation history unavailable · choose a Keeper"
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-                    "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-                    ^ " unavailable · choose a Keeper"
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
-                    "Choose a Keeper  · start a conversation")
-           | _ :: _ -> "New work  · choose a Keeper") ]
-  in
-  resume @ choose
-
-let home_actions state =
-  List.map fst (home_decision_rows state @ home_continue_rows state)
-
-let home_selected_action state =
-  let actions = home_actions state in
-  match state.home_selected with
-  | None -> List.nth_opt actions 0
-  | Some action ->
-      if List.mem action actions then Some action else None
-
-(* Frame preparation pins only an authoritative initial reading; transient
-   boot destinations must remain free to settle. Drawing shares these pure
-   projections but does not store either selection or viewport state. *)
-let home_initial_reading_ready state selected =
-  match selected with
-  | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
-  | Some Home_approvals -> approvals_reading_current state
-  | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state
-      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
-      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
-  | Some Home_agenda | None -> false
-
-let home_decision_window state ~budget =
-  let decisions = home_decision_rows state in
-  let continuation = home_continue_rows state in
-  let selected = home_selected_action state in
-  let warning_rows =
-    if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
-  in
-  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
-  let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
-  let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
-    | Some index when index < first -> index
-    | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
-    | Some _ | None -> first
-  in
-  first, capacity
-
-let home_step state ~backwards =
-  let actions = home_actions state in
-  let current = home_selected_action state in
-  let index =
-    match List.find_index (fun action -> Some action = current) actions with
-    | None -> 0
-    | Some index ->
-        if backwards then max 0 (index - 1)
-        else min (List.length actions - 1) (index + 1)
-  in
-  state.home_selected <- List.nth_opt actions index
-
-(* One title clause per list that was not read, in the order the lists are
-   drawn. A list with nothing read and nothing kept is "unread" whether or not
-   a poll failed; the rows of a list read before and not since are "stale". *)
-let approval_list_note ~name = function
-  | List_read -> ""
-  | List_not_read (Approval_unread | Approval_failed _) ->
-      Printf.sprintf ", %s unread" name
-  | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
-  | List_not_read (Approval_unavailable _) ->
-      Printf.sprintf ", %s unavailable" name
-
-let approvals_title_notes (reading : approvals_reading) =
-  String.concat ""
-    (List.map
-       (fun (name, list_reading) -> approval_list_note ~name list_reading)
-       (approval_row_lists reading @ [ ("questions", reading.questions) ]))
-
-(* What the queue says when it has no approval row to draw. "No pending
-   approvals" is a reading of all three row lists, so it is said only when
-   each of them was read; otherwise each list that was not read is named with
-   its reading. *)
-type approvals_empty_queue =
-  | Nothing_pending
-  | Lists_not_read of (string * approval_not_read) list
-
-let approvals_empty_queue (reading : approvals_reading) =
-  match
-    List.filter_map
-      (fun (name, list_reading) ->
-        match list_reading with
-        | List_read -> None
-        | List_not_read not_read -> Some (name, not_read))
-      (approval_row_lists reading)
-  with
-  | [] -> Nothing_pending
-  | not_read -> Lists_not_read not_read
-
-let is_surface_active (state : state) (s : surface) =
-  match s with
-  | Approvals ->
-      (* An entry that disappears says "nothing is waiting", which is the one
-         thing the strip cannot say when it could not look. With the server
-         unreachable every other surface drew "(load failed)" and this one
-         left the ring, so the screen that holds the operator's decisions was
-         the only one that read as settled. The entry stands until a reading
-         says the lists are empty. *)
-      state.view = Approvals
-      || approvals_surface_pending state > 0
-      || not (approvals_reading_current state)
-  | _ -> true
-;;
-
-let visible_surface_ring (state : state) : (surface * string) list =
-  List.filter (fun (s, _) -> is_surface_active state s) surface_ring
-;;
-
-(* One mapping for the strip highlight and Tab family. Every surface is named
-   so a new surface must choose its destination explicitly. *)
-let surface_ring_family (state : state) (view : surface) =
-  match view with
-  | Keepers _ -> Keepers Keeper_list
-  | Verification | Harness | Approvals -> Planning
-  | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-  | Changes | Connectors | Schedules | Fusion | Memory -> Keepers Keeper_list
-  | Runtime | Clients | Lanes | Acting | System_logs -> Config
-  | Code -> Repositories
-  | Resources | Tools -> Config
-  | Metrics -> Metrics
-  | Overview -> Overview
-  | Board -> Board
-  | Planning -> Planning
-  | Repositories -> Repositories
-  | Config -> Config
-
-let visible_surface_ring_index (state : state) (view : surface) =
-  let ring = visible_surface_ring state in
-  let family = surface_ring_family state view in
-  let rec find i = function
-    | [] -> 0
-    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
-  in
-  find 0 ring
-;;
-
 let conversation_urls (state : state) : string list =
   let seen = Hashtbl.create 16 in
   let acc = ref [] in
@@ -11712,7 +11336,7 @@ let surface_row_texts (state : state) : surface -> string list option =
           (fun _ ->
             List.map
               (fun k ->
-                k.Tui_decode.mkh_keeper_id ^ " "
+                k.Masc.Tui_decode_memory_health.mkh_keeper_id ^ " "
                 ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health
@@ -11721,8 +11345,8 @@ let surface_row_texts (state : state) : surface -> string list option =
       Option.map
         (fun s ->
           List.map
-            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
-            s.Tui_decode.cs_connectors)
+            (fun c -> c.Masc.Tui_decode_connectors.cn_id ^ " " ^ c.Masc.Tui_decode_connectors.cn_display_name)
+            s.Masc.Tui_decode_connectors.cs_connectors)
         state.connectors
   | Runtime ->
       if Option.is_some state.runtime_detail_target then None
@@ -12277,7 +11901,12 @@ let keeper_message_activity_rows (state : state) =
           | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false) then
         attention "요청 처리 실패";
       if List.exists (fun entry -> match entry.phase with
-          | Turn_reconciling -> true | Turn_streaming -> false) own then
+          | Turn_reconciling ->
+              not (List.exists (fun (request, delivery) ->
+                  delivery = Rechecking_delivery
+                  && Masc_tui_keeper_chat_projection.same_request_identity
+                    request entry.sent_request) waiting)
+          | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
       if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
         add "이어서 처리하기를 기다리는 중";

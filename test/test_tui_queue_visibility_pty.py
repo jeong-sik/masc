@@ -178,7 +178,7 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             h.send_and_wait(process, fd, output, b"local-three", h.composer_showing(b"local-three"))
             h.send_and_wait(process, fd, output, b"\r", b"Queue (3 pending")
             h.resize_and_wait(process, fd, output, rows=40, columns=80,
-                              needle=CHAT, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
+                              needle=b"Queue (3 pending", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             screen = capture(output, "mixed-queue", columns=80)
             rows = h.screen_rows(current_screen(output)[0])
             queue_row = h.screen_row_of(rows, b"Queue (3 pending")

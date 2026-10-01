@@ -13921,6 +13921,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
+           if Goal_confirmation_read.is_current ~equal:String.equal read request
+           then state.planning_scroll <- 0;
            state.goal_confirmation <- Goal_confirmation.Inspecting
              (Goal_confirmation_read.complete ~equal:String.equal read request result)
        | Goal_confirmation.Submitting _ -> ())

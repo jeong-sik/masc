@@ -64,12 +64,17 @@ def run(executable: str, *, replace_proof: bool) -> None:
     })
     read_count = 0
     posted: list[object] = []
+    read_entered = threading.Event()
+    release_read = threading.Event()
     submit_entered = threading.Event()
     release_submit = threading.Event()
 
     def read() -> h.HttpResponse:
         nonlocal read_count
         read_count += 1
+        read_entered.set()
+        if not release_read.wait(timeout=15.0):
+            return 500, {"error": "test did not release confirmation read"}
         return 200, response
 
     def submit(body: bytes) -> h.HttpResponse:
@@ -127,9 +132,21 @@ def run(executable: str, *, replace_proof: bool) -> None:
             h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
         h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
         h.wait_for_output(process, master_fd, output, b"Actual: 5 (reported)", start=0, timeout=5.0)
-        proof_frame = h.send_and_wait(
-            process, master_fd, output, b"a", b"CONFIRM THIS PROOF"
-        )
+        h.write_all(master_fd, output, b"a")
+        if not h.wait_for_fixture_event(process, master_fd, output, read_entered, timeout=3.0):
+            raise AssertionError("confirmation read never reached the server")
+        try:
+            # Scroll the long measurement while the proof request is held.
+            # Its completion must bring the newly actionable binding into view.
+            h.press_and_settle(process, master_fd, output, b"jjjjjjjjjj")
+            proof_start = len(output)
+        finally:
+            release_read.set()
+        h.wait_for_output(process, master_fd, output, b"CONFIRM THIS PROOF",
+                          start=proof_start, timeout=5.0)
+        h.wait_for_output(process, master_fd, output, h.FRAME_END,
+                          start=h.end_of_needle(output, b"CONFIRM THIS PROOF", proof_start), timeout=3.0)
+        proof_frame = bytes(output[proof_start:])
         # send_and_wait ends at FRAME_END after this interaction's confirmation.
         # Replay only that returned frame, never historical terminal output.
         proof_screen = h.screen_text(proof_frame)

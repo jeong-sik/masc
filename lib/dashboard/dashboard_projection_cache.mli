@@ -17,6 +17,11 @@ val with_current_keeper_observations :
     metadata generations; consumers reject an older observation in the same
     server incarnation. *)
 
+val with_current_gate_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Add operator-only Candle observations to a Gate roster after CanAdmin
+    authorization. Retain the Gate schema without execution sequence fields. *)
+
 val get_or_compute_snapshot_json :
   config:Workspace_utils.config ->
   actor:string option ->

@@ -11,7 +11,10 @@ let read_persisted ~now ~base_path ~keeper =
   let* ledger = Candle_ledger.read ~base_path
     |> Result.map_error Candle_ledger.read_error_to_string in
   let* at = Candle_stamp.at ~now in
-  let* balance = Candle_balance.of_events ~at (Candle_ledger.events ledger)
+  let events = Candle_ledger.events ledger in
+  let at = List.fold_left (fun latest (event : Candle_event.t) ->
+    if Candle_time.compare event.at latest > 0 then event.at else latest) at events in
+  let* balance = Candle_balance.of_events ~at events
     |> Result.map_error Candle_balance.error_to_string in
   Ok (Candle_balance.equipment balance ~keeper)
 

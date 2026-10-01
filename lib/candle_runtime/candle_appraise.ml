@@ -110,11 +110,17 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         |> Result.map_error (preparation_error ~at ~events) in
       let* () = Candle_payout.validate_settlement waiting prepared.events body
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
-      let* () = match body with
-        | E.Paid payment ->
-          Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ()) |> Result.map_error (fun error -> A.Invalid_response (Candle_balance.error_to_string error))
+      let credit = match body with
+        | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())
         | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
-      Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
+      (match credit, current_policy.half_life with
+       | Ok (), _ -> Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
+       | Error (Candle_balance.Balance_overflow _ as error), Candle_decay.Hours _ ->
+         (* Commit the authorized policy boundary even when credit must wait:
+            switching from Off must actually start decay before the next pulse. *)
+         Ok (prepared.policy_events, Retry_later {goal_id=waiting.goal_id;
+           detail=Candle_balance.error_to_string error})
+       | Error error, _ -> Error (A.Invalid_response (Candle_balance.error_to_string error)))
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function
     | Candle_ledger.Refused error -> error

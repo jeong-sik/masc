@@ -846,6 +846,36 @@ type credential_prune_snapshot =
   { credentials : (agent_credential * credential_prune_retirement) list
   ; orphaned_redirects : credential_prune_retirement list }
 
+let credential_prune_authority config name stored (credential : agent_credential) =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "cannot prune %s: %s" name detail))) in
+  let uuid_path id =
+    match redirect_target_file config (Credential_id.to_string id ^ ".json") with
+    | Some target -> Ok target
+    | None -> refused "credential UUID is not a store filename" in
+  match stored, credential.id with
+  | Stored_credential _, None -> Ok { retiring_agent_name = name; uuid_target = None; alias_names = [] }
+  | Stored_redirect target, Some id ->
+    let* uuid = uuid_path id in
+    if String.equal target uuid
+    then Ok { retiring_agent_name = name; uuid_target = Some target; alias_names = [] }
+    else refused "redirect target disagrees with the credential UUID"
+  | Stored_credential _, Some id ->
+    let* target = uuid_path id in
+    let* present = credential_path_exists target in
+    if not present then Ok { retiring_agent_name = name; uuid_target = None; alias_names = [] }
+    else
+      let* target_record = read_stored_credential config name target in
+      (match target_record with
+       | Stored_credential current when current = credential ->
+         Ok { retiring_agent_name = name; uuid_target = Some target; alias_names = [] }
+       | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
+         refused "embedded UUID resolves to another credential")
+  | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
+  | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
 (* Existing UUID payloads must belong to the exact current credential; a
    redirect must name its embedded UUID. Missing direct UUID payloads are
    distinguishable from an owned existing target. *)
@@ -1051,12 +1081,13 @@ let credential_prune_snapshot_in_transaction ((Credential_transaction config) as
   let rec validate acc = function
     | [] -> Ok (List.rev acc)
     | (stored, credential) :: rest ->
-      let* uuid_target = credential_owned_uuid_target config credential.agent_name stored credential in
+      let* authority = credential_prune_authority config credential.agent_name stored credential in
       let alias_names = List.filter_map (fun (alias, target, resolved) ->
         if not (String.equal alias credential.agent_name) && resolved = credential
-           && uuid_target = Some target then Some alias else None) snapshot.aliases
+           && authority.uuid_target = Some target
+        then Some alias else None) snapshot.aliases
         |> List.sort_uniq String.compare in
-      let authority = { retiring_agent_name = credential.agent_name; uuid_target; alias_names } in
+      let authority = { authority with alias_names } in
       validate ((credential, authority) :: acc) rest in
   let* credentials = validate [] snapshot.current_credentials in
   let orphaned_redirects = List.map (fun agent_name -> { retiring_agent_name = agent_name; uuid_target = None; alias_names = [] })
@@ -1075,7 +1106,8 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
-        (* Canonical authority remains discoverable if dependent cleanup fails. *)
+        (* Keep canonical discovery authority until every dependent path is
+           retired. A failed sidecar/alias/UUID unlink must remain retryable. *)
         unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
         List.iter (fun alias -> unlink_prune_path (credential_file config alias))
           retirement.alias_names;

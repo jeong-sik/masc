@@ -190,9 +190,9 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
-  check string "mosaic keeps the server equipment in compact pixels"
-    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let expected_mosaic = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in accessory pixels"
+    expected_mosaic.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);
@@ -269,7 +269,7 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       ~content_rows:(Portrait.min_content_rows mosaic_size)
       ~content_cols:(Portrait.min_content_cols mosaic_size)) in
     let observed_info = info () in
-    let expected_info = Draw.render_compact_posed (Look.body_of_name alpha) glasses Draw.still
+    let expected_info = Draw.render (Look.body_of_name alpha) glasses
       observed_info.Portrait.box.View.size in
     check string "Info draws the observed glasses with the accessory renderer"
       expected_info.Draw.rgba observed_info.Portrait.image.Draw.rgba;

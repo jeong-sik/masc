@@ -432,17 +432,46 @@ let test_priority_control_receipt_ordering () =
         (match outcome with Tui.Priority_unconfirmed -> 1 | Tui.Priority_superseded -> 0)
         (List.length state.keeper_run_next_receipts))
       [Tui.Priority_unconfirmed; Tui.Priority_superseded]) [false; true];
+  (* Every confirmed control applies its own cohort, independent of which
+     overlapping control or run-next callback returns first. *)
+  List.iter (fun received_first ->
+    List.iter (fun older_first ->
+      List.iter (fun older_succeeds ->
+        let state, request = setup () in
+        let first = Tui.begin_keeper_chat_control state "alpha" in
+        let second = Tui.begin_keeper_chat_control state "alpha" in
+        let successful = if older_succeeds then first else second in
+        let unsuccessful = if older_succeeds then second else first in
+        if received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+        let settle generation = Tui.settle_keeper_priority_control state "alpha" ~generation
+          ~outcome:(if generation = successful then Tui.Priority_superseded else Tui.Priority_unconfirmed) in
+        settle (if older_first then first else second);
+        check int "one callback leaves the other control outstanding" 1
+          (List.length state.keeper_priority_controls);
+        check bool "the unsettled control keeps its cohort provisional" true
+          (Tui.keeper_run_next_receipt_provisional state request);
+        (* This assertion also covers a second control that never answers. *)
+        if (if older_first then first else second) = successful then
+          check int "success already removes acknowledged priority despite hanging control" 0
+            (List.length state.keeper_run_next_receipts);
+        settle (if older_first then second else first);
+        if not received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+        check int "failure cannot restore evidence superseded by another control" 0
+          (List.length state.keeper_run_next_receipts);
+        check int "each settled generation leaves tracking exactly once" 0
+          (List.length state.keeper_priority_controls);
+        settle unsuccessful;
+        check int "duplicate semantic callback cannot recreate evidence" 0
+          (List.length state.keeper_run_next_receipts)) [false; true]) [false; true]) [false; true];
   let state, request = setup () in
-  state.keeper_run_next_receipts <- [request, Ok "already accepted"];
-  let first = Tui.begin_keeper_chat_control state "alpha" in
-  let second = Tui.begin_keeper_chat_control state "alpha" in
-  Tui.settle_keeper_priority_control state "alpha" ~generation:first
-    ~outcome:Tui.Priority_superseded;
-  check bool "old control cannot retire newer provisional cohort" true
+  let alpha = Tui.begin_keeper_chat_control state "alpha" in
+  let beta = Tui.begin_keeper_chat_control state "beta" in
+  Tui.settle_keeper_priority_control state "beta" ~generation:beta ~outcome:Tui.Priority_superseded;
+  check bool "another Keeper's success cannot settle alpha's cohort" true
     (Tui.keeper_run_next_receipt_provisional state request);
-  Tui.settle_keeper_priority_control state "alpha" ~generation:second
-    ~outcome:Tui.Priority_unconfirmed;
-  check int "failed newer control restores original accepted receipt" 1
+  Tui.settle_keeper_priority_control state "alpha" ~generation:alpha ~outcome:Tui.Priority_unconfirmed;
+  ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+  check int "alpha failure preserves its received priority" 1
     (List.length state.keeper_run_next_receipts)
 
 let test_compact_failure_keeps_exact_cause () =

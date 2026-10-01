@@ -7238,8 +7238,9 @@ let begin_keeper_chat_control state keeper_name =
     state.keeper_run_next_ready;
   (* Keep acknowledged evidence and active callbacks until the control's
      semantic result arrives. The token callback alone is not that result. *)
-  let previous = match List.assoc_opt keeper_name state.keeper_priority_controls with
-    | None -> [] | Some control -> control.priority_requests in
+  let previous = List.concat_map (fun (name, control) ->
+    if String.equal name keeper_name then control.priority_requests else [])
+    state.keeper_priority_controls in
   let requests = List.fold_left (fun requests request ->
     if String.equal request.Masc_tui_keeper_chat_projection.keeper_name keeper_name
        && not (List.exists (Masc_tui_keeper_chat_projection.same_request_identity request) requests)
@@ -7247,7 +7248,7 @@ let begin_keeper_chat_control state keeper_name =
     (state.keeper_run_next_inflight @ List.map fst state.keeper_run_next_receipts) in
   state.keeper_priority_controls <-
     (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
-    List.remove_assoc keeper_name state.keeper_priority_controls;
+    state.keeper_priority_controls;
   state.keeper_auto_priority_pending <- List.filter
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
@@ -7262,8 +7263,10 @@ let keeper_run_next_receipt_provisional state request =
     control.priority_requests) state.keeper_priority_controls
 
 let settle_keeper_priority_control state keeper_name ~generation ~outcome =
-  match List.assoc_opt keeper_name state.keeper_priority_controls with
-  | Some control when control.priority_generation = generation ->
+  let matches (name, control) = String.equal name keeper_name
+    && control.priority_generation = generation in
+  match List.find_opt matches state.keeper_priority_controls with
+  | Some (_, control) ->
       (match outcome with
        | Priority_unconfirmed -> ()
        | Priority_superseded ->
@@ -7277,8 +7280,9 @@ let settle_keeper_priority_control state keeper_name ~generation ~outcome =
                  (Masc_tui_keeper_chat_projection.same_request_identity request) retired)
              then request :: retired else retired)
              state.keeper_run_next_retired state.keeper_run_next_inflight);
-      state.keeper_priority_controls <- List.remove_assoc keeper_name state.keeper_priority_controls
-  | Some _ | None -> ()
+      state.keeper_priority_controls <- List.filter (fun control -> not (matches control))
+        state.keeper_priority_controls
+  | None -> ()
 
 type keeper_run_next_completion =
   | Run_next_untracked

@@ -134,21 +134,22 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
     ~config snapshot
 
 let with_current_gate_keeper_observations ~config snapshot =
-  (* The compact Gate form names its rows [items], while the detailed form
-     uses [keepers]. Both reuse the same immutable observation projection. *)
-  let compact = match snapshot with
-    | `Assoc fields -> List.mem_assoc "items" fields
-    | _ -> false in
-  let rename from_key into_key = function
-    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
-        (if key = from_key then into_key else key), value) fields)
-    | json -> json in
-  let input = if compact then rename "items" "keepers" snapshot else snapshot in
-  let projected = with_current_keeper_observations ~config input in
-  let projected = if compact then rename "keepers" "items" projected else projected in
-  match projected with
-  | `Assoc fields -> `Assoc (List.remove_assoc "candle_observation_sequence" fields)
-  | json -> json
+  (* Project only compact row objects; the independent [keepers] name list
+     must remain untouched, including when the response also contains items. *)
+  match snapshot with
+  | `Assoc fields when List.mem_assoc "items" fields ->
+      let items = List.assoc "items" fields in
+      let projected = with_current_keeper_observations ~config
+        (`Assoc ["keepers", items]) in
+      let rows = Yojson.Safe.Util.member "keepers" projected in
+      let candle = Yojson.Safe.Util.member "candle" projected in
+      `Assoc (("candle", candle) ::
+        (List.remove_assoc "candle" fields |> List.map (fun (key, value) ->
+          key, if key = "items" then rows else value)))
+  | _ ->
+      match with_current_keeper_observations ~config snapshot with
+      | `Assoc fields -> `Assoc (List.remove_assoc "candle_observation_sequence" fields)
+      | json -> json
 
 module For_test = struct
   let with_current_keeper_observations = with_current_keeper_observations_using

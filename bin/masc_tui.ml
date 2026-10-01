@@ -5797,8 +5797,8 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
 (* Rows this session wrote that the transcript now carries. Dropped so the same
    turn is not drawn twice, once from each source.
 
-   Four roles go on sight: the server holds every user line, keeper line, tool
-   block and reasoning block.
+   A returned page proves replacement only for the rows it carries. A refresh
+   started before the latest turn persisted must keep that session's output.
 
    Errors used to be kept on sight for the opposite reason. Most are notices
    the server has no row for -- a blocked dispatch, a recovery fence waiting on
@@ -5812,7 +5812,7 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
    carrying one for its request. Until then it stays -- a persist the server
    could not finish never produces that row, and the session keeps the only
    record, which is what keeping every error row was protecting. *)
-let forget_session_rows_the_transcript_holds state keeper_name rows =
+let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
   let user_turns_the_transcript_holds =
     List.filter_map
       (fun (row : Keeper_chat_history.row) ->
@@ -5874,7 +5874,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                  user_turns_the_transcript_holds)
         | Message_keeper | Message_autonomous | Message_tool | Message_skill _
         | Message_thinking | Message_memory ->
-            false)
+            not (transcript_replaces_session_output ~fresh entry))
       state.msg_history
 
 let locally_submitted_at state keeper_name request_id =
@@ -14715,7 +14715,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                state.msg_older_exist <- Option.is_some cursor;
              state.msg_older_cursor <- cursor;
              state.msg_older_error <- None;
-             forget_session_rows_the_transcript_holds state keeper_name rows;
+             forget_session_rows_the_transcript_holds state keeper_name rows ~fresh;
              kept
           | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
@@ -18720,7 +18720,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set updated = state.voice_agent_voices <- Some updated in
               (* Help is read-only and may cover an in-flight save. *)
-              if session.vas_saving && not (String.equal key "esc" || String.equal key "?")
+              if (compact_viewport && not (String.equal key "esc")) || (session.vas_saving && not (String.equal key "esc" || String.equal key "?"))
               then ()
               else (
                 match key with
@@ -21550,6 +21550,9 @@ and is loaded on demand through keeper_skill.
             | Home_create_keeper -> handle_keeper_create ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <- next_usage_section state.usage_section;
+            state.metrics_scroll <- 0
         | Some ("p" | "P") when state.view = Metrics ->
             state.usage_telemetry_open <- not state.usage_telemetry_open;
             state.metrics_scroll <- 0
@@ -21562,6 +21565,7 @@ and is loaded on demand through keeper_skill.
                | Some "3" | None | Some _ -> Section_tools)
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <- Usage_trend;
             state.provider_history_days <-
               (match state.provider_history_days with
                | 1 -> 7

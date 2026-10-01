@@ -1,7 +1,7 @@
-(** The Usage surface's Plan usage section: one strip per provider account,
-    the way a mixer shows one channel strip per input. Each strip says how full the
-    account's usage windows are, when they reset, and how long ago the
-    provider said so.
+(** The Usage surface's Plan usage section: one card per provider account.
+    Each card labels the reported used percentage and the window's role,
+    says when it resets, and shows the last observation time after a reset
+    has passed.
 
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a
@@ -36,20 +36,13 @@ val section :
   now:float ->
   width:int ->
   section option
-(** [None] before the first read. An account that has not reported since the
-    server started draws no row unless the runtime catalogue observed its
-    quota exhausted; then it draws one ["no usage data"] row with that tag. A
-    read with no row to draw says ["no usage data"]. A failed read is one line,
-    ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
-    a meter takes what the other columns leave, from 10 to 24 cells. When
-    even 10 cells do not fit beside the hearing age, the age is left out.
-
-    An account whose providers have a read email draws it dim under its name.
-    The name column is as wide as the widest account name: an email that fits
-    it goes on the account's second window row, and otherwise, or when the
-    account draws one row, on a row of its own. A failed email read adds one
-    note, ["account emails unread: <reason>"], after the runtime notes, and so
-    do rows this build cannot read. *)
+(** [None] before the first read. Reported accounts and accounts whose
+    runtime catalogue observed exhaustion draw bordered cards. Empty and failed
+    reads keep their explicit source states. A wide viewport places two cards
+    beside each other; a narrow viewport stacks them. Every row fits [width]
+    terminal cells. Emails, reset times, hearing age and catalogue observations
+    are wrapped metadata rather than columns that displace utilization meters.
+    Window roles still decide which full values are alarms. *)
 
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

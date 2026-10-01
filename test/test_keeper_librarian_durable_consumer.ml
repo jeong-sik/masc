@@ -136,7 +136,7 @@ let append_boundary ?history_at_start config ~trace_id ~turn ~recorded_at messag
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start =
               (match history_at_start with
                | Some history_at_start -> history_at_start
@@ -977,6 +977,63 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   check_progress_end config 4;
   Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
   check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
+;;
+
+(* A newly completed turn is produced during the Memory commit while another
+   unit waits on the real lane. Production dispatch calls the controlled
+   continuity edge; this proves its opportunity, not successful synthesis. *)
+let test_growing_source_allows_following_phases () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let module Lane = Masc.Keeper_memory_lane in
+  let trace_id = "trace-growing-source" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  save_checkpoint config ~trace_id first_two 2;
+  Lane.For_testing.reset ();
+  Fun.protect ~finally:Lane.For_testing.reset (fun () ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let events = ref [] in
+      let record event = events := event :: !events in
+      let commit_later ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+        List.iter record (text_markers input);
+        true
+      in
+      let next_unit () =
+        record "queued-context-opportunity";
+        Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+          ~commit:commit_later
+      in
+      let appended = ref false in
+      let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+        List.iter record (text_markers input);
+        if not !appended then (
+          appended := true;
+          let first_three = first_two @ [ message "turn-3" ] in
+          append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+          save_checkpoint config ~trace_id first_three 3;
+          ignore (Lane.submit ~base_path:config.Workspace.base_path ~keeper_name next_unit));
+        true
+      in
+      ignore (Lane.submit ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
+        Queue_refresh.For_testing.run_with_readers
+          ~durable:(fun () ->
+            Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit)
+          ~continuity:(fun () ->
+            (match Queue_refresh.last_measurement ~config ~keeper_name with
+             | Some {last_pass = Queue_refresh.Yielded_to_waiting_unit; unread = Some {atoms = 1; official = 0}; _} -> ()
+             | _ -> fail "yield must expose remaining source without reporting drained");
+            record "continuity-opportunity")
+          ~base_path:config.Workspace.base_path ~keeper_name));
+      Lane.For_testing.await_idle ~base_path:config.Workspace.base_path ~keeper_name;
+      check (list string) "new source waits until the following phases get an opportunity"
+        [ "turn-2"; "continuity-opportunity"; "queued-context-opportunity"; "turn-3" ]
+        (List.rev !events);
+      check_progress_end config 3))
 ;;
 
 let test_one_wake_continues_after_an_initial_baseline () =
@@ -1902,7 +1959,7 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
   let position = match Boundaries.position_of_messages completed with
     | Ok position -> position | Error detail -> fail detail in
   append (Boundaries.Turn_ended
-      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
+      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
         history_at_start = Boundaries.Fresh_history; position }) 4.;
   let in_flight = completed @ List.map message ["new unfinished"; "repeated endpoint"] in
   save_checkpoint config ~trace_id in_flight 5;
@@ -1958,7 +2015,7 @@ let with_consumed_shorter_history f =
   (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
       { recorded_at = 3.; event = Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
             history_at_start = Boundaries.Fresh_history; position } } with
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
@@ -2389,7 +2446,7 @@ let append_official_boundary config ~trace_id ~turn ~recorded_at =
     { recorded_at
     ; event =
         Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start = Boundaries.Continued_history
           ; position = Boundaries.No_atom_history
           }
@@ -2557,6 +2614,7 @@ let test_a_failed_official_turn_is_read () =
     }
   in
   Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+    ~task_context:Masc.Keeper_turn_task_context.No_task
     ~config
     ~meta:(meta trace_id)
     ~turn_ref:failed_ref
@@ -3196,6 +3254,8 @@ let () =
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick
             test_one_wake_stops_on_failure_then_drains_successful_cuts
+        ; test_case "growing source allows following phases" `Quick
+            test_growing_source_allows_following_phases
         ; test_case "one wake continues after an initial baseline" `Quick
             test_one_wake_continues_after_an_initial_baseline
         ; test_case "disable between cuts waits for a new enabled wake" `Quick

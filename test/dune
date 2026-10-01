@@ -1,3 +1,4 @@
+(include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 (include stanzas/test_librarian_working_state_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot_cli.inc)
@@ -3691,6 +3692,8 @@
  (libraries masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
+  masc.fusion_core
+  masc_tui_fetched
   alcotest
   ast_grep
   astring
@@ -7185,6 +7188,7 @@
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_tui_voice_pane_fills_its_height.inc)
+(include stanzas/test_tui_voice_selection_viewport_pty.inc)
 (include stanzas/test_tui_runtime_params_viewport_pty.inc)
 (include stanzas/test_tui_runtime_picker_width_pty.inc)
 (include stanzas/test_tui_keeper_metadata_wrap_pty.inc)
@@ -9330,9 +9334,12 @@
  (deps
   test_tui_chat_activity_pane_pty.py
   ../bin/masc_tui.exe
+  tui_keyboard_chat.py
   tui_keyboard_harness.py
   tui_keyboard_keepers.py
-  tui_keyboard_runtime.py)
+  tui_keyboard_observer.py
+  tui_keyboard_runtime.py
+  tui_keyboard_tools.py)
  (action
   (run python3 %{dep:test_tui_chat_activity_pane_pty.py} %{dep:../bin/masc_tui.exe})))
 
@@ -9883,3 +9890,27 @@
 
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
+
+(rule
+ (alias runtest-test_prepare_keeper_collaboration)
+ (deps
+  test_prepare_keeper_collaboration.py
+  ../scripts/prepare-keeper-collaboration.py
+  ../scripts/prepare-fusion-decision-live.py)
+ (action (run python3 %{dep:test_prepare_keeper_collaboration.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_prepare_keeper_collaboration)))
+
+(rule
+ (alias runtest-test_keeper_continuity_admission)
+ (deps
+  test_keeper_continuity_admission.py
+  ../scripts/harness/workload/keeper_continuity_validation.sh
+  ../config/tools/masc_keeper_up.toml)
+ (action (run python3 %{dep:test_keeper_continuity_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_continuity_admission)))

@@ -188,7 +188,6 @@ KEYBOARD_FAMILY = ScenarioFamily(
 # separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
 # from test/dune and test/stanzas/*.inc and checks both forms of wiring.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
-    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
     KEYBOARD_FAMILY,
     ScenarioFamily(
         "dashboard-usage",
@@ -348,6 +347,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "HTTP badge refresh timing regression",
         (run_http_badge_refresh_regression,),
     ),
+    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
     ScenarioFamily(
         "observer-reconnect",
         "observer reconnect regression",

@@ -5620,6 +5620,7 @@
  (alias runtest-test_skill_activation_events)
  (deps
   test_skill_activation_events.py
+  fixtures/skill-ledger-revision.json
   skill_activation_event_log_fixture.py
   ../scripts/harness/workload/skill_activation_events.py)
  (action
@@ -6215,6 +6216,7 @@
 (test
  (name test_keeper_skill_activation_ledger)
  (modules test_keeper_skill_activation_ledger)
+ (deps fixtures/skill-ledger-revision.json)
  (libraries
   alcotest
   digestif

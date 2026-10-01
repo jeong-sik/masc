@@ -13752,7 +13752,7 @@ let render_runtime_params (state : state) =
     ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
     :: (Message_layout.split_cells
           ~max_cells:(max 1 (framed_inner_width cols - 4))
-          (Tui_decode.sanitize_terminal_text value)
+          (Masc.Tui_terminal_text.sanitize_terminal_text value)
         |> List.map (fun line -> "    " ^ line))
   in
   let selected_lines =

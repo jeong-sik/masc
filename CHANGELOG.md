@@ -130,6 +130,7 @@
 
 ### Fixed
 
+- The DOS Lane Add-on dependency lock now uses `fast-uri` 3.1.8, which fixes percent-encoded hostname case normalization ([GHSA-hrr3-gc8f-f4qj](https://github.com/fastify/fast-uri/security/advisories/GHSA-hrr3-gc8f-f4qj)), and `ip-address` 10.7.2. This records the upstream dependency fix; exploitability in MASC has not been measured. (#40115)
 - Refuse TUI Board posts, comments and votes while workspace identity is unverified, keeping the draft available for retry after verification. (#40314)
 - Schedule a committed Task verification submission even when a later projection fails, so durable awaiting-verification tasks do not lose their verifier notification. (#40315)
 - Long command palette searches keep the edited text and caret visible, including on narrow terminals and with Korean input (#40110).

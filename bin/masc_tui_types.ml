@@ -9373,7 +9373,7 @@ let keeper_log_rows (state : state) ~cols =
     List.rev state.log_entries
     |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
          Masc_tui_observation_layout.log_entry_rows ~width
-           ~time:(Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
            entry
          |> List.map (fun line -> None, line))
   in

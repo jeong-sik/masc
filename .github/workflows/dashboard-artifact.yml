@@ -65,6 +65,12 @@ jobs:
           DASHBOARD_TEST_FILES: ${{ inputs.test_files }}
         run: |
           read -r -a test_files <<< "$DASHBOARD_TEST_FILES"
+          for test_file in "${test_files[@]}"; do
+            if [[ ! -f "$test_file" ]]; then
+              printf 'Requested dashboard test file not found: %s\n' "$test_file" >&2
+              exit 1
+            fi
+          done
           pnpm exec vitest run --config vitest.config.ts "${test_files[@]}"
 
       - name: Install Item proof browser

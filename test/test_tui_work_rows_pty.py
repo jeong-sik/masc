@@ -32,6 +32,28 @@ def prepare(base_path):
     path.write_text(json.dumps(payload))
 
 
+def prepare_short_titles(base_path):
+    prepare_colliding_ids(base_path)
+    path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
+    payload = json.loads(path.read_text())
+    payload["tasks"] = [dict(task, id=f"task-{index}", title=title,
+                             status="claimed", claimed_at="2026-08-22T00:00:00Z")
+                        for index, (task, title) in enumerate(zip(payload["tasks"], ("x", "한")), 1)]
+    path.write_text(json.dumps(payload))
+
+
+def prepare_numeric_aliases(base_path):
+    prepare_colliding_ids(base_path)
+    path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
+    payload = json.loads(path.read_text())
+    original = payload["tasks"][0]
+    payload["tasks"] = [dict(original, id=task_id, title=title, priority=index)
+                        for index, (task_id, title) in enumerate(zip(
+                            ("task-1862", "1862", "row 1"),
+                            ("PREFIXEDALIAS", "BAREALIAS", "RESERVEDALIAS")), 1)]
+    path.write_text(json.dumps(payload))
+
+
 OPAQUE_IDS = ("opaque-owner-first-" + "shared" * 8 + "-tail",
               "opaque-owner-second-" + "shared" * 8 + "-tail")
 
@@ -92,6 +114,44 @@ def run(executable):
 
     h.run_terminal_scenario(executable, description="Work distinguishes same-suffix Task numbers and opens each",
                             interact=distinguish, prepare_workspace=prepare_colliding_ids)
+
+
+    def short_titles(process, master_fd, _slave_fd, output, _base_path):
+        h.palette_go(process, master_fd, output, b"go Work", b"MASC Work")
+        h.send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
+        h.wait_for_output(process, master_fd, output, b"wkbl-web-leader", start=0, timeout=10)
+        for width in (50, 60):
+            frame = h.resize_and_wait(process, master_fd, output, rows=32, columns=width,
+                                      needle=b"2]", final_cursor=b"\x1b[?25l")
+            rows = h.screen_rows(frame)
+            for task_id, title in ((b"1]", b"x"), (b"2]", "한".encode())):
+                row = rows[h.screen_row_of(rows, task_id)]
+                assert b"@wkbl-web-leader" in row and title in row, (width, row)
+                assert b"claimed" in row and b"!" in row, (width, row)
+                assert "…".encode() not in row, (width, row)
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Short Task titles leave room for exact owner identity",
+                            interact=short_titles, prepare_workspace=prepare_short_titles)
+
+    def numeric_aliases(process, master_fd, _slave_fd, output, _base_path):
+        h.palette_go(process, master_fd, output, b"go Work", b"MASC Work")
+        h.send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
+        h.wait_for_output(process, master_fd, output, b"row 3]", start=0, timeout=10)
+        frame = h.resize_and_wait(process, master_fd, output, rows=32, columns=30,
+                                  needle=b"row 3]", final_cursor=b"\x1b[?25l")
+        rows = h.screen_rows(frame)
+        positions = [h.screen_row_of(rows, label) for label in (b"row 1]", b"row 2]", b"row 3]")]
+        assert min(positions) >= 0 and len(set(positions)) == 3, rows
+        h.send_and_wait(process, master_fd, output, b"\r", b"PREFIXEDALIAS")
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+        h.send_and_wait(process, master_fd, output, b"j\r", b"BAREALIAS")
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+        h.send_and_wait(process, master_fd, output, b"j\r", b"RESERVEDALIAS")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Prefixed and bare numeric Task IDs stay distinct",
+                            interact=numeric_aliases, prepare_workspace=prepare_numeric_aliases)
 
 
     def opaque(process, master_fd, _slave_fd, output, _base_path):

@@ -198,7 +198,9 @@ let blame_author_cells = 9
 let blame_age_cells = 3
 let blame_margin_cells = blame_author_cells + blame_age_cells + 2
 
-let task_line ~cols ~ordinal (task : task) =
+module Task_id_set = Set.Make (String)
+
+let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -262,16 +264,24 @@ let task_line ~cols ~ordinal (task : task) =
     then id else short_id in
   (* A row coordinate stays distinct when an opaque ID cannot fit. The
      original identifier remains the selection key and is readable in detail. *)
-  let id = if Message_layout.display_width id <= fields then id
-    else Printf.sprintf "row %d" ordinal in
+  let id =
+    if use_ordinals || Message_layout.display_width id > fields
+       || (not (String.equal id task.id)
+           && Task_id_set.mem id task_ids)
+    then Printf.sprintf "row %d" ordinal else id
+  in
   let remainder = max 0 (fields - Message_layout.display_width id) in
+  let title = Terminal_text.single_line task.title in
+  (* A short title needs only its measured cells. Its spare allocation can
+     show the owner instead of padding beside a shortened identity. *)
+  let title_cells = min (remainder / 2) (Message_layout.display_width title) in
   let assignee =
-    fit_width assignee (min (remainder / 2) (Message_layout.display_width assignee))
+    fit_width assignee
+      (min (remainder - title_cells) (Message_layout.display_width assignee))
   in
   let prefix = prefix id in
   let suffix = suffix status assignee in
   let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
-  let title = Terminal_text.single_line task.title in
   let goal_tag =
     if fixed + Message_layout.display_width title
        + Message_layout.display_width goal_tag <= available
@@ -682,6 +692,17 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Overview_tasks.work_rows state.tasks in
+  let task_ids =
+    Task_id_set.of_list
+      (List.map (fun (task : Tui_decode.task) -> Terminal_text.single_line task.id) rows)
+  in
+  let ordinal_labels =
+    Task_id_set.of_list (List.mapi (fun index _ -> Printf.sprintf "row %d" (index + 1)) rows)
+  in
+  (* A canonical ID may itself occupy the row-coordinate namespace. In
+     that population every row uses its unique coordinate, so no fallback
+     can impersonate a different Task. Detail and selection retain IDs. *)
+  let use_ordinals = not (Task_id_set.disjoint task_ids ordinal_labels) in
   let selected =
     Overview_tasks.work_selected_index state.tasks
       ~selected:(Overview_tasks.selection state.task_focus)
@@ -726,7 +747,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line ~cols ~ordinal:(index + 1) task in
+             let line = " " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)

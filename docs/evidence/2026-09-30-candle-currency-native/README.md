@@ -1,9 +1,9 @@
 # Candle currency: native and terminal evidence
 
-[Test run36595091066](https://github.com/jeong-sik/masc/actions/runs/36595091066)
+[Test run 36595091066](https://github.com/jeong-sik/masc/actions/runs/36595091066)
 completed successfully at source `f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7`.
-The original suite log records17 successful suites:16 Alcotest executables
-with653 cases, plus the real TUI currency PTY alias with four scenarios.
+The original suite log records 17 successful suites: 16 Alcotest executables
+with 653 cases, plus the real TUI currency PTY alias with four scenarios.
 No targeted failure line occurs. [Provenance](provenance.json) preserves source
 hashes, artifact IDs/digests and the exact suite list.
 
@@ -30,9 +30,9 @@ binary hash in [manifest.json](manifest.json). Raw original PTY streams are in
 `terminal-streams.tar.gz`; `scenario.py` is the executed source at the tested
 commit. The archive changes no stream bytes.
 
-The same run separately executes real isolated ledger Paid1000 → purchase200 →
-equip → public roster → strict TUI decoder assertions: issued1000, burned200,
-circulating800 and wallet800, followed by damaged-ledger withdrawal with
+The same run separately executes real isolated ledger Paid 1000 → purchase 200 →
+equip → public roster → strict TUI decoder assertions: issued 1000, burned 200,
+circulating 800 and wallet 800, followed by damaged-ledger withdrawal with
 healthy Keeper lifecycle retained. It also verifies aggregate issuance beyond
 OCaml max_int and strict canonical decimal/conservation parsing. Those native
 ledger cases and the synthetic terminal replay are distinct evidence.

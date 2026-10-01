@@ -716,6 +716,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 

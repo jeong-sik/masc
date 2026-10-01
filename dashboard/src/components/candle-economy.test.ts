@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CandleSummary } from './candle-economy'
 import { KeeperDetailHeaderInfo } from './keeper-detail-shell'
 import { candleObservation, hydrateExecutionSnapshot, keepers, executionWorkspaceAuthority, invalidateExecutionSnapshotGeneration, resetExecutionSnapshotGeneration, refreshExecution } from '../store'
+import type { DashboardExecutionResponse } from '../types'
 
 const fetchDashboardExecution = vi.hoisted(() => vi.fn())
 vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
@@ -20,6 +21,18 @@ let generation = 0
 let epochSequence = 0
 let fixtureEpoch = ''
 let connectionGeneration = 0
+function reconnect() {
+  resetExecutionSnapshotGeneration()
+  connectionGeneration += 1
+}
+function snapshot(candle: unknown, amount: unknown, root = '/fixture/candle-a'): DashboardExecutionResponse {
+  return {
+    execution_publication_epoch: fixtureEpoch,
+    execution_publication_generation: ++generation,
+    status: { project: 'candle-fixture', workspace_root: root },
+    candle, keepers: [{ name: 'alpha', status: 'active', emoji: 'A', candle_balance_milli: amount }],
+  } as DashboardExecutionResponse
+}
 beforeEach(() => {
   fixtureEpoch = `candle-ui-fixture-${++epochSequence}`
   generation = 0
@@ -43,6 +56,67 @@ afterEach(() => {
 })
 
 describe('Candle existing screen consumers', () => {
+  it('withdraws supply and wallet on reconnect and warm-up, retaining the fleet until a ready HTTP read', async () => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    const retainedKeeper = keepers.value[0]
+    vi.useFakeTimers()
+    await act(async () => { reconnect() })
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+    expect(keepers.value[0]).toBe(retainedKeeper)
+
+    fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' }, keepers: [] })
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(candleObservation.value.status).toBe('unavailable')
+    expect(keepers.value[0]).toBe(retainedKeeper)
+    const recovered = { status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }
+    fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+
+    // A successful warm-up without a reconnect also withdraws the accepted money.
+    fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' } })
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('0.500 Candle')
+    fetchDashboardExecution.mockRejectedValueOnce(new Error('current endpoint failed'))
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('current endpoint failed')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('current endpoint failed')
+    expect(keepers.value[0]?.name).toBe('alpha')
+    fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+  })
+
+  it.each(['initializing', 'failure'] as const)('ignores a late %s response from before reconnect after current money recovers', async outcome => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    vi.useFakeTimers()
+    let finish!: (data: DashboardExecutionResponse) => void
+    let fail!: (error: Error) => void
+    const held = new Promise<DashboardExecutionResponse>((resolve, reject) => { finish = resolve; fail = reject })
+    let started!: () => void
+    const requested = new Promise<void>(resolve => { started = resolve })
+    fetchDashboardExecution.mockImplementationOnce(() => { started(); return held })
+    let refresh!: Promise<void>
+    await act(async () => { refresh = refreshExecution({ immediate: true }); await requested })
+    await act(async () => {
+      reconnect()
+      observe({ status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }, '500', '/fixture/candle-b')
+    })
+    await act(async () => {
+      if (outcome === 'initializing') finish({ status: { project: 'initializing' } } as DashboardExecutionResponse)
+      else fail(new Error('old endpoint failed'))
+      await refresh
+    })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('withdraws current currency when the real fetch path receives a warm-up envelope', async () => {
     vi.useFakeTimers()
     observe(ready, '9007199254740993')

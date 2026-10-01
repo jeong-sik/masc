@@ -254,16 +254,25 @@ type max_context_source =
   | Override
   | Capability
   | Override_clamped_by_capability
+  | Provider_override
+  | Binding_override
+  | Provider_override_clamped_by_capability
+  | Binding_override_clamped_by_capability
 
 let max_context_source_to_string = function
+  | Provider_override -> "provider_override"
+  | Binding_override -> "binding_override"
+  | Provider_override_clamped_by_capability -> "provider_override_clamped_by_capability"
+  | Binding_override_clamped_by_capability -> "binding_override_clamped_by_capability"
   | Override -> "override"
   | Capability -> "capability"
   | Override_clamped_by_capability -> "override_clamped_by_capability"
 ;;
 
 (* Effective input context window and the source that produced it.
-   [None] means neither the runtime.toml [model.max-context] override nor the
-   AGENT_CORE capability catalog declares a positive context window for this
+   Binding declarations override provider defaults, then model defaults.
+   [None] means neither a scoped declaration nor the AGENT_CORE capability
+   catalog declares a positive context window for this
    binding — [validate_runtime_max_context] rejects such a runtime at load
    (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
 let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
@@ -275,10 +284,15 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
        | Some _ | None -> None)
     | None -> None
   in
-  match rt.model.max_context, capability_cap with
-  | Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
-  | Some o, (Some _ | None) -> Some (o, Override)
-  | None, Some c -> Some (c, Capability)
+  let declared = match rt.binding.max_context, rt.provider.max_context, rt.model.max_context with
+    | Some tokens, _, _ -> Some (tokens, Binding_override, Binding_override_clamped_by_capability)
+    | None, Some tokens, _ -> Some (tokens, Provider_override, Provider_override_clamped_by_capability)
+    | None, None, Some tokens -> Some (tokens, Override, Override_clamped_by_capability)
+    | None, None, None -> None in
+  match declared, capability_cap with
+  | Some (tokens, _, clamped), Some cap when tokens > cap -> Some (cap, clamped)
+  | Some (tokens, source, _), _ -> Some (tokens, source)
+  | None, Some cap -> Some (cap, Capability)
   | None, None -> None
 ;;
 

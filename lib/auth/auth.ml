@@ -212,14 +212,9 @@ let verify_workspace_secret config ~cached_hash secret : bool =
   match cached_hash with
   | Some stored_hash -> constant_time_string_equal hash stored_hash
   | None ->
-    let file = workspace_secret_file config in
-    (try
-       if Sys.file_exists file
-       then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
-       else false
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> false)
+    (match read_regular_auth_file (workspace_secret_file config) with
+     | Error _ -> false
+     | Ok content -> constant_time_string_equal hash (String.trim content))
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =

@@ -8,6 +8,14 @@
 
 open Masc_domain
 
+module Regular_read_for_testing : sig
+  val read_with_open :
+    open_file:(string -> Unix.open_flag list -> int -> Unix.file_descr) ->
+    string -> (string, masc_error) result
+  (** Exercise the production descriptor reader with a deterministic open
+      boundary; no process-wide hook or production reader is changed. *)
+end
+
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string
@@ -51,8 +59,9 @@ exception Auth_config_error of {
 
 val load_auth_config : string -> auth_config
 (** [load_auth_config config] reads [.masc/auth/config.json] under [config].
-    A missing file yields {!default_auth_config}. Malformed or unreadable
-    configuration raises {!Auth_config_error}. *)
+    An absent path yields {!default_auth_config}. Malformed, unreadable or
+    nonregular configuration raises {!Auth_config_error}; dangling links are
+    unreadable. Symlinks to regular files are accepted. Cancellation propagates. *)
 
 val save_auth_config : string -> auth_config -> unit
 (** [save_auth_config config cfg] persists the auth config. *)
@@ -84,7 +93,8 @@ val credential_exists_in_transaction :
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
     file, following its redirect stub to the id-named file. [None] when the
-    file is missing, and also when it cannot be read or decoded. A name that
+    file is missing, nonregular, or cannot be read or decoded. Symlinks to
+    regular files are accepted; cancellation propagates. A name that
     signs in with another name's token (a generated nickname, a Keeper
     transport alias) has no file of its own: the token check maps it to the
     owner ([Auth_credential_token.verify_token_owner_alias]), not this
@@ -333,12 +343,15 @@ val create_file_backed_login_token :
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
-    the file is missing, blank, or unreadable. A nonblank opaque token retains
+    the file is missing, nonregular, blank, or unreadable. Symlinks to regular
+    files are accepted; cancellation propagates. A nonblank opaque token retains
     its exact bytes, including surrounding whitespace. Runtime subprocesses
     use it when they do not inherit the parent's [MASC_TOKEN] environment. *)
 
 val verify_internal_keeper_token :
   string -> token:string -> bool
+(** Missing, blank, nonregular or unreadable stored hashes fail verification.
+    Symlinks to regular files are accepted and cancellation propagates. *)
 
 val ensure_internal_keeper_token :
   string -> string
@@ -450,8 +463,9 @@ val verify_workspace_secret : string -> cached_hash:string option -> string -> b
     against [cached_hash] (the caller's already-loaded [auth_config.
     workspace_secret_hash]) using a constant-time comparison. Falls back to
     a guarded read of the on-disk workspace-secret file only when
-    [cached_hash] is [None]; that fallback fails closed on any read error
-    rather than raising. *)
+    [cached_hash] is [None]; that fallback fails closed on a nonregular file
+    or expected read error. Symlinks to regular files are accepted, and
+    cancellation propagates. *)
 
 (** {1 Auth Toggle} *)
 
@@ -466,4 +480,6 @@ val disable_auth : string -> unit
 val is_auth_enabled : string -> bool
 
 val read_initial_admin : string -> string option
-(** [read_initial_admin config] returns the bootstrap admin agent name. *)
+(** [read_initial_admin config] returns the bootstrap admin agent name.
+    Missing, nonregular, unreadable or blank files yield [None]. Cancellation
+    propagates; symlinks to regular files are accepted. *)

@@ -2589,6 +2589,7 @@
 (include stanzas/test_auth_token_prune_transaction.inc)
 (include stanzas/test_auth_token_rotation_transaction.inc)
 (include stanzas/test_auth_file_backed_transaction.inc)
+(include stanzas/test_auth_regular_read_boundary.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_builtin_skill_judgement.inc)

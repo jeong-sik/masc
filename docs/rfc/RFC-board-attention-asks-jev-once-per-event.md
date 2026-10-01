@@ -136,10 +136,10 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 - 일시정지된 Keeper 는 후보를 만들 때 빼지 않는다. 다시 켜졌을 때 그동안의 소식을 판정받아야 한다.
   2.1 이 들어가면 이 후보들도 기록할 때 Jev 로 대부분 끝나서, 쌓이는 것은 LLM 이 필요한 후보뿐이다.
 - 설정이 지워진 Keeper 의 Board attention 원장과 파티션은 Keeper 를 지울 때 함께 지운다.
-  **[사실]** Keeper 를 지울 때 쓰는 정리 목록(`lib/keeper/keeper_shutdown_types.ml:593` `dashboard_purge_artifact_plan`)에
-  Board attention 후보 원장과 파티션 원장이 없다. 같은 목록의 주석은 메모리 파일에 대해, 남은 파일을 같은 이름의 새 Keeper 가
-  물려받는다고 경고한다. Board attention 도 같다: 같은 이름으로 `lane-smith` 를 다시 만들면 대기 395건과 격리 기록을 물려받는다.
-  **[제안]** 두 원장을 이 목록에 더한다.
+  **[당시 관측, #40508 이전]** Keeper 를 지울 때 쓰는 정리 목록(`dashboard_purge_artifact_plan`)에
+  Board attention 후보 원장과 파티션 원장이 없었다. 같은 목록의 주석은 메모리 파일에 대해, 남은 파일을 같은 이름의 새 Keeper 가
+  물려받는다고 경고했다. 당시 Board attention 도 같은 경로여서, 같은 이름으로 `lane-smith` 를 다시 만들면 대기 395건과 격리 기록을 물려받을 수 있었다.
+  **[구현 완료]** #40508 이 두 원장을 정리 목록에 더했다(`lib/keeper/keeper_shutdown_types.ml:655–661`). 같은 이름으로 다시 만든 Keeper 에게 이전 원장을 남기지 않는다.
 
 ## 3. 하지 않는 것
 

@@ -327,11 +327,11 @@
 - The cached Board list, hearth counts and memory projection are dropped after an edit, thread change, pin, close, reopen or delete of a post, so a read right after the write no longer answers with the list from before it for up to 15 seconds (#40451). `Board_dispatch.set_board_write_hook` is called once for each of those writes that the store took.
 - Verify independent CI test-wave limits from actual runner calls instead of a wall-clock sleep race, retaining real timeout cancellation coverage. (#40457)
 - Fix TUI compilation by using the public terminal text sanitizer for Keeper log entries and metrics diagnostics (#40469).
-- Fix the TUI build by routing Keeper log clock timestamps through the public terminal-text module and updating the existing terminal-safety AST checks (#40478).
+- Fix the TUI build by routing Keeper log clock timestamps through the public terminal-text module and updating the existing terminal-safety AST checks (#40479, #40478).
 - A keeper purge removes the keeper's Board attention candidate and partition ledgers, so a keeper recreated under the same name no longer inherits the old queue and quarantines. #40508
 - Remove the nonexistent `keeper_status` tool, the retired `generation` field, older proposals and two pointers to tools a Keeper cannot call from the text Keepers read (#40510).
 - State the exact three verdict keys in the Board attention judge prompt so explanations stay inside rationale instead of adding fields the parser rejects (#39970).
-- Declare the Candle configuration test's portrait catalog dependency, accept empty optional shop tables as unpriced without ledger writes, and supply valid arguments for the three Candle tools in the Keeper matrix (#40313).
+- Accept empty optional shop tables as unpriced without ledger writes, and supply valid arguments for the three Candle tools in the Keeper matrix (#40313).
 - Preserve judgement scroll positions in narrow readers independently of footer action keys, and retain rejection-reason guidance (#40313).
 - Keep Lane actions on the visibly selected worker and show that worker before earlier long descriptions (#40313).
 - Align palette, queue and history fixtures with current behavior, persist Goal criteria through the store contract, and finish the Code diff scenario through its real quit path (#40313).
@@ -343,7 +343,7 @@
 - Propose server-generated fixtures for client decoder tests, with expected-value assertions for every consumed field and contrasting present/null schedule values (#40000).
 - Define deterministic encoder inputs, separately encoded response cases, unknown-discriminator rejection and existing standalone TUI decoder coverage; retain immutable source evidence for the proposal (#40000).
 - Add RFC board-attention-asks-jev-once-per-event: ask Jev once per Board event with one question per eligible keeper, move task verification off the shared GLM slots, and record the before and after measurements of the Jev confidence gate. #40450
-- Record in RFC board-attention-asks-jev-once-per-event that one Jev request carrying 21 to 24 keeper questions was accepted for 13 real events in 0.24 to 0.55 s, and that the keeper purge plan leaves the Board attention ledgers behind. #40507
+- Record in RFC board-attention-asks-jev-once-per-event that one Jev request carrying 21 to 24 keeper questions was accepted for 13 real events in 0.24 to 0.55 s. The measured purge-plan gap predates #40508, which now removes the Board attention ledgers when a keeper is purged. #40507
 
 ### Internal
 
@@ -394,7 +394,7 @@
   notification. Its range receipts bind to the kept revision, and the journal
   still records the pass (#40001).
 - Validate cold blob range reads on the CPU domain pool when available, keeping full-file hashing off the Eio main domain (#40015).
-- `GET /api/v1/board` sends its page from the bytes kept with the cached page, on HTTP/1 and HTTP/2. A cache hit used to serialize the page and hash it for its entity tag on every request (1.17 ms, median of 200 runs over a 288 KB copy of the live board page), and the HTTP/2 gateway built its own uncached copy of the page on every request. The HTTP/2 route now reads the same cache entry as HTTP/1: a post, comment, vote or reaction shows on the next read, while an edit, pin, close, reopen, delete or thread change shows once the entry is refreshed, up to about a minute later (#40062), as on HTTP/1. It answers the cache's timeout envelope with 504. (#40052)
+- `GET /api/v1/board` sends its page from the bytes kept with the cached page, on HTTP/1 and HTTP/2. A cache hit used to serialize the page and hash it for its entity tag on every request (1.17 ms, median of 200 runs over a 288 KB copy of the live board page), and the HTTP/2 gateway built its own uncached copy of the page on every request. The HTTP/2 route now reads the same cache entry as HTTP/1. Posts, comments, votes and reactions invalidate the cached page, and #40451 extends invalidation to edits, pins, closes, reopens, deletes and thread changes, so both transports read the updated projection after those writes (#40062, #40451). It answers the cache's timeout envelope with 504. (#40052)
 - The provider-scoped model catalog lookup (`Model_catalog.lookup_for_provider_result`, behind every capability read for a runtime that names its provider) reads an index built with the catalog instead of scanning every row. Over the repository catalog a lookup that finds its row takes 0.11 µs instead of 2.24 µs, and one that misses on a provider the catalog knows takes 0.60 µs instead of 4.01 µs; a miss still scans the provider rows for an alias (median of 5 runs of 2,000 rounds). (#40067)
 - The skill catalog's blank-body check stops at the first scalar that is not whitespace. It used to decode and copy the whole body for every instruction skill on each catalog projection: a 30 KB Korean body took 92.5 µs and allocated 184 KB, and now takes 0.005 µs. A value is blank exactly when it was before. (#40083)
 - Building a Keeper tool plan no longer re-derives every registered tool's model names or scans the descriptor list once per descriptor. The names are computed once when the program starts, and a plan looks descriptors up by id. Parsing the 21 skills of a copy of the live catalog, 8 of them compositions, took 3.44 ms and takes 2.31 ms, with the same answer for every skill. (#40084)

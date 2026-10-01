@@ -682,7 +682,7 @@ let list_credentials config : agent_credential list =
     |> List.filter_map (fun f ->
       let name = Filename.chop_suffix f ".json" in
       match load_credential config name with
-      | Some credential when String.equal name credential.agent_name -> Some credential
+      | Some credential when String.equal name (Common.safe_filename credential.agent_name) -> Some credential
       | Some _ | None -> None)
     |> List.fold_left
          (fun acc cred ->
@@ -1166,7 +1166,8 @@ let credential_prune_snapshot_in_transaction ((Credential_transaction config) as
     | (stored, credential) :: rest ->
       let* authority = credential_prune_authority config credential.agent_name stored credential in
       let alias_names = List.filter_map (fun (alias, target, resolved) ->
-        if not (String.equal alias credential.agent_name) && resolved = credential
+        if not (String.equal (credential_file config alias) (credential_file config credential.agent_name))
+           && resolved = credential
            && authority.uuid_target = Some target
         then Some alias else None) snapshot.aliases
         |> List.sort_uniq String.compare in

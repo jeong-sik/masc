@@ -520,10 +520,47 @@ let test_keeper_batch_updates_its_admitted_index () =
     check_recoverable base_path name) results;
   check int "both requested owners are returned" 2 (List.length results)
 
+let test_batch_retires_every_initially_shared_bearer () =
+  with_workspace @@ fun base_path ->
+  let _ = seed_pair base_path in
+  let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["aaa"; "bbb"]) in
+  List.iter (fun (name, result) ->
+    let raw, _ = auth_ok result in
+    check bool "each initial sharer changes bearer" false (String.equal raw shared);
+    check_recoverable base_path name) results;
+  check bool "the initially shared secret authenticates nobody" true
+    (Result.is_error (Auth.find_credential_by_token base_path ~token:shared))
+
+let test_batch_continues_after_raw_preflight_failure () =
+  with_workspace @@ fun base_path ->
+  let _ = seed_pair base_path in
+  let path = Auth.raw_token_file base_path "aaa" in
+  Unix.unlink path; Unix.mkdir path 0o700;
+  let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["aaa"; "bbb"]) in
+  (match results with
+   | ["aaa", Error _; "bbb", Ok (raw, _)] ->
+       check bool "later initial sharer still remints" false (String.equal raw shared);
+       check_recoverable base_path "bbb"
+   | _ -> fail "one raw preflight failure must not suppress the later Keeper")
+
+let test_normalized_names_retain_bearer_authority () =
+  with_workspace @@ fun base_path ->
+  List.iteri (fun index name ->
+    let raw = "normalized-credential-token-" ^ string_of_int index in
+    let current = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:name ~role:Masc_domain.Worker ~raw_token:raw) in
+    check bool "normalized owner appears in listing" true (List.mem current (Auth.list_credentials base_path));
+    check string "token lookup retains original owner name" name
+      (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name)
+    ["Minsu"; "keeper:foo"]
+
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "unselected case-variant UUID refuses before writes" `Quick test_unselected_case_variant_uuid_refused
+      [ test_case "batch retires every initial shared bearer" `Quick test_batch_retires_every_initially_shared_bearer
+      ; test_case "batch continues after raw preflight refusal" `Quick test_batch_continues_after_raw_preflight_failure
+      ; test_case "normalized names retain bearer authority" `Quick test_normalized_names_retain_bearer_authority
+      ; test_case "unselected case-variant UUID refuses before writes" `Quick test_unselected_case_variant_uuid_refused
       ; test_case "unpublished UUID cannot grant bearer authority" `Quick test_unpublished_uuid_has_no_bearer_authority
       ; test_case "retired UUID cannot retain bearer authority" `Quick test_retired_uuid_has_no_bearer_authority
       ; test_case "publication snapshots refuse FIFO without blocking" `Quick test_publication_fifo_snapshots_refuse_without_blocking

@@ -500,6 +500,7 @@
 - Keep Play handoff participant discovery, departed-holder recovery and the actual DOS controller change under one Auth credential admission so a target cannot be revoked between its eligibility check and handoff. #40577
 - Use the shared admitted handoff through HTTP, MCP, Keeper descriptor and Keeper fallback dispatch, while publishing queued Board notices after the Auth lock is released. #40577
 - Source TUI restarts now preserve the requested workspace, server port and refresh interval. The README explains how to rebuild and restart the TUI while checking its exit log. (#40570)
+- Keep delayed Automation and Identity responses attached to the Keeper and request that started them, preserving the selected Keeper's schedule reading, login links and notices when switching between Keepers. (#40146)
 
 ### Performance
 

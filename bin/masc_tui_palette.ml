@@ -12,6 +12,9 @@ let palette_starts_with ~needle haystack =
     ~prefix:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+let palette_contains ~needle haystack =
+  Masc_tui_pick_list.lowercase_contains ~needle haystack
+
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
@@ -110,6 +113,21 @@ let code_cursor_line_symbols (state : state) =
    is a line the operator can type and nothing answers. *)
 let lsp_question_prefixes =
   [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
+
+let palette_typed_question query =
+  let query = String.trim query in
+  let word, symbol =
+    match String.index_opt query ' ' with
+    | None -> query, None
+    | Some index ->
+        let symbol = String.trim (String.sub query (index + 1)
+            (String.length query - index - 1)) in
+        String.sub query 0 index,
+        (if String.equal symbol "" then None else Some symbol)
+  in
+  List.find_map (fun (prefix, question) ->
+      if String.equal word (String.trim prefix) then Some (question, symbol)
+      else None) lsp_question_prefixes
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
@@ -229,7 +247,16 @@ let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
-    | Palette_jump -> palette_entries state
+    | Palette_jump ->
+        let entries = palette_entries state in
+        (match palette_typed_question state.palette_query with
+         | None -> entries
+         | Some (question, None) ->
+             List.filter (function
+               | _, Palette_lsp (candidate_question, _) ->
+                   String.equal question candidate_question
+               | _ -> false) entries
+         | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
           (fun name -> (name, Palette_lsp (choice_question, name)))
@@ -237,12 +264,12 @@ let palette_matches (state : state) =
   in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
-     in order. A K/D pre-fill of "def " therefore lists the cursor line's
-     names before a post that merely mentions "deferred". *)
+     in order. Typed Code questions retain only executable symbol candidates;
+     ordinary jump filters continue ranking destinations and content. *)
   let rank (label, action) =
     let texts = label :: palette_action_words action in
     if List.exists (palette_starts_with ~needle) texts then Some 0
-    else if List.exists (Masc_tui_pick_list.lowercase_contains ~needle) texts then Some 1
+    else if List.exists (palette_contains ~needle) texts then Some 1
     else if List.exists (palette_subsequence ~needle) texts then Some 2
     else None
   in

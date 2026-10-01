@@ -73,21 +73,6 @@ let rule_json_preview json =
   Yojson.Safe.to_string json |> String_util.utf8_prefix ~max_bytes:240
 ;;
 
-let rec canonical_request_json = function
-  | `Assoc fields ->
-    fields
-    |> List.map (fun (key, value) -> key, canonical_request_json value)
-    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
-    |> fun canonical -> `Assoc canonical
-  | `List items -> `List (List.map canonical_request_json items)
-  | other -> other
-;;
-
-let request_fingerprint (input : Yojson.Safe.t) =
-  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
-  Digestif.SHA256.(digest_string canonical_json |> to_hex)
-;;
-
 let nonempty_string_opt = function
   | Some value when String.trim value <> "" -> Some (String.trim value)
   | _ -> None
@@ -222,7 +207,9 @@ let upsert_rule
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
-      let request_fingerprint = request_fingerprint input in
+      let request_fingerprint =
+        Keeper_approval_request_fingerprint.request_fingerprint input
+      in
       let candidate =
         { id = make_generated_id "rule"
         ; keeper_name
@@ -282,7 +269,9 @@ let find_matching_rule
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
-      let request_fingerprint = request_fingerprint input in
+      let request_fingerprint =
+        Keeper_approval_request_fingerprint.request_fingerprint input
+      in
       (match
          List.find_opt
            (fun rule ->

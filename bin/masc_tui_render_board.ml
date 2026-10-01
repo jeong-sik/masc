@@ -402,6 +402,13 @@ let render_board_list (state : state) =
                     (board_sort_explanation state.board_sort))
                  " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
+        ; (fun () ->
+            match List.nth_opt state.board_posts
+                (max 0 (min state.board_cursor (count - 1))) with
+            | None -> c.push_empty ()
+            | Some post ->
+                c.push ("  Selected post · " ^ Ansi.bold
+                  ^ Terminal_text.single_line post.bp_title ^ Ansi.reset))
         ; c.push_divider
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())

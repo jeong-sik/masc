@@ -184,6 +184,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label class="v2-mobile-operator-target"><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
         ${model.label}${model.source?.startsWith('muse_') ? ` · ${model.source.slice(5)} 카탈로그 (응답 미검증)` : ''}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
+        ${model.default_reasoning_effort !== undefined ? html`<p class="set-hint">추론 노력 · 기본: ${model.default_reasoning_effort} · 지원: ${model.supported_reasoning_efforts?.join(', ') || '보고된 선택지 없음'}</p>` : null}
         ${model.context === null && model.tools !== false ? documentedContext
           ? html`<${ModelContextEntry} model=${model} onApply=${(context: number) => {
               setModels(current => current.map(row => row.id === model.id ? { ...row, context } : row))

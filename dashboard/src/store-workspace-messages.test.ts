@@ -52,4 +52,20 @@ describe('durable workspace message authority', () => {
 
     expect(store.messages.value).toEqual([durableMessage])
   })
+  it('retires account authority on workspace and publication changes', async () => {
+    const store = await import('./store')
+    store.hydrateExecutionSnapshot({ status: { project: 'A' } })
+    const a = store.executionWorkspaceRevision.value
+    store.hydrateExecutionSnapshot({ status: { project: 'B' } })
+    const b = store.executionWorkspaceRevision.value
+    expect(b).not.toBe(a)
+    store.hydrateExecutionSnapshot({ status: { project: 'B' } })
+    expect(store.executionWorkspaceRevision.value).toBe(b)
+    store.invalidateExecutionSnapshotGeneration('replacement', 1)
+    const replacement = store.executionWorkspaceRevision.value
+    expect(replacement).not.toBe(b)
+    store.resetExecutionSnapshotGeneration()
+    expect(store.executionWorkspaceRevision.value).not.toBe(replacement)
+  })
+
 })

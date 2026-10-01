@@ -18,9 +18,14 @@ let of_state (state : Masc_tui_types.state) : Composer.t =
           Composer.Unreachable
             { keeper = keeper.k_name
             ; reason =
-                (match state.keepers_error with
-                 | Some _ -> "keeper list unread"
-                 | None -> "no longer in the roster")
+                (match state.workspace_identity with
+                 | Masc_tui_types.Workspace_identity_mismatch _ ->
+                   "chat needs the server workspace for attachments and pasted files"
+                 | Workspace_identity_unread -> "server workspace not observed"
+                 | Workspace_identity_match ->
+                   (match state.keepers_error with
+                    | Some _ -> "keeper list unread"
+                    | None -> "no longer in the roster"))
             }
   in
   { Composer.target

@@ -143,7 +143,8 @@ export type TurnRecordEntry = {
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
   // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
-  // effective token budget (the ctx-fill% denominator); the two prices are USD
+  // configured token budget (occupancy fallback when no provider window is reported);
+  // the two prices are USD
   // per 1M tokens declared on the runtime binding. Absent (undefined) when the
   // runtime is unknown or the operator left runtime.toml unset; the inspector
   // renders "미상" (unknown) rather than a fabricated 200K / Claude $3·$15.

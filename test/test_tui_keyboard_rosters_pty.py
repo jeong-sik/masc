@@ -7,6 +7,8 @@ import time
 import tui_keyboard_walk as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_roster_pane.ml",
     "bin/masc_tui_keys.ml",
     "test/tui_keyboard_approvals.py",

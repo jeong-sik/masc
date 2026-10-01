@@ -22,6 +22,12 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "test/tui_keyboard_approvals.py",
     "test/tui_keyboard_harness.py",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
+    "bin/masc_tui_approvals_model.ml",
+    "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui_loader.ml",
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"

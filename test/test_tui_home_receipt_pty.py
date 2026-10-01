@@ -9,6 +9,7 @@ import tui_keyboard_harness as _keyboard_harness
 
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_config.ml",
     "bin/masc_tui_types.ml",

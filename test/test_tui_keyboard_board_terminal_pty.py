@@ -8,6 +8,8 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_walk as _keyboard_walk
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_render_board.ml",
     "bin/masc_tui_render_board.mli",

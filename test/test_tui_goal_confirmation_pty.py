@@ -14,6 +14,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_planning as _keyboard_planning
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_http.ml",
     "bin/masc_tui_render.ml",

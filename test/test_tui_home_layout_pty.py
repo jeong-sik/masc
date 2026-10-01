@@ -16,6 +16,10 @@ SOURCE_MODULES = (
     "test/tui_keyboard_harness.py",
     "test/tui_keyboard_keepers.py",
     "test/tui_keyboard_runtime.py",
+    "bin/masc_tui_approvals_model.ml",
+    "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
 )
 
 

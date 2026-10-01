@@ -172,6 +172,17 @@ no Keeper and needs no provider key. `--team classic` seeds a Keeper preset
 that uses the configured default runtime and needs that runtime’s credentials.
 The fresh quickstart configuration uses `OLLAMA_CLOUD_API_KEY`.
 
+To rebuild and restart a running source TUI, inspect the target processes first:
+
+```bash
+bash scripts/tui-graceful-restart.sh --dry-run
+DUNE_ROOT="$PWD" bash scripts/tui-graceful-restart.sh --build --base-path /path/to/your/workspace
+```
+
+The script builds before sending SIGTERM, reads the old TUI’s per-PID
+`exit: normal` log, and starts the fresh binary. It restarts every running TUI
+it finds. Add TUI options after `--`, for example `-- --port 8935 --refresh 5`.
+See [the TUI guide](docs/TUI-GUIDE.md#troubleshooting) for the exit log details.
 
 </details>
 

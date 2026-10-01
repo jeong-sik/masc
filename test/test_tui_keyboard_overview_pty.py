@@ -16,6 +16,8 @@ import tui_keyboard_walk as _keyboard_walk
 
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_config.ml",
     "bin/masc_tui_types.ml",
@@ -23,6 +25,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_overview_goals.ml",
     "bin/masc_tui_overview_providers.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_render_schedule.ml",
     "test/tui_keyboard_approvals.py",
     "test/tui_keyboard_board.py",

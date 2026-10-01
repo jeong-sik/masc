@@ -3543,9 +3543,8 @@ let launch_goal_timeline_load state ~mailbox goal_id =
 let launch_task_history_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Task_history_loaded (task_id, result)))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Task_history_loaded (task_id, result))
     (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
 (* Cancel one task through the same MCP tool the keepers use
@@ -11964,11 +11963,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
       car_generation = state.candle_authority_generation;
       car_identity = state.server_identity;
     } in
-    let run_refresh () =
-      try
-        enqueue_async mailbox
-          (Http_scoped_refresh_done
-             (authority, currency_authority, load_http_scoped_surfaces ~host ~port
+    let read_scoped () =
+      let ( let* ) = Result.bind in
+      let identity = currency_authority.car_identity in
+      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+      let results = load_http_scoped_surfaces ~host ~port
                 ~expected_workspace:(Option.map
                   (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
                   currency_authority.car_identity)
@@ -11978,7 +11977,17 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
                      state.system_logs_min_level)
-                ~needs))
+                ~needs in
+      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+      Ok results
+    in
+    let run_refresh () =
+      try
+        match read_scoped () with
+        | Ok results -> enqueue_async mailbox
+            (Http_scoped_refresh_done (authority, currency_authority, results))
+        | Error detail -> enqueue_async mailbox
+            (Http_scoped_refresh_failed (authority, detail, approval_ticket))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -11994,24 +12003,18 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             let results = load_http_scoped_surfaces ~host ~port
-                  ~expected_workspace:(Option.map
-                    (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
-                    currency_authority.car_identity)
-                  ~approval_ticket ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth
-                ~provider_history_days:state.provider_history_days
-                ~system_log_level:
-                  (Option.map Masc.Tui_decode.system_log_level_query
-                     state.system_logs_min_level)
-                ~needs in
-             let same_workspace =
-               currency_authority.car_generation = state.candle_authority_generation
-               && same_currency_workspace currency_authority.car_identity state.server_identity in
-             let results = if same_workspace then results
-               else { results with http_keeper_roster = None } in
-             if authority = state.workspace_authority then
-               apply_http_scoped_surfaces_and_refresh state ~mailbox results)
+             match read_scoped () with
+             | Ok results when authority = state.workspace_authority ->
+                 let same_workspace =
+                   currency_authority.car_generation = state.candle_authority_generation
+                   && same_currency_workspace currency_authority.car_identity state.server_identity in
+                 let results = if same_workspace then results
+                   else { results with http_keeper_roster = None } in
+                 apply_http_scoped_surfaces_and_refresh state ~mailbox results
+             | Ok _ -> ()
+             | Error detail when authority = state.workspace_authority ->
+                 apply_server_identity_reading state (Error detail)
+             | Error _ -> ())
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight

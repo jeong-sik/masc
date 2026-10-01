@@ -6063,7 +6063,7 @@ let row_list (state : state) : row_list option =
        | Planning_detail _ -> None
        | Planning_list
          when Masc_tui_overview_tasks.is_focused state.task_focus ->
-           if Option.is_some state.task_detail_id then None
+           if Option.is_some (task_detail_on_screen state) then None
            else
              let rows = Masc_tui_overview_tasks.work_rows state.tasks in
              let cursor =
@@ -25760,7 +25760,7 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Planning when state.planning_mode = Planning_list
-                            && Option.is_none state.task_detail_id ->
+                            && Option.is_none (task_detail_on_screen state) ->
                 state.task_focus <-
                   Masc_tui_overview_tasks.toggle state.tasks state.task_focus
             | Keepers (Keeper_list | Keeper_detail) ->

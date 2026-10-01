@@ -410,10 +410,12 @@ Only digests and public model metadata are retained. There is no age-based cache
 An unchanged connection avoids a catalog subprocess on later turns. Ephemeral
 readiness homes do not populate the process-global cache.
 
-MASC also overrides `model_auto_compact_token_limit` with the requested nominal
-window. Codex applies its own model-native compaction headroom; an account-local
-smaller threshold no longer silently controls a MASC turn. The catalog's usable
-input percentage is recorded separately from the nominal window. This check does
+For catalog-backed models, MASC overrides `model_auto_compact_token_limit` with
+its admitted usable-input window: the requested nominal window multiplied by the
+catalog's usable-input percentage. For example, a 400,000-token request and a 95%
+catalog percentage produce a 380,000-token compaction limit. For a custom model
+absent from the catalog, MASC supplies no compaction override and retains the
+client's fallback policy. This check does
 not tokenize the vendor-composed prompt or prove that a 1M declaration is available
 on an account whose client advertises a smaller maximum. The vendor remains the
 authority for exact token admission and actual compaction.

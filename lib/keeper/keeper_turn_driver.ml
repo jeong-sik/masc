@@ -2400,6 +2400,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture

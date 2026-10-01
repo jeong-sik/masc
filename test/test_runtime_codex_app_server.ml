@@ -327,7 +327,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 ;;
 
 let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
-    ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
+    ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
@@ -347,6 +347,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
         cli_path = path
       ; account_home
       ; isolated_home
+      ; context_window
       ; native
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
@@ -400,6 +401,19 @@ let test_dispatch_validation_is_process_free () =
     | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok () -> fail "invalid deterministic client config passed admission")
+;;
+
+let test_invalid_context_window_is_process_free () =
+  Eio_main.run (fun env ->
+    List.iter (fun tokens ->
+      let config = { (Runtime_codex_app_server.default_config ()) with
+        context_window = Some tokens } in
+      match Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config
+        ~prompt:"fixture" ~images:[] with
+      | Error (Runtime_codex_app_server.Invalid_config "context_window must be positive") -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok () -> fail "invalid context window reached dispatch") [0; -1])
 ;;
 
 let tool_call_request =
@@ -1868,7 +1882,7 @@ let test_invalid_elicitation_keeps_protocol_error () =
 ;;
 
 let test_client_argv_carries_posture_and_sub_agent_overrides () =
-  List.iter (fun native ->
+  List.iter (fun (native, context_window) ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
     Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
       with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
@@ -1881,11 +1895,14 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
                 ("printf '%s\\n' \"$@\" > " ^ shell_quote argv_path) :: rest)
             | _ -> fail "invalid fixture script" in
           Out_channel.with_open_bin path (fun output -> output_string output instrumented);
-          (match run_fixture ~native path with
+          (match run_fixture ~native ?context_window path with
            | Ok _ -> ()
            | Error error -> fail (Runtime_codex_app_server.error_to_string error)));
       let argv = In_channel.with_open_bin argv_path In_channel.input_lines in
       let expected = ["app-server"; "--stdio"] @
+        (match context_window with
+         | None -> []
+         | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens]) @
         (match native with
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
@@ -1895,7 +1912,8 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
            is off, so the switch that counts is [agents] enabled. *)
         ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
       check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
-    [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
+    [Runtime_native_tools.Native_read, None;
+     Runtime_native_tools.Native_full, Some 872000]
 ;;
 
 (* A live keeper failed every turn on a context overflow the server reported,
@@ -7153,6 +7171,8 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
+        ; test_case "invalid context window is refused before dispatch" `Quick
+            test_invalid_context_window_is_process_free
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "worker encoded dynamic tool callback" `Quick

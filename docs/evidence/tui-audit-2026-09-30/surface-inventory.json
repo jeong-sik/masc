@@ -1,0 +1,1000 @@
+{
+  "source_head": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+  "source": "bin/masc_tui_render.ml:render_surface",
+  "coverage_definition": "Every distinct renderer called by the surface dispatcher plus separately inventoried inline dispatcher screens; per-renderer tabs/forms and global overlays are tracked separately. No-defect source review is not executable proof.",
+  "renderers": [
+    {
+      "name": "render_acting",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_approval_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_approvals",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_compose",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_list",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_read",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused Linux PTY and same-size before/after captures on 40ebc263; latest integrated head and complete state matrix pending",
+      "finding_ids": [
+        "B01"
+      ]
+    },
+    {
+      "name": "render_changes",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R02"
+      ]
+    },
+    {
+      "name": "render_clients",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b, run 36663560222: Clients/Connectors focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "S03"
+      ],
+      "implementation_prs": [
+        40118
+      ],
+      "implementation_evidence": "focused PASS at 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b, run 36663560222: Clients/Connectors focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_code",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R04",
+        "R02"
+      ]
+    },
+    {
+      "name": "render_config",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_config_models",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_connectors",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b, run 36663560222: Clients/Connectors focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "K03"
+      ],
+      "implementation_prs": [
+        40118
+      ],
+      "implementation_evidence": "focused PASS at 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b, run 36663560222: Clients/Connectors focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_fusion_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_fusion_launch",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_fusion_list",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_harness",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W06"
+      ]
+    },
+    {
+      "name": "render_keeper_calls",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_keeper_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at 3308aef6b461afe0b7deb89aacc12d5ed6c0699f, run 36663532148: Keeper Info/Channels focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "K01"
+      ],
+      "implementation_prs": [
+        40131
+      ],
+      "implementation_evidence": "focused PASS at 3308aef6b461afe0b7deb89aacc12d5ed6c0699f, run 36663532148: Keeper Info/Channels focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_keeper_list",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_keeper_logs",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at 8241076261ad10c8402b043889864ada0a37c47d, run 36665480126: Keeper logs focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "K02"
+      ],
+      "implementation_prs": [
+        40160
+      ],
+      "implementation_evidence": "focused PASS at 8241076261ad10c8402b043889864ada0a37c47d, run 36665480126: Keeper logs focused fixture PTY; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_keeper_message",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K06"
+      ],
+      "implementation_prs": [
+        40186
+      ],
+      "implementation_evidence": "K06 source-reviewed at b1b7dcfa0152d545731355a7663927dfd32eb16f; targeted 36669995389 failed compiling undeclared direct test dependencies, all three declared and independently reviewed; run36674712037 queued; runtime and screenshots pending"
+    },
+    {
+      "name": "render_lanes",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_memory",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_memory_facts",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "M01"
+      ],
+      "implementation_prs": [
+        40103
+      ]
+    },
+    {
+      "name": "render_metrics",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "U01"
+      ]
+    },
+    {
+      "name": "render_overview",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "D01"
+      ]
+    },
+    {
+      "name": "render_planning_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused viewport and confirmation PTY PASS at e38b210cd189fae660078b2571c2198d17ff95c9, run 36665786174; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "W03",
+        "W04"
+      ],
+      "implementation_prs": [
+        40142
+      ],
+      "implementation_evidence": "focused viewport and confirmation PTY PASS at e38b210cd189fae660078b2571c2198d17ff95c9, run 36665786174; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_planning_list",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_presets",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused fixture PTY PASS at 3128a81dda, run 36666351767; full state matrix, later heads and installed binary pending",
+      "finding_ids": [
+        "S06",
+        "S07"
+      ],
+      "implementation_prs": [
+        40141
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
+    },
+    {
+      "name": "render_prompts",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "prior-head primary and held-back PTY PASS atc0c3d9b1ed2edac61edc3e031fd140b0f206aa7e, run36689755419; overallrunFAILURE due one key case. Repaired head, full matrix, required checks, installation and production unverified. Receipt prompts-pty-pass-key-expectation-failure.txt",
+      "finding_ids": [
+        "S05"
+      ]
+    },
+    {
+      "name": "render_question_reader",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_repositories",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "R01"
+      ]
+    },
+    {
+      "name": "render_repository_changes",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R02"
+      ]
+    },
+    {
+      "name": "render_resources",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_runtime",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S02"
+      ],
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still uses 10/20/20/22 widths below120; PR40177 a5ff52d4f6cf83a11830a5254025110a0ec0aa79 does not repair this listing; source-only",
+      "implementation_prs": [
+        40220
+      ],
+      "implementation_evidence": "S02 listing portion at68b11bce73 source/static/review only; width40/60/80/120 lane/catalog color/NO_COLOR focused fixture added, runtime pending. Default/media routes and warning/fallback/smaller frames remain.",
+      "route_followup": "PR40293 exact e948ac6276beba010fbaf1189a10926d3e5af045 source-reviewed full routes/status reader; read-only v access independent of candidates, runtime not verified"
+    },
+    {
+      "name": "render_runtime_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_runtime_params",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused fixture PTY PASS at 8c909157d1, run 36665989084; full state matrix, later heads and installed binary pending",
+      "finding_ids": [
+        "S04"
+      ],
+      "implementation_prs": [
+        40135
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
+    },
+    {
+      "name": "render_runtime_pick",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K05"
+      ],
+      "implementation_prs": [
+        40143
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
+    },
+    {
+      "name": "render_schedules",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at f088db60a2a3cc5a2bb56513eeb46617032612c2, run 36668855707: viewport, source-status and hold focused fixture PTY; receipt schedules-repair-pass.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "K04"
+      ],
+      "implementation_prs": [
+        40167
+      ],
+      "implementation_evidence": "focused PASS at f088db60a2a3cc5a2bb56513eeb46617032612c2, run 36668855707: viewport, source-status and hold focused fixture PTY; receipt schedules-repair-pass.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
+    },
+    {
+      "name": "render_system_log_detail",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_system_logs",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S01"
+      ]
+    },
+    {
+      "name": "render_task_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused fixture PTY PASS at be39f068a1, run 36663470167; full state matrix, later heads and installed binary pending",
+      "finding_ids": [
+        "W02"
+      ],
+      "implementation_prs": [
+        40133
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
+    },
+    {
+      "name": "render_themes",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_tools",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S11"
+      ]
+    },
+    {
+      "name": "render_verification",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W05"
+      ]
+    },
+    {
+      "name": "render_voice",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S08",
+        "S09",
+        "S10"
+      ]
+    },
+    {
+      "name": "render_work_tasks",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W01"
+      ]
+    },
+    {
+      "name": "render_workspace_activity",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "focused PASS at c6677251ad98639c7cbc4390eecef7c690390caa, run 36681385350: ten width/color fixture configurations plus Repositories and Changes newline; receipt workspace-activity-targeted-pass.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
+      "finding_ids": [
+        "R03"
+      ],
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still has date16/keeper18/task16 before path and one-row selected metadata; PR40177 does not repair this reader; source-only",
+      "implementation_prs": [
+        40230,
+        40316
+      ],
+      "implementation_evidence": "PR40316 at 0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b integrates current remote40230 source into accumulated Runtime/Patch/help stack. Source checks only; latest integrated-head runtime evidence pending."
+    }
+  ],
+  "global_overlays": [
+    {
+      "name": "palette",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O01"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "agenda",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O02"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "answering",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O03",
+        "O04"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "help",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "context inspector",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "patch",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "R02"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "link preview",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O05"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "deletion confirmation",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "compact terminal",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "account login",
+      "source_review": "dispatcher branch identified; detailed source and runtime review pending",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "lane addons",
+      "source_review": "dispatcher branch identified; detailed source and runtime review pending",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "About",
+      "source_review": "dispatcher branch identified; detailed source and runtime review pending",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    }
+  ],
+  "detail_modes_requiring_separate_evidence": [
+    "Keeper Info/Sandbox/Settings/Secrets/GitHub/Identity/Channels/Automation/Runs tabs; Context inspector separately",
+    "System runtime.toml/models/params/prompts/presets/themes/voice",
+    "Tools five pane modes",
+    "Resources list/detail focus",
+    "Code directory/file/history/memo/diff",
+    "Voice wizard steps and assignment phases",
+    "Goal inspection/submitting/confirmation",
+    "Approval ask/held-tool/operator/gate detail kinds",
+    "Memory ordinary/source/invalidation details",
+    "Fusion list/detail/historical detail/launch",
+    "Runtime exact-lane editor and runtime picker",
+    "Browser addons/live/history",
+    "Connectors browser live/history (surface-local mode, not a global overlay)",
+    "Board pending detail: Absent / Loading / Failed with no matching cached post; retry/loading/error chrome is inline in render_surface, distinct from render_board_read"
+  ],
+  "diff_access_audit": {
+    "source_head": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+    "provenance": "direct current source inspection; no executable proof",
+    "code_diff_implementation_pr": 40196,
+    "remaining_readers_implementation_pr": 40208,
+    "focused_run": 36673795966,
+    "execution_status": "run36673795966 failed at keeper-tree resize; successor36685060343 at602762aec20b26045bbf7af3c462d7c7acc01d17 passed all24reader/width/color combinations (recorded-diff-targeted-pass.txt). Refresh, repository scope switching, patch modal, latest required checks and installed/production remain unverified.",
+    "readers": [
+      {
+        "reader": "recorded tool-call before/after",
+        "renderer": "bin/masc_tui_render.ml:11164",
+        "state": "changes_diff_row + changes_diff_scroll",
+        "evidence": "diff_row_span applies Span.truncate to marker and complete body; no horizontal position or input route",
+        "required_verification": "long removed/added tail reachable with fixed +/- marker; reopening or changed selection owns its position; materialized blob without recorded bytes remains explicit",
+        "implementation_pr": 40208,
+        "runtime_evidence": "focused successor run36685060343 PASS at602762aec20b26045bbf7af3c462d7c7acc01d17; see recorded-diff-targeted-pass.txt for covered reader/width/color cases; refresh, modal, required checks and installation remain unverified"
+      },
+      {
+        "reader": "Changes working tree",
+        "renderer": "bin/masc_tui_render.ml:11490",
+        "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
+        "state": "changes_tree_diff_path + changes_tree_diff + changes_diff_scroll",
+        "evidence": "diff_surface has ds_scroll only; tree_diff_row_span truncates composed old/new gutter and body",
+        "required_verification": "body pans while old/new/marker remain fixed; stale path answer refused; held or failed refresh keeps correct reading and position",
+        "implementation_pr": 40208,
+        "runtime_evidence": "focused successor run36685060343 PASS at602762aec20b26045bbf7af3c462d7c7acc01d17; see recorded-diff-targeted-pass.txt for covered reader/width/color cases; refresh, modal, required checks and installation remain unverified"
+      },
+      {
+        "reader": "Repository Changes working tree",
+        "renderer": "bin/masc_tui_render_prim.ml:3060",
+        "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
+        "state": "repository_changes_diff_path + repository_changes_diff + repository_changes_diff_scroll",
+        "evidence": "same no-horizontal diff_surface; opens from selected repository-change row with its scope",
+        "required_verification": "body pans in project/repository scope; selected path changes reset own position; list and hidden Code file never move",
+        "implementation_pr": 40208,
+        "runtime_evidence": "focused successor run36685060343 PASS at602762aec20b26045bbf7af3c462d7c7acc01d17; see recorded-diff-targeted-pass.txt for covered reader/width/color cases; refresh, modal, required checks and installation remain unverified"
+      }
+    ]
+  },
+  "link_preview_repair": {
+    "pr": 40209,
+    "source_head": "893ca15b5b",
+    "focused_run": 36673794831,
+    "status": "compiled unit suite PASS at 893ca15b5b998433196541e575bdfdf7419c52dc, run36673794831, 29 tests; actual modal PTY/screenshots, required checks and installation remain pending"
+  },
+  "tables_targeted_evidence": {
+    "head": "560667e1a2860e23a6773d7c31cd1d2e72e9c1f7",
+    "run": 36670468008,
+    "job": 109744166515,
+    "receipt": "tables-targeted-pass.txt",
+    "scope": "compiled unit suite, 96 tests success; raw checkout and printed narrow table rows verified; not PTY, required checks or installed binary proof"
+  },
+  "code_diff_hint_response": {
+    "failed_head": "abfe0affb12bc8c2e6b93f9bc8fd3c8bd75a6c08",
+    "failed_run": 36671784007,
+    "receipt": "code-diff-narrow-hint-failure.txt",
+    "repair_head": "bee36c85b7a02d37a33278e82bfd540af1731c42",
+    "new_targeted_run": 36675879028,
+    "new_probe_run": 36676458728,
+    "scope": "source-reviewed narrow hint fix; no latest runtime or screenshot proof"
+  },
+  "runtime_listing_targeted_request": {
+    "pr": 40220,
+    "run": 36677494108,
+    "scope": "requested scoped CI; source/static only, no execution PASS",
+    "head": "b9db8b2b0f0823d85108785f2bdea6797167c2ee",
+    "probe_run": 36676780128,
+    "superseded_runs_cancel_requested": [
+      36676524947,
+      36677120757
+    ],
+    "probe_head": "68b11bce7304ecd3d5c51d244a0aee8495f353bd"
+  },
+  "runtime_listing_baseline_fixture": {
+    "binary_commit": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "binary_sha256": "96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b",
+    "receipt": "runtime-list-before-86751.txt",
+    "scope": "installed binary in isolated fixture PTY,40x32,color,lane,healthy singleton; original clipping reproduced only. No repaired head or full matrix proof."
+  },
+  "link_preview_targeted_evidence": {
+    "head": "893ca15b5b998433196541e575bdfdf7419c52dc",
+    "run": 36673794831,
+    "receipt": "link-preview-targeted-pass.txt",
+    "raw": "link-preview-targeted.raw.txt",
+    "scope": "compiled unit29tests success, not actual modal PTY/screenshot/required checks/install"
+  },
+  "recorded_diff_resize_response": {
+    "failed_head": "ac8df5fb7487bbd04bf72b2b5b5ae7144182da7b",
+    "failed_run": 36673795966,
+    "repair_head": "6766ed25f4ab9515bc380284a60603a1a3f234aa",
+    "requested_run": 36680037724,
+    "scope": "recorded40color initialreader checks passed; unchangedsizewait failedbeforekeeper_tree pan; source-reviewed no-op wait repair, remaining matrix pending",
+    "receipt": "recorded-diff-resize-failure.txt",
+    "raw": "recorded-diff-resize-failure.raw.txt"
+  },
+  "workspace_activity_baseline_fixture": {
+    "binary_head": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "binary_sha256": "96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b",
+    "fixture_head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "receipt": "workspace-activity-before.txt",
+    "raw": "workspace-activity-before.raw.txt",
+    "scope": "frozen installed copy in isolated100x30colorPTY, original path-tail loss afterloadedTask/data; no repaired or full matrix proof"
+  },
+  "workspace_activity_targeted_request": {
+    "head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "run": 36681385350,
+    "probe": 36680543354,
+    "scope": "completed focused PASS; see workspace_activity_targeted_evidence for exact head, receipt and remaining limits; older cancelled request is not proof"
+  },
+  "code_memo_layout_request": {
+    "head": "3af8d721aec436688b12063caa15f57ebfc7523d",
+    "pr": 40240,
+    "run": 36683716774,
+    "probe": 36683719767,
+    "scope": "source/static and independent response reviews only; complete author/body physical-row fixture30/40/60/80/120/160 color/NO_COLOR added, new-head execution pending. R04 commit-history remains unrepaired."
+  },
+  "code_history_layout_request": {
+    "head": "1b907b070f95ec32d0ba35808b458c5a70a2fc95",
+    "pr": 40247,
+    "run": 36685970463,
+    "probe": 36685975680,
+    "scope": "source/static and independent response reviews only, executable/matrix/screenshots/install unproved",
+    "baseline_receipt": "code-history-before.txt",
+    "baseline_raw": "code-history-before.raw.txt"
+  },
+  "recorded_diff_folded_path_response": {
+    "failed_head": "6766ed25f4ab9515bc380284a60603a1a3f234aa",
+    "failed_run": 36680037724,
+    "requested_run": 36685060343,
+    "receipt": "recorded-diff-folded-path-failure.txt",
+    "raw": "recorded-diff-folded-path-failure.raw.txt",
+    "scope": "nine color pan receipts then fullpathneedle failure; raw truncated so source-supported inference only; remaining project widths/NO_COLOR unproved",
+    "repair_head": "602762aec20b26045bbf7af3c462d7c7acc01d17"
+  },
+  "workspace_activity_targeted_evidence": {
+    "head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "run": 36681385350,
+    "receipt": "workspace-activity-targeted-pass.txt",
+    "raw": "workspace-activity-targeted.raw.txt",
+    "scope": "compiled fixture10width/color combinations at18rows plus Repositories/Changes newline PASS; normalized-whitespace comparisons. Refresh/stale/overlay/Enter/production/install unproved. Probe metadata success only, artifact download active."
+  },
+  "prompts_layout_request": {
+    "head": "c0c3d9b1ed2edac61edc3e031fd140b0f206aa7e",
+    "pr": 40254,
+    "run": 36689755419,
+    "probe": 36689759464,
+    "scope": "source/static/independent reviews only; complete literal metadata and shared detail paging; focused10cases added, execution pending"
+  },
+  "code_reader_focused_followup": {
+    "memo": {
+      "failed_run": "36683716774",
+      "repair_head": "9bba366587728629efa61aa4ac14e419e3f60ee6",
+      "request": "36692603068",
+      "receipt": "code-memo-targeted-failure.txt"
+    },
+    "history": {
+      "failed_run": "36685970463",
+      "repair_head": "705d49c54d83d65f165708166abd08478220af55",
+      "request": "36692381154",
+      "receipt": "code-history-targeted-failure.txt"
+    },
+    "recorded_diff": {
+      "passed_run": "36685060343",
+      "head": "602762aec20b26045bbf7af3c462d7c7acc01d17",
+      "receipt": "recorded-diff-targeted-pass.txt"
+    },
+    "activity_capture": "workspace-activity-ci-capture.json"
+  },
+  "tools_layout_request": {
+    "pr": 40263,
+    "base": "179544426a",
+    "head": "40c77d8d738cbaea794be922ed0ca3b7e9b74b67",
+    "focused_run_request": "36694877409",
+    "probe_request": "36694878753",
+    "scope": "complete physical rows for allTools panes; fullrevisions/rawtimestamps/usagecompositiondetails",
+    "new_fixture": "10 usage-pane combinations30/40/60/80/120 xcolor/NO_COLOR; full fields/pages/HomeEnd",
+    "other_panes_and_full_read_failure": "source reviewed only",
+    "before_receipt": "tools-before.txt",
+    "before_screenshot": "tools-before-browser.png",
+    "status": "source/static reviews and baseline evidence; newhead executable verification pending"
+  },
+  "code_prompt_verification_followup": {
+    "memo": {
+      "old_failed_run": "36692603068",
+      "receipt": "code-memo-recent-pane-failure.txt",
+      "repair_head": "7c8a737df2932b48316dc726cff35e6960ba9c81",
+      "focused_request": "36696258326"
+    },
+    "history": {
+      "old_failed_run": "36692381154",
+      "receipt": "code-history-get-observer-failure.txt",
+      "repair_head": "a6379deb666ddb0de7a6159c6654ba5b33a951d7",
+      "focused_request": "36696373189"
+    },
+    "prompts": {
+      "old_run": "36689755419",
+      "overall": "FAILURE",
+      "primary_pty": "PASS",
+      "held_back_pty": "PASS",
+      "key_cases_passed": 125,
+      "key_cases_failed": 1,
+      "receipt": "prompts-pty-pass-key-expectation-failure.txt",
+      "repair_head": "1be34f2ae7457c115b34910fe9320ee84de39921",
+      "focused_request": "36696374901"
+    },
+    "limits": "Repairedhead runs requested only; no installed or production proof"
+  },
+  "review_verdict_layout_request": {
+    "pr": 40277,
+    "base": "0c37b5c285",
+    "head": "ae678a798507e0f5633f180db0d2f5a9e9c67307",
+    "scope": "complete Review/Verdict metadata, evidence references, literal reasons and goal metrics; full armed/actionerror body",
+    "new_fixture": "24 cases:2surfaces x30/40/60/80/120/160 xcolor/NO_COLOR; j/HomeEnd only",
+    "source_only_states": [
+      "page overlap",
+      "refresh/stale",
+      "armed/actionerror",
+      "other actions"
+    ],
+    "before_receipt": "review-detail-before.txt",
+    "before_screenshot": "review-detail-before-browser.png",
+    "ci_dispatch": "rejectedHTTP422; Test/probe manuallydisabled; PRchecksabsent",
+    "ci_receipt": "review-verdict-ci-dispatch-rejected.txt",
+    "status": "source/static reviewed, repairedhead executable verification not started",
+    "operator_decision": "source-only continuation; no further dispatch; stacked PR/source review policy, full CI at Release/Tag"
+  },
+  "voice_metadata_stack": {
+    "pr": 40282,
+    "base_pr": 40277,
+    "base_head": "ae678a798507e0f5633f180db0d2f5a9e9c67307",
+    "head": "c0a6283abddb3407e88b37005bac359e2e20db03",
+    "scope": "literal complete Voice metadata, pinned action owners and active wizard answer",
+    "review": "independent hostile and response source APPROVE exact recorded head; no unresolved P0/P1/P2; ANSI continuation emphasis P3",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under operator source-only policy"
+  },
+  "runtime_routes_stack": {
+    "pr": 40293,
+    "base_pr": 40282,
+    "base_head": "c0a6283abddb3407e88b37005bac359e2e20db03",
+    "head": "e948ac6276beba010fbaf1189a10926d3e5af045",
+    "scope": "complete read-only route/status document, independent of row availability; full diagnostic and narrow-label wrapping",
+    "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2; initial diagnostic-label P2 repaired",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under source-only policy"
+  },
+  "diff_ownership_stack": {
+    "pr": 40296,
+    "base_pr": 40293,
+    "base_head": "e948ac6276beba010fbaf1189a10926d3e5af045",
+    "head": "1cd694ed077b02a141cb17c2558fbd8f0c966d9d",
+    "scope": "typed reader/scope/path/generation async diff ownership, independent patch cache/error and project-scope path selection",
+    "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under source-only policy",
+    "remaining": "runtime race scenarios; patch horizontal source follow-up is PR40301, runtime not verified"
+  },
+  "patch_horizontal_stack": {
+    "pr": 40301,
+    "base_pr": 40296,
+    "base_head": "1cd694ed077b02a141cb17c2558fbd8f0c966d9d",
+    "head": "a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa",
+    "scope": "body-cell pan with fixed diff gutters, content/pane bounds, both-axis frame clamp and reopen reset",
+    "review": "independent system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2, initial public-interface P1 repaired",
+    "validation": "syntax parsing of four implementations and two interfaces, diff check only",
+    "execution": "not run under source-only policy"
+  },
+  "active_reader_help_stack": {
+    "pr": 40304,
+    "base_pr": 40301,
+    "base_head": "a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa",
+    "head": "080c6e12fa9f75faab19075ad9d831da9bc7d372",
+    "scope": "reachable patch/voice assignment help, active reader first, shared help/footer bindings and saving-state controls",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2; narrow pan/exit/omission-marker P2 repaired",
+    "validation": "syntax parsing of four implementations and key interface, diff check only",
+    "execution": "not run under source-only policy"
+  },
+  "runtime_reader_owner_stack": {
+    "pr": 40306,
+    "base_pr": 40304,
+    "base_head": "080c6e12fa9f75faab19075ad9d831da9bc7d372",
+    "head": "d6fa21c5e4787ca8dde09e6ca3a7beb578b808c1",
+    "scope": "stable row/route detail identity and scroll under repeated Enter/Right after hidden listing refresh",
+    "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2; P3 listing-bound comment placement retained for batch",
+    "validation": "syntax parsing and diff check only; functional state scenario added to existing suite, not executed",
+    "execution": "not run under source-only policy"
+  },
+  "runtime_layout_integration_stack": {
+    "pr": 40309,
+    "base_pr": 40306,
+    "base_head": "d6fa21c5e4787ca8dde09e6ca3a7beb578b808c1",
+    "head": "5b005ee6d8c1d2706a0e3847f936cf749eef41b5",
+    "imported_pr": 40220,
+    "imported_head": "230e53edfda0db7f787668a2d13b5cf0f008f9e7",
+    "imported_base": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "scope": "responsive list plus existing routes/help/stable identity; measured candidate heading reserve fixes30col P2",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head, no unresolved P0/P1/P2, initial30col candidateellipsis P2 repaired",
+    "validation": "syntax/AST/diff checks only; imported refined fixture unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "capture_tooling_validation": {
+    "manifest": "capture-review-validation/manifest.json",
+    "scope": "installedff7f49c isolated fixture capture,24pairs/48hashes checked; not current-source binary or production",
+    "negative_checks": "Python-O failed refresh, changed input and unrelated binary refused"
+  },
+  "workspace_activity_integration_stack": {
+    "pr": 40316,
+    "base_pr": 40309,
+    "base_head": "5b005ee6d8c1d2706a0e3847f936cf749eef41b5",
+    "head": "0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b",
+    "imported_pr": 40230,
+    "imported_head": "08cf7750366f63daa793d80744976f1466bf6e08",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "responsive path/result list, full Context metadata and physical-row navigation, refresh selection retention, h/v reader ownership, active Activity help",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head, no unresolved P0/P1/P2; wheel P3 deferred",
+    "validation": "OCaml syntax, Python AST and diff checks only; imported fixture not executed",
+    "execution": "not run under source-only policy",
+    "deferred_p3": [
+      "Context wheel input is consumed without scrolling"
+    ]
+  },
+  "code_memo_integration_stack": {
+    "pr": 40319,
+    "base_pr": 40316,
+    "base_head": "0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b",
+    "head": "d4a43183c8aa12cf492c4ddcbe28d9254c39a129",
+    "imported_pr": 40240,
+    "imported_head": "228c25fbf29f37bcafa33c6e5008c54acbbee423",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal author/body and physical-row movement at actual file pane width; shared active memo help/footer",
+    "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
+    "validation": "three OCaml implementations/two interfaces syntax, Python AST, diff check; imported14-case fixture not executed",
+    "execution": "not run under source-only policy"
+  },
+  "code_history_integration_stack": {
+    "pr": 40320,
+    "base_pr": 40319,
+    "base_head": "d4a43183c8aa12cf492c4ddcbe28d9254c39a129",
+    "head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "imported_pr": 40247,
+    "imported_head": "bad6edd4cf70d11efaf8c48fb2161f95a96959c5",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal commit/Keeper history, physical-row Enter owner, final short record selectable, active history help/footer while preserving Memo; Enter history branch requires file-pane focus",
+    "review": "system_audit and agenda_finish source PASS exact head; constructor P1 and hidden History Enter P2 repaired; no unresolved P0/P1/P2",
+    "validation": "OCaml syntax of four product implementations/two interfaces/existing keys test, Python AST and diff checks; imported14-case fixture unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "tools_integration_stack": {
+    "pr": 40325,
+    "base_pr": 40320,
+    "base_head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "imported_pr": 40263,
+    "imported_head": "7dc1f9df828e41f32d2bed6d34be41f9f9942ff2",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal revisions/timestamps/roots/errors across5Tools panes; full usage composition batches/nodes/dependencies; actualphysicalrows sharednavigation",
+    "review": "system_audit and agenda_finish source PASS exact head, no introduced P0/P1/P2; inherited action-target visibility remains follow-up",
+    "validation": "OCaml implementation/interface syntax and Python AST PASS; base-to-head diffcheck reports test/dune:7725 extra blank EOF (P3 deferred); usage-only10case fixture unexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": [
+      "J/K selection visibility source repair is40328; runtime actionproof pending",
+      "P3 test/dune:7725 extra blank EOF"
+    ]
+  },
+  "prompts_integration_stack": {
+    "pr": 40327,
+    "base_pr": 40325,
+    "base_head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "head": "8a669cc634c30b33fba56a5420292c8360442a75",
+    "imported_pr": 40254,
+    "imported_head": "962a592aab93ffb3ddcdd6ec1a92a4f8a1bcca45",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "full registry/asset document and literal metadata/heldback/stale diagnostics, shared physical-row page/edges while preserving edits/read-only asset boundary",
+    "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
+    "validation": "three product ML/one MLI/existingkeys syntax, Python AST, fullbasediffcheck PASS; fixture10casesunexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "tools_selection_stack": {
+    "pr": 40328,
+    "base_pr": 40327,
+    "base_head": "8a669cc634c30b33fba56a5420292c8360442a75",
+    "head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "scope": "pinned Skill index/count/name on all5Tools tabs; complete actionreference document; shared typed selection for display and Enter/edit; fixedrow budget included",
+    "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2",
+    "validation": "five implementation and one interface syntax parses, full base-to-head whitespace check PASS; no newtests or execution",
+    "execution": "not run under source-only policy",
+    "deferred_p3": [
+      "Types helper insertion has extra blank lines",
+      "Render_tools introductory comment has stale exported-definition count"
+    ]
+  },
+  "work_usage_integration_stack": {
+    "pr": 40331,
+    "base_pr": 40328,
+    "base_head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "imported_prs": [
+      40089,
+      40091
+    ],
+    "imported_heads": [
+      "6d669cec6cc5c2a8060a30869b5e1f8973db29bd",
+      "ddcc61139e1e1966db07a48eca303e4918128ce3"
+    ],
+    "imported_base": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "scope": "bounded Task ID/owner/title preserving state and priority; typed compact status and middleIDfold fix30/40; Usagewrapbeforephysicalcount",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; narrow fullstatusoverflow P2 repaired",
+    "validation": "OCaml syntax, two Python AST and fullbasediffcheck PASS; color-only importedfixtures unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "dashboard_goal_stack": {
+    "pr": 40333,
+    "base_pr": 40331,
+    "base_head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "head": "f808a2992eefbe519bd0ca103188656639f01480",
+    "reference_pr": 40095,
+    "reference_pr_state": "closed, unmerged",
+    "reference_head": "7baf1e4d594019644288704dcd7cc93f78fe5bae",
+    "reference_base": "179544426ada771d76ccdf262760b3f1f80bb766",
+    "scope": "bounded Goal title preview followed by complete actual/target/linked-task clauses wrapped at actualFramewidth; physicalrowsfeedDashboardbudget",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2",
+    "validation": "OCaml syntax/Python AST/fullbasediffcheck PASS; adapted5widthcolorfixture40rowsunexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": "short-pane summary omissions persist visibly; wholeDashboard states/sections require releaseverification"
+  },
+  "task_detail_integration_stack": {
+    "pr": 40336,
+    "base_pr": 40333,
+    "base_head": "f808a2992eefbe519bd0ca103188656639f01480",
+    "head": "b44ef2cea9afd6890a22d7663db3991dcd67ce38",
+    "imported_pr": 40133,
+    "imported_head": "787fa7b6f22ca3393b417b5cae7f2268383b56c2",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "full literal Task metadata/status/body/history physicaldocument; splitviewport/page shared; cancelkey visibleTaskguard andGoal lifecycle detail-only",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; EOF P3deferred",
+    "validation": "three ML/two MLI syntax and Python AST PASS; basediffEOFwarning7752P3deferred; importedcolorfixtureunexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "later_global_overlay_additions": {
+    "source_head": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "source": "bin/masc_tui_render.ml:frame_choice",
+    "overlays": [
+      {
+        "name": "Play card",
+        "source_review": "branch identified after original audit source; detailed review pending",
+        "runtime_evidence": "not covered by this capture walk"
+      }
+    ],
+    "scope": "original source inventory has12global branches; this later source adds Play card before account login, bringing observed branches to13"
+  },
+  "goal_detail_integration_stack": {
+    "pr": 40341,
+    "base_pr": 40336,
+    "base_head": "b44ef2cea9afd6890a22d7663db3991dcd67ce38",
+    "head": "2e1648a7d7617c5aa3f3253a1168ed8b470fd144",
+    "imported_pr": 40142,
+    "imported_head": "ed89a64045558e31a7f85f587410870b46d289df",
+    "imported_base": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "scope": "full physical Goal metadata/all linked Tasks/proof/timeline; pinned actions; visible Goal guard; exact confirmation retained across Home/End; Task cancel preserved",
+    "review": "system_audit and agenda_finish source PASS final head, no unresolved P0/P1/P2; P3 unused timestamp helper deferred",
+    "validation": "OCaml syntax/Python AST/full base diff PASS; 5width color detail fixture and overflowing confirmation edge extension unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "inline_dispatcher_surfaces": [
+    {
+      "name": "Board pending detail",
+      "source_head": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+      "source": "bin/masc_tui_render.ml:16208-16222 (render_surface Board_read)",
+      "condition": "Board_detail is Absent, Loading or Failed and state.board_posts has no matching post_id",
+      "states": [
+        "Absent: unloaded message and r retry hint",
+        "Loading: loading message",
+        "Failed: single-line failure detail with failure styling"
+      ],
+      "source_review": "dispatcher branch and footer_hints_board_pending identified; detailed layout/input review pending",
+      "runtime_evidence": "pending; ready/cached Board detail captures do not cover these states",
+      "required_evidence": [
+        "Absent, Loading and Failed without cached post at narrow/wide widths and short panes",
+        "retry r and back navigation preserve Board owner and use pending footer hints",
+        "long post ID and failure detail, resize and Activity reservation",
+        "matching cached post and later Ready response transition to render_board_read without stale pending chrome"
+      ]
+    }
+  ]
+}

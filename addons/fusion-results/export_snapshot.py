@@ -5,6 +5,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from server import parse_detail
@@ -34,5 +35,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     value = snapshot(json.loads(args.detail.read_text()), args.source_id)
     # Refuse replacing an existing capture; publish by explicitly choosing a new path.
-    with args.output.open("x") as output:
+    descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         output.write(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2) + "\n")

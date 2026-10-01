@@ -52,21 +52,19 @@ let account_of balance keeper =
   }
 ;;
 
-let fold view =
-  Candle_balance.of_events (Candle_ledger.events view)
-  |> Result.map_error (fun error -> Account_invalid error)
+let read_account view ~now ~base_path ~keeper =
+  let* (view : Candle_status.view) = view ~now ~base_path
+    |> Result.map_error (function
+      | Candle_status.Off -> Off
+      | Candle_status.Disabled reason -> Disabled reason
+      | Candle_status.Invalid_time detail -> Invalid_time detail
+      | Candle_status.Invalid_ledger error -> Account_invalid error
+      | Candle_status.Ledger_unavailable detail -> Ledger_unavailable detail) in
+  Ok (account_of view.balance (Keeper_id.Keeper_name.to_string keeper))
 ;;
 
-let account ~base_path ~keeper =
-  let* (_ : Candle_config.policy) = policy ~base_path in
-  let* view =
-    Candle_ledger.read ~base_path
-    |> Result.map_error (fun error ->
-      Ledger_unavailable (Candle_ledger.read_error_to_string error))
-  in
-  let* balance = fold view in
-  Ok (account_of balance (Keeper_id.Keeper_name.to_string keeper))
-;;
+let account = read_account Candle_status.current_view
+let observed_account = read_account Candle_status.observed_view
 
 let catalog ~base_path =
   let* policy = policy ~base_path in
@@ -77,20 +75,19 @@ let catalog ~base_path =
 ;;
 
 let purchase ~now ~base_path ~keeper ~item =
-  let* policy = policy ~base_path in
-  let* amount_milli =
-    match Candle_config.price policy item with
-    | Candle_config.Unpriced -> Error (Unpriced item)
-    | Candle_config.Priced amount -> Ok amount
-  in
-  let* purchased_at =
-    Candle_stamp.at ~now |> Result.map_error (fun error -> Invalid_time error)
-  in
+  let* (_ : Candle_config.policy) = policy ~base_path in
   let keeper = Keeper_id.Keeper_name.to_string keeper in
   Candle_ledger.update ~base_path (fun view ->
-    let* balance = fold view in
+    let* current_policy = policy ~base_path in
+    let* amount_milli = match Candle_config.price current_policy item with
+      | Candle_config.Unpriced -> Error (Unpriced item)
+      | Candle_config.Priced amount -> Ok amount in
+    let* purchased_at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+    let* prepared = Candle_status.prepare ~at:purchased_at ~half_life:current_policy.half_life (Candle_ledger.events view)
+      |> Result.map_error (fun error -> Account_invalid error) in
+    let balance = prepared.balance in
     let* balance =
-      Candle_balance.purchase balance ~keeper ~item ~amount_milli
+      Candle_balance.purchase balance ~at:purchased_at ~keeper ~item ~amount_milli
       |> Result.map_error (fun error -> Purchase_refused error)
     in
     let event =
@@ -99,7 +96,7 @@ let purchase ~now ~base_path ~keeper ~item =
       }
     in
     Ok
-      ( [ event ]
+      ( prepared.policy_events @ [ event ]
       , { account = account_of balance keeper; item; amount_milli; purchased_at } ))
   |> Result.map_error (function
     | Candle_ledger.Refused error -> error

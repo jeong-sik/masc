@@ -31,16 +31,26 @@ type error =
 val error_to_string : error -> string
 
 val account
-  :  base_path:string
+  :  now:(unit -> float)
+  -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> (account, error) result
+
+val observed_account
+  :  now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> (account, error) result
+(** Read-only account using recorded half-life boundaries. Does not publish
+    desired policy changes; read-authorized HTTP callers must use this path. *)
 
 val catalog : base_path:string -> (catalog_entry list, error) result
 
 (** The caller supplies its trusted Keeper identity. A single cursor-checked
     ledger update recomputes funds and ownership before appending one purchase.
     A competing append reruns that decision with the new ledger. The price
-    recorded is the explicit policy observed for this request. *)
+    recorded is the explicit policy re-read within each cursor attempt; an
+    item that becomes unpriced is refused before any debit. *)
 val purchase
   :  now:(unit -> float)
   -> base_path:string

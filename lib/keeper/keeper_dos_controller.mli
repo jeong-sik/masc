@@ -1,7 +1,9 @@
 (** Frees the DOS controller of a holder who can no longer move, before a
     call that needs the controller. *)
 
-val holder_left : config:Workspace.config -> now:float -> string -> Tool_misc_dos_lane.holder_departure option
+val holder_left :
+  transaction:Auth.credential_transaction -> config:Workspace.config ->
+  now:float -> string -> Tool_misc_dos_lane.holder_departure option
 (** Why [holder] can no longer act, or [None] while it still can.
     [Keeper_stopped]: a Keeper that is paused or stopped, including one whose
     stop finished and left the registry but kept its meta. [Credential_expired]:
@@ -13,7 +15,8 @@ val holder_left : config:Workspace.config -> now:float -> string -> Tool_misc_do
     that is not a Keeper and has no credential file, only where every request
     must carry a credential (auth enabled, [require_token]). A credential file
     that cannot be read, and a missing one where a request needs no token,
-    keep the controller. *)
+    keep the controller. [transaction] must be the current admission for
+    [config]'s workspace; keep it through the resulting controller effect. *)
 
 val before_move :
   config:Workspace.config -> who:string -> (unit, Masc_domain.masc_error) result
@@ -36,16 +39,18 @@ type call_refusal =
   | Refused of string  (** the call cannot run as asked; the caller can fix it *)
   | Seats_unknown of string  (** who sits at the machine could not be read *)
 
-val before_call :
+val execute :
   config:Workspace.config -> who:string -> name:string -> args:Yojson.Safe.t ->
-  (unit, call_refusal) result
-(** What every caller of a misc tool runs first (a Keeper's turn, the play
-    page's DOS routes, an MCP client). A call that moves the machine lets a
-    departed holder go ({!before_move}). Where every request must carry a
-    credential, a pass goes only to a name in [Play_seat.hand_to] and any
-    other target is an [Error]; nothing has happened then. Where a name may be
-    self-declared there is no list, and a pass goes through as before. Other
-    calls pass through. *)
+  run:(unit -> Tool_result.result option) ->
+  (Tool_result.result option, call_refusal) result
+(** Execute an already authorized misc tool request. Handoff target discovery,
+    departed-holder recovery and the actual DOS pass share one Auth admission,
+    excluding credential publication and revocation until the effect completes.
+    Handoff uses the same DOS implementation as the misc dispatcher; its Board
+    announcements are flushed after Auth release. For other tools, [run] is
+    invoked after any required holder recovery. [None] means no dispatcher
+    handled that other tool. The HTTP body must already have been read.
+    This does not authenticate [who] or cancel requests authorized earlier. *)
 
 val refusal_result : tool_name:string -> call_refusal -> Tool_result.result
 (** The tool answer for a refusal: a [Workflow_rejection] for [Refused], a

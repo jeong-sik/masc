@@ -3,7 +3,7 @@ module Look = Keeper_portrait_look
 
 let grid = 40
 
-(* Thirty-six steps of the splash's 150 ms. *)
+(* Thirty-six steps of the /about candle's 150 ms. *)
 let sway_period_ms = 5400
 
 (* ---- vectors ------------------------------------------------------------- *)

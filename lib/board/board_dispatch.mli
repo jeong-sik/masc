@@ -132,6 +132,13 @@ val emit_board_sse_event : board_sse_event -> unit
     a synthetic event without going through one of the typed
     operations. *)
 
+val set_board_write_hook : (unit -> unit) -> unit
+(** Replace the in-process hook invoked after a board write that raises no
+    {!board_sse_event}: {!update_post}, {!set_thread_id}, {!set_pinned},
+    {!set_closed}, {!reopen} and {!delete_post}. A write the store refuses does
+    not invoke it. The server drops its cached projections of the store here,
+    so a read after the write is not answered from the page it changed. *)
+
 (** {1 Backend lifecycle} *)
 
 type board_backend =

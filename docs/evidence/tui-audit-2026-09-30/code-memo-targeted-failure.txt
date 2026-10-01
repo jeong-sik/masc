@@ -1,0 +1,6 @@
+Focused Test run: 36683716774
+Head: 3af8d721aec436688b12063caa15f57ebfc7523d (run metadata, not a raw checkout line)
+Raw: code-memo-targeted-failure.raw
+SHA256: cc846d1349bc905aab425bd36e54b15e35cb892fc81eebc650cbe478470b6c1f
+New memo fixture failed at160 color: incorrect fixed tree slicing. Earlier color30/40/60/80/120 assertions completed; NO_COLOR not reached. Existing memo family and126 key cases passed. No full frame in failure trace. Repaired head9bba366587728629efa61aa4ac14e419e3f60ee6 has requests36692603068/36692607204; source/static review only.
+No local Dune build.

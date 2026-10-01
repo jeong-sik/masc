@@ -32,7 +32,7 @@
 set -uo pipefail
 
 # Sibling cleaners' convention: MASC_BASE_PATH, else cwd — never a
-# HOME-anchored machine guess (audit-path-ssot).
+# HOME-anchored machine guess.
 PLAYGROUND="${MASC_BASE_PATH:-$(pwd)}/.masc/playground"
 APPLY=0
 WITH_NODE=0

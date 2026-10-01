@@ -237,7 +237,7 @@ type model_spec =
   ; max_context : int option
       (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
-          {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
+          {!Runtime_instance.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool option
         (** Absent inherits provider defaults; Some false explicitly disables thinking. *)
   ; preserve_thinking : bool option
@@ -265,10 +265,12 @@ type model_spec =
 (** Where the keeper starts evicting carried history and where it stops, in
     the provider's tokens of the whole request: prefix, carried atoms and
     tail together, as the provider's [input_tokens] reports it (RFC
-    keeper-context-window-in-tokens §10.2, §10.5). Parsed as a pair so the
+    keeper-context-window-in-tokens §10.2, §10.5). Proactive turn-boundary
+    eviction applies these marks only when no Librarian continuity is applied;
+    recovery after a provider refusal is a separate path. Parsed as a pair so the
     invariant [0 < low_water_tokens < high_water_tokens] holds by
     construction; [high_water_tokens <= max-context] is checked once the model
-    is resolved ({!Runtime.validate_runtime_context_marks}). *)
+    is resolved ({!Runtime_config_validation.validate_runtime_context_marks}). *)
 type context_marks =
   { high_water_tokens : int  (** Eviction starts when the last measured total passes this. *)
   ; low_water_tokens : int  (** Eviction stops once the projected total is at or below this. *)

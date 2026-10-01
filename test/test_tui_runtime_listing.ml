@@ -573,7 +573,7 @@ let test_every_row_fits_the_frame () =
          (Printf.sprintf "%d columns: the row stays inside the frame" cols)
          true
          (row <= Masc_tui_frame.inner_width ~cols))
-    [ 80; 100; 120; 160; 200 ]
+    [ 40; 60; 80; 100; 120; 160; 200 ]
 
 (* The facts a narrow row drops, and the one it keeps. *)
 let test_narrow_rows_keep_the_fact_that_is_said_nowhere_else () =

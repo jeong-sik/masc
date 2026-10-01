@@ -1541,6 +1541,7 @@ let test_keeper_tool_slot_callbacks_are_always_wired () =
   let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
   let _, yield_on_tool, on_yield, on_resume, _ =
     Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+      ~preview:None
       ~observation_token:None
       ~config
       ~keeper_name:"slot-lease-test"

@@ -203,6 +203,7 @@ type tool_stream_observation =
 (** [observation_token] is captured for registry callbacks. Omission disables
     registry turn observation; it never adopts a currently active turn. *)
 val make_hooks :
+  ?preview:Keeper_turn_preview.writer ->
   ?observation_token:Keeper_turn_observation_token.t ->
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->

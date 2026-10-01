@@ -391,7 +391,9 @@ let test_expired_credentials_are_not_seats () =
     in
     let _ = Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
     let now = Unix.gettimeofday () in
-    let seats at = Masc.Play_seat.participants ~base_path ~keepers:[ "Alpha"; "operator" ] ~now:at in
+    let seats at = match Masc.Play_seat.participants ~base_path ~keepers:[ "Alpha"; "operator" ] ~now:at with
+      | Ok names -> names
+      | Error error -> fail (Masc_domain.masc_error_to_string error) in
     check (list string) "live" [ "Alpha"; "minsu"; "operator"; "visiting-operator" ] (seats now);
     check (list string) "two hours on" [ "Alpha"; "operator" ] (seats (now +. (2. *. 3600.))))
 

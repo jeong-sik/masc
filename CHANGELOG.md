@@ -123,6 +123,8 @@
 
 ### Removed
 
+- Remove the former Overview Team block. The startup Dashboard, Work, and Usage surfaces replace it (#38801).
+
 - The microVM image gate no longer builds `masc-sandbox:general` from the
   embedded recipe when a Keeper's image is missing from the store; it refuses
   the missing image. A Keeper's image is the build the host catalog promoted,

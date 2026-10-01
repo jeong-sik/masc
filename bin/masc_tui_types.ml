@@ -6689,6 +6689,22 @@ let abandon_fusion_launch (state : state) =
        | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
        | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
 
+(* Read owners and their retained values belong to the same workspace as the
+   launch form. Keep generations monotonic across A -> B -> A. *)
+let withdraw_fusion_workspace (state : state) =
+  ignore (abandon_fusion_launch state);
+  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_detail_generation <- state.fusion_detail_generation + 1;
+  state.fusion_detail_inflight <- None;
+  state.fusion_historical_inflight <- None;
+  state.fusion_detail <- None;
+  state.fusion_historical_detail <- None;
+  state.fusion_detail_error <- None;
+  state.fusion_launch_error <- None;
+  state.fusion_mode <- Fusion_list;
+  state.fusion_cursor <- 0;
+  state.fusion_scroll <- 0
+
 (* The launch form belongs to the Fusion surface and to nothing else, so the
    loop drops it whenever the surface under it is no longer Fusion. Asked
    every iteration rather than at the places that change the surface: there
@@ -7348,6 +7364,22 @@ let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name 
     if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
     else Masc_tui_esc_interrupt.action ~now_ns
       (Masc_tui_keeper_chat_transcript.interrupt entry.log.tl_transcript)
+
+(* Authority withdrawal drops local request owners, not submitted server work. *)
+let withdraw_keeper_chat_requests (state : state) =
+  state.keeper_interactive_waiting <- [];
+  state.keeper_chat_control_tokens <- [];
+  state.keeper_chat_control_pending <- [];
+  state.keeper_queue_inflight <- [];
+  state.keeper_run_next_pending <- [];
+  state.keeper_run_next_ready <- [];
+  state.keeper_run_next_inflight <- [];
+  state.keeper_run_next_receipts <- [];
+  state.keeper_priority_controls <- [];
+  state.keeper_run_next_retired <- [];
+  state.keeper_auto_priority_pending <- [];
+  state.keeper_auto_priority_requests <- [];
+  state.msg_inflight <- []
 
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)

@@ -1821,17 +1821,6 @@ let keeper_lane_idle_text seconds =
   else Printf.sprintf "%dd" (seconds / 86400)
 
 
-(** Render one backlog task in full, from the same load the Overview list was
-    projected from. The dispatch falls back to the Overview when the row is no
-    longer in the backlog, so the task argument always exists here. *)
-(* What a boxed surface spends on chrome before any row of content: the top
-   border, its title and rule, the closing rule and border, the selected-row
-   detail, and the key hints. Five surfaces subtracted the literal 10 from the
-   terminal height; naming it is what makes a sixth reader able to check the
-   arithmetic instead of trusting it. *)
-let boxed_surface_chrome_rows = 10
-
-
 (* Long question, choice, and reason text was cut to one line with a trailing
    "~", so an operator could not read the decision being asked of them. Each
    field wraps instead: the first row carries [head] (the caret and Keeper
@@ -5057,7 +5046,7 @@ let answering_lines (state : state) =
 (* The overlay ends in a fixed preview panel (divider + two lines): always
    drawn, so the list height never shifts with what the cursor is on — the
    fixed-chrome rule, applied before the panel exists rather than patched
-   after (see boxed_surface_chrome_rows for the precedent). *)
+   after. *)
 let answering_preview_rows = 3
 
 (* The two-pane surfaces -- Code and Resources -- opened on their list pane's

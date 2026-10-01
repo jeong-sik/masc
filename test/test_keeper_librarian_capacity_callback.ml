@@ -152,7 +152,7 @@ let test_prefit_real_continuity ~base_path () =
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-    {B.recorded_at=1000.; event=B.Turn_ended {
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
       turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;
@@ -534,7 +534,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-    {B.recorded_at=1000.; event=B.Turn_ended {
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
       turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;

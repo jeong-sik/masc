@@ -208,6 +208,63 @@ let test_a_held_log_completed_in_place_is_seen () =
     (whole == Tui_types.chat_rows_for state "alpha")
 ;;
 
+let test_refresh_preserves_output_until_its_replacement_arrives () =
+  let state = fresh_state () in
+  let reply =
+    { (entry_at ~request_id:"just-finished" 3.) with
+      me_identity = Tui_types.Session_row
+        { request_id = "just-finished"
+        ; turn_phase = Tui_types.Turn_output
+        ; operation_seq = 1
+        }
+    ; me_text = "the reply that finished after GET started"
+    }
+  in
+  state.msg_history <- [reply];
+  let apply fresh =
+    state.msg_history <-
+      List.filter
+        (fun row -> not (Tui_types.transcript_replaces_session_output ~fresh row))
+        state.msg_history;
+    state.msg_loaded <- Tui_types.merge_paged_history ~paged:state.msg_loaded ~fresh
+  in
+  apply [];
+  Alcotest.(check bool) "an empty successful page keeps the reply" true
+    (List.exists (fun row -> row.Tui_types.me_text = reply.me_text)
+       (Tui_types.chat_rows_for state "alpha"));
+  let addressed =
+    { (entry_at ~request_id:"just-finished" 2.5) with
+      me_role = Tui_types.Message_user (Tui_types.Sent_by_operator {surface = None})
+    }
+  in
+  apply [addressed];
+  Alcotest.(check int) "the user row alone cannot replace the reply" 1
+    (List.length state.msg_history);
+  apply [entry_at ~request_id:"another-turn" 4.];
+  Alcotest.(check int) "another completed turn cannot replace the reply" 1
+    (List.length state.msg_history);
+  apply [{reply with me_identity = Tui_types.Persisted_row "durable-reply"}];
+  Alcotest.(check int) "the exact turn's durable reply replaces the session copy" 0
+    (List.length state.msg_history);
+  Alcotest.(check int) "the reply stays visible once" 1
+    (List.length
+       (List.filter (fun row -> row.Tui_types.me_text = reply.me_text)
+          (Tui_types.chat_rows_for state "alpha")))
+;;
+
+let test_unkeyed_output_is_not_replaced_by_a_role_match () =
+  let output = entry_at 3. in
+  let fresh = [entry_at 4.] in
+  Alcotest.(check bool) "unkeyed replies retain their only available record" false
+    (Tui_types.transcript_replaces_session_output ~fresh output);
+  let memory = {output with me_role = Tui_types.Message_memory} in
+  Alcotest.(check bool) "another memory pass cannot replace this pass" false
+    (Tui_types.transcript_replaces_session_output
+       ~fresh:[{(entry_at 4.) with me_role = Tui_types.Message_memory}] memory);
+  Alcotest.(check bool) "an exact row identity proves replacement" true
+    (Tui_types.transcript_replaces_session_output ~fresh:[memory] memory)
+;;
+
 let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   let state = fresh_state () in
   state.msg_loaded <-
@@ -269,6 +326,10 @@ let () =
     [ ( "memo",
         [ Alcotest.test_case "same inputs return the same list" `Quick
             test_same_inputs_return_the_same_list;
+          Alcotest.test_case "refresh retains output until durable replacement" `Quick
+            test_refresh_preserves_output_until_its_replacement_arrives;
+          Alcotest.test_case "unkeyed output requires row identity" `Quick
+            test_unkeyed_output_is_not_replaced_by_a_role_match;
           Alcotest.test_case "Keeper revisit preserves read pages through outage" `Quick
             test_keeper_revisit_restores_read_pages_and_paging_authority;
           Alcotest.test_case "replaced loaded page is seen" `Quick

@@ -9,6 +9,21 @@ let resolve () =
   Runtime_exact_output_registry.resolve_lane registry ~lane_id
   |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string
 let available () = Result.map (fun _ -> ()) (resolve ())
+let declaration_change_probe () =
+  let declaration () =
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> None
+    | Ok registry -> Runtime_exact_output_registry.declared_lane registry ~lane_id in
+  let previous = ref (declaration ()) in
+  fun () ->
+    match declaration () with
+    | None -> false
+    | Some current ->
+      let changed = match !previous with
+        | None -> false
+        | Some prior -> not (Runtime_schema.equal_exact_output_lane_decl prior current) in
+      previous := Some current;
+      changed
 let prompt_key = function
   | A.Grade _ -> Prompt_names.candle_appraiser_grade
   | A.Relation _ -> Prompt_names.candle_appraiser_relation

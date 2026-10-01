@@ -2,7 +2,7 @@
 
 No live instance is contacted. Login writes credentials inside the isolated
 workspace; its auth directory is removed on exit and excluded from evidence.
-Keeper metadata, empty ledger and catalog are synthetic inputs, not evidence
+Keeper metadata, credited ledger and catalog are synthetic inputs, not evidence
 of lifecycle creation, a real payout or a model-driven purchase.
 Authenticated MCP calls exercise the real purchase and equipment ledger.
 """
@@ -102,7 +102,8 @@ repo = Path(__file__).resolve().parents[1]
 fixture_paths = [('runtime.toml', 'config/runtime.toml'),
                  ('candle.toml', 'config/candle.toml'),
                  ('keeper.toml', 'config/keepers/item-runtime-probe.toml'),
-                 ('keeper.json', 'keepers/item-runtime-probe.json')]
+                 ('keeper.json', 'keepers/item-runtime-probe.json'),
+                 ('restart-credit.jsonl', 'candle-ledger.jsonl')]
 input_paths = ['scripts/item-http-acceptance.py'] + [
     f'test/fixtures/item-http/{name}' for name, _ in fixture_paths]
 if args.capture_browser:
@@ -180,6 +181,7 @@ origin = f'http://127.0.0.1:{port}'
 # Proxy settings in the invoking shell must not route them elsewhere.
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}), RejectRedirects())
 records = []
+server_generation = 1
 def request(path, authenticated=True):
     headers = {'Authorization': 'Bearer ' + token} if authenticated else {}
     req = urllib.request.Request(origin + path, headers=headers)
@@ -189,7 +191,7 @@ def request(path, authenticated=True):
         response = error
     with response:
         body = response.read()
-        records.append({'path': path, 'authenticated': authenticated,
+        records.append({'server_generation': server_generation, 'path': path, 'authenticated': authenticated,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
         return response.status, body
 
@@ -208,7 +210,7 @@ def rpc(method, params, notification=False):
     req = urllib.request.Request(origin + '/mcp', data=json.dumps(payload).encode(), headers=headers)
     with http.open(req, timeout=10) as response:
         body = response.read()
-        records.append({'path': '/mcp', 'authenticated': True, 'rpc_method': method,
+        records.append({'server_generation': server_generation, 'path': '/mcp', 'authenticated': True, 'rpc_method': method,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
         if method == 'initialize':
             rpc_session['Mcp-Session-Id'] = response.headers['Mcp-Session-Id']
@@ -235,7 +237,7 @@ def tool(name, arguments, error_code=None, validation_reason=None):
     if validation_reason is not None:
         require(data['validation'] == 'agent_core_tool_middleware', data)
         require(data['reason'] == validation_reason, data)
-    tool_records.append({'name': name, 'arguments': arguments, 'is_error': failed,
+    tool_records.append({'server_generation': server_generation, 'name': name, 'arguments': arguments, 'is_error': failed,
                          'data': data})
     return data
 
@@ -313,7 +315,7 @@ with (root / 'server.log').open('wb') as log:
         (root / 'account.json').write_bytes(body)
         require(status == 200 and account['status'] == 'ready'
                 and account['keeper'] == 'item-runtime-probe', account)
-        require(account['balance_milli'] == '0' and account['owned_items'] == [], account)
+        require(account['balance_milli'] == '100' and account['owned_items'] == [], account)
         glasses = next(item for item in account['catalog'] if item['id'] == 'glasses')
         require(glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses)
         crown = next(item for item in account['catalog'] if item['id'] == 'crown')
@@ -329,7 +331,7 @@ with (root / 'server.log').open('wb') as log:
                            'clientInfo': {'name': 'item-http-acceptance', 'version': '1'}})
         rpc('notifications/initialized', {}, notification=True)
         own = tool('keeper_candle_balance', {})
-        require(own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '0', own)
+        require(own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '100', own)
         tool('keeper_candle_balance', {'keeper': 'another-keeper'}, validation_reason='empty_schema_args')
         starting = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})['equipment']
         item = 'shades' if starting['face'] == 'glasses' else 'glasses'
@@ -349,7 +351,7 @@ with (root / 'server.log').open('wb') as log:
             require(equipped['equipment'][slot] == starting[slot], equipped)
         status, updated = request(path)
         account_after = json.loads(updated)
-        require(status == 200 and account_after['balance_milli'] == '0', account_after)
+        require(status == 200 and account_after['balance_milli'] == '100', account_after)
         require(account_after['owned_items'] == [item], account_after)
         (root / 'account-after.json').write_bytes(updated)
         status, equipped_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
@@ -362,6 +364,7 @@ with (root / 'server.log').open('wb') as log:
             subprocess.run(['node', str(browser_script)], input=json.dumps({
                 'origin': origin, 'token': token, 'output': str(root),
                 'sourceSha': source, 'keeper': 'item-runtime-probe', 'ownedItem': item,
+                'balanceLabel': '0.100 Candle',
             }), text=True, check=True, cwd=browser_script.parent, env=env)
         restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
         require(restored['equipment'] == starting, restored)
@@ -371,10 +374,44 @@ with (root / 'server.log').open('wb') as log:
         require(status == 200, status)
         require(hashlib.sha256(index).hexdigest() == hashlib.sha256(
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
+        # Leave the purchased accessory equipped for the restart proof.
+        tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+    finally:
+        stop_server()
+
+# Reuse only this harness's isolated workspace and credential store. A new
+# native process must recover the authoritative ledger rather than cached state.
+server_generation = 2
+reservation, port = reserve_port()
+origin = f'http://127.0.0.1:{port}'
+with (root / 'server.log').open('ab') as log:
+    try:
+        start_ready(log)
+        status, persisted_body = request(path)
+        persisted = json.loads(persisted_body)
+        require(status == 200 and persisted == account_after, ('restart lost Item account', persisted))
+        (root / 'account-restarted.json').write_bytes(persisted_body)
+        status, persisted_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        require(status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment')
+        (root / 'portrait-restarted.png').write_bytes(persisted_png)
+        # Sessions belong to a process; authenticate and initialize a fresh MCP session.
+        rpc_session.clear()
+        rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                           'clientInfo': {'name': 'item-http-restart', 'version': '1'}})
+        rpc('notifications/initialized', {}, notification=True)
+        persisted_wallet = tool('keeper_candle_balance', {})
+        require(persisted_wallet['balance_milli'] == '100' and persisted_wallet['owned_items'] == [item], persisted_wallet)
+        tool('keeper_candle_purchase', {'item': item}, 'already_owned')
+        unchanged = tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+        require(unchanged['changed'] is False and unchanged['equipment'] == equipped['equipment'], unchanged)
+        restored_after_restart = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
+        require(restored_after_restart['equipment'] == starting, restored_after_restart)
+        status, default_after_restart = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        require(status == 200 and default_after_restart == png, 'default restore after restart differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
-            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
-            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, passed=True)
+            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, synthetic 100-milli Paid ledger credit and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
+            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, restart_verified=True, passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Isolated Item HTTP acceptance: PASS')
     finally:

@@ -122,15 +122,16 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, loadPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
-import type { BoardComment } from '../../types/core'
+import type { BoardComment, BoardPost } from '../../types/core'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   routerMock.route.value = { params: {} }
   detailComments.value = []
+  detailPostId.value = null
   detailCommentPage.value = { offset: 0, total: 0 }
 })
 
@@ -300,12 +301,13 @@ describe('CommentThread', () => {
       },
     ] as any
 
-    render(h(CommentThread, { comments, postId: 'post-1' }))
+    render(h(CommentThread, { comments, postId: 'post-1', focusedCommentId: 'c1' }))
 
     fireEvent.click(screen.getByRole('button', { name: '댓글 추천' }))
     await Promise.resolve()
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
+    expect(loadPostDetail).toHaveBeenCalledWith('post-1', 'c1')
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
@@ -501,6 +503,28 @@ describe('filterCommentTree', () => {
 })
 
 describe('PostDetail', () => {
+  it('loads missing ancestors when an already loaded reply gains route focus', async () => {
+    const post: BoardPost = {
+      id: 'post-1', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 21,
+      created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:00:00Z',
+    }
+    detailPostId.value = post.id
+    detailCommentPage.value = { offset: 20, total: 21 }
+    detailComments.value = [{
+      id: 'reply', post_id: post.id, parent_id: 'missing-parent', author: 'keeper',
+      content: 'loaded reply', created_at: post.created_at,
+    }]
+    routerMock.route.value = { params: { post: post.id } }
+    const { rerender } = render(h(PostDetail, { post }))
+    expect(loadPostDetail).not.toHaveBeenCalled()
+
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    rerender(h(PostDetail, { post: { ...post } }))
+
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, 'reply'))
+  })
+
   it('renders the classification reason when present', () => {
     const post = {
       id: 'post-1',
@@ -594,6 +618,7 @@ describe('PostDetail', () => {
       comments: [],
     } as any
 
+    routerMock.route.value = { params: { post: 'post-1', comment: 'older-focused' } }
     render(h(PostDetail, { post }))
 
     const downvote = screen.getByRole('button', { name: '▼ 비추천' })
@@ -601,9 +626,11 @@ describe('PostDetail', () => {
     expect(downvote).toBeDisabled()
     expect(screen.getByRole('button', { name: '▲ 추천' })).toHaveAttribute('aria-pressed', 'false')
 
+    vi.mocked(loadPostDetail).mockClear()
     fireEvent.click(screen.getByRole('button', { name: '▲ 추천' }))
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
+      expect(loadPostDetail).toHaveBeenCalledWith('post-1', 'older-focused')
     })
   })
 

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { focusedCommentNeedsAncestors } from './comment-context'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
@@ -249,7 +250,7 @@ function CommentItem({
   const handleCommentVote = async (dir: 'up' | 'down') => {
     try {
       await voteComment(comment.id, dir)
-      await loadPostDetail(postId)
+      await loadPostDetail(postId, focusedCommentId)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] comment vote failed (comment=${comment.id}, dir=${dir})`, err instanceof Error ? err.message : err)
@@ -544,7 +545,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
   useEffect(() => {
     if (detailPostId.value !== post.id
-      || (focusedCommentId && !detailComments.value.some(comment => comment.id === focusedCommentId))) {
+      || (focusedCommentId && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)
     }
   }, [post.id, focusedCommentId])
@@ -552,7 +553,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const handleVote = async (dir: 'up' | 'down') => {
     try {
       await votePost(post.id, dir)
-      await loadPostDetail(post.id)
+      await loadPostDetail(post.id, focusedCommentId)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)

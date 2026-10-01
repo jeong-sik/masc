@@ -116,6 +116,19 @@ Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized
 through `Keeper_turn_admission`.
 
+For explicitly requested targeted verification, the surviving
+`test_tool_input_validation` suite exercises Execute's accepted fields and
+rejects background and async lifecycle fields. Dispatch it at the reviewed PR
+branch with the Test workflow (do not count another head's result):
+
+```bash
+gh workflow run test.yml --ref <reviewed-pr-branch> -f suite=test_tool_input_validation
+```
+
+The removed shell checker is not required. A dispatch is a request, not a passing
+result; retain the completed run URL and its exact head with the verification.
+
+
 ## Counter Endpoint
 
 ```text

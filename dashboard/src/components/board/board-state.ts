@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { focusedCommentNeedsAncestors, mergeCommentPages } from './comment-context'
 import { showToast } from '../common/toast'
 import {
   boardPosts,
@@ -373,11 +374,11 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     let comments = data.comments
     let page = data.commentPage
     while (focusedCommentId && page.offset > 0
-      && !comments.some(comment => comment.id === focusedCommentId)) {
+      && focusedCommentNeedsAncestors(comments, focusedCommentId)) {
       const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
       const older = await fetchBoardPost(postId, offset, page.offset - offset)
       if (detailPostId.value !== postId || detailRequestId !== requestId) return
-      comments = [...older.comments, ...comments]
+      comments = mergeCommentPages(older.comments, comments)
       page = older.commentPage
     }
     detailComments.value = comments
@@ -406,11 +407,7 @@ export async function loadOlderPostComments(postId: string) {
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
-    const seen = new Set(detailComments.value.map(comment => comment.id))
-    detailComments.value = [
-      ...data.comments.filter(comment => !seen.has(comment.id)),
-      ...detailComments.value,
-    ]
+    detailComments.value = mergeCommentPages(data.comments, detailComments.value)
     detailCommentPage.value = data.commentPage
   } catch (err) {
     console.warn('[Board] failed to load older comments:', postId, err)

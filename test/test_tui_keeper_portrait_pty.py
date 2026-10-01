@@ -624,6 +624,14 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
         # without a second key press or leaving/re-entering the tab.
         await_frame(process, fd, output, b"Balance 13.000 Candle")
         assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
+        # Passive decay changes the observed balance without changing the
+        # durable account revision. It must refresh Items while the tab stays open.
+        items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="12000")
+        for row in roster["keepers"]:
+            if row["name"] == "alpha":
+                row["candle_balance_milli"] = "12000"
+        await_frame(process, fd, output, b"Balance 12.000 Candle")
+        assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
         # Turning Candle off cannot leave B's ready Item account alongside an
         # off roster. The next current reading withdraws it before a new GET.
         roster["candle"] = {"status": "off"}

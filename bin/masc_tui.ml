@@ -3086,24 +3086,10 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
     let request = { live_view = !msx_poll_view; live_port = state.port } in
     state.dos_live_in_flight <- Some request;
     let since = Masc_tui_machine_live.since state.dos_live in
-    let run () =
-      let result =
-        try
-          Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.live_port
-            Masc.Machine_lane.Dos ~since
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Dos_live_loaded (request, result))
-    in
-    (try
-       match Eio_context.get_switch_opt () with
-       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-       | None -> enqueue_async mailbox (Dos_live_loaded (request, Error "Eio switch is unavailable"))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> enqueue_async mailbox (Dos_live_loaded (request, Error (Printexc.to_string exn))))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Dos_live_loaded (request, result))
+      (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
+        ~port:request.live_port Masc.Machine_lane.Dos ~since)
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -3568,45 +3554,23 @@ let launch_task_history_load state ~mailbox task_id =
    like the resource browser: a human-cadence action does not earn a held
    connection. The server's task FSM stays the judge of whether this task
    can still be cancelled. *)
-let launch_task_cancel state ~mailbox ~task_id ~reason =
+let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-cancel-%.6f" (Unix.gettimeofday ()) in
-  let run () =
-    let result =
-      try
-        match
-          Masc_tui_http.open_mcp_session ~host ~port
-            ~client_version:Runtime_build_version.current
-        with
-        | Error detail -> Error detail
-        | Ok session_id -> (
-            let arguments =
-              Masc_tui_mcp.task_cancel_arguments ~task_id ~reason
-            in
-            match
-              Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
-                ~tool:"masc_transition" ~arguments
-            with
-            | Error detail -> Error detail
-            | Ok outcome ->
-                if outcome.Masc_tui_mcp.is_error then
-                  Error outcome.Masc_tui_mcp.text
-                else Ok outcome.Masc_tui_mcp.text)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Task_cancel_done (task_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Task_cancel_done (task_id, Error "Eio switch is unavailable"))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Task_cancel_done (task_id, result))
+    (fun () ->
+      let ( let* ) = Result.bind in
+      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+      let* session_id = Masc_tui_http.open_mcp_session ~host ~port
+          ~client_version:Runtime_build_version.current in
+      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+      let arguments = Masc_tui_mcp.task_cancel_arguments ~task_id ~reason in
+      let* outcome = Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
+          ~tool:"masc_transition" ~arguments in
+      if outcome.Masc_tui_mcp.is_error then Error outcome.Masc_tui_mcp.text
+      else Ok outcome.Masc_tui_mcp.text)
 
 (* The operator evidence bundle for the verification detail, over HTTP.
    Keyed by task id so a stale answer for a request the operator already
@@ -4216,10 +4180,8 @@ let launch_github_token_save state ~mailbox keeper_name token =
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~source:Masc_tui_async_read.Runtime_config
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_config_view_loaded result))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Runtime_config_view_loaded result)
     (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
@@ -4248,10 +4210,8 @@ let launch_prompts_load state ~mailbox =
 let launch_preset_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (wrap result))
-    (fun () -> call ~host ~port)
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:wrap (fun () -> call ~host ~port)
 
 (* A revoked invite's link opens nothing, so its card goes, whether or not it
    is the one on screen. The card carries the name the server sent, made safe
@@ -5783,21 +5743,9 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
   let generation = state.fusion_launch_generation in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.launch_fusion_run ~host ~port ~request with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Fusion_launched (generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Fusion_launched (generation, result))
+    (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request)
 
 let launch_keeper_lanes_load state ~mailbox =
   let enqueue_async = workspace_enqueue state in
@@ -10935,6 +10883,27 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  state.task_detail_id <- None;
+  state.task_detail_scroll <- 0;
+  state.task_history <- None;
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  state.runtime_config_view <- None;
+  state.runtime_config_view_error <- None;
+  state.runtime_config_jump_section <- None;
+  state.runtime_config_status_open <- false;
+  state.runtime_account_form <- None;
+  state.presets_snapshot <- None;
+  state.presets_error <- None;
+  state.presets_cursor <- 0;
+  state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+  state.preset_save_draft <- None;
+  state.preset_restore_armed <- None;
+  state.preset_report <- None;
+  state.preset_busy <- false;
+  ignore (Masc_tui_types.abandon_fusion_launch state);
+  state.dos_live <- Masc_tui_machine_live.Unread;
+  state.dos_activity <- [];
+  state.dos_live_in_flight <- None;
   state.board_vote_armed <- None;
   state.board_compose_armed <- false;
   state.board_compose_reply_to <- None;
@@ -18316,6 +18285,8 @@ let main
      empty reason leaves the task untouched. The server's FSM decides
      whether the task is still cancellable. *)
   let handle_task_cancel () =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
     match state.task_detail_id with
     | None -> ()
     | Some task_id -> (
@@ -18347,7 +18318,7 @@ let main
                       report_action state "system" "cancel cancelled (empty reason)"
                     else
                       launch_task_cancel state ~mailbox:async_messages
-                        ~task_id ~reason)))
+                        ~authority ~identity ~task_id ~reason)))
   in
   (* From a table row to the line that declares it. The header the source
      pane needs is [models.NAME], quoted when the name carries a dot -- the
@@ -18426,9 +18397,11 @@ let main
      validates the text again but does not compare it with what the file held
      when the text was read, so a caller that holds text for long re-reads
      the file first; the account form does. *)
-  let save_runtime_config_text edited =
+  let save_runtime_config_text ~authority ~identity edited =
     let host = server_peer_host in
     let port = state.port in
+    let ( let* ) = Result.bind in
+    let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
     match
       Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited
     with
@@ -18439,6 +18412,7 @@ let main
       | Ok (Masc_tui_runtime_config_receipt.Cannot_save reason) ->
         Error ("preview rejected the edit: " ^ Terminal_text.single_line reason)
       | Ok Masc_tui_runtime_config_receipt.Can_save -> (
+        let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
         match
           Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
         with
@@ -18448,6 +18422,8 @@ let main
         | Error detail -> Error ("save failed: " ^ detail)))
   in
   let handle_runtime_config_edit () =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some { rcv_rows = rows; _ } -> (
@@ -18464,7 +18440,7 @@ let main
           report_editor_abort state ~action:"runtime.toml"
             ~cancelled:"runtime.toml unchanged" abort
         | Ok edited -> (
-          match save_runtime_config_text edited with
+          match save_runtime_config_text ~authority ~identity edited with
           | Ok summary -> report_action state "system" ("runtime.toml saved · " ^ summary)
           | Error message -> report_action state "error" message)))
   in
@@ -20645,10 +20621,15 @@ and is loaded on demand through keeper_skill.
                  report_action state "system"
                    "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
                | Masc_tui_runtime_account_form.Submitted form -> (
+                   let authority = state.workspace_authority in
+                   let identity = state.server_identity in
                    let current =
                      match
-                       Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
-                         ~port:state.port
+                       Result.bind
+                         (check_workspace_request state ~mailbox:async_messages ~authority ~identity
+                            ~host:server_peer_host ~port:state.port ())
+                         (fun () -> Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
+                           ~port:state.port)
                      with
                      | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
                      | Ok json -> (
@@ -20667,7 +20648,7 @@ and is loaded on demand through keeper_skill.
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
                    | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
-                       match save_runtime_config_text text with
+                       match save_runtime_config_text ~authority ~identity text with
                        | Ok summary ->
                          (* A sign-in keeps the form open on its command;
                             Antigravity has none and closes. *)

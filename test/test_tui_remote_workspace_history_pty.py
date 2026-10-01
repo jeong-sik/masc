@@ -911,6 +911,52 @@ def schedule_editor_workspace_change(binary: str) -> None:
             refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
+def runtime_config_editor_workspace_change(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
+        **h.runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml", "source_text": h.config_navigation_source(),
+    })
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health})
+    posts: h.HttpRequests = []
+    with tempfile.TemporaryDirectory(prefix="tui-runtime-workspace-editor-") as work:
+        started, release = Path(work, "started"), Path(work, "release")
+        editor = Path(work, "edit.py")
+        editor.write_text("import sys, time\nfrom pathlib import Path\n"
+            "path=Path(sys.argv[1]); path.write_text(path.read_text() + '\\n# edited in A\\n')\n"
+            f"Path({str(started)!r}).touch()\n"
+            f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
+        def interact(process, fd, _slave, output, _base):
+            try:
+                h.resize_and_wait(process, fd, output,
+                    rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                h.tab_until(process, fd, output, b"MASC System")
+                h.wait_for_output(process, fd, output, b"first-value = ", start=0, timeout=WAIT_SECONDS)
+                os.write(fd, b"e")
+                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                    timeout=WAIT_SECONDS), "runtime config editor did not open"
+                # The clone keeps the same config revision.
+                # No event-loop refresh can retire A while $EDITOR blocks.
+                wire.publish("b")
+                release.touch()
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
+                    "post-editor identity change was not visibly refused"
+                assert not [p for p, _ in posts if p.startswith("/api/v1/runtime/config/")], \
+                    "the edited A runtime config reached a preview or save in B"
+                os.write(fd, b"q")
+            finally:
+                release.touch()
+        h.run_terminal_scenario(binary,
+            description="workspace replacement while runtime.toml editor blocks refuses preview and save",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
+            refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
+
+
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
@@ -1548,6 +1594,7 @@ if __name__ == "__main__":
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     schedule_editor_workspace_change(binary)
+    runtime_config_editor_workspace_change(binary)
     ask_workspace_withdrawal(binary)
     github_workspace_withdrawal(binary)
     run(binary, captures)

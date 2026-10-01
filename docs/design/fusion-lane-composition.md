@@ -108,3 +108,29 @@ Source authority: `lib/fusion_core/fusion_run_registry.ml`,
 `lib/fusion/fusion_orchestrator.mli`,
 `lib/fusion/fusion_delivery_obligation.mli`,
 and [generic output composition](../guides/lane-output-composition.md).
+
+## Readable report output
+
+The `fusion-report` package adds an executable projection after `fusion-results`:
+native Fusion run → captured status/result → report → host Evidence delivery.
+Its named `report` port contains the retained analysis body and exact input
+lineage. The package keeps analysis completion, input completeness and delivery
+as separate states. Report generation is implemented; model computation inside
+an isolated Fusion package and graph-driven Broadcast execution remain follow-up
+work under issue #40183.
+
+The report port includes a shared input-context row and the individual reports
+that reference it. That context retains the whole input coverage, exact producer
+coordinates, compact upstream row references and the immutable host output
+digest. Full source rows remain readable through that digest. Each analysis body
+appears once; metadata is not multiplied by the number of reported runs. MCP
+structuredContent carries these rows, while text content summarizes the result.
+The final serialized reply must fit the package manifest's resource envelope;
+an oversized reply is refused without truncating analysis or accepting a report.
+
+Regenerate the fixture composition and preview with
+`python3 scripts/fusion-report-preview.py`, then regenerate browser screenshots
+and receipts with `python3 scripts/fusion-report-preview-browser.py` (requires
+Playwright and its Chromium browser). Browser receipts in
+`docs/evidence/fusion-report-20260930/preview-checks.json` identify the exact HTML
+and composition hashes, delivery label, lineage interaction and screenshots.

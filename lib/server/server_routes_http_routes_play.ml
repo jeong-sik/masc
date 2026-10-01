@@ -90,8 +90,15 @@ let current_controller () =
   | Error _ -> None
 
 let list_json ~config =
-  let controller = current_controller () in
-  `Assoc
+  match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
+  | Error error ->
+    let code = match error with
+      | Auth.Invalid_credential_expiry _ -> "invalid_credential_expiry"
+      | Auth.Unreadable_credential _ -> "credential_store_unavailable" in
+    `Service_unavailable, Server_refusal.json ~code (Auth.credential_listing_error_to_string error)
+  | Ok invites ->
+    let controller = current_controller () in
+    `OK, `Assoc
     [ ( "invites"
       , `List
           (List.map
@@ -102,7 +109,7 @@ let list_json ~config =
                  ; ("expired", `Bool expired)
                  ; ("holds_controller", `Bool (controller = Some invite_name))
                  ])
-             (Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()))) )
+             invites))
     ]
 
 type release =
@@ -204,8 +211,8 @@ let add_routes router =
   |> Http.Router.get invites_path (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _by request reqd ->
-           respond_json_value_with_cors request reqd
-             (list_json ~config:(Mcp_server.workspace_config state)))
+           let status, json = list_json ~config:(Mcp_server.workspace_config state) in
+           respond_json_value_with_cors ~status request reqd json)
          request reqd)
   |> Http.Router.prefix_delete invite_prefix (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

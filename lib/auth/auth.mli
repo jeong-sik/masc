@@ -170,13 +170,28 @@ val raw_token_file : string -> string -> string
 val delete_credential : string -> string -> unit
 (** Retire [agent_name]: the credential, its redirect stub and UUID file, and
     the raw token file, then invalidate the credential cache. The bearer stops
-    validating from the next request. Absent files are not an error. *)
+    validating from the next request. Absent files are not an error. Redirect
+    aliases are refused: request the payload's canonical owner instead. Expiry
+    decoding is not required for explicit canonical-owner revocation. *)
 
 val delete_credential_in_transaction :
   credential_transaction -> string -> (unit, masc_error) result
 (** The same deletion, using the workspace already admitted by
     {!with_credential_transaction}. No second lock is acquired. Cache
     invalidation also runs if a removal fails after a partial deletion. *)
+
+type credential_listing_error =
+  | Invalid_credential_expiry of
+      { agent_name : string; role : agent_role; timestamp : string }
+  | Unreadable_credential of { path : string; reason : string }
+
+val list_credential_results :
+  string -> (agent_credential, credential_listing_error) result list
+(** Diagnostic listing that retains malformed expiry and read/decode failures.
+    Invalid records are never returned as authentication credentials. Redirect
+    aliases are de-duplicated by the resolved record or failing target. *)
+
+val credential_listing_error_to_string : credential_listing_error -> string
 
 val list_credentials : string -> agent_credential list
 

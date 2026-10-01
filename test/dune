@@ -2585,6 +2585,7 @@
 (include stanzas/test_sandbox_image_version.inc)
 (include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
+(include stanzas/test_credential_expiry.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_builtin_skill_judgement.inc)

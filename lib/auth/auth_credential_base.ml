@@ -279,7 +279,9 @@ let load_redirect_target config path =
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;
 
-let remove_file_if_exists path = if file_exists path then remove_file path
+let remove_file_if_exists path =
+  try run_blocking_io (fun () -> Unix.unlink path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 (* [agent_name]'s own file, then the id-named file its redirect stub points
    to. A name that signs in with another name's token (a generated nickname,
@@ -533,24 +535,108 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(* Open nonblocking and validate the descriptor we actually read. Following a
+   regular-file symlink is allowed; special-file replacement cannot block. *)
+let read_regular_credential_text path =
+  run_blocking_io (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        raise (Sys_error (Printf.sprintf "credential path is not a regular file: %s" path));
+      let content = Buffer.create 256 in
+      let chunk = Bytes.create 4096 in
+      let rec read () =
+        let count = Unix.read fd chunk 0 (Bytes.length chunk) in
+        if count > 0 then (Buffer.add_subbytes content chunk 0 count; read ()) in
+      read ();
+      let after = Unix.fstat fd in
+      let named = Unix.stat path in
+      if before.Unix.st_dev <> after.Unix.st_dev || before.Unix.st_ino <> after.Unix.st_ino
+         || before.Unix.st_size <> after.Unix.st_size || before.Unix.st_mtime <> after.Unix.st_mtime
+         || before.Unix.st_ctime <> after.Unix.st_ctime
+         || after.Unix.st_dev <> named.Unix.st_dev || after.Unix.st_ino <> named.Unix.st_ino
+      then raise (Sys_error (Printf.sprintf "credential changed during verified read: %s" path));
+      Buffer.contents content))
+;;
+
+(* Revocation admits only the payload's canonical name. Expiry need not decode,
+   but an alias must not retire another owner's UUID and leave its raw bearer. *)
+let credential_revocation_targets config agent_name =
+  let file = credential_file config agent_name in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "cannot revoke %s: %s" agent_name detail))) in
+  let read_json path =
+    try
+      Ok (Some (Yojson.Safe.from_string (read_regular_credential_text path)))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Yojson.Json_error _ -> refused "credential owner cannot be decoded"
+    | Sys_error detail -> Error (System (System_error.IoError detail))
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (System (System_error.IoError
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+    | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn))) in
+  let ( let* ) = Result.bind in
+  let require_owner = function
+    | None -> Ok ()
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "agent_name" fields with
+       | Some (`String owner) when String.equal owner agent_name -> Ok ()
+       | Some (`String _) -> refused "requested name is an alias, not the canonical owner"
+       | _ -> refused "credential owner cannot be decoded")
+    | Some _ -> refused "credential owner cannot be decoded" in
+  let* named = read_json file in
+  let* redirect, payload = match named with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "redirect_to" fields with
+       | Some (`String target) ->
+         (match redirect_target_file config target with
+          | Some path -> let* payload = read_json path in Ok (Some path, payload)
+          | None -> refused "invalid redirect target")
+       | _ -> Ok (None, named))
+    | _ -> Ok (None, named) in
+  let* () = require_owner payload in
+  (* Keep the embedded ID even when expiry or another unrelated field cannot
+     decode. Verify every payload owner before deleting any named/raw path. *)
+  let* uuid = match payload with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "id" fields with
+       | None | Some `Null -> Ok None
+       | Some (`String id) ->
+         (match redirect_target_file config (id ^ ".json") with
+          | None -> refused "credential UUID is not a store filename"
+          | Some path ->
+            let* target = read_json path in
+            let* () = require_owner target in
+            let* () = match target with
+              | Some (`Assoc fields) ->
+                (match List.assoc_opt "id" fields with
+                 | Some (`String target_id) when String.equal id target_id -> Ok ()
+                 | _ -> refused "UUID payload does not carry its referenced ID")
+              | None -> Ok ()
+              | Some _ -> refused "UUID payload cannot be decoded" in
+            Ok (Some path))
+       | Some _ -> refused "credential UUID cannot be decoded")
+    | None -> Ok None
+    | Some _ -> refused "credential owner cannot be decoded" in
+  Ok (List.sort_uniq String.compare (List.filter_map Fun.id [redirect; uuid]))
+
+;;
+
 (** Delete using the caller's admitted workspace. The public wrapper and
     multi-effect transactions share this implementation. *)
 let delete_credential_in_transaction (Credential_transaction config) agent_name =
+  let ( let* ) = Result.bind in
+  let* targets = credential_revocation_targets config agent_name in
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
         let file = credential_file config agent_name in
         let raw_token = raw_token_file config agent_name in
-        let redirect_target = load_redirect_target config file in
-        let credential_target =
-          match load_credential config agent_name with
-          | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
-          | _ -> None
-        in
         remove_file_if_exists file;
         remove_file_if_exists raw_token;
-        Option.iter remove_file_if_exists redirect_target;
-        Option.iter remove_file_if_exists credential_target;
+        List.iter remove_file_if_exists targets;
         Ok ())
   with
   | Sys_error detail -> Error (System (System_error.IoError detail))
@@ -611,6 +697,82 @@ let list_credentials config : agent_credential list =
          []
     |> List.rev
   else []
+;;
+
+type credential_listing_error =
+  | Invalid_credential_expiry of
+      { agent_name : string; role : agent_role; timestamp : string }
+  | Unreadable_credential of { path : string; reason : string }
+
+let credential_listing_error_to_string = function
+  | Invalid_credential_expiry { agent_name; timestamp; _ } ->
+    Printf.sprintf "invalid credential expiry for %s: %S" agent_name timestamp
+  | Unreadable_credential { path; reason } ->
+    Printf.sprintf "credential %s is unreadable: %s" path reason
+;;
+
+let list_credential_results config =
+  let unreadable path reason = Error (Unreadable_credential { path; reason }) in
+  let decode path json =
+    match agent_credential_of_yojson json with
+    | Ok credential -> Ok credential
+    | Error reason ->
+      (* Parse the remaining fields only to identify the rejected record for
+         diagnostics. The placeholder never escapes as a valid credential. *)
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "expires_at" fields with
+          | Some (`String timestamp) ->
+            (match Credential_expiry.parse (Some timestamp) with
+             | Ok _ -> unreadable path reason
+             | Error (Credential_expiry.Invalid_timestamp _) ->
+               let without_expiry = `Assoc (List.map (fun (key, value) ->
+                 key, if String.equal key "expires_at" then `Null else value) fields) in
+               (match agent_credential_of_yojson without_expiry with
+                | Error _ -> unreadable path reason
+                | Ok credential -> Error (Invalid_credential_expiry
+                    { agent_name = credential.agent_name; role = credential.role; timestamp })))
+          | Some _ | None -> unreadable path reason)
+       | _ -> unreadable path reason)
+  in
+  let read_json path =
+    try Ok (Yojson.Safe.from_string (read_regular_credential_text path)) with
+    | Sys_error reason | Yojson.Json_error reason -> unreadable path reason
+    | Unix.Unix_error (error, operation, argument) ->
+      unreadable path (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+    | Eio.Io _ as exn -> unreadable path (Printexc.to_string exn)
+  in
+  let read path =
+    let ( let* ) = Result.bind in
+    let* json = read_json path in
+    match json with
+    | `Assoc [ "redirect_to", `String target ] ->
+      (match redirect_target_file config target with
+       | None -> unreadable path "invalid redirect target"
+       | Some target_path ->
+         let* target_json = read_json target_path in
+         decode target_path target_json)
+    | _ -> decode path json
+  in
+  let dir = agents_dir config in
+  let entries =
+    try
+      let present =
+        try
+          let _ = run_blocking_io (fun () -> Unix.lstat dir) in true
+        with Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+      if not present then []
+      else read_dir dir |> Array.to_list
+        |> List.filter (fun file -> Filename.check_suffix file ".json")
+        |> List.sort String.compare
+        |> List.map (fun file -> read (Filename.concat dir file))
+    with
+    | Sys_error reason -> [ unreadable dir reason ]
+    | Unix.Unix_error (error, operation, argument) ->
+      [ unreadable dir (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)) ]
+    | Eio.Io _ as exn -> [ unreadable dir (Printexc.to_string exn) ]
+  in
+  List.sort_uniq compare entries
 ;;
 
 (* ============================================ *)

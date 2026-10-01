@@ -211,6 +211,17 @@ let fresh_matches_for_token_hash config token_hash matches =
     | None -> Ok [])
 ;;
 
+let require_live_credential ~now (credential : agent_credential) =
+  match Credential_expiry.parse credential.expires_at with
+  | Error (Credential_expiry.Invalid_timestamp stamp) ->
+    Error (Auth (Auth_error.InvalidToken
+      (Printf.sprintf "Invalid credential expiry for %s: %S" credential.agent_name stamp)))
+  | Ok expiry ->
+    if Credential_expiry.is_expired ~now expiry
+    then Error (Auth (Auth_error.TokenExpired credential.agent_name))
+    else Ok credential
+;;
+
 (** Find credential by raw token (hash lookup + expiry check).
 
     #9786 runtime complement: when N>=2 credentials share the
@@ -251,13 +262,7 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
             Auth_metric_store.metric_auth_credential_ambiguous_lookup
             ~labels:[ "first_match", first.agent_name ]
             ());
-       (match first.expires_at with
-        | None -> Ok first
-        | Some exp_str ->
-          let now = now_iso () in
-          if now > exp_str
-          then Error (Auth (Auth_error.TokenExpired first.agent_name))
-          else Ok first))
+       require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
 (** Resolve either an OAuth access token or the existing static bearer.
@@ -603,7 +608,11 @@ let verify_token_owner_alias config ~agent_name ~token =
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
   | None ->
-    (match Auth_oauth.find_access_credential ~base_path:config ~token with
+    let ( let* ) = Result.bind in
+    let* present = credential_path_exists (credential_file config agent_name) in
+    if present then Error (Auth (Auth_error.InvalidToken
+      "The exact credential exists but cannot be decoded; alias fallback is refused"))
+    else (match Auth_oauth.find_access_credential ~base_path:config ~token with
      | Ok (Some credential) when String.equal credential.agent_name agent_name ->
        Ok credential
      | Ok (Some credential) ->
@@ -643,14 +652,5 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
                  }))
        | Ok None -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
        | Error error -> Error error)
-    else (
-      (* Check expiry *)
-      match cred.expires_at with
-      | None -> Ok cred
-      | Some exp_str ->
-        (* Simple ISO string comparison works for UTC *)
-        let now = now_iso () in
-        if now > exp_str
-        then Error (Auth (Auth_error.TokenExpired agent_name))
-        else Ok cred)
+    else require_live_credential ~now:(Time_compat.now ()) cred
 ;;

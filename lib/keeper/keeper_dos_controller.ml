@@ -53,10 +53,16 @@ let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
     Log.Auth.warn "DOS controller departure cannot read credential for %s: %s" holder detail;
     None
   | Ok (Some ({ Masc_domain.agent_name; _ } as credential))
-    when String.equal agent_name holder && Play_invite.expired ~now credential ->
-    (match auth_mode ~config with
-     | Enforced -> Some Tool_misc_dos_lane.Credential_expired
-     | Self_declared | Unreadable _ -> None)
+    when String.equal agent_name holder ->
+    (match Play_invite.expired ~now credential with
+     | Ok true ->
+       (match auth_mode ~config with
+        | Enforced -> Some Tool_misc_dos_lane.Credential_expired
+        | Self_declared | Unreadable _ -> None)
+     | Ok false -> None
+     | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
+       Log.Auth.warn "DOS controller cannot read credential expiry for %s: %S" holder stamp;
+       None)
   | Ok (Some _) -> None
   | Ok None ->
     (match auth_mode ~config with

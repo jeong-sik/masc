@@ -83,14 +83,20 @@ type invite =
   ; expired : bool
   }
 
-val expired : now:float -> Masc_domain.agent_credential -> bool
+val expired :
+  now:float -> Masc_domain.agent_credential ->
+  (bool, Masc_domain.Credential_expiry.error) result
 (** Whether a credential's time has run out at [now]. A credential with no
     [expires_at] never expires; an invite always has one. This is the rule a
     static bearer is checked by: whole UTC seconds and a strict [now > expiry],
-    so the bearer still works during its expiry second. *)
+    so the bearer still works during its expiry second. A malformed in-memory
+    expiry returns [Error]; persisted malformed credentials fail decoding. *)
 
-val list : base_path:string -> now:float -> invite list
-(** Every [Player] credential, expired ones included, by name. *)
+val list :
+  base_path:string -> now:float ->
+  (invite list, Auth.credential_listing_error) result
+(** Every [Player] credential, expired ones included, by name. An invalid
+    expiry or unreadable stored record returns [Error] rather than omitting it. *)
 
 type revoked =
   | Deleted  (** the invite's credential was there and is gone *)

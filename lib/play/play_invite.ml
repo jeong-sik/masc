@@ -113,18 +113,26 @@ type invite =
   }
 
 let expired ~now (cred : Masc_domain.agent_credential) =
-  match cred.expires_at with
-  | Some expires_at -> String.compare (Masc_domain.iso8601_of_unix_seconds now) expires_at > 0
-  | None -> false
+  Masc_domain.Credential_expiry.parse cred.expires_at
+  |> Result.map (Masc_domain.Credential_expiry.is_expired ~now)
 
 let list ~base_path ~now =
-  Auth.list_credentials base_path
-  |> List.filter_map (fun (cred : Masc_domain.agent_credential) ->
-    match cred.role with
-    | Masc_domain.Player ->
-      Some { invite_name = cred.agent_name; expires_at = cred.expires_at; expired = expired ~now cred }
-    | Masc_domain.Worker | Masc_domain.Admin -> None)
-  |> List.sort (fun a b -> String.compare a.invite_name b.invite_name)
+  let rec collect invites = function
+    | [] -> Ok (List.sort (fun a b -> String.compare a.invite_name b.invite_name) invites)
+    | Error (Auth.Invalid_credential_expiry { role = (Masc_domain.Worker | Masc_domain.Admin); _ }) :: rest ->
+      collect invites rest
+    | Error error :: _ -> Error error
+    | Ok (cred : Masc_domain.agent_credential) :: rest ->
+      (match cred.role with
+       | Masc_domain.Player ->
+         let expiry = expired ~now cred |> Result.map_error
+             (fun (Masc_domain.Credential_expiry.Invalid_timestamp timestamp) ->
+               Auth.Invalid_credential_expiry { agent_name = cred.agent_name; role = cred.role; timestamp }) in
+         Result.bind expiry (fun expired ->
+           collect ({ invite_name = cred.agent_name; expires_at = cred.expires_at; expired } :: invites) rest)
+       | Masc_domain.Worker | Masc_domain.Admin -> collect invites rest)
+  in
+  collect [] (Auth.list_credential_results base_path)
 
 type revoked =
   | Deleted

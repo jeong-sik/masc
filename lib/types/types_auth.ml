@@ -60,6 +60,27 @@ let agent_role_of_yojson = function
             (List.map (Printf.sprintf "%S") valid_agent_role_strings))
          (Json_util.kind_name other))
 
+module Credential_expiry = struct
+  type t = No_expiry | At of float
+  type error = Invalid_timestamp of string
+
+  let parse = function
+    | None -> Ok No_expiry
+    | Some stamp ->
+      (match Time_codec.parse_rfc3339_whole_seconds stamp with
+       | Ok seconds -> Ok (At seconds)
+       | Error Time_codec.Invalid_rfc3339 -> Error (Invalid_timestamp stamp))
+
+  let normalize expires_at =
+    Result.map
+      (function No_expiry -> None | At seconds -> Some (Time_codec.rfc3339_of_unix seconds))
+      (parse expires_at)
+
+  let is_expired ~now = function
+    | No_expiry -> false
+    | At seconds -> Float.floor now > seconds
+end
+
 (** Agent credential - used for token-based auth *)
 type agent_credential = {
   id: Credential_id.t option; [@default None]
@@ -141,6 +162,11 @@ let agent_credential_of_yojson json =
   let* role = agent_role_of_string role_name in
   let* created_at = require_credential_string fields "created_at" in
   let* expires_at = require_credential_optional_string fields "expires_at" in
+  let* expires_at =
+    Credential_expiry.normalize expires_at
+    |> Result.map_error (fun (Credential_expiry.Invalid_timestamp stamp) ->
+      Printf.sprintf "agent_credential_of_yojson: invalid RFC3339 expires_at %S" stamp)
+  in
   Ok
     {
       id = Option.map Credential_id.of_string id;

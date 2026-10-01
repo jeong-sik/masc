@@ -2773,7 +2773,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_keeper_logs" [ "k_name" ];
   check_fields ~module_path:"bin/masc_tui_types.ml"
-    ~non_rendering_calls:[ "Tui_decode.clock_timestamp_for_terminal" ]
+    ~non_rendering_calls:[ "Masc.Tui_terminal_text.clock_timestamp_for_terminal" ]
     "keeper_log_rows" [ "le_ts" ];
   (* The entry projector owns the full timestamp and every tool/work fact.
      [wrap] sanitizes the final text, including values assembled in lambdas. *)
@@ -2879,7 +2879,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "log renderer uses the safe clock projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_log_rows"
-       ~callee:"Tui_decode.clock_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper

@@ -93,6 +93,7 @@ jobs:
           trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 --retry-max-time 30 --max-time 5 "$KEEPER_ITEMS_FIXTURE_URL" > /dev/null
           pnpm exec node e2e/keeper-items.mjs
+          pnpm exec node e2e/keeper-items-workspace.mjs
 
       - name: Upload Item browser evidence
         if: always() && inputs.capture_item_browser

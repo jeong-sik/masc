@@ -276,6 +276,55 @@ let test_group_explicit_kill_reaps_leader_and_stops_descendant () =
       | _ -> fail "explicitly killed foreground leader left unreaped"))
 ;;
 
+let test_group_final_reap_needs_no_second_signal () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let interrupted = Atomic.make false in
+  let waitpid pid =
+    if not (Atomic.exchange interrupted true)
+    then raise (Unix.Unix_error (Unix.EINTR, "waitpid", ""))
+    else Unix.waitpid [] pid in
+  let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr
+      ~clock ~grace_seconds:2. ~waitpid in
+  Eio.Switch.run @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 7"] in
+  (match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Process.await proc) with
+   | `Exited code -> check int "actual exit survives interrupted final reap" 7 code
+   | `Signaled _ -> fail "completed child was reported killed");
+  check bool "final wait was reached" true (Atomic.get interrupted);
+  match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+  | _ -> fail "leader was not reaped exactly once"
+;;
+
+let test_group_final_reap_does_not_block_scheduler () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let entered, publish_entered = Eio.Promise.create () in
+  let input, output = Unix.pipe ~cloexec:true () in
+  Fun.protect ~finally:(fun () -> Unix.close input; Unix.close output) @@ fun () ->
+  let calls = Atomic.make 0 in
+  let waitpid pid =
+    ignore (Atomic.fetch_and_add calls 1 : int);
+    Eio.Promise.resolve publish_entered ();
+    let byte = Bytes.create 1 in
+    ignore (Unix.read input byte 0 1 : int);
+    Unix.waitpid [] pid in
+  let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr
+      ~clock ~grace_seconds:2. ~waitpid in
+  Eio.Switch.run @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 9"] in
+  Eio.Promise.await entered;
+  (* This fiber must run while the final wait blocks its system thread.
+     A concurrent termination request cannot signal/reap the owned PID. *)
+  Eio.Process.signal proc Sys.sigterm;
+  ignore (Unix.write_substring output "x" 0 1 : int);
+  (match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Process.await proc) with
+   | `Exited code -> check int "original exit preserved" 9 code
+   | `Signaled _ -> fail "reaping child was signalled");
+  check int "one owner performs final wait" 1 (Atomic.get calls)
+;;
+
 let test_group_normal_exit_reaps_in_long_lived_switch () =
   with_group_fixture (fun env marker ->
     let clock = Eio.Stdenv.clock env in
@@ -406,7 +455,11 @@ let () =
         ; test_case "a group needs the leader this process owns" `Quick
             test_group_without_its_owned_leader_is_not_ours ])
     ; ( "foreground group ownership",
-        [ test_case "TERM leader exits before closed-pipe descendant" `Quick
+        [ test_case "final reap leaves scheduler and signal responsive" `Quick
+            test_group_final_reap_does_not_block_scheduler
+        ; test_case "final reap needs no second SIGCHLD" `Quick
+            test_group_final_reap_needs_no_second_signal
+        ; test_case "TERM leader exits before closed-pipe descendant" `Quick
             (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
         ; test_case "TERM-ignoring leader still reaches group escalation" `Quick
             (test_group_term_keeps_owner_after_leader_exit ~mode:"ignore")

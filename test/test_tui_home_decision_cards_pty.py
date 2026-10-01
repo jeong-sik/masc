@@ -295,12 +295,12 @@ def operator_task_survives_supplemental_failure(executable):
                 recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
 
         def interact(process, fd, _slave, output, base):
-            h.wait_for_output(process, fd, output, b"Operator task \xc2\xb7 task-777", start=0, timeout=10)
+            _keyboard_harness.wait_for_output(process, fd, output, b"Operator task \xc2\xb7 task-777", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
             select_home(process, fd, output, b"Operator task \xc2\xb7 task-777", destinations=4)
-            h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
-            drawn = h.screen_text(bytes(output))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
+            drawn = _keyboard_harness.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
             if relative == "tasks/goal_task_links.json":
                 assert b"membership unknown" in drawn, drawn
@@ -311,19 +311,19 @@ def operator_task_survives_supplemental_failure(executable):
             snapshot["tasks"][0]["title"] = "Same primary task after refresh"
             snapshot["version"] += 1
             path.write_text(json.dumps(snapshot))
-            h.send_and_wait(process, fd, output, b"r", b"Same primary task after refresh")
-            drawn = h.screen_text(bytes(output))
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Same primary task after refresh")
+            drawn = _keyboard_harness.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
             if relative == "tasks/goal_task_links.json":
                 assert b"membership unknown" in drawn, drawn
                 assert b"not linked to a goal" not in drawn, drawn
                 assert b"goal-recovery" not in drawn, drawn
                 (Path(base) / ".masc" / relative).write_text(json.dumps({"links": []}))
-                h.send_and_wait(process, fd, output, b"r", b"not linked to a goal")
-                drawn = h.screen_text(bytes(output))
+                _keyboard_harness.send_and_wait(process, fd, output, b"r", b"not linked to a goal")
+                drawn = _keyboard_harness.screen_text(bytes(output))
                 assert b"membership unknown" not in drawn, drawn
             home.assert_no_decision_posts(requests)
-            h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
             assert_selected(output, b"Operator task \xc2\xb7 task-777")
             os.write(fd, b"q")
 
@@ -337,7 +337,7 @@ def recovered_tasks_are_not_current_cards(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"Operator tasks unavailable", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Operator tasks unavailable", start=0, timeout=10)
         visible = frame(process, fd, output, "operator-task-backup-reading")
         assert "Operator task ·".encode() not in visible, visible
         assert b"task-777" not in visible, visible

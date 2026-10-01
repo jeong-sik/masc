@@ -1,0 +1,7 @@
+(copy_files ../../../lib/keeper/keeper_tasks_list_query.ml)
+(copy_files ../../../lib/keeper/keeper_tasks_list_query.mli)
+(copy_files ../../../lib/keeper/keeper_tasks_list_cursor.ml)
+(copy_files ../../../lib/keeper/keeper_tasks_list_cursor.mli)
+(executable
+ (name probe)
+ (libraries masc.masc_types masc.string_util yojson base64))

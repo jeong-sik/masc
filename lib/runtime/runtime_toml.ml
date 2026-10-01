@@ -774,6 +774,23 @@ let parse_usage_read
     Error (error path "usage-read must be a TOML table")
 ;;
 
+let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match typed_find "an integer" path tbl key Otoml.get_integer with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0 -> Ok (Some value)
+  | Ok (Some value) ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf
+               "%s must be a positive integer; got %d"
+               key
+               value))
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
@@ -915,6 +932,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
          |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
        in
        (let ( let* ) = Result.bind in
+        let* max_context = positive_int_opt_field ~path ~key:"max-context" tbl in
         let* capabilities = capabilities_result in
         let* enabled_opt = enabled_result in
         let* healthcheck_path = healthcheck_result in
@@ -935,6 +953,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; transport
             ; is_non_interactive
             ; credentials
+            ; max_context
             ; account_home
             ; capabilities
             ; healthcheck_path
@@ -1275,23 +1294,6 @@ let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
     ~lower:probability_min
     ~upper:probability_max
     tbl
-;;
-
-let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
-  : (int option, parse_error list) result
-  =
-  match typed_find "an integer" path tbl key Otoml.get_integer with
-  | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some value) when value > 0 -> Ok (Some value)
-  | Ok (Some value) ->
-       Error
-         (error
-            (path ^ "." ^ key)
-            (Printf.sprintf
-               "%s must be a positive integer; got %d"
-               key
-               value))
 ;;
 
 let sampling_capability_errors
@@ -2196,6 +2198,12 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     typed_find_or "a boolean" path tbl "disable-parallel-tool-use"
       Otoml.get_boolean ~default:false
   in
+  let max_context_result =
+    match typed_find "an integer" path tbl "max-context" Otoml.get_integer with
+    | Ok (Some n) when n <= 0 ->
+      Error (error (path ^ ".max-context") "max-context must be a positive integer")
+    | result -> result
+  in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
     | Ok None -> Ok None
@@ -2316,6 +2324,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     Option.value wizard_default_opt ~default:false
     (* DET-OK: omitted means not selected for install wizard. *)
   in
+  let* max_context = max_context_result in
   let* max_concurrent = max_concurrent_result in
   let* disable_parallel_tool_use = disable_parallel_tool_use_result in
   let* context_marks = context_marks_result in
@@ -2333,6 +2342,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; enabled
     ; is_default
     ; wizard_default
+    ; max_context
     ; max_concurrent
     ; disable_parallel_tool_use
     ; context_marks

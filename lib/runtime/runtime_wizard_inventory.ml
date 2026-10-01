@@ -159,6 +159,13 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
+             (* Setup edits declarations, not a credential-probing runtime.
+                Preserve the most specific configured window in its form. *)
+             let declared_context = match binding.max_context, provider.max_context, model.max_context with
+               | Some tokens, _, _ -> Some (tokens, Runtime_instance.Binding_override)
+               | None, Some tokens, _ -> Some (tokens, Runtime_instance.Provider_override)
+               | None, None, Some tokens -> Some (tokens, Runtime_instance.Override)
+               | None, None, None -> None in
              let credential = credential_fields ~include_credential_references provider.credentials in
              Some
                (`Assoc
@@ -168,9 +175,13 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                     ; "protocol", `String provider.protocol
                     ; "model", `String model.api_name
                     ; ( "max_context"
-                      , match model.max_context with
+                      , match declared_context with
                         | None -> `Null
-                        | Some n -> `Int n )
+                        | Some (tokens, _) -> `Int tokens )
+                    ; ( "max_context_source"
+                      , match declared_context with
+                        | None -> `Null
+                        | Some (_, source) -> `String (Runtime_instance.max_context_source_to_string source) )
                     ; "tools", `Bool model.tools_support
                     ; "streaming", `Bool model.streaming
                     ]

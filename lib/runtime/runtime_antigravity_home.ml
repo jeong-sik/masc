@@ -686,6 +686,91 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
 
+(* [true] when the unreferenced revision directory holds nothing beyond what
+   [prepare_home_storage] seeds before publication: the managed directory
+   chain and a credential copy still byte-equal to the selected source.
+   Every later write — the pointer, settings, MCP config, CLI sessions, a
+   vendor-refreshed credential — disqualifies it, because reseeding from the
+   source cannot reproduce that state. *)
+let unreferenced_generation_is_reseedable ~seed revision_dir =
+  let lstat path = try Some (Unix.lstat path) with Unix.Unix_error _ -> None in
+  let directory path =
+    match lstat path with
+    | Some stat -> stat.Unix.st_kind = Unix.S_DIR
+    | None -> false in
+  let seeded_credential path =
+    match lstat path with
+    | Some stat ->
+      stat.Unix.st_kind = Unix.S_REG
+      && stat.Unix.st_uid = effective_uid
+      && stat.Unix.st_perm land 0o7777 = 0o600
+      && (match Fs_compat.load_file_opt path with
+          | Some contents -> String.equal contents seed
+          | None -> false)
+    | None -> false in
+  let children path =
+    if directory path then
+      match Sys.readdir path with
+      | found -> Some (Array.to_list found)
+      | exception Sys_error _ -> None
+    else Some [] in
+  let names_subset path permitted =
+    match children path with
+    | None -> false
+    | Some found -> List.for_all (fun name -> List.mem name permitted) found in
+  let present name path =
+    match children path with
+    | Some found -> List.mem name found
+    | None -> false in
+  let gemini = Filename.concat revision_dir ".gemini" in
+  let cli_dir = Filename.concat gemini "antigravity-cli" in
+  let config_dir = Filename.concat gemini "config" in
+  let credential = Filename.concat cli_dir "antigravity-oauth-token" in
+  names_subset revision_dir [".gemini"]
+  && names_subset gemini ["antigravity-cli"; "config"]
+  && names_subset cli_dir ["antigravity-oauth-token"]
+  && names_subset config_dir []
+  && (not (present ".gemini" revision_dir) || directory gemini)
+  && (not (present "antigravity-cli" gemini) || directory cli_dir)
+  && (not (present "config" gemini) || directory config_dir)
+  && (not (present "antigravity-oauth-token" cli_dir) || seeded_credential credential)
+;;
+
+(* Called only when no pointer is visible, under the exclusive preparation
+   lock, so no admitted generation can reference these entries. Clears the
+   pointer writer's staged temps and revisions that are exactly a fresh
+   seed, admitting a new generation instead of refusing forever. Any other
+   content is state reseeding cannot reproduce; the refusal preserves it
+   for the operator, and a removal failure refuses naming the path. *)
+let clear_reseedable_store ~sync_store ~seed ~store =
+  let entries = Array.to_list (Sys.readdir store) in
+  let reseedable entry =
+    Fs_compat.is_atomic_orphan_name entry
+    ||
+    let path = Filename.concat store entry in
+    match Unix.lstat path with
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      unreferenced_generation_is_reseedable ~seed path
+    | _ -> false
+  in
+  if not (List.for_all reseedable entries) then
+    Error (generation_error store
+      "account generation pointer is missing and the unreferenced entries are not reproducible from the selected credential")
+  else
+    let failures =
+      List.filter_map
+        (fun entry ->
+          let path = Filename.concat store entry in
+          try Fs_compat.remove_tree path; None with
+          | Sys_error detail -> Some (generation_error path detail)
+          | Unix.Unix_error (error, fn, arg) ->
+            Some (generation_error path (unix_error_detail error fn arg)))
+        entries in
+    match failures with
+    | [] -> sync_store store; Ok ()
+    | error :: _ -> Error error
+;;
+
 let select_generation ~sync_store
     ~(publish_pointer : string -> string -> (unit, Fs_compat.atomic_replace_failure) result)
     ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
@@ -701,7 +786,13 @@ let select_generation ~sync_store
   let* previous = match previous with
     | None ->
       if Array.length (Sys.readdir store) = 0 then Ok None
-      else Error (generation_error record_path "account generation pointer is missing from a populated store")
+      else
+        (* No pointer is visible under the exclusive preparation lock, so no
+           admitted generation references these entries; a store that only a
+           fresh seed can explain is cleared and reseeded, and any other
+           content refuses and preserves the entries. *)
+        let* () = clear_reseedable_store ~sync_store ~seed:source_bytes ~store in
+        Ok None
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
   | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->

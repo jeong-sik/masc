@@ -379,7 +379,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             roster_payload["candle"] = dict(READY)
             for row in roster_payload["keepers"]:
                 row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
-            row["candle_account_revision"] = "a" * 64
+                row["candle_account_revision"] = "a" * 64
         if phase != "error":
             fixtures[ROSTER_PATH] = (200, roster_payload)
 

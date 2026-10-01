@@ -1282,7 +1282,8 @@ let test_shared_python_revision_fixture () =
   List.iter (fun value ->
     match Ledger.of_projection_yojson value with
     | Error error -> failf "shared projection rejected: %s" (Ledger.decode_error_code error)
-    | Ok ledger -> check string "server revision agrees with Python fixture" expected (Ledger.revision ledger))
+    | Ok ledger -> check string "server revision agrees with Python fixture" expected
+      (Ledger.revision ledger |> Ledger.ledger_revision_to_string))
     [json; reverse_objects json]
 ;;
 

@@ -245,6 +245,7 @@ let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
   then Error "invalid retained record byte envelope"
+  (* Ingress sources and namespaced output each have the declared bound. *)
   else Ok (2 * max_bytes + envelope_bytes)
 let read_observation ~instance_id ~seq ~max_bytes t =
   if seq <= 0 then Error "observation sequence must be positive" else

@@ -719,18 +719,20 @@ let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun 
   await clock (fun () -> Option.is_some (source received id));
   let before = instance config id in
   let sequence = member "observation_seq" before in
-  let prior = Hashtbl.find received id in
   check string "configured capture is bound to retained private owner" owner
     (before |> member "source_access" |> text "keeper");
   Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
     ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
     ~topology:Fusion_types.Simple ~started_at:2.;
   Runtime.notify_fusion_run ~run_id;
-  await clock (fun () -> text "kind" (member "phase" (instance config id)) = "failed");
-  check bool "owner replacement commits no foreign observation" true
-    (member "observation_seq" (instance config id) = sequence);
-  check bool "worker never receives the replacement owner's source" true
-    (Hashtbl.find received id = prior))
+  await clock (fun () -> member "observation_seq" (instance config id) <> sequence);
+  let denied = require_some "missing refused source envelope" (source received id) in
+  check bool "changed owner becomes explicitly incomplete input" false
+    (member "complete" denied |> Yojson.Safe.Util.to_bool);
+  check int "worker receives no replacement owner's observations" 0
+    (list "observations" denied |> List.length);
+  check string "the source reports its actual ownership refusal"
+    "Fusion run is unavailable to this caller" (text "detail" denied))
 
 let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
   let package = manifest root in

@@ -28,7 +28,7 @@ def run(executable: str) -> None:
             if not _keyboard_harness.wait_for_fixture_event(process, master_fd, output, fixture.first_post_received, timeout=5):
                 raise AssertionError("first POST never reached the HTTP fixture")
             _keyboard_harness.send_and_wait(process, master_fd, output, b"second", _keyboard_harness.composer_showing(b"second"))
-            _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             # The /queue command first renders the local queue before its
             # server read. A parallel second POST removes this line locally,
             # even if its HTTP fiber has not yet reached the fixture.

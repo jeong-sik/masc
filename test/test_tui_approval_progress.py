@@ -84,6 +84,9 @@ def scenario(binary: str, columns: int) -> None:
             _keyboard_harness.select_keeper_row(process, master, output, b"alpha")
             _keyboard_harness.send_and_wait(process, master, output, b"c",
                             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+            # This scenario verifies the detailed tool progress and held
+            # approval together; select the product's full diagnostic mode.
+            _keyboard_harness.send_and_wait(process, master, output, b"\x04\x04", b"tools:full")
             _keyboard_harness.send_and_wait(process, master, output, b"observe", b"observe")
             before = len(output)
             os.write(master, b"\r")

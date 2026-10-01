@@ -163,7 +163,7 @@ def run(executable, *, mode, evidence_dir=None):
                     raise AssertionError("first admission was not held")
                 stage(process, fd, output, base_path)
                 _keyboard_harness.send_and_wait(process, fd, output, b"queued-image", _keyboard_harness.composer_showing(b"queued-image"))
-                _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", "내 메시지 2건 대기".encode())
                 if len(queue.received) != 1:
                     raise AssertionError("image request was not waiting locally behind the first admission")
             else:
@@ -196,7 +196,7 @@ def run(executable, *, mode, evidence_dir=None):
                     screen = _keyboard_harness.screen_text(bytes(output[:end + len(_keyboard_harness.FRAME_END)]))
                     return (b"reply-settled-local-image" in screen
                             and b"bounded-tail-image-ready" in screen
-                            and b"IN PROGRESS" not in screen and b"Queue (" not in screen
+                            and b"IN PROGRESS" not in screen and "내 메시지".encode() not in screen
                             and b"stream ended; settling" not in screen)
 
                 if not _keyboard_harness.wait_for_fixture_state(process, fd, output, settled_frame, timeout=5):

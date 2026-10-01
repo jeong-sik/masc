@@ -22,12 +22,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  let account = { status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
+  let account = { status: 'ready', account_revision: '0'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
   let failed = false
   let releaseResponse = null
   const requests = []
   const captures = []
-  await page.route('**/api/v1/keepers/rondo/items', async route => {
+  await page.route('**/api/v1/keepers/rondo/items?*', async route => {
     const status = failed ? 503 : 200
     const body = JSON.stringify(failed ? { error: 'fixture ledger unreadable' } : account)
     requests.push({ failed, owned_items: [...account.owned_items] })
@@ -42,6 +42,10 @@ try {
     captures.push({ name, sha256: createHash('sha256').update(await readFile(path)).digest('hex') })
   }
   await page.route('**/api/v1/keepers/rondo/portrait.png?*', route => route.fulfill({ status: 503 }))
+  await page.route('**/api/v1/dashboard/execution?force=1', async route => {
+    const snapshot = await page.evaluate(() => window.updateKeeperItemsWorkspaceFixture())
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshot) })
+  })
   await page.goto(fixtureUrl)
   await page.getByText('0.800 Candle').waitFor()
   if (await page.getByText('착용 중').count() !== 1) throw new Error('equipped marker missing')
@@ -55,10 +59,10 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 })
 
   // A free purchase changes ownership, with the wallet and outfit fixed.
-  account = { ...account, account_revision: 'b'.repeat(64), owned_items: ['crown', 'glasses'] }
+  account = { ...account, account_revision: 'a'.repeat(64), owned_items: ['crown', 'glasses'] }
   let release
   releaseResponse = new Promise(resolve => { release = resolve })
-  await page.evaluate(() => window.updateKeeperItemsFixture('b'.repeat(64)))
+  await page.evaluate(() => window.updateKeeperItemsFixture('a'.repeat(64)))
   await page.getByRole('status').filter({ hasText: 'Item 계정 불러오는 중' }).waitFor()
   if (await page.getByText('0.800 Candle').count()) throw new Error('stale account visible while reloading')
   await capture('keeper-items-loading')
@@ -69,15 +73,19 @@ try {
   await capture('keeper-items-free-purchase')
 
   // A price-only observation also refreshes an already open Item tab.
-  account = { ...account, account_revision: 'c'.repeat(64), catalog: catalog.map(item => item.id === 'crown'
+  account = { ...account, account_revision: 'b'.repeat(64), catalog: catalog.map(item => item.id === 'crown'
     ? { ...item, price_milli: '300' } : item) }
-  await page.evaluate(() => window.updateKeeperItemsFixture('c'.repeat(64)))
+  await page.evaluate(() => window.updateKeeperItemsFixture('b'.repeat(64)))
   await page.getByText('0.300 Candle').waitFor()
   await capture('keeper-items-price-change')
 
   failed = true
   await page.getByRole('button', { name: '새로고침', exact: true }).click()
   await page.getByRole('alert').waitFor()
+  const failureText = await page.getByRole('alert').textContent()
+  if (!failureText?.includes('fixture ledger unreadable') || failureText.includes('/api/')) {
+    throw new Error('Item error must show the server reason without an internal endpoint')
+  }
   if (await page.getByText('0.800 Candle').count()) throw new Error('failed refresh retained balance')
   await capture('keeper-items-unavailable')
   failed = false

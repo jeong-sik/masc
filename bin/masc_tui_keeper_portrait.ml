@@ -135,9 +135,9 @@ let preview ~name ~equipment ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             (* Item selection previews the chosen equipment. Info also uses
-                the full drawing when its observed equipment has accessories;
-                selecting a preview leaves that observed equipment unchanged. *)
-             let picture = image session_cache ~name ~equipment box.View.size in
+             let compact =
+               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
+             in
+             let picture = image ~compact session_cache ~name ~equipment box.View.size in
              { display; box; image = picture
              ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

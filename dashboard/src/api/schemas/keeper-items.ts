@@ -1,13 +1,16 @@
 import { Either, Schema } from 'effect'
+import { isCandleAmount, isCandleAccountRevision } from '../../lib/candle-observation'
 import { EQUIPMENT_IDS } from './keeper-portrait'
-import { CandleAccountDigestSchema } from './candle-observation'
 
 const slots = ['face', 'neck', 'head', 'hand', 'base'] as const
 const itemSlot = new Map<string, typeof slots[number]>(
   slots.flatMap(slot => EQUIPMENT_IDS[slot].slice(1).map(id => [id, slot] as const)),
 )
 const AmountSchema = Schema.String.pipe(
-  Schema.filter(value => /^(0|[1-9][0-9]*)$/.test(value) || 'Item amount must be canonical decimal'),
+  Schema.filter(value => isCandleAmount(value) || 'Item amount must be canonical decimal'),
+)
+const RevisionSchema = Schema.String.pipe(
+  Schema.filter(value => isCandleAccountRevision(value) || 'invalid Item account revision'),
 )
 const ItemIdSchema = Schema.String.pipe(
   Schema.filter(value => itemSlot.has(value) || 'unknown Item id'),
@@ -20,8 +23,8 @@ const CatalogEntrySchema = Schema.Union(
 
 const ReadySchema = Schema.Struct({
   status: Schema.Literal('ready'),
-  account_revision: CandleAccountDigestSchema,
   keeper: Schema.NonEmptyString,
+  account_revision: RevisionSchema,
   balance_milli: AmountSchema,
   owned_items: Schema.Array(ItemIdSchema),
   catalog: Schema.Array(CatalogEntrySchema),
@@ -35,7 +38,7 @@ const ReadySchema = Schema.Struct({
 
 export const KeeperItemsSchema = Schema.Union(
   Schema.Struct({ status: Schema.Literal('off'), keeper: Schema.NonEmptyString, account_revision: Schema.Null }),
-  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString, account_revision: CandleAccountDigestSchema,
+  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString, account_revision: RevisionSchema,
     reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0 || 'disabled reason is empty')) }),
   ReadySchema,
 )

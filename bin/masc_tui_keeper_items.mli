@@ -8,8 +8,14 @@ type account = {
   catalog : entry list;
 }
 type t = Off | Disabled of string | Ready of account
-type observation = { revision : string option; account : t }
 
-val decode : keeper_name:string -> Yojson.Safe.t -> (observation, string) result
+val decode : keeper_name:string -> Yojson.Safe.t -> (string option * t, string) result
 (** Refuses a response for another Keeper, unknown or duplicate items,
-    incomplete catalogs, and malformed balances or prices. *)
+    incomplete catalogs, malformed balances or prices, and missing or malformed
+    account revisions. Returns that revision with the account, so publication
+    can compare it with the roster. Off requires null; ready/disabled require canonical SHA-256. *)
+
+val match_revision : expected_revision:(string option, string) result ->
+  string option * t -> (t, string) result
+(** Requires a successful roster revision reading equal to this account response.
+    [None] is the explicit Candle-off revision, never an unread observation. *)

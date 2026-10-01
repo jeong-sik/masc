@@ -133,6 +133,24 @@ describe('decodeGateKeepers', () => {
     }
   })
 
+  it('accepts emitted account revisions on healthy and both directory-error row shapes', () => {
+    const revision = 'a'.repeat(64)
+    const issue = issueWire()
+    const persisted = { ...issueWire('persisted'), meta: keeperWire('persisted').meta,
+      created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:01:00Z', activation_mode: 'on_demand' }
+    const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'ready', issued_milli: '0', burned_milli: '0', circulating_milli: '0' }, count: 3,
+      keepers: [keeperWire(), issue, persisted].map(row => ({ ...row, candle_balance_milli: '0', candle_account_revision: revision })),
+      ...listingWire(3),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    expect(data.directoryIssues.map(issue => issue.keeperName)).toEqual(['broken', 'persisted'])
+    for (const value of [undefined, '', 'A'.repeat(64), revision + '\n', 1]) {
+      expectDrift({ candle: { status: 'off' }, count: 1,
+        keepers: [{ ...keeperWire(), candle_account_revision: value }], ...listingWire(1) })
+    }
+  })
+
   it('accepts a nonempty sandbox name this consumer does not interpret', () => {
     const wire = keeperWire()
     wire.meta.sandbox_profile = 'uninterpreted-sandbox'
@@ -272,4 +290,28 @@ describe('decodeGateKeepers', () => {
     })
     expect(error.message).toContain('effective_meta_error.keeper')
   })
+
+  it('retains producer-declared Portrait unavailability in a readable Gate roster', () => {
+    const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' }, count: 1,
+      keepers: [{ ...keeperWire(), portrait: { state: 'unavailable', reason: 'ledger unreadable' } }],
+      ...listingWire(1),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    expect(data.directoryIssues).toEqual([])
+  })
+
+  it('reports malformed Portrait data as typed Gate drift instead of readable unavailability', () => {
+    const equipment = keeperWire().portrait.equipment
+    for (const portrait of [undefined, null, { state: 'ready' },
+      { state: 'ready', equipment: { ...equipment, head: 'medal' } },
+      { state: 'ready', equipment: { ...equipment, extra: 'crown' } },
+      { state: 'ready', equipment, extra: true }, { state: 'unavailable', reason: ' ' },
+      { state: 'unavailable', reason: 'ledger unreadable', extra: true }]) {
+      const error = expectDrift({ candle: { status: 'off' }, count: 1,
+        keepers: [{ ...keeperWire(), portrait }], ...listingWire(1) })
+      expect(error.issues.some(issue => issue.path.join('.') === 'keepers.0.portrait')).toBe(true)
+    }
+  })
+
 })

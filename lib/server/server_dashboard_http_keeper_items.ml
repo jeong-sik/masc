@@ -28,11 +28,17 @@ let catalog_entry_json (entry : Candle_shop.catalog_entry) =
      ] @ price)
 ;;
 
-let ready_fields (account : Candle_shop.account) catalog =
+let ready_json ~keeper (view : Candle_status.view) =
+  let catalog = List.map (fun item ->
+    { Candle_shop.item; price=Candle_config.price view.policy item }) Item.all in
+  `Assoc
     [ "status", `String "ready"
-    ; "keeper", `String account.keeper
-    ; "balance_milli", `String (string_of_int account.balance_milli)
-    ; "owned_items", `List (List.map (fun item -> `String (Item.id item)) account.owned_items)
+    ; "keeper", `String keeper
+    ; "account_revision", `String (Candle_observe.ready_account_revision
+        ~events:view.events ~policy:view.policy ~balance:view.balance ~keeper)
+    ; "balance_milli", `String (string_of_int (Candle_balance.balance view.balance ~keeper))
+    ; "owned_items", `List (List.map (fun item -> `String (Item.id item))
+        (Candle_balance.owned view.balance ~keeper))
     ; "catalog", `List (List.map catalog_entry_json catalog)
     ]
 ;;
@@ -48,23 +54,34 @@ let handle_get state request reqd name =
   match Keeper_id.Keeper_name.of_string name with
   | Error detail -> respond ~status:`Bad_request (error_json detail)
   | Ok keeper ->
-    (match Server_dashboard_http_keeper_portrait.keeper_present config name () with
+    let workspace_matches = match Server_utils.query_param request "expected_workspace" with
+      | None -> Ok true
+      | Some expected when String.trim expected = "" -> Error "expected workspace must not be blank"
+      | Some expected ->
+        (* Health owns this canonical identity. Capture it from this handler's
+           configuration before reading any Keeper or Candle account. *)
+        let paths = Server_base_path_diagnostics.detect
+          ~effective_base_path:base_path ~effective_masc_root:(Workspace.masc_dir config) () in
+        Ok (String.equal expected paths.effective_base_path) in
+    (match workspace_matches with
+     | Error detail -> respond ~status:`Bad_request (error_json detail)
+     | Ok false -> respond ~status:`Conflict (error_json "Server workspace changed; refresh its identity before reading Item accounts")
+     | Ok true ->
+    match Server_dashboard_http_keeper_portrait.keeper_present config name () with
      | Error detail -> respond ~status:`Service_unavailable (error_json detail)
      | Ok false -> respond ~status:`Not_found (error_json "Keeper not found")
      | Ok true ->
-       match Candle_shop.observe_account ~base_path ~keeper with
-       | Error error ->
-         respond ~status:`Service_unavailable
-           (error_json (Candle_shop.error_to_string error))
-       | Ok observation ->
-         let fields = match observation with
-           | Candle_shop.Account_off -> [ "status", `String "off"; "keeper", `String name ]
-           | Candle_shop.Account_disabled reason ->
-             [ "status", `String "disabled"; "keeper", `String name; "reason", `String reason ]
-           | Candle_shop.Account_ready (account, catalog) ->
-             ready_fields account catalog
-         in
-         let revision = match Candle_shop.account_revision observation with
-           | None -> `Null | Some revision -> `String revision in
-         respond (`Assoc (("account_revision", revision) :: fields)))
+       match Candle_status.observed_view ~now:Time_compat.now ~base_path with
+       | Error Candle_status.Off ->
+         respond (`Assoc [ "status", `String "off"; "keeper", `String name;
+           "account_revision", `Null ])
+       | Error ((Candle_status.Disabled raw_reason) as error) ->
+         let reason = Candle_status.error_to_string error in
+         respond (`Assoc [ "status", `String "disabled"; "keeper", `String name;
+           "reason", `String reason;
+           "account_revision", `String (Candle_observe.disabled_account_revision raw_reason) ])
+       | Error ((Candle_status.Invalid_time _ | Candle_status.Invalid_ledger _
+           | Candle_status.Ledger_unavailable _) as error) ->
+         respond ~status:`Service_unavailable (error_json (Candle_status.error_to_string error))
+       | Ok view -> respond (ready_json ~keeper:(Keeper_id.Keeper_name.to_string keeper) view))
 ;;

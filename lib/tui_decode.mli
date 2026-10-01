@@ -1243,10 +1243,7 @@ type keeper_runtime = {
   kr_portrait : keeper_portrait;
   kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
-  (** Independent Item authority reading. The field is required: [Off] accepts
-      null; [Ready]/[Disabled] require a canonical revision digest. Missing,
-      malformed or inconsistent readings return [Error] without invalidating
-      the Keeper's lifecycle observation. *)
+  (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;

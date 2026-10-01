@@ -273,24 +273,32 @@ def seed_operator_task(base, *, backup=False):
 
 
 def operator_task_survives_supplemental_failure(executable):
-    for relative in ("tasks-archive.json", "tasks/goal_task_links.json"):
+    for relative, recovered_links in (
+        ("tasks-archive.json", None),
+        ("tasks/goal_task_links.json", None),
+        ("tasks/goal_task_links.json", []),
+        ("tasks/goal_task_links.json", [{"goal_id": "goal-recovery", "task_ids": ["task-777"]}]),
+    ):
         fixtures = fixtures_with_held([])
         fixtures["/api/v1/dashboard/tasks/history?task_id=task-777&limit=50"] = (200, [])
         requests = []
 
         def prepare(base):
             seed_operator_task(base)
-            (Path(base) / ".masc" / relative).write_text("{broken supplemental source")
-            if relative == "tasks/goal_task_links.json":
-                recovery = Path(base) / ".masc" / (relative + ".last-good")
-                recovery.write_text(json.dumps({"version": 1, "links": [
-                    {"goal_id": "goal-recovery", "task_ids": ["task-777"]}
-                ]}))
+            path = Path(base) / ".masc" / relative
+            if recovered_links is not None:
+                path.with_name(path.name + ".last-good").write_text(
+                    json.dumps({"version": 1, "links": recovered_links}))
+            path.write_text("{broken supplemental source")
 
         def interact(process, fd, _slave, output, base):
             h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
+            if relative == "tasks/goal_task_links.json":
+                assert b"Work:" in visible, visible
+                assert b"Work: reading unavailable" not in visible, visible
+                assert b"Work: not observed" not in visible, visible
             select_home(process, fd, output, b"Operator task", destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
@@ -321,7 +329,7 @@ def operator_task_survives_supplemental_failure(executable):
             assert_selected(output, b"Operator task")
             os.write(fd, b"q")
 
-        run(executable, f"Home current task and exact detail survive {relative} failure",
+        run(executable, f"Home current task and exact detail survive {relative} failure (backup={recovered_links})",
             fixtures, interact, requests, prepare=prepare)
 
 

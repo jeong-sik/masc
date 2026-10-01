@@ -178,12 +178,12 @@ let load_active_tasks (base_path : string) :
       in
       (* Goal links are supplemental to tasks, but only a successful primary
          registry read can establish their presence or absence. *)
-      let goal_task_links, goal_link_error =
+      let goal_task_links =
         match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error err ->
             let reason = "goal links unavailable: " ^ err in
-            Masc_tui_agenda.Read_failed reason, Some reason
-        | Ok links -> Masc_tui_agenda.Read links, None
+            Masc_tui_agenda.Read_failed reason
+        | Ok links -> Masc_tui_agenda.Read links
       in
       let goals_for_task =
         match goal_task_links with
@@ -209,7 +209,7 @@ let load_active_tasks (base_path : string) :
              observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match List.filter_map Fun.id
-                 [ recovery_error; goal_link_error; archive_error ] with
+                 [ recovery_error; archive_error ] with
          | [] -> None
          | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived

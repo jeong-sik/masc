@@ -5303,7 +5303,7 @@ type state = {
   mutable goal_task_links: (string * string list) Masc_tui_agenda.reading;
   mutable task_flow: Masc_tui_task_flow.t option;
   (* Primary backlog authority, shared by Home and Agenda. Supplemental
-     archive/link errors stay in tasks_error and cannot erase this reading. *)
+     archive errors stay in tasks_error; link errors stay in goal_task_links. *)
   mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
@@ -5316,7 +5316,7 @@ type state = {
   (* What the last backlog read said about the rows. [tasks] holds the same
      rows when they were read and [] otherwise; this says which of the two
      an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
-     including notes (backup recovery, goal links) on rows that were read. *)
+     including notes (backup recovery, archive) on rows that were read. *)
   mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)

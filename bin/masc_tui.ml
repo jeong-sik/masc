@@ -10977,7 +10977,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.preset_restore_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
-  ignore (Masc_tui_types.abandon_fusion_launch state);
+  Masc_tui_types.withdraw_fusion_workspace state;
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
   state.dos_live_in_flight <- None;
@@ -11071,16 +11071,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
       "Workspace changed: unsent Keeper inputs retained for their original workspace; resume there to send"
   end;
   state.msg_queued <- Chat_queue.empty;
-  state.keeper_interactive_waiting <- [];
-  state.keeper_chat_control_tokens <- [];
-  state.keeper_chat_control_pending <- [];
-  state.keeper_queue_inflight <- [];
-  state.keeper_run_next_pending <- [];
-  state.keeper_run_next_ready <- [];
-  state.keeper_run_next_inflight <- [];
-  state.keeper_auto_priority_pending <- [];
-  state.keeper_auto_priority_requests <- [];
-  state.msg_inflight <- [];
+  Masc_tui_types.withdraw_keeper_chat_requests state;
   release_composer_for_browser_reader state;
   close_context_inspector state;
   state.context_inspector_generation <- state.context_inspector_generation + 1;

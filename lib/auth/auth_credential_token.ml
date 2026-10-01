@@ -207,7 +207,10 @@ let fresh_matches_for_token_hash config token_hash matches =
     (* DET-OK: exact token-hash cache miss means there are no indexed
        credential candidates; this does not infer state from ambiguous input. *)
     match Hashtbl.find_opt idx token_hash with
-    | Some matches -> Ok matches
+    | Some matches ->
+      if List.for_all (credential_matches_live_disk config) matches
+      then Ok matches
+      else Error (Auth (Auth_error.InvalidToken "Credential changed during token lookup"))
     | None -> Ok [])
 ;;
 
@@ -714,5 +717,10 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
                  }))
        | Ok None -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
        | Error error -> Error error)
-    else require_live_credential ~now:(Time_compat.now ()) cred
+    else (
+      let open Result.Syntax in
+      let* credential = require_live_credential ~now:(Time_compat.now ()) cred in
+      if credential_matches_live_disk config credential
+      then Ok credential
+      else Error (Auth (Auth_error.InvalidToken "Credential changed during token verification")))
 ;;

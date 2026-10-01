@@ -1255,9 +1255,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
     - Explicit invalidation from [save_credential] / [delete_credential]
       so writes through this module are visible immediately.
     - Token hash -> [agent_credential list] (not single value) so the
-      #9786 ambiguous-lookup warn path still sees all matches.  The
-      list is built in [list_credentials] order so first-match
-      semantics stay identical to the pre-cache implementation. *)
+      #9786 ambiguous-lookup warn path still sees all matches. Current named
+      owners are indexed in sorted name order; collision checks compare the
+      complete records rather than granting the first candidate authority. *)
 
 type credential_index_cache_entry = {
   loaded_at : float;
@@ -1296,8 +1296,8 @@ let build_token_index (creds : agent_credential list)
        in
        Hashtbl.replace idx cred.token (cred :: prev))
     creds;
-  (* Reverse each bucket so callers see [list_credentials] order
-     (first-match semantics match the legacy [List.filter] flow). *)
+  (* Restore the input credential order within each token bucket. The
+     caller supplies current named owners in sorted name order. *)
   Hashtbl.filter_map_inplace
     (fun _ entries -> Some (List.rev entries))
     idx;
@@ -1337,7 +1337,19 @@ let credential_token_index config
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
     with_credential_transaction config (fun _transaction ->
-       let creds = list_credentials config in
+       (* Directory entries discover owners. Only each owner's current named
+          binding supplies the credential indexed for authentication. An old
+          UUID payload must neither resurrect its bearer nor hide a replacement
+          because it happened to be listed before the named file. *)
+       let creds =
+         list_credentials config
+         |> List.map (fun (credential : agent_credential) -> credential.agent_name)
+         |> List.sort_uniq String.compare
+         |> List.filter_map (fun name ->
+           match load_credential config name with
+           | Some credential when String.equal credential.agent_name name -> Some credential
+           | Some _ | None -> None)
+       in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->
          Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });

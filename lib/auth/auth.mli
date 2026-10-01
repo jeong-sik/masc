@@ -260,7 +260,10 @@ val find_credential_by_token :
 
 val find_static_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
-(** Static bearer-only lookup for the OAuth authorization bootstrap. *)
+(** Static bearer-only lookup for the OAuth authorization bootstrap. A stored
+    UUID payload grants no bearer authority unless its owner's current named
+    credential resolves to the same complete record. Cache rebuilds preserve
+    that rule; unknown or changed named authority is rejected. *)
 
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
@@ -418,6 +421,9 @@ val create_token_expiring_in_if_absent :
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result
+(** Static verification through a UUID or stored redirect alias requires the
+    complete credential to still match its owner's current named binding.
+    Direct UUID data reads do not grant independent bearer authority. *)
 
 (** {1 Permission Checks} *)
 

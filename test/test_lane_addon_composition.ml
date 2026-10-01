@@ -783,11 +783,9 @@ sources=%s
   let saved_document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
     (`Assoc ["source_path",`String saved_path]) in
   let broken = saved_document owner (Lane_addon_sources.Keeper owner) in
-  let current_revision = match broken with
-    | Ok json -> text "source_revision" json
-    | Error error -> fail error.Lane_addon_declaration.message in
-  check bool "private owner reads malformed current bytes using applied ownership" true
-    (Result.is_ok broken);
+  let current_revision = Store.digest "id = [" in
+  check bool "prior ownership does not disclose unadmitted malformed bytes" true
+    (Result.is_error broken);
   check bool "foreign Keeper cannot read malformed private bytes" true
     (Result.is_error (saved_document "foreign" (Lane_addon_sources.Keeper "foreign")));
   let repair caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config

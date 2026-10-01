@@ -86,8 +86,13 @@ def row_coordinates(original):
         string(clock.get("domain"), "row.clock.domain")
         string(clock.get("value"), "row.clock.value")
     evidence(original.get("evidence"))
+    related = original.get("related_ids")
+    if not isinstance(related, list):
+        raise InvalidInput("row.related_ids must be an array")
+    for identity in related:
+        string(identity, "row.related_ids entry")
     return {key: original[key] for key in (
-        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence")}
+        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
 
 
 def reports(source: Source, observation: dict, *, recognized: bool):
@@ -158,6 +163,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             elif run.get("failure_code") is not None or run.get("error") is not None:
                 raise InvalidInput("Non-failed Fusion run contains failure metadata")
         else:
+            if len(original["related_ids"]) != 1:
+                raise InvalidInput("Fusion result must identify its status row")
             run_id = string(fields.get("fusion_run_id"), "fusion_run_id")
             status = run_state(fields.get("run_status"))
             post = object_value(fields.get("board_post"), "board_post")
@@ -197,8 +204,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
             result_fields = result_row[0]["fields"]
-            if result_row[0].get("related_ids") != [status_row[0]["id"]]:
-                raise InvalidInput("Fusion result must identify its paired status row")
+            if result_row[0]["related_ids"] != [status_row[0]["id"]]:
+                raise InvalidInput("Fusion result relation does not identify its paired status row")
             status_event = string(status_fields.get("source_event_id"), "status.source_event_id")
             if string(result_fields.get("source_event_id"), "result.source_event_id") != status_event:
                 raise InvalidInput("Fusion status and result belong to different source events")

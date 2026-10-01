@@ -70,6 +70,27 @@ def contexts(output):
 
 
 class FusionReport(unittest.TestCase):
+    def test_result_relation_identifies_paired_status(self):
+        captured = upstream(project(detail()))
+        for relation in (None, [], ["projection-1/1/other"], ["one", "two"]):
+            with self.subTest(relation=relation):
+                invalid = copy.deepcopy(captured)
+                invalid["observations"][0]["output"]["rows"][1]["related_ids"] = relation
+                self.assertTrue(call("fusion-report", [invalid])["isError"])
+
+    def test_recognized_rows_require_matching_upstream_coverage(self):
+        captured = upstream(project(detail()))
+        for field in ("source_id", "incarnation"):
+            with self.subTest(field=field):
+                invalid = copy.deepcopy(captured)
+                invalid["observations"][0]["output"]["coverage"][0][field] = "unrelated"
+                self.assertTrue(call("fusion-report", [invalid])["isError"])
+        incomplete = copy.deepcopy(captured)
+        incomplete["observations"][0]["output"]["coverage"][0]["complete"] = False
+        result = call("fusion-report", [incomplete])["structuredContent"]
+        self.assertFalse(result["coverage"][0]["complete"])
+        self.assertTrue(all(not row["fields"]["input_complete"] for row in reports(result)))
+
     def test_report_rejects_conflicting_or_missing_fusion_producer(self):
         original = upstream(project(detail()))
         for change in ("other-owner", "missing-origin-owner", "missing-run-owner"):
@@ -120,7 +141,7 @@ class FusionReport(unittest.TestCase):
         upstream_rows = captured["observations"][0]["output"]["rows"]
         self.assertEqual([r["id"] for r in context["fields"]["upstream_rows"]], [r["id"] for r in upstream_rows])
         self.assertEqual(context["fields"]["upstream_rows"], [{key: r[key] for key in (
-            "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence")}
+            "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
             for r in upstream_rows])
         self.assertEqual(context["fields"]["producer"], captured["observations"][0]["producer"])
         self.assertEqual(context["evidence"], captured["observations"][0]["evidence"])

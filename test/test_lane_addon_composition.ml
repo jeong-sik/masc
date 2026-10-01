@@ -567,6 +567,76 @@ sources=%s
     (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
       (`Assoc ["instance_id",`String saved]))))
 
+let test_saved_document_keeps_repair_authority_after_source_eviction () =
+  with_fixture (fun clock config root directory _received _ ->
+    let owner = "repair-owner" in
+    let old_run = register_private_run root owner in
+    let package = manifest root in
+    let source run = Printf.sprintf {|id="owned-document"
+run_id="world"
+manifest_path=%S
+[binding]
+sources=%s
+|} package (fusion_source run) in
+    let save ?revision bytes = Lane_addon_runtime.save_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config (`Assoc ([
+        "mode",`String (if Option.is_none revision then "create" else "save");
+        "file_name",`String "owned.toml"; "source_text",`String bytes] @
+        Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)) in
+    let require_document = function Ok value -> value | Error error -> fail error.Lane_addon_declaration.message in
+    ignore (save (source old_run) |> require_document);
+    let path = Filename.concat directory "owned.toml" in
+    let read keeper = Lane_addon_runtime.read_declaration ~caller:keeper
+      ~access:(Lane_addon_sources.Keeper keeper) ~config (`Assoc ["source_path",`String path]) in
+    let operator_path = declare directory package "operator-created" (fusion_source old_run) in
+    reconcile config directory;
+    let registry = Fusion_run_registry.global () in
+    Fusion_run_registry.mark_completed registry ~run_id:old_run ~outcome:Fusion_run_registry.Succeeded;
+    for index = 1 to Fusion_run_registry.max_completed_retained do
+      Eio.Time.sleep clock 0.001;
+      let run_id = old_run ^ "/newer/" ^ string_of_int index in
+      Fusion_run_registry.register_running registry ~run_id ~keeper:owner ~preset:"default"
+        ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:(float_of_int index +. 100.);
+      Fusion_run_registry.mark_completed registry ~run_id ~outcome:Fusion_run_registry.Succeeded
+    done;
+    check bool "original source has left bounded registry" true
+      (Option.is_none (Fusion_run_registry.get registry ~run_id:old_run));
+    check string "durable owner can read after source eviction" (source old_run)
+      (read owner |> require_document |> text "source_text");
+    check bool "foreign Keeper cannot read an owned document" true (Result.is_error (read "foreign"));
+    let malformed = "id = \"unfinished" in
+    write operator_path malformed;
+    let operator_document = Lane_addon_runtime.read_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["source_path",`String operator_path]) |> require_document in
+    check string "operator-created private document retains its verified owner" malformed
+      (text "source_text" operator_document);
+    write path malformed;
+    let damaged = read owner |> require_document in
+    check string "invalid source is available for authorized repair" malformed (text "source_text" damaged);
+    let next_run = register_private_run (root ^ "/replacement") owner in
+    ignore (save ~revision:(text "source_revision" damaged) (source next_run) |> require_document);
+    check string "repair can replace a pruned source" (source next_run)
+      (read owner |> require_document |> text "source_text"))
+
+let test_pending_document_owner_rejects_replaced_source () =
+  with_fixture (fun _clock config root directory _received _ ->
+    let package = manifest root in
+    let path = declare directory package "pending-owner" "[]" in
+    let bytes = Fs_compat.load_file path in
+    let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    unwrap (Lane_addon_document_owner.prepare ~root:store_root ~source_path:path ~keeper:"owner"
+      ~prior_revision:None ~proposed_revision:(Store.digest bytes));
+    let read () = Lane_addon_runtime.read_declaration ~caller:"owner"
+      ~access:(Lane_addon_sources.Keeper "owner") ~config (`Assoc ["source_path",`String path]) in
+    check bool "pending admission authorizes only exact proposed bytes" true (Result.is_ok (read ()));
+    write path (bytes ^ "\nforeign = true\n");
+    check bool "uncommitted ownership cannot adopt replacement bytes" true (Result.is_error (read ()));
+    write path bytes;
+    let journal = Filename.concat store_root (Filename.concat "declaration-owners" (Store.digest path ^ ".jsonl")) in
+    Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 journal (fun out -> output_string out "{");
+    check bool "incomplete ownership journal fails closed" true (Result.is_error (read ())))
+
 let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
   let package = manifest root in
   ignore (declare directory package "a-consumer" (edge "z-producer"));
@@ -596,6 +666,10 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
     (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "owned declarations survive source eviction and malformed edits" `Quick
+    test_saved_document_keeps_repair_authority_after_source_eviction;
+  test_case "pending document owner cannot adopt replacement bytes" `Quick
+    test_pending_document_owner_rejects_replaced_source;
   test_case "private visibility survives declared output graph" `Quick test_private_visibility_crosses_declared_output_graph;
   test_case "shared consumer refuses replacement with private producer" `Quick test_shared_consumer_refuses_new_private_producer;
   test_case "host namespace overhead preserves package reply capacity" `Quick

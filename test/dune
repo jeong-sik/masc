@@ -3998,7 +3998,7 @@
 (test
  (name test_tui_workspace_entries)
  (modules test_tui_workspace_entries)
- (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types))
+ (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types masc_tui_code_results))
 
 (test
  (name test_tui_acting)

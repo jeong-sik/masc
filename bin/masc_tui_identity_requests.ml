@@ -5,7 +5,8 @@ open Masc_tui_async_protocol
 open Masc_tui_identity_model
 
 let launch_github_view state ~host ~deliver keeper_name =
-  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
+  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name
+    ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result -> deliver (Github_identity_view_loaded (request, result)))
@@ -13,7 +14,8 @@ let launch_github_view state ~host ~deliver keeper_name =
 ;;
 
 let launch_view state ~host ~deliver keeper_name =
-  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
+  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name
+    ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result -> deliver (Identity_providers_loaded (request, result)))

@@ -210,7 +210,7 @@ def reopen_existing_without_login(binary):
     fixtures["/api/v1/setup/models"] = _keyboard_harness.RequestHttpResponse(models)
 
     def interact(process, fd, _slave, output, _base_path):
-        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
         _keyboard_harness.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         account_frame = _keyboard_harness.send_and_wait(

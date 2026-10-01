@@ -414,7 +414,10 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
  (libraries
+  masc.sse_wire
   masc
+  masc.string_util
+  masc_tui_message_layout
   masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
@@ -442,7 +445,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc masc.masc_types masc_tui_keeper_chat_projection
-  masc_tui_sse_lines yojson))
+  masc.sse_wire yojson))
 
 (library
  (name masc_tui_keeper_chat_log)
@@ -2133,6 +2136,7 @@
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
+  masc
   masc.keeper_portrait
   masc_tui_keeper_portrait
   masc_tui_graphics

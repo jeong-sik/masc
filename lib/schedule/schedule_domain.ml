@@ -415,7 +415,11 @@ let range_values ~field ~min_v ~max_v ~map_value start stop step =
       then Ok (List.rev acc)
       else
         let* mapped = map_value value in
-        loop (mapped :: acc) (value + step)
+        let acc = mapped :: acc in
+        (* Compare against the remaining bounded field before adding, so a
+           valid large step cannot overflow into negative calendar values. *)
+        if step > stop - value then Ok (List.rev acc)
+        else loop acc (value + step)
     in
     loop [] start)
 ;;
@@ -425,15 +429,15 @@ let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
   if String.equal atom ""
   then Error (Printf.sprintf "recurrence.cron.%s contains an empty token" field)
   else (
-    let base, step =
+    let* base, explicit_step =
       match split_char '/' atom with
-      | [ base ] -> base, 1
+      | [ base ] -> Ok (base, None)
       | [ base; step_s ] ->
-        (match int_of_token ~field step_s with
-         | Ok step -> base, step
-         | Error _ -> base, -1)
-      | _ -> atom, -1
+          let* step = int_of_token ~field step_s in
+          Ok (base, Some step)
+      | _ -> Error (Printf.sprintf "recurrence.cron.%s has invalid step syntax: %s" field atom)
     in
+    let step = Option.value explicit_step ~default:1 in
     if step <= 0
     then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
     else if String.equal base "*"
@@ -441,8 +445,13 @@ let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
     else (
       match split_char '-' base with
       | [ one ] ->
-        let* value = int_of_token ~field one in
-        range_values ~field ~min_v ~max_v ~map_value value value step
+        (match explicit_step with
+         | Some _ -> Error (Printf.sprintf
+             "recurrence.cron.%s single-value steps are unsupported; use */s or n-m/s: %s"
+             field atom)
+         | None ->
+             let* value = int_of_token ~field one in
+             range_values ~field ~min_v ~max_v ~map_value value value step)
       | [ start_s; stop_s ] ->
         let* start = int_of_token ~field start_s in
         let* stop = int_of_token ~field stop_s in

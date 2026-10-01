@@ -445,6 +445,17 @@ note = "not a lane header"
     expect(parseRuntimeTomlEnvironment(sourceText, runtimeReservedProviderIdsFixture).laneIds).toEqual([])
   })
 
+  it.each([
+    'runtime.lanes."coding.fast".candidates = ["rt-a"]',
+    '[runtime]\nlanes."coding.fast".candidates = ["rt-a"]',
+    '[runtime.lanes]\n"coding.fast" = { candidates = ["rt-a"] }',
+    'runtime = { lanes = { "coding.fast" = { candidates = ["rt-a"] } } }',
+  ])('recognizes assignment lane identity in %s without enabling table editing', (source) => {
+    expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).laneIds)
+      .toEqual(['coding.fast'])
+    expect(declaredRuntimeLaneCandidates(source, 'coding.fast')).toBeNull()
+  })
+
   it('reads a lane\'s declared candidates only from its own table', () => {
     const withLanes = `${sourceText}
 
@@ -488,7 +499,9 @@ candidates = ["not-real"]
 [runtime.lanes.other.child]
 candidates = ["not-a-lane"]
 `
-    expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).laneIds).toEqual(['coded.lane'])
+    // This inventories declarations, including the implicit parent table.
+    // Whether its candidates are valid remains the server's admission decision.
+    expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).laneIds).toEqual(['coded.lane', 'other'])
     expect(declaredRuntimeLaneCandidates(source, 'coded.lane')).toEqual(['rt-a', 'unadmitted#slot', 'rt-b'])
     expect(declaredRuntimeLaneCandidates(source, 'fake')).toBeNull()
     expect(declaredRuntimeLaneCandidates(source, 'other')).toBeNull()

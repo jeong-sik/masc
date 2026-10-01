@@ -62,7 +62,7 @@ let handle_get state request reqd name =
            ; "keeper", `String name
            ; "reason", `String reason ])
        | Candle_config.Enabled _ ->
-         (match Candle_shop.account ~base_path ~keeper with
+         (match Candle_shop.observed_account ~now:Time_compat.now ~base_path ~keeper with
           | Error error ->
             respond ~status:`Service_unavailable
               (error_json (Candle_shop.error_to_string error))

@@ -40,7 +40,7 @@ let with_snapshot_publication_generation f =
 let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
      Equipment, balances and supply share one fresh ledger view per response. *)
-  let candle = Candle_observe.read ~base_path:config.base_path in
+  let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
   let equipment = Candle_observe.equipment candle in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
   let set key value fields =

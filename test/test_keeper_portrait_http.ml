@@ -1,6 +1,37 @@
 open Alcotest
 open Masc
 
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
+
 module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_portrait
 module Items_api = Server_dashboard_http_keeper_items
@@ -395,7 +426,8 @@ max-concurrent = 1
     let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
     if not (String.starts_with ~prefix:base_path policy_path) then fail "policy escaped fixture";
     Fs_compat.mkdir_p (Filename.dirname policy_path);
-    Fs_compat.save_file policy_path {|[payout]
+    Fs_compat.save_file policy_path {|half_life = "off"
+[payout]
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
@@ -419,7 +451,7 @@ beanie = 200
       ~weights_trace:{run_id="weights";slot_id="appraiser"}
       ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
     require_ok (Candle_ledger.update_error_to_string Fun.id)
-      (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
+      (Candle_ledger.update ~base_path (fun _ -> Ok (funding_rows at payment, ())));
     let starting = Keeper_portrait_look.equipment_of_name keeper in
     let id = match starting.head with Keeper_portrait_look.Crown -> "beanie"
       | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow | Keeper_portrait_look.Beanie -> "crown" in
@@ -481,7 +513,7 @@ beanie = 200
     check bool "operator snapshot supplies starting portrait" true
       (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
     ignore (require_ok Candle_shop.error_to_string
-      (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+      (Candle_shop.purchase ~now:Time_compat.now ~base_path ~keeper:owner ~item));
     (match item_account (get ~router ~token:reader (item_path keeper)) with
      | Masc_tui_keeper_items.Ready account ->
        check int "Item view reads debit" 800 account.balance_milli;
@@ -526,10 +558,10 @@ beanie = 200
     check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
-      (require_ok Fun.id (Candle_equipment.current ~base_path ~keeper) = expected);
+      (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
     ignore (accepted (call "default"));
     check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
-    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~base_path ~keeper:owner) in
+    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~now:Time_compat.now ~base_path ~keeper:owner) in
     check int "equipping spends no Candle" 800 account.balance_milli;
     check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";

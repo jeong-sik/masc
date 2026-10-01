@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { candleAmountText, readCandleBalance, readCandleObservation } from './candle-observation'
+import { candleAmountText, readCandleBalance, readCandleObservation, readCandleRosterObservation } from './candle-observation'
 
 const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const
 
@@ -23,5 +23,23 @@ describe('Candle observation', () => {
     expect(readCandleBalance(null)).toBeNull()
     expect(readCandleObservation({ status: 'off' })).toEqual({ status: 'off' })
     expect(readCandleObservation({ status: 'disabled', reason: 'ledger unreadable' })).toEqual({ status: 'disabled', reason: 'ledger unreadable' })
+  })
+})
+
+// Currency availability is checked independently of Gate lifecycle rows.
+describe('Candle roster observation', () => {
+  it('preserves every valid summary with matching wallet observations', () => {
+    for (const candle of [{ status: 'off' }, { status: 'disabled', reason: 'ledger unreadable' }, ready]) {
+      expect(readCandleRosterObservation(candle, [{ candle_balance_milli: candle.status === 'ready' ? '0' : null }])).toEqual(candle)
+    }
+  })
+  it('withdraws malformed or inconsistent money while Gate retains lifecycle controls', () => {
+    for (const candle of [{ status: 'unknown' }, { status: 'off', reason: 'extra' },
+      { status: 'ready', issued_milli: '01', burned_milli: '0', circulating_milli: '1' },
+      { status: 'ready', issued_milli: '3', burned_milli: '1', circulating_milli: '1' }]) {
+      expect(readCandleRosterObservation(candle, []).status).toBe('unavailable')
+    }
+    expect(readCandleRosterObservation({ status: 'off' }, [{ candle_balance_milli: '0' }]).status).toBe('unavailable')
+    expect(readCandleRosterObservation(ready, [{}]).status).toBe('unavailable')
   })
 })

@@ -75,7 +75,7 @@ class Host:
         if self.status == "answered":
             result["_meta"] = {"masc.lane_sampling": refs}
             return {"result": result}
-        terminal = {"status": self.status, "error": "Actual fixture failure"}
+        terminal: dict[str, object] = {"status": self.status, "error": "Actual fixture failure"}
         if self.status == "invalid_response":
             terminal["response"] = copy.deepcopy(result)
         terminal.update({"request": request_ref} if self.pending else {"evidence": refs})
@@ -100,18 +100,20 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
     process = subprocess.Popen([sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, env={})
-    def send(message):
-        process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
-        process.stdin.flush()
-    def read():
-        line = process.stdout.readline(MAXIMUM_FRAME + 1)
-        if not line:
-            raise AssertionError("worker closed stdout: " + process.stderr.read())
-        host.last_reply_bytes = len(line.encode("utf-8"))
-        if host.last_reply_bytes > MAXIMUM_FRAME:
-            raise AssertionError("worker exceeded its bounded MCP transport frame")
-        return json.loads(line)
+    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
     try:
+        assert stdin is not None and stdout is not None and stderr is not None
+        def send(message):
+            stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+            stdin.flush()
+        def read():
+            line = stdout.readline(MAXIMUM_FRAME + 1)
+            if not line:
+                raise AssertionError("worker closed stdout: " + stderr.read())
+            host.last_reply_bytes = len(line.encode("utf-8"))
+            if host.last_reply_bytes > MAXIMUM_FRAME:
+                raise AssertionError("worker exceeded its bounded MCP transport frame")
+            return json.loads(line)
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "capabilities": {"sampling": {}} if sampling else {}}})
         assert read()["id"] == 1
@@ -133,19 +135,21 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
         if ping:
             send({"jsonrpc": "2.0", "id": "after-call", "method": "ping"})
             assert read() == {"jsonrpc": "2.0", "id": "after-call", "result": {}}
-        process.stdin.close()
+        stdin.close()
         process.wait(timeout=10)
         assert process.returncode == 0
-        assert process.stderr.read() == ""
+        assert stderr.read() == ""
         return message["result"]
     finally:
         if process.poll() is None:
             process.kill()
             process.wait()
-        process.stdout.close()
-        process.stderr.close()
-        if not process.stdin.closed:
-            process.stdin.close()
+        if stdout is not None:
+            stdout.close()
+        if stderr is not None:
+            stderr.close()
+        if stdin is not None and not stdin.closed:
+            stdin.close()
 
 
 class FusionCompute(unittest.TestCase):

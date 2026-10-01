@@ -342,6 +342,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         result_row = group.get("fusion/result")
         post = result_row[0]["fields"]["board_post"] if result_row else None
         if status_row and result_row:
+            assert post is not None
             status_fields = status_row[0]["fields"]
             result_fields = result_row[0]["fields"]
             if result_row[0]["related_ids"] != [status_row[0]["id"]]:

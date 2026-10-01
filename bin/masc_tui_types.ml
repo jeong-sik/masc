@@ -12101,14 +12101,64 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-let keeper_message_status_rows (state : state) =
+(* Foreign turns keep the complete stop command ahead of their descriptive
+   status. Count these physical rows with the same pane width as rendering;
+   otherwise wrapping a long Keeper name would cover the composer below. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
+  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+  let batch_label group =
+    if group.count = 1 then ""
+    else Printf.sprintf "%d messages in one turn · " group.count
+  in
+  let activity group =
+    if group.reconciling_count > 0 then
+      if group.count = 1 then "reconciling"
+      else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+    else
+      let transcript = group.representative.log.tl_transcript in
+      if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then
+        "awaiting continuation"
+      else
+        match Masc_tui_keeper_chat_transcript.phase transcript with
+        | Masc_tui_keeper_chat_transcript.Waiting -> "waiting to start"
+        | Masc_tui_keeper_chat_transcript.Working -> "running"
+        | Masc_tui_keeper_chat_transcript.Stream_ended -> "finishing"
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> "failed"
+  in
+  let summary group =
+    let age =
+      match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
+      | None -> ""
+      | Some text -> " · " ^ text
+    in
+    Printf.sprintf "  (%s%s %s%s)" (batch_label group) (activity group)
+      (Masc_tui_keeper_chat_projection.compact_request_id
+         (turn_log_execution_id group.representative.log)) age
+  in
+  let mine, others = List.partition
+      (fun group -> state.msg_target_keeper_name =
+          Some group.representative.sent_request.keeper_name)
+      (keeper_message_inflight_drawn state) in
+  List.map (fun group -> true, summary group) mine
+  @ List.concat_map (fun group ->
+      let name = Tui_decode.sanitize_terminal_text
+          group.representative.sent_request.keeper_name in
+      let command_rows =
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          ("/interrupt " ^ name)
+        |> List.map (fun line -> false, "  " ^ line) in
+      command_rows @ [false, summary group]) others
+
+let keeper_message_status_rows (state : state) ~terminal_cols =
+  let chat_cols = Masc_tui_roster_pane.content_cols
+      ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name
       -> 0
     | Some _ | None -> 1
   in
-  List.length (keeper_message_inflight_drawn state)
+  List.length (keeper_message_inflight_rows state ~chat_cols ~now:0.)
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
@@ -12167,7 +12217,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
         (Buffer.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state + 1 in
+       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

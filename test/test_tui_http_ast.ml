@@ -3126,7 +3126,7 @@ let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_message_status_rows"
-       ~callee:"keeper_message_inflight_drawn");
+       ~callee:"keeper_message_inflight_rows");
   check int "and reads the raw in-flight list nowhere in that sum" 0
     (Ast_grep.count_field_reads_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
@@ -3135,7 +3135,7 @@ let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message"
-       ~callee:"Masc_tui_types.keeper_message_inflight_drawn")
+       ~callee:"Masc_tui_types.keeper_message_inflight_rows")
 ;;
 
 let () =

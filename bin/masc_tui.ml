@@ -1649,7 +1649,7 @@ type async_msg =
   | Http_scoped_refresh_failed of
       string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
-      Board_detail.request * (board_post * board_comment list, string) result
+      Board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -10206,6 +10206,7 @@ let leave_board_detail state =
   state.board_focus <- Right_pane;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
+  state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
@@ -11372,10 +11373,15 @@ let apply_board_post_load state request result =
       if state.view <> Board then
         add_event state "error" err
     in
+    let initial_read =
+      match Board_detail.view_for state.board_detail ~post_id with
+      | Board_detail.Loading | Board_detail.Failed _ -> true
+      | Board_detail.Absent | Board_detail.Ready _ -> false in
     match result with
-    | Ok (post, comments) when String.equal post.bp_id post_id ->
+    | Ok (post, comments, landing) when String.equal post.bp_id post_id ->
         state.board_detail <-
-          Board_detail.complete state.board_detail request (Ok (post, comments));
+          Board_detail.complete state.board_detail request (Ok (post, comments, landing));
+        if initial_read then state.board_comment_landing <- landing;
         (* A detail response enriches one list row; it does not rank the list.
            Moving the completed post to the front made rapid j/k navigation
            snap back to row zero as asynchronous responses arrived. *)
@@ -11384,7 +11390,7 @@ let apply_board_post_load state request result =
             (fun current ->
               if String.equal current.bp_id post_id then post else current)
             state.board_posts
-    | Ok (post, _) ->
+    | Ok (post, _, _) ->
         fail
           (Printf.sprintf
              "response ID mismatch: expected %s, received %s"
@@ -11392,9 +11398,8 @@ let apply_board_post_load state request result =
     | Error err -> fail err
 
 let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
-  (match Board_detail.view_for state.board_detail ~post_id with
-   | Board_detail.Absent -> state.board_history_post_id <- None
-   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
+  if state.board_history_post_id <> Some post_id then
+    state.board_history_post_id <- None;
   match Board_detail.start state.board_detail ~post_id with
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->
@@ -11421,10 +11426,12 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
+  state.board_detail <- Board_detail.clear state.board_detail;
   state.board_history_post_id <- None;
   state.board_focus <- focus;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
+  state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~mailbox
@@ -22093,8 +22100,11 @@ and is loaded on demand through keeper_skill.
             | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence reference) ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_history_post_id <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -22107,8 +22117,11 @@ and is loaded on demand through keeper_skill.
             | Fusion_historical_detail reference, _ ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_history_post_id <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -22120,8 +22133,11 @@ and is loaded on demand through keeper_skill.
                  | Some evidence ->
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_history_post_id <- None;
+                     state.board_detail <- Board_detail.clear state.board_detail;
                      state.board_scroll <- 0;
                      state.board_comment_scroll <- 0;
+                     state.board_comment_landing <- None;
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -23081,11 +23097,11 @@ and is loaded on demand through keeper_skill.
                   state.board_comments_focused <- false
                 end else
                   (match Board_detail.view_for state.board_detail ~post_id with
-                   | Board_detail.Ready (_, _ :: _) ->
+                   | Board_detail.Ready (_, _ :: _, _) ->
                        state.board_comments_focused <-
                          not state.board_comments_focused
                    | Board_detail.Absent | Board_detail.Loading
-                   | Board_detail.Ready (_, []) | Board_detail.Failed _ -> ())
+                   | Board_detail.Ready (_, [], _) | Board_detail.Failed _ -> ())
             | Board_list | Board_compose -> ())
        | Some ":" ->
            state.palette_open <- true;
@@ -23314,14 +23330,20 @@ and is loaded on demand through keeper_skill.
            (match state.board_mode with
             | Board_read post_id
               when Board_detail.is_ready state.board_detail ~post_id
-                   || state.board_history_post_id = Some post_id ->
+                   || (state.board_history_post_id = Some post_id
+                       && match Board_detail.view_for state.board_detail ~post_id with
+                      | Board_detail.Failed _ -> true
+                      | Board_detail.Absent | Board_detail.Loading
+                      | Board_detail.Ready _ -> false) ->
                 state.board_history_post_id <-
                   (if state.board_history_post_id = Some post_id then None
                    else Some post_id);
-                (* [o] swaps the comment list, so both windows start again
-                   from the top, as they do when a post is opened. *)
+                (* A mode swap owns a fresh request generation. History starts
+                   at its first row; newest-page reads can resolve a page anchor. *)
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 start_board_post_refresh state ~host ~port ~post_id
                   ~mailbox:async_messages
             | Board_list | Board_compose | Board_read _ -> ());

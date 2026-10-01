@@ -110,11 +110,27 @@ def journey(executable, no_color=False):
         if b"0%" not in compact or b"exhausted (observed)" not in compact:
             raise AssertionError("compact Plan conflated observed blocking and provider usage")
         capture(process, fd, output, "terminal-too-small", 14, 80, b"terminal too small")
-        capture(process, fd, output, "plan-short", 16, 80, b"Plan usage")
-        h.send_and_wait(process, fd, output, b"j", b"Claude")
-        short = capture(process, fd, output, "plan-short-scrolled", 16, 80, b"Claude")
-        if b"Claude" not in short:
-            raise AssertionError("short Usage cannot expose its content by scrolling")
+        short = capture(process, fd, output, "plan-short", 16, 80, b"Plan usage")
+        later_account = scopes[-1]["scope_id"][:8].encode()
+        if later_account in short:
+            raise AssertionError("scroll fixture's later account is already visible")
+        while later_account not in short:
+            notice = next((line for line in short.splitlines() if b"[rows " in line), None)
+            if notice is None:
+                raise AssertionError("short Usage has no reachable overflow window")
+            span = notice.split(b"[rows ", 1)[1].split(b" ", 1)[0]
+            window, total = span.split(b"/")
+            first, last = map(int, window.split(b"-"))
+            if last >= int(total):
+                raise AssertionError("later account remained hidden at the end of Usage")
+            # Move one visible window in individual row steps so no account
+            # heading can be skipped between consecutive inspected windows.
+            h.press_and_settle(process, fd, output, b"j" * (last - first + 1), cap=4.0)
+            short = capture(process, fd, output, "plan-short-scrolled", 16, 80, b"MASC Usage")
+            updated = next((line for line in short.splitlines() if b"[rows " in line), None)
+            if updated is None or int(updated.split(b"[rows ", 1)[1].split(b"-", 1)[0]) <= first:
+                raise AssertionError("Usage scroll input did not advance its visible window")
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"Claude")
         capture(process, fd, output, "plan-restored", 30, 120, b"Claude")
         h.send_and_wait(process, fd, output, b"v", b"UTC days reported")
         capture(process, fd, output, "trend", 30, 120, b"UTC days reported")

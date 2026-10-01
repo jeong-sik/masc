@@ -12,13 +12,26 @@ verdict: PASS head: <40-hex SHA> by: <reviewer>
 
 Approve with `approve-guard.sh --repo O/R --pr N --head SHA --body FILE`.
 Use `--check` for a read-only admission probe. A source-reviewed child may be
-approved while its parent is still open. Land the parent first, then retarget
-and inspect the changed diff before landing the child.
+approved while its parent is still open. Inspect the REST PR's `stack` metadata
+and ordered stack membership before choosing the merge scope. For a native
+stack, merging a selected PR includes every open downstack PR through it; do
+not require separate parent merges or manually retarget it. For a confirmed
+non-native branch chain, land the parent first and inspect the changed diff
+before landing the child. See the [Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
 
-`merge-guard.sh --check --repo O/R --pr N --head SHA` checks current head,
-independent trusted head-bound approval and the latest blocking reviews or
-structured decision. It does not call Actions for an ordinary head. External
-coding agents perform the actual merge with `gh pr merge --match-head-commit SHA`.
+`merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
+PR's current head, independent trusted head-bound approval and latest blocking
+reviews or structured decision. It rechecks stack membership and included
+head/base identities before admission. Check output names the validated
+merge target: a native stack can land into another feature branch, whose PR
+is outside this stack scope. That is not main integration. It does not call Actions
+for an ordinary head. External coding agents use this read-only check before submitting a native
+stack via `PUT /repos/O/R/pulls/N/merge-async`; for a non-native PR, use
+`gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
+only the selected head SHA as a precondition; its accepted destination remains
+unconfirmed until the result is read. The receipt is acceptance,
+not completion: confirm the result and each included PR's merged state before
+reporting success. The guide above documents the request and its SHA boundary.
 
 For a `release/vX.Y.Z` head, execute the full Release Candidate Verification
 workflow explicitly. The release verdict also carries `run: <full run ID>`
@@ -27,6 +40,7 @@ including successful full-check, behavior, packaging and result jobs. A
 missing or skipped required job is not evidence of full verification.
 
 `queue-ledger.sh --repo O/R --format tsv` reports source-review readiness and
-parent-first landing. It reads full CI evidence only for release heads.
+native stack scope admission or non-native parent waits. It reads full CI
+evidence only for release heads.
 `python3 scripts/review/test_source_review_policy.py` exercises live-boundary
 controls in an isolated fake-GitHub fixture.

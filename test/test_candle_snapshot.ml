@@ -174,7 +174,8 @@ let goal_ids events =
        | Candle_event.Candidates { goal_id; _ }
        | Candle_event.Unattributed { goal_id; _ }
        | Candle_event.Payout_failed { goal_id; _ } -> goal_id
-       | Candle_event.Paid p -> p.identity.goal_id)
+       | Candle_event.Paid p -> p.identity.goal_id
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 

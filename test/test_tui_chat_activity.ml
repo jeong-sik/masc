@@ -10,6 +10,7 @@ module Queue = Masc_tui_keeper_chat_queue
 let state () =
   let state = Tui.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
+  state.msg_tool_visibility <- Tui.Tools_full;
   state
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
@@ -310,10 +311,194 @@ let test_one_status_row_per_server_batch () =
       group.representative.sent_at
   | groups -> failf "expected one batch row, got %d" (List.length groups)
 
+let test_compact_status_keeps_delivery_and_priority_truth () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let first = inflight ~request_id:"first-private-id" ~at:2. () in
+  let second = inflight ~request_id:"second-private-id" ~at:3. () in
+  List.iter (fun entry -> Tui.turn_log_add ~now:4. entry.Tui.log ~seq:None
+      (Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None})) [first; second];
+  state.msg_inflight <- [second; first];
+  state.msg_live <- Some second.log;
+  state.keeper_turns <- [running Turn_lane_autonomous];
+  let rows () = List.map (fun row -> row.Masc_tui_answering.lead ^ row.rest)
+      (Tui.keeper_message_activity_rows state) in
+  check (list string) "one quiet status preserves exact current queue count"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 접수됨"] (rows ());
+  state.keeper_run_next_inflight <- [second.sent_request];
+  state.keeper_run_next_receipts <- [first.sent_request, Ok "confirmed first"];
+  check (list string) "in-flight priority cannot claim confirmation"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
+  state.keeper_run_next_inflight <- [];
+  check (list string) "one receipt does not confirm both inputs"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 접수됨"] (rows ());
+  state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
+  check (list string) "both exact receipts confirm priority"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 접수됨"] (rows ());
+  state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
+  check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
+  check (list string) "failure does not claim priority"
+    ["다음 순서 확인 불가 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
+  let foreign = inflight ~keeper_name:"beta" ~request_id:"foreign-private-id" ~at:1. () in
+  state.msg_inflight <- foreign :: state.msg_inflight;
+  (match Tui.keeper_message_inflight_drawn state with
+   | [group] -> check string "foreign stop target survives folding" "beta" group.representative.sent_request.keeper_name
+   | groups -> failf "expected foreign-only row, got %d" (List.length groups));
+  state.msg_tool_visibility <- Tui.Tools_full;
+  check bool "diagnostics keep exact private ID" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"second-private-id" text) (rows ()))
+
+let test_compact_keeps_uncovered_execution_problems () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let active = inflight ~request_id:"active" ~at:1. () in
+  let uncovered = inflight ~request_id:"uncovered" ~at:2. () in
+  List.iter (fun entry -> Tui.turn_log_add ~now:3. entry.Tui.log ~seq:(Some 1)
+      Live.Run_started) [active; uncovered];
+  state.msg_live <- Some active.log;
+  state.msg_inflight <- [active; {uncovered with phase=Tui.Turn_reconciling}];
+  let text () = texts (Tui.keeper_message_activity_rows state) |> String.concat " | " in
+  check bool "another running execution's reconciliation is visible without color" true
+    (Astring.String.is_infix ~affix:"메시지 전달 재확인 중" (text ()));
+  Tui.turn_log_add ~now:4. uncovered.log ~seq:(Some 2)
+    (Live.Run_failed {message="fixture failure"});
+  state.msg_inflight <- [active; uncovered];
+  check bool "another execution failure remains named while one works" true
+    (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()))
+
+(* The foreign turn's stop command is operator input, so shortening the
+   Keeper identity would offer a command for an identity that does not exist. *)
+let test_foreign_stop_command_remains_complete () =
+  List.iter (fun keeper_name ->
+    List.iter (fun terminal_cols ->
+      let state = state () in
+      let empty = Tui.keeper_message_status_rows state ~terminal_cols in
+      state.msg_inflight <-
+        [inflight ~keeper_name ~request_id:"foreign-request" ~at:2. ()];
+      let chat_cols = Masc_tui_roster_pane.content_cols
+          ~hidden:(Tui.roster_pane_hidden state) ~cols:terminal_cols in
+      let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
+      let command_rows = List.filteri
+          (fun index _ -> index < List.length rows - 1) rows in
+      let command_lines = List.map (fun (_, line) -> String.trim line) command_rows in
+      let reconstructed = match command_lines with
+        | "/interrupt" :: rest -> "/interrupt " ^ String.concat "" rest
+        | lines -> String.concat "" lines in
+      check string "the complete stop command precedes the status"
+        ("/interrupt " ^ keeper_name) reconstructed;
+      check bool "every physical command row is valid UTF-8" true
+        (List.for_all (fun (_, line) -> String.is_valid_utf_8 line) command_rows);
+      check bool "all command rows fit the pane" true
+        (List.for_all (fun (_, line) ->
+          Masc_tui_message_layout.display_width line <=
+            Masc_tui_frame.inner_width ~cols:chat_cols)
+          (List.filteri (fun index _ -> index < List.length rows - 1) rows));
+      check bool "foreign rows remain visually distinct" true
+        (List.for_all (fun (mine, _) -> not mine) rows);
+      check int "the composer reserves every physical row"
+        (List.length rows)
+        (Tui.keeper_message_status_rows state ~terminal_cols - empty);
+      check int "age updates cannot change the reserved height"
+        (List.length rows)
+        (List.length (Tui.keeper_message_inflight_rows state ~chat_cols ~now:100000.)))
+      [40; 60; 80; 120; 242])
+    ["beta"; "keeper-with-a-long-family-name-and-a-distinct-tail";
+     "아주긴키퍼이름으로행동안내가가려지면안되는키퍼"]
+
+
+let test_priority_control_receipt_ordering () =
+  let setup () =
+    let state = state () in
+    let entry = inflight ~request_id:"priority-request" ~at:2. () in
+    state.msg_inflight <- [entry];
+    state.keeper_run_next_inflight <- [entry.sent_request];
+    state, entry.sent_request in
+  List.iter (fun received_first ->
+    List.iter (fun outcome ->
+      let state, request = setup () in
+      let generation = Tui.begin_keeper_chat_control state "alpha" in
+      check int "active callback still serializes subsequent priority" 1
+        (List.length state.keeper_run_next_inflight);
+      if received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+      (* The transport token acknowledgement is not the final control result. *)
+      ignore (Tui.finish_keeper_chat_control state "alpha" ~generation);
+      check bool "priority evidence is provisional until semantic result" true
+        (Tui.keeper_run_next_receipt_provisional state request);
+      Tui.settle_keeper_priority_control state "alpha" ~generation ~outcome;
+      if not received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+      check int "callback tracking settles exactly once" 0
+        (List.length state.keeper_run_next_inflight);
+      check int "failure restores evidence, successful supersession retires it"
+        (match outcome with Tui.Priority_unconfirmed -> 1 | Tui.Priority_superseded -> 0)
+        (List.length state.keeper_run_next_receipts))
+      [Tui.Priority_unconfirmed; Tui.Priority_superseded]) [false; true];
+  (* Every confirmed control applies its own cohort, independent of which
+     overlapping control or run-next callback returns first. *)
+  List.iter (fun received_first ->
+    List.iter (fun older_first ->
+      List.iter (fun older_succeeds ->
+        let state, request = setup () in
+        let first = Tui.begin_keeper_chat_control state "alpha" in
+        let second = Tui.begin_keeper_chat_control state "alpha" in
+        let successful = if older_succeeds then first else second in
+        let unsuccessful = if older_succeeds then second else first in
+        if received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+        let settle generation = Tui.settle_keeper_priority_control state "alpha" ~generation
+          ~outcome:(if generation = successful then Tui.Priority_superseded else Tui.Priority_unconfirmed) in
+        settle (if older_first then first else second);
+        check int "one callback leaves the other control outstanding" 1
+          (List.length state.keeper_priority_controls);
+        check bool "the unsettled control keeps its cohort provisional" true
+          (Tui.keeper_run_next_receipt_provisional state request);
+        (* This assertion also covers a second control that never answers. *)
+        if (if older_first then first else second) = successful then
+          check int "success already removes acknowledged priority despite hanging control" 0
+            (List.length state.keeper_run_next_receipts);
+        settle (if older_first then second else first);
+        if not received_first then ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+        check int "failure cannot restore evidence superseded by another control" 0
+          (List.length state.keeper_run_next_receipts);
+        check int "each settled generation leaves tracking exactly once" 0
+          (List.length state.keeper_priority_controls);
+        settle unsuccessful;
+        check int "duplicate semantic callback cannot recreate evidence" 0
+          (List.length state.keeper_run_next_receipts)) [false; true]) [false; true]) [false; true];
+  let state, request = setup () in
+  let alpha = Tui.begin_keeper_chat_control state "alpha" in
+  let beta = Tui.begin_keeper_chat_control state "beta" in
+  Tui.settle_keeper_priority_control state "beta" ~generation:beta ~outcome:Tui.Priority_superseded;
+  check bool "another Keeper's success cannot settle alpha's cohort" true
+    (Tui.keeper_run_next_receipt_provisional state request);
+  Tui.settle_keeper_priority_control state "alpha" ~generation:alpha ~outcome:Tui.Priority_unconfirmed;
+  ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
+  check int "alpha failure preserves its received priority" 1
+    (List.length state.keeper_run_next_receipts)
+
+let test_compact_failure_keeps_exact_cause () =
+  let state = state () in
+  let entry = inflight ~request_id:"failed-request" ~at:1. () in
+  Tui.turn_log_add ~now:2. entry.log ~seq:(Some 1)
+    (Live.Run_failed {message="exact stream failure cause"});
+  List.iter (fun mode ->
+    state.msg_tool_visibility <- mode;
+    List.iter (fun folded ->
+      state.msg_turn_folded <- folded;
+      let rows = Tui.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:3. in
+      check bool "compact failure cause survives folding" true
+        (List.exists (fun (kind, text) -> kind = Masc_tui_keeper_chat_transcript.Progress
+          && Astring.String.is_infix ~affix:"exact stream failure cause" text) rows)) [false; true])
+    [Tui.Tools_compact; Tui.Tools_results]
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+      [ test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
+      ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
+      ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
+      ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
+      ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission
       ; test_case "one status row per server batch" `Quick

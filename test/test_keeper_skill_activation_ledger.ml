@@ -1272,6 +1272,20 @@ let test_projection_decoder_reuses_all_ledger_invariants () =
   | Ok _ -> fail "invalid projection workspace was accepted"
 ;;
 
+let test_shared_python_revision_fixture () =
+  let json = Yojson.Safe.from_file "fixtures/skill-ledger-revision.json" in
+  let expected = Yojson.Safe.Util.(json |> member "revision" |> to_string) in
+  let rec reverse_objects = function
+    | `Assoc fields -> `Assoc (List.rev_map (fun (key, value) -> key, reverse_objects value) fields)
+    | `List values -> `List (List.map reverse_objects values)
+    | value -> value in
+  List.iter (fun value ->
+    match Ledger.of_projection_yojson value with
+    | Error error -> failf "shared projection rejected: %s" (Ledger.decode_error_code error)
+    | Ok ledger -> check string "server revision agrees with Python fixture" expected (Ledger.revision ledger))
+    [json; reverse_objects json]
+;;
+
 let test_receipt_projection_revision_binds_full_unicode_id () =
   let ledger =
     Ledger.empty ~workspace_root:"/workspace" ~trace_id:(trace_id "trace-one")
@@ -1343,6 +1357,7 @@ let () =
             test_revision_binds_workspace_and_trace
         ; test_case "projection decoder reuses all ledger invariants" `Quick
             test_projection_decoder_reuses_all_ledger_invariants
+        ; test_case "shared Python revision fixture" `Quick test_shared_python_revision_fixture
         ; test_case "receipt projection binds the full Unicode id" `Quick
             test_receipt_projection_revision_binds_full_unicode_id
         ; test_case "store error string keeps decode detail" `Quick

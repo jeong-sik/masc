@@ -16,7 +16,8 @@
     in the runtime manifest. *)
 
 val handle
-  :  config:Workspace.config
+  :  observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
   -> keeper_name:string
   -> runtime_id:string
   -> Agent_core.Error.t

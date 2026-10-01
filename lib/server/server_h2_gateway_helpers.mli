@@ -33,6 +33,9 @@ val h2_respond_cached_payload :
   ?extra_headers:(string * string) list ->
   H2.Reqd.t -> Dashboard_cache.cached_payload -> unit
 
+(** JSON values use the HTTP/1 timeout-envelope status rule: the default or
+    explicit 200 becomes 504 for an envelope; other explicit statuses remain.
+    The envelope body and response headers are preserved. *)
 val h2_respond_json_value :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->
@@ -40,7 +43,8 @@ val h2_respond_json_value :
   H2.Reqd.t -> Yojson.Safe.t -> unit
 
 (** Encode immutable JSON on the shared CPU executor, then write on the
-    caller fiber. Only the negotiated encoding is prepared. *)
+    caller fiber. Only the negotiated encoding is prepared. Timeout status
+    follows {!h2_respond_json_value}, including when no pool is installed. *)
 val h2_respond_json_value_on_cpu :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->

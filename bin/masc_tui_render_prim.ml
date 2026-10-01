@@ -111,6 +111,7 @@ let clamped_scroll_now (state : state) = function
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
   | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
   | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
       System_log_detail_scroll state.system_logs_detail_scroll
   | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
@@ -160,6 +161,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
   | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
   | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
   | Lane_run_detail_scroll { scroll; content_height } ->
@@ -3440,17 +3442,27 @@ let help_lines ~width (state : state) =
          Masc_tui_command.catalog
     @ [ "" ]
   in
-  (* The first section is the reader's own surface, and it opens the sheet.
+  (* After any live Candle details, the first key section is the reader's
+     own surface.
      The eleven lines of slash commands used to sit above it and pushed the
      answer past the fold; they are a reference and read as one here.
 
      [help_sections] puts Global first where the surface has no section of its
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
-  match Masc_tui_keys.help_sections_for_state state with
+  let candle =
+    match Masc_tui_candle.summary_lines state.candle_observation with
+    | [] -> []
+    | lines ->
+      (Ansi.bold ^ "Candle details" ^ Ansi.reset)
+      :: (List.concat_map
+            (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
+              (Terminal_text.single_line line)) lines @ [ "" ])
+  in
+  candle @ (match Masc_tui_keys.help_sections_for_state state with
   | [] -> slash_commands
   | first :: rest ->
-      section first @ slash_commands @ List.concat_map section rest
+      section first @ slash_commands @ List.concat_map section rest)
 
 
 module Context_bars = Masc_tui_context_bars

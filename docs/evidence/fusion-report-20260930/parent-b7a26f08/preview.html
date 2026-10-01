@@ -1,0 +1,106 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MASC · Fusion 보고서 연결</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101a18;color:#edf3ed}
+*{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:0 auto;padding:48px 28px}
+.eyebrow{color:#a2c6b4;font-size:13px;letter-spacing:.12em}h1{font-size:36px;margin:14px 0}
+.intro{color:#c4d3cc;max-width:680px;line-height:1.7}.fixture{display:inline-block;padding:7px 11px;border:1px solid #506559;border-radius:8px;font-size:12px}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:32px 0}
+.node{border:1px solid #42584b;background:#1b2922;border-radius:12px;padding:18px;min-width:0}
+.node strong{display:block;margin:10px 0}.node small{color:#bed0c4;line-height:1.6;display:block}
+.pending{border-style:dashed;background:transparent}.layer{font-size:12px;color:#88bfa1}
+.report{border:1px solid #42584b;border-radius:14px;background:#15221c;padding:26px}
+.report h2{font-size:18px;margin:0 0 20px}.pill{font-size:12px;padding:5px 9px;border-radius:20px;background:#2e4a39;color:#c8f0d0;margin-left:10px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;line-height:1.85;margin:0}
+details{margin-top:24px;border-top:1px solid #354c3e;padding-top:18px}summary{cursor:pointer;color:#b9d8c4}details pre{font:13px/1.65 ui-monospace,monospace;margin-top:18px;color:#c4d3cc}
+.note{font-size:13px;color:#a6b9ac;line-height:1.7;margin-top:22px}a{color:#bce7ce}
+@media(max-width:700px){main{padding:28px 18px}.flow{grid-template-columns:1fr 1fr}h1{font-size:28px}.report{padding:18px}}
+</style><main><div class="eyebrow">MASC / LANE ADD-ONS</div>
+<h1>분석 결과가 내 에이전트에게 가는 길</h1>
+<p class="intro">Fusion의 결과를 보존하고, 읽을 수 있는 보고서로 만들고, 에이전트의 입력으로 연결합니다. 각 층의 결과와 전달 상태를 따로 확인합니다.</p>
+<span class="fixture">MCP stdio fixture · 실제 두 패키지 실행 · 운영 데이터 아님</span>
+<div class="flow">
+<div class="node"><span class="layer">01 · 분석</span><strong>Fusion 실행</strong><small>호스트 실행의 상태와 Board 원문을 fixture로 공급</small></div>
+<div class="node"><span class="layer">02 · 보존</span><strong>Fusion Results →</strong><small>완료 상태 · 원문 · 실행 ID<br>독립 패키지의 출력</small></div>
+<div class="node"><span class="layer">03 · 활용</span><strong>Fusion Report →</strong><small>아래 보고서와 입력 출처<br>독립 패키지의 출력</small></div>
+<div class="node pending"><span class="layer">04 · 전달</span><strong>내 에이전트</strong><small>전달 미실행<br>호스트 Evidence 연결 대상</small></div>
+</div><section class="report"><h2>활용할 결과<span class="pill">분석 완료</span><span class="pill">입력 근거 보존</span></h2>
+<pre id="report-body"># Fusion 보고서 · 분석 완료
+
+실행: fusion-request-1
+
+입력 범위: 기록된 실행 결과
+
+## 보존된 분석 내용
+
+검증용 운영 보고서
+
+에이전트가 활용할 결과
+• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.
+• 분석 실패와 근거 누락을 구분할 수 있습니다.
+• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.
+
+다음 연결
+보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.
+
+전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.
+</pre><p id="delivery-state" class="note">아직 전달하지 않음</p><details><summary>이 결과는 어디에서 왔나요?</summary><pre id="report-lineage">{
+  &quot;producer&quot;: {
+    &quot;installation_id&quot;: &quot;fusion-results&quot;,
+    &quot;instance_id&quot;: &quot;projection-1&quot;,
+    &quot;run_id&quot;: &quot;fusion-report&quot;,
+    &quot;configuration_revision&quot;: &quot;config-1&quot;,
+    &quot;package_revision&quot;: &quot;0.1.1&quot;,
+    &quot;observation_seq&quot;: 1,
+    &quot;output_id&quot;: null,
+    &quot;output_selection&quot;: {
+      &quot;all_lanes&quot;: true
+    },
+    &quot;coverage_scope&quot;: &quot;whole_producer&quot;
+  },
+  &quot;upstream_rows&quot;: [
+    {
+      &quot;id&quot;: &quot;projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30&quot;,
+      &quot;lane_id&quot;: &quot;projection-1/fusion/status&quot;,
+      &quot;kind&quot;: &quot;event&quot;,
+      &quot;subject_id&quot;: &quot;fusion-request-1&quot;,
+      &quot;observed_at&quot;: 120.0,
+      &quot;clock&quot;: null,
+      &quot;actor&quot;: null,
+      &quot;evidence&quot;: [
+        {
+          &quot;uri&quot;: &quot;lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e&quot;,
+          &quot;sha256&quot;: &quot;45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e&quot;
+        }
+      ],
+      &quot;related_ids&quot;: []
+    },
+    {
+      &quot;id&quot;: &quot;projection-1/1/f389c2544ed0e00df5baf9d2f42269a171a1054124aa99d8b39b26834963ffbc&quot;,
+      &quot;lane_id&quot;: &quot;projection-1/fusion/result&quot;,
+      &quot;kind&quot;: &quot;value&quot;,
+      &quot;subject_id&quot;: &quot;fusion-request-1&quot;,
+      &quot;observed_at&quot;: 120.0,
+      &quot;clock&quot;: null,
+      &quot;actor&quot;: null,
+      &quot;evidence&quot;: [
+        {
+          &quot;uri&quot;: &quot;lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e&quot;,
+          &quot;sha256&quot;: &quot;45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e&quot;
+        }
+      ],
+      &quot;related_ids&quot;: [
+        &quot;projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30&quot;
+      ]
+    }
+  ],
+  &quot;upstream_output_evidence&quot;: [
+    {
+      &quot;uri&quot;: &quot;lane-evidence:5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218&quot;,
+      &quot;sha256&quot;: &quot;5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218&quot;
+    }
+  ]
+}</pre><p class="note">보고서의 전체 입력·출력은 composition.json에 보존되어 있습니다.</p></details></section>
+<p class="note">이 페이지는 실행된 패키지 출력의 미리보기입니다. Fusion 모델 연산의 격리와 Broadcast·에이전트 열람은 후속 구현·검증 범위입니다.</p>
+<p class="note"><a href="lane-addons-composer.html">수평·수직 레이어와 Fusion 내부 조립 보기 ↗</a></p></main></html>

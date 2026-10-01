@@ -21,6 +21,7 @@ val handle : ?access:Lane_addon_sources.access -> config:Workspace.config -> cal
 
 module For_testing : sig
   val handle :
+    ?access:Lane_addon_sources.access ->
     replace_cursor_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result

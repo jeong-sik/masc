@@ -141,6 +141,21 @@ describe('streamKeeperGithubLogin', () => {
     expect(events).toEqual([{ event: 'error', message: 'gh exited with 1' }])
   })
 
+  it('preserves output and completion at every CRLF stream chunk boundary', async () => {
+    const output = { stream: 'stdout', text: '인증 코드: ABCD-1234\n  다음 단계' }
+    const wire = `event: output\r\ndata: ${JSON.stringify(output)}\r\n\r\n`
+      + `event: complete\r\ndata: ${JSON.stringify({ observation })}\r\n\r\n`
+    const expected = [
+      { event: 'output', ...output },
+      { event: 'complete', observation },
+    ]
+    for (let split = 1; split < wire.length; split++) {
+      expect(await collectLoginEvents([wire.slice(0, split), wire.slice(split)]),
+        `wire split at ${split}`).toEqual(expected)
+    }
+    expect(await collectLoginEvents(Array.from(wire))).toEqual(expected)
+  })
+
   it('surfaces the response body when the login request is refused', async () => {
     vi.stubGlobal(
       'fetch',

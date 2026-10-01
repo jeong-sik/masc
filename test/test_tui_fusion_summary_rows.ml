@@ -52,7 +52,7 @@ let test_no_entry_loses_its_row () =
     done
   done
 
-let module_path = "bin/masc_tui_render.ml"
+let module_path = "bin/masc_tui_render_fusion.ml"
 
 let calls ~callee =
   Ast_grep.count_calls_in_value_binding ~module_path

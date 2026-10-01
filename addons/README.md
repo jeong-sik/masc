@@ -65,6 +65,12 @@ docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 add
 docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.2.0 addons
 ```
 
+`max_reply_bytes` bounds each worker reply, acquired input, and namespaced host
+observation. Packages must leave room for the host's instance/sequence identity
+prefixes. A reply that fits the worker wire limit can therefore be explicitly
+refused before storage if namespacing exceeds that observation envelope; relation
+counts do not grant extra host storage capacity.
+
 Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
 frame-progress and value-difference examples use half a CPU, 128 MiB memory,
 16 processes and a

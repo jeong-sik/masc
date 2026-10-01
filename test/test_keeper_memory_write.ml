@@ -823,6 +823,15 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     (contains ~needle:"retrieval is unavailable" no_reader);
   Alcotest.(check bool) "missing reader does not fall back to full injection" false
     (contains ~needle:"deployment region is us-west-1" no_reader);
+  let no_tools = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~memory_search_available:false
+    ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ()) ()
+    |> Option.value ~default:"" in
+  Alcotest.(check bool) "a tool-less runtime retains its readable snapshot" true
+    (contains ~needle:"deployment region is us-west-1" no_tools);
+  Alcotest.(check bool) "a tool-less runtime is not directed to absent tools" false
+    (contains ~needle:"keeper_memory_search" no_tools
+     || contains ~needle:"keeper_artifact_read" no_tools);
   Alcotest.(check bool)
     "unchanged source claim reaches recall"
     true
@@ -881,6 +890,26 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "typed invalidation persists in recall"
     true
     (contains ~needle:"reason=source_changed" invalidated_prompt);
+  let without_reader = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~config ~meta ~keepers_dir
+    ~keeper_id:meta.name ~now:(Time_compat.now ()) () |> Option.get in
+  Alcotest.(check bool) "no-reader fallback identifies the invalidated source" true
+    (contains ~needle:source_path without_reader
+     && contains ~needle:"reason=source_changed" without_reader);
+  let blob_root = Masc.Tool_blob_store.root_dir
+      (Masc.Tool_blob_store.create ~base_path) in
+  let saved_blob_root = blob_root ^ ".saved" in
+  Sys.rename blob_root saved_blob_root;
+  Fs_compat.save_file blob_root "not a directory";
+  Fun.protect ~finally:(fun () -> Sys.remove blob_root; Sys.rename saved_blob_root blob_root)
+    (fun () ->
+      let failed_publication = render_prompt ~now:(Time_compat.now ()) in
+      Alcotest.(check bool) "publication failure does not report source-store failure" false
+        (contains ~needle:"Source-bound memory is unavailable" failed_publication);
+      Alcotest.(check bool) "publication failure retains the invalidation" true
+        (contains ~needle:"reason=source_changed" failed_publication);
+      Alcotest.(check bool) "publication failure keeps search available" true
+        (contains ~needle:"keeper_memory_search" failed_publication));
   Alcotest.(check string)
     "a retained invalidation renders the same block at a later clock"
     invalidated_prompt
@@ -1099,7 +1128,46 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
   let revalidated =
     Fun.protect
       ~finally:(fun () -> Unix.chmod unreadable_host 0o600)
-      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+      (fun () ->
+        let prompt = Masc.Keeper_memory_os_recall.render_if_enabled
+            ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
+        let reference = List.hd (List.rev (String.split_on_char '\n' prompt))
+          |> Yojson.Safe.from_string in
+        let body = match Masc.Tool_output.normalized_artifact_ref_of_json reference with
+          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
+            let execution, page = Masc.Keeper_artifact_read.handle_with_page
+                ~base_path ~args:(`Assoc ["sha256", `String artifact.sha256]) in
+            (match page with
+             | Some page ->
+               Alcotest.(check bool) "reader returns the whole small fixture" true page.eof;
+               Alcotest.(check bool) "reader returns text" true
+                 (page.encoding = Masc.Keeper_artifact_read.Utf_8);
+               page.content
+             | None -> Alcotest.fail execution.Masc.Keeper_tool_execution.raw_output)
+          | _ -> Alcotest.fail "expected recall artifact" in
+        Alcotest.(check bool) "unreadable claim is absent from the complete artifact" false
+          (contains ~needle:("claim about " ^ unreadable) body);
+        Alcotest.(check bool) "verified claim survives alongside deferred source" true
+          (contains ~needle:("claim about " ^ unchanged) body);
+        Alcotest.(check bool) "artifact retains deferred identity and invalidation" true
+          (contains ~needle:"reason=source_unreadable_this_turn" body
+           && contains ~needle:unreadable body
+           && contains ~needle:"reason=source_changed" body);
+        let inline = Masc.Keeper_memory_os_recall.render_if_enabled
+            ~artifact_reader_available:false ~memory_search_available:false
+            ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
+        Alcotest.(check bool) "tool-less fallback also withholds unreadable claim" false
+          (contains ~needle:("claim about " ^ unreadable) inline);
+        Alcotest.(check bool) "tool-less fallback retains verified facts" true
+          (contains ~needle:("claim about " ^ unchanged) inline);
+        let search = Runtime.keeper_memory_search_json ~config ~meta
+            ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+            ~args:(`Assoc ["query", `String "claim about";
+                          "source", `String "current"; "limit", `Int 10])
+            |> Yojson.Safe.from_string in
+        Alcotest.(check (list string)) "search returns only revalidated source claims"
+          ["claim about " ^ unchanged] (match_texts search);
+        Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
   match revalidated with
   | Error detail -> Alcotest.fail detail

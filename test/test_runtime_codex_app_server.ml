@@ -330,7 +330,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?handoff_requested ?(prompt = "Return the fixture marker")
+    ?on_prompt_sent ?await_handoff ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
@@ -381,7 +381,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ?on_turn_started
       ?on_stream_event
       ?on_prompt_sent
-      ?handoff_requested
+      ?await_handoff
       config
       ~prompt
       ~images))
@@ -576,6 +576,7 @@ let test_scheduling_handoff_preserves_active_protocol () =
     let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
       let calls = ref 0 in
+      let ready, signal = Eio.Promise.create () in
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "Observe an effect exactly once"
         ; input_schema = `Assoc ["type", `String "object"]
@@ -583,6 +584,7 @@ let test_scheduling_handoff_preserves_active_protocol () =
         ; result_bound = Runtime_official_client_tool.Unbounded
         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
         ; call = (fun ~call_id:_ _ -> incr calls;
+            if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
             { success = true; content = "effect persisted";
               content_blocks = None; abort_turn = None }) } in
       let second_tool =
@@ -603,7 +605,7 @@ let test_scheduling_handoff_preserves_active_protocol () =
               then [capture ^ capture ^ capture; line] else [line])
             |> String.concat "\n" in
           Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-          match run_fixture ~dynamic_tools:[tool] ~handoff_requested:(fun () -> true) path with
+          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true) path with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
             check int "concurrent tool frames survive steer response" 2 !calls;
@@ -623,6 +625,64 @@ let test_scheduling_handoff_preserves_active_protocol () =
           (second_result |> member "id" |> to_string)
       | _ -> fail "expected tool result, scheduling steer, and second tool result"))
     [Some true; Some false; None]
+;;
+
+let test_scheduling_handoff_wakes_idle_before_first_tool () =
+  let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
+  let progress, signal_progress = Eio.Promise.create () in
+  Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      agent_message_delta; item_completed; turn_completed] (fun path ->
+      let original = In_channel.with_open_bin path In_channel.input_all in
+      let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
+      let wait_for_steer =
+        "IFS= read -r steer\nprintf '%s\\n' \"$steer\" > " ^ shell_quote capture_path
+        ^ "\nprintf '%s\\n' "
+        ^ shell_quote {|{"id":6,"result":{"turnId":"turn-1"}}|} in
+      let instrumented = original |> String.split_on_char '\n'
+        |> List.concat_map (fun line ->
+          if line = terminal then [wait_for_steer; line] else [line])
+        |> String.concat "\n" in
+      Out_channel.with_open_bin path (fun out -> output_string out instrumented);
+      let on_stream_event = function
+        | Runtime_codex_app_server.Text_delta _ ->
+          Eio.Promise.resolve signal_progress ()
+        | _ -> ()
+      in
+      let await_handoff () =
+        Eio.Promise.await progress;
+        (* Let the consumer enter its next receive. The fixture emits no more
+           provider frames until it receives the scheduling notice, so a
+           progress-boundary-only queue check cannot complete this turn. *)
+        Eio.Fiber.yield ();
+        true
+      in
+      match run_fixture ~on_stream_event ~await_handoff path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        check int "no tool required to wake idle turn" 0 result.dynamic_tool_calls;
+        let request = In_channel.with_open_bin capture_path In_channel.input_all
+          |> Yojson.Safe.from_string in
+        check string "idle transport receives scheduling steer" "turn/steer"
+          Yojson.Safe.Util.(request |> member "method" |> to_string)))
+;;
+
+let test_scheduling_handoff_waiter_released_at_terminal () =
+  let waiting, _resolve_waiting = Eio.Promise.create () in
+  let subscribed = ref false in
+  let released = ref false in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    let await_handoff () =
+      subscribed := true;
+      Fun.protect ~finally:(fun () -> released := true)
+        (fun () -> Eio.Promise.await waiting)
+    in
+    match run_fixture ~await_handoff path with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ ->
+      check bool "waiter subscribed" true !subscribed;
+      check bool "terminal unregisters waiter" true !released)
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -7230,6 +7290,10 @@ let () =
             test_invalid_context_window_is_process_free
         ; test_case "scheduling handoff preserves active protocol" `Quick
             test_scheduling_handoff_preserves_active_protocol
+        ; test_case "scheduling handoff wakes idle turn before any tool" `Quick
+            test_scheduling_handoff_wakes_idle_before_first_tool
+        ; test_case "scheduling handoff waiter released at terminal" `Quick
+            test_scheduling_handoff_waiter_released_at_terminal
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "worker encoded dynamic tool callback" `Quick

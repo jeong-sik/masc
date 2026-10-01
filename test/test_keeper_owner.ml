@@ -1151,6 +1151,10 @@ let test_operation_lifecycle_is_durable_and_projected () =
          ~initial_meta:(Some (make_meta "operation-lifecycle")))
   in
   let operation_id = operation_id "kmsg-operation-lifecycle" in
+  let observed, resolve_observed = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve resolve_observed (Owner.await_claimable_operation owner));
+  Eio.Fiber.yield ();
   let accepted =
     owner_ok
       (Owner.submit_operation
@@ -1164,6 +1168,9 @@ let test_operation_lifecycle_is_durable_and_projected () =
   let queued_projection = Owner.operation_projection owner in
   check int "queued projection publishes after commit" 1 queued_projection.queued_count;
   check bool "queued input is ready" true queued_projection.has_claimable_queued;
+  check bool "queue commit wakes a sleeping subscriber" true (Eio.Promise.await observed);
+  check bool "subscription after commit observes existing input" true
+    (Owner.await_claimable_operation owner);
   check bool
     "queued projection has no running operation"
     true

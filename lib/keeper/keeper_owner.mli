@@ -264,6 +264,10 @@ val projection : t -> Keeper_owner_reducer.projection
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
 
+val await_claimable_operation : t -> bool
+(** Wait for a durable claimable queued operation without consuming it. Returns
+    false when the owner closes. Cancellation unregisters the condition waiter. *)
+
 val wake_operation_drain : t -> (unit, error) result
 (** Reconsider existing Queued rows after the operation runner's dependency
     becomes ready. This command never changes sequence or state itself.

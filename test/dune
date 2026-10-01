@@ -7975,3 +7975,5 @@
  (libraries alcotest masc.sse_wire))
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+
+(include stanzas/test_item_http_redirects.inc)

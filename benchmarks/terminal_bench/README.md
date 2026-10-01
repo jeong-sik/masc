@@ -43,8 +43,15 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
     BENCH_ENV=modal ./run_matrix.sh  # 샌드박스를 태스크마다 맞춰 만드는 환경
     python aggregate.py results/jobs # → CSV
 
-`run_matrix.sh` 는 데이터셋을 받아(`results/datasets/`, 끝까지 받았을 때만 `.complete`)
-`dataset_plan.py` 로 먼저 판정한다.
+`run_matrix.sh` 는 데이터셋을 받기 전에 `preflight_arms.py` 로 MASC arm 마다 컨테이너에서
+서버를 띄워 본다. `bootstrap.sh` 가 서버를 켜고 첫 keeper 를 올리고 승인 모드를 정하는
+데까지 가며, 모델은 부르지 않고 provider 키는 자리표시자다. arm 하나라도 못 올라오면
+멈춘 단계와 로그 끝을 적고 실행을 시작하지 않는다. 에뮬레이션 amd64 에서 arm 마다
+1~2분 걸린다(2026-10-01, v0.48.0, b 55초, e 94초, f 53초, h 65초). 태스크 이미지 자체
+(사용자, PATH)와 모델의 답은 다루지 않는다.
+
+그 다음 데이터셋을 받아(`results/datasets/`, 끝까지 받았을 때만 `.complete`)
+`dataset_plan.py` 로 판정한다.
 
 - GPU 태스크(`fp8-rmsnorm-gemm`, `jax-speedrun-gpu`, `math-eval-grader`, H100 요구)는
   docker 에서 `-x` 로 뺀다. harbor 는 GPU 를 줄 수 없는 환경에서 이 trial 을 만들다가

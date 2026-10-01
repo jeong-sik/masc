@@ -588,8 +588,9 @@ let test_externalize_with_temp_base_path () =
 let test_post_effect_peer_artifact_remains_delegatable () =
   with_temp_base_path (fun base_path ->
     let bytes = "already exported peer artifact" in
+    let store = Tool_blob_store.create ~base_path in
     let blob = Tool_blob_store.put_durable
-        (Tool_blob_store.create ~base_path) ~bytes ~mime:"application/octet-stream" in
+        store ~bytes ~mime:"application/octet-stream" in
     let artifact =
       match Masc.Keeper_peer_artifact_ref.make ~blob
               ~filename:"analysis.bin" ~purpose:"peer handoff" with
@@ -597,6 +598,21 @@ let test_post_effect_peer_artifact_remains_delegatable () =
       | Error detail -> Alcotest.fail detail
     in
     let data = `Assoc ["artifact", Masc.Keeper_peer_artifact_ref.to_json artifact] in
+    let exported = Tool_result.make_ok ~tool_name:"keeper_artifact_transfer"
+        ~start_time:(Tool_timing.start ()) ~data () in
+    (* Preserve the durable export while making the real manifest writer fail.
+       Restore access before the model consumes the resulting failure. *)
+    let root = Tool_blob_store.root_dir store in
+    let retained = root ^ ".retained" in
+    Unix.rename root retained;
+    Fun.protect ~finally:(fun () ->
+      if Sys.file_exists root then Unix.unlink root;
+      Unix.rename retained root) (fun () ->
+        let blocked = open_out_bin root in
+        close_out blocked;
+        match B.attach_artifact_manifest ~base_path exported with
+        | Ok _ -> Alcotest.fail "blocked manifest storage unexpectedly succeeded"
+        | Error { kind = B.Artifact_storage_failure; _ } -> ());
     let failed = Tool_result.make_err
         ~tool_name:"keeper_artifact_transfer" ~class_:Tool_result.Runtime_failure
         ~start_time:(Tool_timing.start ()) ~data

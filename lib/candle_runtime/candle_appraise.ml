@@ -75,6 +75,21 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
          Ok (E.Paid payment))
   | None, _, _ -> Error (A.Transport_unavailable "no Snapshot names the confirmed verifier run")
   | Some _, (None | Some _), None | Some _, None, Some _ -> Error (A.Transport_unavailable "Candidates are not durable yet")
+let preparation_error ~at ~events error =
+  let invalid error = A.Invalid_response (Candle_balance.error_to_string error) in
+  match error with
+  | Candle_balance.Clock_reversed _
+  | Candle_balance.Decay_failed {error=Candle_decay.Reversed_interval;_} ->
+      (* Distinguish a temporarily early wall clock from reversed historical
+         ledger facts. Replaying through the latest recorded instant still
+         rejects malformed historical order and monetary facts. *)
+      let through = List.fold_left (fun latest (event : E.t) ->
+        if Candle_time.compare event.at latest > 0 then event.at else latest) at events in
+      (match Candle_balance.of_events ~at:through events with
+       | Ok _ -> A.Transport_unavailable (Candle_balance.error_to_string error)
+       | Error historical -> invalid historical)
+  | error -> invalid error
+
 let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.waiting) =
   let* body = decide ~appraise ~policy events waiting in
   Candle_ledger.update ~base_path (fun view ->
@@ -87,8 +102,9 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
         | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in
       let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
-      let* prepared = Candle_status.prepare ~at ~half_life:current_policy.half_life (Candle_ledger.events view)
-        |> Result.map_error (fun error -> A.Invalid_response (Candle_balance.error_to_string error)) in
+      let events = Candle_ledger.events view in
+      let* prepared = Candle_status.prepare ~at ~half_life:current_policy.half_life events
+        |> Result.map_error (preparation_error ~at ~events) in
       let* () = Candle_payout.validate_settlement waiting prepared.events body
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let* () = match body with

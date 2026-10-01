@@ -1309,6 +1309,7 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 type keeper_runtime = {
   kr_name : string;
   kr_portrait : keeper_portrait;
+  kr_candle_balance_milli : string option;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -1332,10 +1333,12 @@ type keeper_runtime = {
     the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, configuration_errors, truncated, total)]. Explicit metadata errors
-    are retained per keeper without discarding readable rows. A row whose [status] or lifecycle [phase] is
+    [(rows, configuration_errors, truncated, total, candle)]. Explicit metadata errors
+    are retained per keeper without discarding readable rows. Malformed Candle
+    fields produce an [Error] observation and withdraw every balance while
+    keeping the readable Keeper lifecycle rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.
 

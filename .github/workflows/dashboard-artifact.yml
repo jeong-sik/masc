@@ -7,6 +7,10 @@ on:
         description: Space-separated dashboard feature test files to verify before packaging
         type: string
         default: ""
+      capture_item_browser:
+        description: Verify Item account transitions in Chromium and retain fixture screenshots
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,6 +72,36 @@ jobs:
             fi
           done
           pnpm exec vitest run --config vitest.config.ts "${test_files[@]}"
+
+      - name: Install Item proof browser
+        if: inputs.capture_item_browser
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify Item browser transitions
+        if: inputs.capture_item_browser
+        working-directory: dashboard
+        env:
+          KEEPER_ITEMS_ARTIFACT_DIR: ${{ runner.temp }}/keeper-items-browser
+          KEEPER_ITEMS_FIXTURE_URL: http://127.0.0.1:5197/dashboard/dev-fixtures/keeper-items-fixture.html
+          MASC_DASHBOARD_PROXY_TARGET: http://127.0.0.1:1
+        run: |
+          set -euo pipefail
+          mkdir -p "$KEEPER_ITEMS_ARTIFACT_DIR"
+          pnpm exec vite --host 127.0.0.1 --port 5197 --strictPort > "$KEEPER_ITEMS_ARTIFACT_DIR/vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 --retry-max-time 30 --max-time 5 "$KEEPER_ITEMS_FIXTURE_URL" > /dev/null
+          pnpm exec node e2e/keeper-items.mjs
+
+      - name: Upload Item browser evidence
+        if: always() && inputs.capture_item_browser
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-items-browser-${{ github.sha }}
+          path: ${{ runner.temp }}/keeper-items-browser/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Build dashboard
         working-directory: dashboard

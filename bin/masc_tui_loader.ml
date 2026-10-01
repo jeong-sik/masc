@@ -1864,7 +1864,7 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
 let load_keeper_roster ~(host : string) ~(port : int) :
-    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
   match fetch_keeper_runtimes ~host ~port with
   | Error transport ->
@@ -1879,8 +1879,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total, candle) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show

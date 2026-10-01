@@ -914,7 +914,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       row)
       names
   in
-  let equipment = Candle_equipment.reader ~base_path:config.base_path () in
+  let candle = Candle_observe.read ~base_path:config.base_path in
+  let equipment = Candle_observe.equipment candle in
   let summaries = List.filter_map Fun.id rows |> List.map (fun row ->
     let portrait = match Json_util.assoc_string_opt "name" row with
       | Some keeper -> (match equipment ~keeper with
@@ -922,10 +923,20 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           | Error reason -> Keeper_portrait_equipment.Unavailable reason)
       | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
     match row with
-    | `Assoc fields -> `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait) :: List.remove_assoc "portrait" fields)
+    | `Assoc fields -> let balance = match Json_util.assoc_string_opt "name" (`Assoc fields) with
+        | Some keeper -> Candle_observe.balance candle ~keeper
+        | None -> None in
+      let account_revision = match Json_util.assoc_string_opt "name" (`Assoc fields) with
+        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | None -> None in
+      `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait)
+        :: ("candle_balance_milli", Json_util.option_to_yojson (fun value -> `String value) balance)
+        :: ("candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision)
+        :: List.remove_assoc "candle_account_revision" (List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields)))
     | json -> json) in
   `Assoc [
     ("keepers", `List summaries);
+    ("candle", Candle_observation.to_json (Candle_observe.summary candle));
     ("total", `Int (List.length summaries));
   ]
 

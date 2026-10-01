@@ -95,6 +95,7 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 type keeper_runtime = {
   kr_name : string;
   kr_portrait : keeper_portrait;
+  kr_candle_balance_milli : string option;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -5883,7 +5884,7 @@ let decode_overview_goals json =
   let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
   Ok (List.concat nodes)
 
-let decode_keeper_runtime json =
+let decode_keeper_runtime ~candle_balance_milli json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
@@ -5938,6 +5939,7 @@ let decode_keeper_runtime json =
   Ok
     { kr_name
     ; kr_portrait
+    ; kr_candle_balance_milli = candle_balance_milli
     ; kr_health
     ; kr_paused
     ; kr_next_action
@@ -5954,7 +5956,26 @@ let decode_keeper_runtime json =
    otherwise present a short list as the whole fleet. *)
 let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
-  let decode_row json =
+  let candle_rows =
+    let* candle = Candle_observation.of_json (member "candle" json) in
+    let decode_balance json =
+      let* balance = match Json_util.assoc_member_opt "candle_balance_milli" json with
+        | Some value -> Candle_observation.balance_of_json value
+        | None -> Error "missing required field candle_balance_milli" in
+      match candle, balance with
+      | Candle_observation.Ready _, Some _
+      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance)
+      | Candle_observation.Ready _, None
+      | (Candle_observation.Off | Candle_observation.Disabled _), Some _ ->
+        Error "Candle row balance disagrees with the envelope observation" in
+    let* rows = decode_list "keepers" decode_balance items in
+    Ok (candle, rows)
+  in
+  let candle, items = match candle_rows with
+    | Ok (candle, rows) -> Ok candle, rows
+    | Error detail -> Error detail, List.map (fun row -> row, None) items
+  in
+  let decode_row (json, candle_balance_milli) =
     match member "effective_meta_error" json with
     | `Null when member "status" json = `String "error" ->
         let* name = required_string_field json "name" in
@@ -5968,7 +5989,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:
@@ -6003,7 +6024,7 @@ let decode_keeper_runtime_list json =
     | bad -> field_type_error "truncated" "a bool or null" bad
   in
   let* total = int_field_or json "total" ~default:(List.length readings) in
-  Ok (rows, errors, truncated, total)
+  Ok (rows, errors, truncated, total, candle)
 
 let keeper_lane_phase_of_string raw =
   match keeper_phase_of_string raw with

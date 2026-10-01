@@ -6,6 +6,7 @@ terminal answers the Kitty graphics query."""
 from __future__ import annotations
 
 import os
+import hashlib
 import json
 import threading
 import re
@@ -17,6 +18,9 @@ import test_tui_keyboard_input as h
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
 SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_keeper_items.ml",
+    "bin/masc_tui_types.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",
     "bin/masc_tui_keeper_portrait.ml",
@@ -66,6 +70,29 @@ PORTRAIT_DELETE = b"\x1b_Ga=d,d=I,i=" + PORTRAIT_IMAGE_ID + b",q=2\x1b\\"
 # The pane's content starts two cells in (Masc_tui_ansi.framed_content_column)
 # and the portrait two more (the fact indent): column 5, counted from 1.
 PORTRAIT_COLUMN = 1 + 2 + 2
+
+
+ITEM_CATALOG = [
+    ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
+    ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
+    ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
+    ("bow", "head"), ("crown", "head"), ("beanie", "head"),
+    ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
+    ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
+]
+
+
+def capture_item_screen(output: bytearray, name: str) -> None:
+    """Keep the actual terminal bytes and their last completed screen."""
+    artifact_root = os.environ.get("RUNNER_TEMP")
+    if artifact_root is None:
+        return
+    captures = Path(artifact_root) / "keeper-items-tui"
+    captures.mkdir(parents=True, exist_ok=True)
+    rows = last_frame_rows(output)
+    (captures / f"{name}.txt").write_bytes(
+        b"\n".join(text for _, text in sorted(rows.items())) + b"\n")
+    (captures / f"{name}.pty").write_bytes(output)
 
 
 def last_frame_rows(output: bytearray, *, preserve_styles: bool = False) -> dict[int, bytes]:
@@ -233,14 +260,6 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
-ITEM_CATALOG = [
-    ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
-    ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
-    ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
-    ("bow", "head"), ("crown", "head"), ("beanie", "head"),
-    ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
-    ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
-]
 
 def item_tab_previews_accessories(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
@@ -268,12 +287,14 @@ def item_tab_previews_accessories(binary: str) -> None:
         assert row_of(first, b"Items 1/18") > 0
         assert b"owned" in first[row_of(first, b"glasses")]
         assert portrait_rows(first), "the Item preview has no picture at 100x24"
+        capture_item_screen(output, "owned-glasses")
         h.send_and_wait(process, fd, output, b"j", b"Items 2/18")
         h.drain_until_quiet(process, fd, output)
         second = last_frame_rows(output)
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
         assert row_of(second, b"Preview changes this picture only") > 0
+        capture_item_screen(output, "shades-preview")
         # Read the current completed viewport after each navigation or resize.
         h.resize_and_wait(process, fd, output, rows=18, columns=COLUMNS,
                           needle=b"Items 2/18", controls=(h.FULL_REDRAW,),
@@ -316,16 +337,38 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
-    fixtures["/api/v1/keepers/alpha/items"] = (503, {"error": "ledger unreadable"})
+    ready = {"status": "ready", "keeper": "alpha", "balance_milli": "12500",
+             "owned_items": [], "catalog": [
+                 {"id": item, "slot": slot, "price_status": "unpriced"}
+                 for item, slot in ITEM_CATALOG]}
+    response = [(200, ready)]
+    fixtures["/api/v1/keepers/alpha/items"] = lambda: response[0]
+
+    def await_account(process, fd, output, needle):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: needle in b"\n".join(last_frame_rows(output).values()), timeout=10.0), \
+            f"Item account never drew {needle!r}: {last_frame_rows(output)!r}"
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
         h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
-        h.send_and_wait(process, fd, output, b"]", b"Account unavailable:")
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_account(process, fd, output, b"Balance 12.500 Candle")
+        response[0] = (503, {"error": "ledger unreadable"})
+        os.write(fd, b"r")
+        await_account(process, fd, output, b"Account unavailable:")
         h.drain_until_quiet(process, fd, output)
         rows = last_frame_rows(output)
         assert row_of(rows, b"Items 1/18") > 0
         assert portrait_rows(rows), "an account read failure hid the separate portrait preview"
+        assert not any(b"Balance 12.500" in text for text in rows.values()), \
+            "the failed account read retained its previous balance"
+        capture_item_screen(output, "account-unavailable")
+        response[0] = (200, dict(ready, balance_milli="13000"))
+        os.write(fd, b"r")
+        await_account(process, fd, output, b"Balance 13.000 Candle")
+        assert not any(b"Account unavailable:" in text for text in last_frame_rows(output).values())
+        capture_item_screen(output, "account-recovered")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
@@ -429,6 +472,16 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
+    artifact_root = os.environ.get("RUNNER_TEMP")
+    if artifact_root is not None:
+        captures = Path(artifact_root) / "keeper-items-tui"
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "manifest.json").write_text(json.dumps({
+            "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+            "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+            "source_sha": os.environ.get("GITHUB_SHA"),
+            "columns": COLUMNS, "item_rows": SHORT_ROWS,
+        }, indent=2) + "\n")
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)

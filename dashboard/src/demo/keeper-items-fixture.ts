@@ -4,18 +4,29 @@ import '../styles/keeper-workspace.css'
 
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { signal } from '@preact/signals'
 import type { Keeper } from '../types'
 import { hydrateExecutionSnapshot } from '../store'
 import { KeeperItemsPanel } from '../components/keeper-items-panel'
 import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection } from '../components/keeper-detail-shell'
 
-const keeper = {
+const keeper = signal({
   name: 'rondo',
   portrait: {
     state: 'ready',
     equipment: { face: 'bare_face', neck: 'bare_neck', head: 'crown', hand: 'empty_hand', base: 'no_dish' },
   },
-} as Keeper
+} as Keeper)
+
+// Only this isolated fixture exposes a controlled roster observation.
+declare global {
+  interface Window {
+    updateKeeperItemsFixture: (revision: string) => void
+  }
+}
+window.updateKeeperItemsFixture = revision => {
+  keeper.value = { ...keeper.value, candle_account_revision: revision }
+}
 
 // This isolated fixture has no production HTTP/SSE bootstrap. Admit its
 // explicitly synthetic workspace through the same store path as production.
@@ -37,14 +48,17 @@ window.updateKeeperItemsWorkspaceFixture('/fixture/keeper-items')
 
 activeKeeperDetailSection.value = 'keeper-items'
 const root = document.getElementById('app')
-if (root) render(html`
+function Fixture() {
+  return html`
   <main class="kw-detail-content mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8" style="background: var(--color-bg-page); color: var(--color-fg-primary)">
-    <header class="kw-detail-full-head w-full p-4"><h1 class="m-0 text-xl font-semibold">${keeper.name}</h1></header>
+    <header class="kw-detail-full-head w-full p-4"><h1 class="m-0 text-xl font-semibold">${keeper.value.name}</h1></header>
     <div class="kw-detail-body mx-auto flex w-full max-w-[1180px] flex-col gap-5">
       <${KeeperDetailSectionRail} />
       <${KeeperDetailSection} id="keeper-items" eyebrow="Candle & 초상화" title="아이템">
-        <${KeeperItemsPanel} keeper=${keeper} />
+        <${KeeperItemsPanel} keeper=${keeper.value} />
       <//>
     </div>
   </main>
-`, root)
+`
+}
+if (root) render(html`<${Fixture} />`, root)

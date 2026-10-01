@@ -120,6 +120,7 @@ class FusionReport(unittest.TestCase):
             "status": "failed", "failure_code": "invalid_judge", "error": "Judge reply invalid"}
         self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
 
+
     def test_rejects_stale_rows_and_incomplete_coverage_scope(self):
         captured = upstream(project(detail()), sequence=2)
         for kind in ("stale_row", "missing_scope", "partial_scope"):
@@ -254,6 +255,12 @@ class FusionReport(unittest.TestCase):
                 self.assertTrue(result["isError"])
                 self.assertNotIn("structuredContent", result)
 
+    def test_paired_rows_require_one_immutable_snapshot(self):
+        output = project(detail())
+        output["rows"][1]["evidence"] = [{"uri": "lane-evidence:" + "b" * 64,
+                                             "sha256": "b" * 64}]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+
     def test_full_body_fits_when_native_producer_wire_fits(self):
         producer_limit = reply_limit("fusion-results")
         report_limit = reply_limit("fusion-report")
@@ -298,6 +305,7 @@ class FusionReport(unittest.TestCase):
             value = detail()
             value["run"]["run_id"] = f"fusion-{index}"
             value["evidence"]["post"]["origin"]["fusion_run_id"] = value["run"]["run_id"]
+            value["evidence"]["post"]["id"] = f"p-{index:032x}"
             value["evidence"]["post"]["meta"]["judge"]["resolved_answer"] = f"Body {index}\n" + "x" * 60000
             captured = source(value)
             captured["incarnation"] = value["run"]["run_id"]
@@ -333,6 +341,7 @@ class FusionReport(unittest.TestCase):
             run_id = f"fusion-{index}"
             value["run"]["run_id"] = run_id
             value["evidence"]["post"]["origin"]["fusion_run_id"] = run_id
+            value["evidence"]["post"]["id"] = f"p-{index:032x}"
             captured = source(value)
             captured["incarnation"] = run_id
             captures.append(captured)
@@ -418,13 +427,41 @@ class FusionReport(unittest.TestCase):
         self.assertIn("provider_error", fields["body"])
         self.assertIn("분석 실패", fields["body"])
 
-    def test_failed_result_without_status_remains_incomplete(self):
-        output = project(detail("failed", "recorded"))
-        output["rows"] = [item for item in output["rows"] if item["lane_id"] == "fusion/result"]
-        report = call("fusion-report", [upstream(output)])["structuredContent"]
-        self.assertEqual(reports(report)[0]["fields"]["run_status"], "failed")
-        self.assertFalse(reports(report)[0]["fields"]["input_complete"])
-        self.assertFalse(report["coverage"][0]["complete"])
+    def test_result_without_status_remains_incomplete(self):
+        for status in ("completed", "failed"):
+            with self.subTest(status=status):
+                output = project(detail(status, "recorded"))
+                output["rows"] = [item for item in output["rows"] if item["lane_id"] == "fusion/result"]
+                report = call("fusion-report", [upstream(output)])["structuredContent"]
+                self.assertEqual(reports(report)[0]["fields"]["run_status"], status)
+                self.assertFalse(reports(report)[0]["fields"]["input_complete"])
+                self.assertFalse(report["coverage"][0]["complete"])
+
+    def test_paired_rows_require_the_same_source_coordinates(self):
+        for key in ("source_id", "incarnation"):
+            with self.subTest(coordinate=key):
+                output = project(detail())
+                result = next(item for item in output["rows"] if item["lane_id"] == "fusion/result")
+                result["fields"][key] = "other-capture"
+                other_coverage = copy.deepcopy(output["coverage"][0])
+                other_coverage[key] = "other-capture"
+                output["coverage"].append(other_coverage)
+                refused = call("fusion-report", [upstream(output)])
+                self.assertTrue(refused["isError"])
+                self.assertIn("different source coordinates", refused["content"][0]["text"])
+
+    def test_repeated_source_aliases_are_refused_before_row_generation(self):
+        captured = upstream(project(detail()))
+        refused = call("fusion-report", [captured, copy.deepcopy(captured)])
+        self.assertTrue(refused["isError"])
+        self.assertNotIn("structuredContent", refused)
+        self.assertIn("source aliases must be distinct", refused["content"][0]["text"])
+        separate = copy.deepcopy(captured)
+        separate["source_id"] = "another-alias"
+        accepted = call("fusion-report", [captured, separate])
+        self.assertFalse(accepted["isError"])
+        ids = [item["id"] for item in accepted["structuredContent"]["rows"]]
+        self.assertEqual(len(ids), len(set(ids)))
 
     def test_running_missing_and_stale_producer_are_partial(self):
         for value in (detail("running", "pending"), detail("completed", "absent")):
@@ -458,17 +495,40 @@ class FusionReport(unittest.TestCase):
         second_output = project(second)
         combined["rows"].extend(second_output["rows"])
         combined["coverage"].extend(second_output["coverage"])
+        self.assertTrue(call("fusion-report", [upstream(combined)])["isError"],
+                        "one Board post cannot certify two different Fusion runs")
+        second_output["rows"][1]["fields"]["board_post"]["id"] = "p-" + "b" * 32
+        second_output["rows"][0]["fields"]["board_post_id"] = "p-" + "b" * 32
+        combined["rows"][-2:] = second_output["rows"]
         report = call("fusion-report", [upstream(combined)])["structuredContent"]
         self.assertEqual([r["subject_id"] for r in reports(report)], [RUN, "fusion-request-2"])
         self.assertEqual(len({r["id"] for r in reports(report)}), 2)
         selected = copy.deepcopy(first)
         selected["rows"] = [selected["rows"][1]]
         report = call("fusion-report", [upstream(selected, output_id="result", selected_lanes=["fusion/result"])])["structuredContent"]
-        self.assertTrue(report["coverage"][0]["complete"])
+        self.assertFalse(report["coverage"][0]["complete"])
+        self.assertFalse(reports(report)[0]["fields"]["input_complete"])
         selected_producer = contexts(report)[0]["fields"]["producer"]
         self.assertEqual(selected_producer["output_id"], "result")
         self.assertEqual(selected_producer["output_selection"], {"lanes": ["fusion/result"]})
         self.assertEqual(selected_producer["coverage_scope"], "whole_producer")
+
+    def test_complete_report_requires_matching_output_selection(self):
+        output = project(detail())
+        for selection in (None, {"all_lanes": False}, {"all_lanes": 1},
+                          {"lanes": ["fusion/status"]}):
+            with self.subTest(selection=selection):
+                captured = upstream(output)
+                producer = captured["observations"][0]["producer"]
+                if selection is None:
+                    del producer["output_selection"]
+                else:
+                    producer["output_selection"] = selection
+                self.assertTrue(call("fusion-report", [captured])["isError"])
+        captured = upstream(output, output_id="both",
+                            selected_lanes=["fusion/status", "fusion/result"])
+        report = call("fusion-report", [captured])["structuredContent"]
+        self.assertTrue(reports(report)[0]["fields"]["input_complete"])
 
     def test_every_fusion_row_requires_matching_source_coverage(self):
         original = project(detail())

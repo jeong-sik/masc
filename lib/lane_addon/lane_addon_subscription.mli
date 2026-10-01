@@ -10,20 +10,20 @@ type subscription = {keeper_name:string; run_id:string; installation_id:string; 
 type operation = Inspect | Save | Read | Acknowledge
 val json : subscription -> Yojson.Safe.t
 val decode : Yojson.Safe.t -> (subscription, string) result
-(** Omitted [access] is unauthenticated; caller text cannot grant private ownership. *)
-val dispatch : ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> operation:operation ->
-  Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** [caller] selects a subscription; only explicit, verified [access] grants
     its private read or update authority. The default is unauthenticated. *)
+val dispatch : ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> operation:operation ->
+  Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val observe : config:Workspace.config -> keeper_name:string -> (Yojson.Safe.t, string) result
 val render : (Yojson.Safe.t, string) result -> string option
 val handle : ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 module For_testing : sig
   val handle :
+    ?access:Lane_addon_sources.access ->
     replace_cursor_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
-    ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+    config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
   val observe : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     config:Workspace.config -> keeper_name:string -> (Yojson.Safe.t, string) result
 end

@@ -5313,11 +5313,13 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Tasks whose only exit belongs to the operator, as
-     [Operator_task_attention] projected them from the same load. [None] until
-     the first load answers: an empty list is a fact about the workspace and
-     "not looked yet" is not. *)
-  mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Primary backlog authority, shared by Home and Agenda. Supplemental
+     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
+  (* Availability of the registry behind each task row's goal_ids. An empty
+     projection cannot claim an absent link when the registry was not read.
+     The reading payload is empty; memberships live on task.goal_ids. *)
+  mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
      names them on every surface rather than only on Planning. *)
@@ -8082,7 +8084,8 @@ let create_state
   tasks = [];
   tasks_domain = [];
   task_flow = None;
-  operator_stalled = None;
+  operator_stalled = Masc_tui_agenda.Not_read;
+  task_goal_links = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
@@ -9320,15 +9323,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  let stalled =
-    match state.operator_stalled, state.tasks_error with
-    | None, Some error ->
-      Masc_tui_agenda.Read_failed error
-    | None, None -> Masc_tui_agenda.Not_read
-    | Some rows, _ -> Masc_tui_agenda.Read rows
-  in
   Masc_tui_agenda.project ~scheduled ~awaiting
-    ~confirming:state.goals_to_confirm ~stalled
+    ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -11414,10 +11410,10 @@ let home_decision_rows (state : state) =
     | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
     | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
   in
-  let tasks = match state.tasks_error, state.operator_stalled with
-    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | None, Some rows ->
+  let tasks = match state.operator_stalled with
+    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
           Home_request (Home_operator_task row.task_id),
           Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
@@ -11546,7 +11542,8 @@ let home_initial_reading_ready state selected =
   | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state && Option.is_some state.operator_stalled
+      approvals_reading_current state
+      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 

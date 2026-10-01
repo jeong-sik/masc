@@ -81,6 +81,9 @@ jobs:
             ${{ runner.temp }}/item-http-evidence/item-server-*.png
             ${{ runner.temp }}/item-http-evidence/http-evidence.json
             ${{ runner.temp }}/item-http-evidence/tool-calls.json
+            ${{ runner.temp }}/item-http-evidence/paid-account*.json
+            ${{ runner.temp }}/item-http-evidence/paid-portrait*.png
+            ${{ runner.temp }}/item-http-evidence/ledger-*.jsonl
             ${{ runner.temp }}/item-http-evidence/account.json
             ${{ runner.temp }}/item-http-evidence/account-after.json
             ${{ runner.temp }}/item-http-evidence/account-restarted.json

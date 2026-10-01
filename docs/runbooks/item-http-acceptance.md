@@ -11,15 +11,14 @@ a portrait PNG and the isolated server log. The receipt records source SHA,
 binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
-reads, an authenticated 100-milli wallet with empty ownership and its catalog,
-PNG delivery, and delivery
+reads, an authenticated 100-milli wallet with empty inventory and catalog, PNG delivery, and delivery
 of the exact production dashboard index. It then authenticates as the synthetic
 Keeper over MCP, buys a free face item, rejects repeat/insufficient purchases
 and unowned equipment, equips the item, and verifies ledger-backed account
 ownership and changed PNG bytes. Restoring the default must restore the
 original PNG; the other slots must stay unchanged. Before restoration, Chromium
 opens the production bundle served by that same native process, follows the
-Keeper route and Item tab, and checks 0.100 Candle, one owned item and its
+Keeper route, opens 대화 도구 → 상세, selects the Item tab, and checks 0.100 Candle, one owned item and its
 equipped marker through real authenticated API requests. External browser
 requests are blocked; API responses are never replaced by fixtures. Finally
 the harness stops its server, starts a new process against the same isolated
@@ -29,12 +28,17 @@ session, repeat-purchase rejection, an unchanged repeated equipment selection,
 and restoration of the original default PNG after restart. The HTTP
 PASS receipt is written only after this restart check.
 
-Inputs are a synthetic paused Keeper in the current metadata schema, a
-canonical synthetic Paid row granting 100 milli, and explicit test prices/payout
-policy. The free purchase leaves that wallet at 100 milli before and after restart. This proves real HTTP routing
+Inputs are two synthetic paused Keepers in the current metadata schema, two
+canonical synthetic Paid rows granting 100 milli to the free-test Keeper and
+700 milli to the paid-test Keeper, and explicit test prices/payout policy.
+Buying the zero-price face item preserves the free-test Keeper’s 100 milli.
+The paid Keeper buys crown for200 milli and must retain500 milli. Duplicate
+and insufficient purchases must leave the ledger byte-identical. After a
+process restart, paid ownership, balance and equipped PNG must remain; only
+one200-milli purchase event may exist. Both original synthetic Paid rows must
+remain unchanged. Seed and before/after ledger hashes are retained. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
-purchase/equipment decisions, a paid purchase or real payout, or production
-rollout.
+purchase/equipment decisions, a real earned payout, or production rollout.
 Additional browser fixture and TUI transition evidence comes from the separate dashboard and
 Test workflows.
 

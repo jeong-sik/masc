@@ -21,28 +21,63 @@ let data_payload_line line =
   else None
 
 
+type frame = { id : string option; data : string }
+type decoder = {
+  line : Buffer.t;
+  mutable first_line : bool;
+  mutable skip_lf : bool;
+  mutable data_rev : string list;
+  mutable frame_id : string option;
+}
+
+let create_decoder () = {
+  line = Buffer.create 256; first_line = true; skip_lf = false;
+  data_rev = []; frame_id = None;
+}
+
+let consume_line t =
+  let line = Buffer.contents t.line in
+  Buffer.clear t.line;
+  let line =
+    if t.first_line && String.starts_with ~prefix:"\239\187\191" line
+    then String.sub line 3 (String.length line - 3)
+    else line in
+  t.first_line <- false;
+  if String.equal line "" then (
+    let frame = match t.data_rev with
+      | [] -> None
+      | fields -> Some {id = t.frame_id; data = String.concat "\n" (List.rev fields)} in
+    t.data_rev <- [];
+    t.frame_id <- None;
+    frame)
+  else (
+    (match data_payload_line line with
+     | Some data -> t.data_rev <- data :: t.data_rev
+     | None ->
+       let field, value = match String.index_opt line ':' with
+         | None -> line, ""
+         | Some colon ->
+             let start = if colon + 1 < String.length line && line.[colon + 1] = ' '
+               then colon + 2 else colon + 1 in
+             String.sub line 0 colon, String.sub line start (String.length line - start) in
+       if String.equal field "id" && not (String.contains value '\000')
+       then t.frame_id <- Some value);
+    None)
+
+let feed t chunk =
+  let completed = ref [] in
+  String.iter (fun c ->
+    if t.skip_lf && c = '\n' then t.skip_lf <- false
+    else (
+      t.skip_lf <- false;
+      if c = '\r' || c = '\n' then (
+        Option.iter (fun frame -> completed := frame :: !completed) (consume_line t);
+        t.skip_lf <- c = '\r')
+      else Buffer.add_char t.line c)) chunk;
+  List.rev !completed
+
 let data_payloads_of_stream stream =
-  let length = String.length stream in
-  let start = if String.starts_with ~prefix:"\239\187\191" stream then 3 else 0 in
-  let consume_line line pending completed =
-    if String.equal line "" then
-      match pending with
-      | [] -> [], completed
-      | _ -> [], String.concat "\n" (List.rev pending) :: completed
-    else match data_payload_line line with
-      | None -> pending, completed
-      | Some data -> data :: pending, completed in
-  let rec scan line_start index pending completed =
-    if index >= length then List.rev completed
-    else match stream.[index] with
-      | '\r' | '\n' ->
-          let line = String.sub stream line_start (index - line_start) in
-          let pending, completed = consume_line line pending completed in
-          let next = if stream.[index] = '\r' && index + 1 < length
-              && stream.[index + 1] = '\n' then index + 2 else index + 1 in
-          scan next next pending completed
-      | _ -> scan line_start (index + 1) pending completed in
-  scan start start [] []
+  feed (create_decoder ()) stream |> List.map (fun frame -> frame.data)
 
 let add_header buf name value =
   Buffer.add_string buf name;

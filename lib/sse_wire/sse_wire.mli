@@ -1,3 +1,11 @@
+type frame = { id : string option; data : string }
+type decoder
+val create_decoder : unit -> decoder
+val feed : decoder -> string -> frame list
+(** Complete events from arbitrary byte chunks. Supports LF/CRLF/CR, an initial
+    BOM, and joined data fields. Unterminated EOF events are not emitted.
+    [id] is the explicit field of this frame, not a persisted reconnect cursor. *)
+
 val data_payload_line : string -> string option
 (** Read one SSE data field, stripping one optional space after the colon and
     a trailing CR. Bare [data] is an empty field; other fields are ignored. *)

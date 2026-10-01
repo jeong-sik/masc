@@ -361,17 +361,22 @@ let test_reply_details_short_of_a_field_is_reported () =
     (undecodable
        (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))))
 
-(* Two data lines in one frame share the frame's id: the seq is cleared at
-   the frame end, not at the first data line. *)
+(* Multiple data fields form one JSON payload and carry the frame's id. *)
 let test_two_data_lines_in_one_frame_share_the_seq () =
-  let frame =
-    "id: 7\n"
-    ^ "data: " ^ Yojson.Safe.to_string (text_content "a") ^ "\n"
-    ^ "data: " ^ Yojson.Safe.to_string (text_content "b") ^ "\n\n"
-  in
-  check (list tagged) "both carry seq 7"
-    [ (Some 7, Live.Text "a"); (Some 7, Live.Text "b") ]
-    (feed_whole_tagged frame)
+  let frame = "id: 7\ndata:{\ndata: \"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}\n\n" in
+  check (list tagged) "one complete multiline event carries seq 7"
+    [ (Some 7, Live.Text "a") ] (feed_whole_tagged frame);
+  List.iter (fun size ->
+    check (list tagged) "chunk boundaries preserve multiline event"
+      [ (Some 7, Live.Text "a") ] (feed_in_chunks_tagged ~size frame)) [1; 2; 7]
+;
+  List.iter (fun newline ->
+    let wire = "\239\187\191" ^ String.concat newline
+      ["id:7"; "data:{"; "data:\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}"; ""; ""] in
+    check (list tagged) "byte chunks preserve BOM and line endings"
+      [Some 7, Live.Text "a"] (feed_in_chunks_tagged ~size:1 wire)) ["\n"; "\r\n"; "\r"];
+  check (list delta) "unterminated frame does not publish a delta" []
+    (feed_whole ("data:" ^ Yojson.Safe.to_string (text_content "unfinished")))
 
 let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
   let body =
@@ -382,8 +387,8 @@ let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
     ->
       check bool "the unreadable JSON says so" true
         (String.length json_detail > 0);
-      check string "a non-canonical data field is named as one"
-        "non-canonical data field" frame_detail
+      check string "valid no-space framing reaches event validation"
+        "unknown event type X" frame_detail
   | other ->
       failf "expected report, text, report; got [%s]"
         (String.concat "; " (List.map delta_to_string other))

@@ -781,17 +781,21 @@ if "app-server" in args:
     emit({"id": request["id"], "result": {"account": {"type": "chatgpt", "email": "fixture@example.test",
         "planType": "pro"}, "requiresOpenaiAuth": True}})
     request = read()
+    if request["method"] == "model/list":
+        assert request["params"]["includeHidden"] is True
+        models = ["gpt-6.1-sol", "gpt-future-fixture"]
+        emit({"id": request["id"], "result": {"data": [{"id": candidate, "model": candidate,
+            "displayName": candidate, "isDefault": candidate == models[0],
+            "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [{"reasoningEffort": effort, "description": effort}
+                for effort in ["low", "medium", "high", "xhigh", "max", "ultra"]]}
+            for candidate in models], "nextCursor": None}})
+        request = read()
     assert request["method"] == "thread/start"
     model = request["params"]["model"]
     tool = request["params"]["dynamicTools"][0]["name"]
     emit({"id": request["id"], "result": {"thread": {"id": "effort-thread"}, "model": model}})
     request = read()
-    if request["method"] == "model/list":
-        emit({"id": request["id"], "result": {"data": [{"id": model, "model": model,
-            "displayName": model, "isDefault": True, "defaultReasoningEffort": "medium",
-            "supportedReasoningEfforts": [{"reasoningEffort": effort, "description": effort}
-                for effort in ["low", "medium", "high", "xhigh", "max", "ultra"]]}], "nextCursor": None}})
-        request = read()
     assert request["method"] == "turn/start"
     capture.write_text(json.dumps({"effort": request["params"].get("effort"), "model": model}))
     emit({"id": request["id"], "result": {"turn": {"id": "effort-turn"}}})

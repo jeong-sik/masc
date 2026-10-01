@@ -41,7 +41,7 @@ for line in sys.stdin:
     elif method == 'model/list':
         assert request['params']['includeHidden'] is True
         efforts = [] if mode == 'effort-empty' else ['future-depth'] if mode == 'effort-unknown' else ['high']
-        emit({'id':ident,'result':{'data':[{'id':'vision-ui','model':'vision-response-model',
+        emit({'id':ident,'result':{'data':[{'id':'vision-request-model','model':'vision-response-model',
             'displayName':'Vision fixture','isDefault':True,'defaultReasoningEffort':'high',
             'supportedReasoningEfforts':[{'reasoningEffort':effort,'description':effort} for effort in efforts]}],
             'nextCursor':None}})

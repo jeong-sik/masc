@@ -349,6 +349,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc []
   | "keeper_candle_purchase" ->
       `Assoc [ "item", `String "glasses" ]
+  | "keeper_candle_equip" ->
+      `Assoc [ "slot", `String "face"; "item", `String "default" ]
   | "keeper_capability_search" ->
       `Assoc [ "query", `String "keeper_lane_status" ]
   | "keeper_memory_search" ->

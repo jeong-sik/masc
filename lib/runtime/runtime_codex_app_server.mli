@@ -410,11 +410,12 @@ val read_rate_limits :
     the app-server's schema says clients must not infer recovery from them. *)
 
 val run_turn :
-  ?handoff_requested:(unit -> bool) ->
-  (* After a dynamic-tool result, request one scheduling-only steer when this
-      read-only callback returns true. Queued input is neither delivered nor
-      consumed. The client still finishes naturally; refusal does not abort
-      the current turn. *)
+  ?await_handoff:(unit -> bool) ->
+  (* Event-driven scheduling notice. The waiter returns true when queued input
+     needs the turn slot, false when its owner closes. It is cancelled when the
+     turn ends. Only the protocol consumer writes the steer, after any active
+     dynamic-tool result, including before the first tool. Input is not consumed
+     and the client still completes naturally. *)
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?thread_mode:thread_mode ->

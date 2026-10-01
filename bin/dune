@@ -1367,7 +1367,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.masc_candle masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1629,6 +1629,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
@@ -1725,6 +1726,13 @@
   masc_tui_types
   unix))
 
+;; Exact Candle presentation shared by the Overview and Keeper info pane.
+(library
+ (name masc_tui_candle)
+ (wrapped false)
+ (modules masc_tui_candle)
+ (libraries masc.masc_candle))
+
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1770,12 +1778,15 @@
   masc_tui
   masc_tui_render
   masc_tui_render_code
+  masc_tui_render_resources
   masc_tui_render_board
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_candle
+  masc.masc_candle
   masc_tui_voice_wizard_session
   masc_tui_kept_reads
   masc_tui_palette

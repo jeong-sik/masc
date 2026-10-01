@@ -1,0 +1,7 @@
+{
+  "lib/browser_scene_script.ml": "c71ea0fbe7e1b3f33a8130bf47e0cf5e240499947020bd4968031aae7aad3d48",
+  "lib/browser_page_script.ml": "cbdcb565d18bc35cbd6887e6914ffad2ec197a4ae76d7e32eea02bed26ee49a0",
+  "lib/browser_interaction.ml": "03a112720a2aaf0c3108f7b8743db1b39f4f6c972250c62046697f295e374180",
+  "connectors/browser/extension/background.js": "d1de39e659d0595e46aabe41fc29f5c0c7515cb13f7b5a47f4c685fa7432be6b",
+  "test/test_browser_scene.py": "56991ef3bf7b6d4abe301ac73222286c769e77ea08964d92fe2325da01d8e13f"
+}

@@ -12,10 +12,8 @@
 # that cannot fail is a decoration, and the only way to know this one bites is
 # to break the thing it watches and watch it bite.
 #
-# The surface is a stand-in, not the OCaml TUI: this lane has no OCaml
-# toolchain, so the binary is a copy of bash named `masc_tui.exe`. comm is the
-# executable's basename, so discovery sees the real name. A BASH_ENV script
-# makes that copy trap SIGTERM and write the exact row the real TUI writes --
+# The surface is a native stand-in, not the OCaml TUI. A small C executable
+# accepts the TUI's argv, waits for SIGTERM and writes the row the TUI writes --
 # `[masc-tui] exit: normal (signal SIGTERM)`, the vocabulary owned by
 # bin/masc_tui_exit_reason.ml. So what this proves is the restart script's own
 # path: discovery, the signal, the row read, the fresh start. That the real
@@ -24,6 +22,26 @@
 # Usage: scripts/test-tui-graceful-restart-e2e.sh
 # Exit:  0 all checks passed, 1 a check failed, 2 refused to run.
 set -uo pipefail
+
+# Both the test and the restart script discover processes by name. A startup
+# scan cannot protect a TUI that another session starts later, so run every
+# discovery and signal inside a private Linux PID namespace and proc mount.
+# Namespace setup failure is fatal: never fall back to the caller's processes.
+if [ "${1:-}" != "--isolated-pid-namespace" ]; then
+  command -v unshare >/dev/null 2>&1 || {
+    echo "[e2e] requires Linux unshare with PID and mount namespaces" >&2
+    exit 2
+  }
+  parent_namespace="$(readlink /proc/self/ns/pid)" || exit 2
+  exec unshare --user --map-root-user --mount --pid --fork --mount-proc \
+    --kill-child=KILL bash "${BASH_SOURCE[0]}" --isolated-pid-namespace "$parent_namespace"
+fi
+[ "$#" -eq 2 ] && [ "$$" -eq 1 ] &&
+  [ "$(readlink /proc/self/ns/pid)" != "$2" ] || {
+    echo "[e2e] refusing: private PID namespace was not established" >&2
+    exit 2
+  }
+shift 2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_SCRIPT="$SCRIPT_DIR/tui-graceful-restart.sh"
@@ -55,17 +73,6 @@ kill_surfaces() {
   sleep 1
 }
 
-# Refuse rather than restart someone's live TUI. The script under test finds
-# surfaces machine-wide by comm, so if a real one is already up this test
-# would SIGTERM it and start the stand-in in its place.
-pre_existing="$(surface_pids)"
-if [ -n "$pre_existing" ]; then
-  echo "[e2e] refusing: a TUI surface is already running (pid(s):" \
-       "$(echo "$pre_existing" | tr '\n' ' ')). This test restarts every" \
-       "surface it finds. Quit the TUI and run it again." >&2
-  exit 2
-fi
-
 failures=0
 check() {
   if [ "$2" = "$3" ]; then
@@ -88,7 +95,7 @@ trap cleanup EXIT
 # TUI_BINARY=$tmp/_build/default/bin/masc_tui.exe, and keeps its logs under
 # $tmp/.masc/logs. Nothing touches the real checkout.
 #
-# $1 = "intact" or "no-sigterm" (the mutation). Echoes the layout path.
+# $1 = "intact", "no-sigterm" or "no-args". Echoes the layout path.
 build_layout() {
   local mode="$1" t
   t="$(mktemp -d "${TMPDIR:-/tmp}/tui-restart-e2e.XXXXXX")" || return 1
@@ -97,34 +104,48 @@ build_layout() {
   if [ "$mode" = "no-sigterm" ]; then
     sed 's|kill -TERM |: mutation-no-sigterm |' "$REAL_SCRIPT" \
       >"$t/scripts/tui-graceful-restart.sh"
+  elif [ "$mode" = "no-args" ]; then
+    sed 's/^start_fresh "\$@"$/start_fresh/' "$REAL_SCRIPT" \
+      >"$t/scripts/tui-graceful-restart.sh"
   else
     cp "$REAL_SCRIPT" "$t/scripts/tui-graceful-restart.sh"
   fi
 
-  cp "$(command -v bash)" "$t/_build/default/bin/masc_tui.exe"
-  chmod +x "$t/_build/default/bin/masc_tui.exe"
+  # A copied bash rejects --base-path before reading BASH_ENV. This native
+  # fixture records the exact argv and accepts the same options as the TUI.
+  cat >"$t/standin.c" <<'STANDIN'
+#include <limits.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
-  # What the stand-in does when it starts: trap SIGTERM, write the real row,
-  # exit. Two details that are easy to get wrong:
-  #
-  #   * The `case "$0"` guard. BASH_ENV is read by *every* non-interactive
-  #     bash that inherits it -- including the restart script under test.
-  #     Without the guard that script sources this file and blocks in `wait`
-  #     instead of running its own body, and the cycle hangs with no output.
-  #   * `sleep & wait` rather than a bare `sleep`. A bare final command is
-  #     exec'd, which would make comm `sleep` and hide the surface from
-  #     discovery; and `wait` lets the trap run the moment the signal lands
-  #     instead of after a foreground sleep finishes.
-  cat >"$t/standin.sh" <<'STANDIN'
-case "$0" in
-  */masc_tui.exe)
-    trap 'printf "[masc-tui] exit: normal (signal SIGTERM)\n" \
-            >> "$STANDIN_LOG_DIR/masc-tui-$$.log"; exit 0' TERM
-    sleep 300 &
-    wait $!
-    ;;
-esac
+int main(int argc, char **argv) {
+  const char *dir = getenv("STANDIN_LOG_DIR");
+  char path[PATH_MAX];
+  sigset_t signals;
+  int received;
+  FILE *file;
+  if (dir == NULL) return 2;
+  sigemptyset(&signals);
+  sigaddset(&signals, SIGTERM);
+  if (sigprocmask(SIG_BLOCK, &signals, NULL) != 0) return 2;
+  if (snprintf(path, sizeof path, "%s/masc-tui-%ld.argv", dir,
+               (long)getpid()) >= (int)sizeof path) return 2;
+  file = fopen(path, "w");
+  if (file == NULL) return 2;
+  for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
+  if (fclose(file) != 0) return 2;
+  if (sigwait(&signals, &received) != 0 || received != SIGTERM) return 2;
+  if (snprintf(path, sizeof path, "%s/masc-tui-%ld.log", dir,
+               (long)getpid()) >= (int)sizeof path) return 2;
+  file = fopen(path, "a");
+  if (file == NULL) return 2;
+  fputs("[masc-tui] exit: normal (signal SIGTERM)\n", file);
+  return fclose(file) == 0 ? 0 : 2;
+}
 STANDIN
+  cc -Wall -Wextra -Werror "$t/standin.c" -o "$t/_build/default/bin/masc_tui.exe" || return 1
 
   printf '%s' "$t"
 }
@@ -135,7 +156,6 @@ run_cycle() {
   t="$(build_layout "$mode")" || return 1
   workdirs+=("$t")
 
-  export BASH_ENV="$t/standin.sh"
   export STANDIN_LOG_DIR="$t/.masc/logs"
 
   "$t/_build/default/bin/masc_tui.exe" </dev/null &
@@ -143,7 +163,8 @@ run_cycle() {
   sleep 1
   c_comm="$(ps -o comm= -p "$old" 2>/dev/null | sed 's:.*/::;s/ *$//')"
 
-  ( cd "$t" && bash "$t/scripts/tui-graceful-restart.sh" --timeout 5 ) \
+  ( cd "$t" && bash "$t/scripts/tui-graceful-restart.sh" --timeout 5 \
+      --base-path "$t" -- --workspace "restart workspace" --port 34393 --refresh 60 ) \
     >"$t/cycle.out" 2>&1
   c_rc=$?
 
@@ -153,7 +174,14 @@ run_cycle() {
   [ -f "$t/.masc/logs/masc-tui-$old.log" ] &&
     c_row="$(grep -F "$GRACEFUL_ROW" "$t/.masc/logs/masc-tui-$old.log" | tail -n 1)"
 
-  c_fresh="$(surface_pids | grep -vx "$old" | grep -c .)"
+  local fresh_pids
+  fresh_pids="$(surface_pids | grep -vx "$old")"
+  c_fresh="$(printf '%s\n' "$fresh_pids" | grep -c .)"
+  c_argv=""
+  if [ "$c_fresh" = "1" ] && [ -f "$t/.masc/logs/masc-tui-$fresh_pids.argv" ]; then
+    c_argv="$(cat "$t/.masc/logs/masc-tui-$fresh_pids.argv")"
+  fi
+  c_expected_argv="$(printf '%s\n' --base-path "$t" --workspace "restart workspace" --port 34393 --refresh 60)"
 
   if grep -qF "$GRACEFUL_ROW" "$t/cycle.out"; then c_echo="yes"; else c_echo="no"; fi
 
@@ -170,6 +198,7 @@ check "the old session ended" "$c_old" "gone"
 check "the old session left the graceful row" "$c_row" "$GRACEFUL_ROW"
 check "exactly one fresh surface is up" "$c_fresh" "1"
 check "the cycle echoed the row it read" "$c_echo" "yes"
+check "the fresh TUI receives the workspace, port and refresh arguments" "$c_argv" "$c_expected_argv"
 [ "$c_rc" = "0" ] || { echo "--- cycle output ---" >&2; cat "$c_out" >&2; }
 
 # ------------------------------------------------------- mutation control ---
@@ -185,6 +214,15 @@ check "the mutated cycle does not exit 0" \
 check "the mutated cycle leaves the old session alive" "$c_old" "alive"
 check "the mutated cycle proves no graceful row" "$c_row" ""
 check "the mutated cycle starts no fresh surface" "$c_fresh" "0"
+
+echo "[e2e] --- cycle 3: mutation control, argument forwarding removed ---"
+forwarding_hits="$(grep -cxF 'start_fresh "$@"' "$REAL_SCRIPT")"
+check "the argument mutation changes exactly one call" "$forwarding_hits" "1"
+run_cycle no-args || { echo "[e2e] could not build the layout" >&2; exit 2; }
+check "the no-args cycle still exits 0" "$c_rc" "0"
+check "the no-args cycle still starts one fresh surface" "$c_fresh" "1"
+check "the no-args cycle loses the requested TUI arguments" \
+  "$([ "$c_argv" != "$c_expected_argv" ] && echo differs || echo equal)" "differs"
 
 if [ "$failures" -eq 0 ]; then
   printf '[e2e] all checks passed\n'

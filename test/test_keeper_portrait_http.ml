@@ -481,6 +481,20 @@ let test_gate_account_revision_uses_current_candle_reading () =
       let response = get ~router ~token "/api/v1/gate/keepers?detailed=true" in
       check int "authorized Gate discovery succeeds" 200 response.status;
       Yojson.Safe.from_string response.body in
+    let compact = get ~router ~token:operator "/api/v1/gate/keepers?detailed=false" in
+    check int "operator compact roster succeeds" 200 compact.status;
+    let compact = Yojson.Safe.from_string compact.body in
+    (match compact with
+     | `Assoc fields ->
+       List.iter (fun key -> check int (key ^ " appears once") 1
+         (List.length (List.filter (fun (name, _) -> name = key) fields))) ["keepers"; "items"]
+     | _ -> fail "compact roster is not an object");
+    check (list string) "compact name list survives projection" [keeper]
+      Yojson.Safe.Util.(compact |> member "keepers" |> to_list |> List.map to_string);
+    let compact_rows = Yojson.Safe.Util.(compact |> member "items" |> to_list) in
+    check int "compact row survives projection" 1 (List.length compact_rows);
+    check bool "compact row receives account revision" true
+      (Json_util.assoc_member_opt "candle_account_revision" (List.hd compact_rows) = Some `Null);
     let broken = require_ok Fun.id
       (Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "broken"])) in
     require_ok Fun.id (Keeper_meta_store.replace_snapshot config broken);

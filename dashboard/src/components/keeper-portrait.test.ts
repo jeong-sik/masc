@@ -60,6 +60,20 @@ describe('KeeperPortrait', () => {
     html`<${KeeperPortrait} name=${name} reading=${reading} accountRevision=${accountRevision} sizePx=${40} fallback=${fallback} />`
   const shown = () => container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
 
+  it('requests an authenticated accessory preview and restores the current portrait', async () => {
+    setStoredToken('portrait-preview-token')
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${KeeperPortrait} name="wick-tester" reading=${ready} sizePx=${40} previewItem="glasses" fallback=${fallback} />`, container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(keeperPortraitUrl('wick-tester', 40, ready.equipment, 'glasses'))
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer portrait-preview-token')
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-2'))
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(keeperPortraitUrl('wick-tester', 40, ready.equipment))
+    expect(revoked).toEqual(['blob:portrait-1'])
+  })
+
   it('reserves its box while the portrait is on its way', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     render(portrait('wick-tester'), container)
@@ -138,7 +152,8 @@ describe('KeeperPortrait', () => {
     render(portrait('wick-tester', ready, 'b'.repeat(64)), container)
     await waitFor(() => expect(shown()).not.toBeNull())
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[1][0])
+    const path = keeperPortraitUrl('wick-tester', 40, ready.state === 'ready' ? ready.equipment : undefined)
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([path, path])
   })
 
   it('draws the fallback when the bytes are not an image it can show', async () => {

@@ -1,0 +1,18 @@
+{
+  "actual_head": "9464d7404c97b086d1b5cdc7af2c817e8f5d23cc",
+  "local_compared_head": "a215894965a620af1ba80d6c464eb6e082e4e423",
+  "independent_checks": {
+    "actual_source_paths": 1593,
+    "local_source_paths": 1593,
+    "different_blobs": 22,
+    "hash_identical_blobs": 1571,
+    "nontruncated": true,
+    "all22_diverged_mention_receipts_bound_to_correct_source_hashes": true
+  },
+  "scope": "Historical 946 source inventory closes the lost-reader/removed-export audit; it is not a current6e whole-tree equivalence claim. Current6e composition uses the eight explicitly pinned source/test blobs above.",
+  "receipt_sha256": {
+    "actual-946-dashboard-source-inventory.json": "28f98662e65537b89a1333e3a7eacdfa13917620f6d2930bbcdddd59c2232fc6",
+    "actual946-vs-local-source-delta.json": "26d9a5a8fc962c6a4ee2eee5613bbb32410733f2f74fe66eddfa7ea08dc69701",
+    "actual946-diverged-import-mentions.json": "7323f6837efa6eb63a878f61a19ee82dced7119e551eb26469ee2483458ff85b"
+  }
+}

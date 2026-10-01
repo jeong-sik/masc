@@ -451,6 +451,27 @@ let test_cli_timeout_remains_retryable () =
     check (list string) "timeout keeps its dispatch evidence" [F.cli_primary_runtime] (dispatched output))
 ;;
 
+let test_codex_reasoning_admission_remains_retryable () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      Error (Fusion_official_client.Codex_failure
+        (Runtime_codex_app_server.Reasoning_effort_admission_failed
+          {model = "fixture"; detail = "model/list timed out"})) in
+    (match run_declared ~base_path cli_runner with
+     | Error (A.Transport_unavailable _) -> ()
+     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
+       failf "reasoning admission failure stranded the payout: %s" detail
+     | Ok _ -> fail "failed reasoning admission produced an appraisal");
+    let output, selected = check_failure "candle_appraisal_unavailable"
+      (recorded_run ~base_path) in
+    check (option string) "admission receipt names actual runtime"
+      (Some F.cli_primary_runtime) selected;
+    check (list string) "admission failure keeps dispatch evidence"
+      [F.cli_primary_runtime] (dispatched output))
+;;
+
 let test_http_permanent_refusal_then_cli_rest_retries () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture refused input","type":"invalid_request_error"}}|} in
@@ -659,7 +680,9 @@ let () =
   run
     "candle_appraiser_transport"
     [ ( "declared transports"
-      , [ test_case "recoverable HTTP survives permanent CLI" `Quick test_transient_http_survives_permanent_cli_failure
+      , [ test_case "Codex reasoning admission remains retryable" `Quick
+            test_codex_reasoning_admission_remains_retryable
+        ; test_case "recoverable HTTP survives permanent CLI" `Quick test_transient_http_survives_permanent_cli_failure
         ; test_case "mixed HTTP candidates recover in either order" `Quick test_mixed_http_candidates_remain_retryable
         ; test_case "opaque provider failure remains retryable" `Quick test_opaque_provider_failure_remains_retryable
         ; test_case "hard quota requires a recovery window" `Quick test_hard_quota_requires_recovery_window

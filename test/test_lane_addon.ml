@@ -296,14 +296,43 @@ let test_invalid_retained_visibility_is_isolated () = with_fixture (fun env _ co
     let fields = ("instance_id",`String retained_id) ::
       List.remove_assoc "instance_id" (List.remove_assoc "visibility" current) in
     let fields = match visibility with None -> fields | Some value -> ("visibility",value)::fields in
+    let fields = ("configuration",`Assoc ["id",`String ("invalid-producer-" ^ string_of_int index);
+      "source_path",`String (Filename.concat dir "invalid.toml");"revision",`String "fixture"])
+      :: List.remove_assoc "configuration" fields in
     unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields)))
     [None; Some (`Assoc ["kind",`String "unknown"])];
+  let consumer_id = "released-invalid-consumer" in
+  let consumer = current
+    |> List.filter (fun (key, _) -> not (List.mem key
+      ["runtime_presence";"visibility";"source_access";"instance_id";"incarnation";"binding"]))
+    |> List.map (function
+      | "package", `Assoc fields -> "package", `Assoc (List.remove_assoc "model_access" fields)
+      | field -> field) in
+  let consumer = `Assoc (("instance_id",`String consumer_id)::("incarnation",`String consumer_id)::
+    ("binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "upstream";
+      "kind",`String "lane_output";"installation_id",`String "invalid-producer-1";
+      "selection",`String "latest_completed"]]])::consumer) in
+  let valid_producer = match consumer with
+    | `Assoc fields -> `Assoc (("instance_id",`String "released-producer")::
+        ("incarnation",`String "released-producer")::("binding",`Assoc ["sources",`List []])::
+        ("configuration",`Assoc ["id",`String "invalid-producer-1";
+          "source_path",`String (Filename.concat dir "producer.toml");"revision",`String "fixture"])::
+        List.filter (fun (key, _) -> not (List.mem key
+          ["instance_id";"incarnation";"binding";"configuration"])) fields)
+    | _ -> assert false in
+  check bool "released consumer shape is valid with a proved shared producer" true
+    (Result.is_ok (Runtime.authorize_retained_read ~bindings:[valid_producer;consumer]
+      ~access:Lane_addon_sources.Unauthenticated consumer));
+  unwrap (Store.save_binding store ~instance_id:consumer_id consumer);
   check Alcotest.int "unreadable retained policy cannot hide a valid live installation" 1
     (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
   check bool "unreadable record still cannot be requested directly" true
     (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
       (`Assoc ["instance_id",`String "unreadable-0"])));
-  check Alcotest.int "both invalid records remain available for operator repair" 3
+  check bool "omitting an invalid producer cannot authorize its released consumer" true
+    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+      (`Assoc ["instance_id",`String consumer_id])));
+  check Alcotest.int "invalid records and dependent consumer remain available for operator repair" 4
     (Store.bindings store |> unwrap |> List.length);
   detach config id; await_phase clock config id "detached")
 
@@ -569,7 +598,9 @@ let test_mcp_attribution_does_not_authorize_private_lane () =
         let foreign = match Auth.create_token config.base_path ~agent_name:"foreign-lane-reader" ~role:Masc_domain.Worker with
           | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
         let denied = mcp ~auth_token:foreign "masc_lane_inspect" ["instance_id",`String id] in
-        check bool "foreign bearer cannot borrow cached owner" false (Tool_result.is_success denied)))
+        check bool "foreign bearer cannot borrow cached owner" false (Tool_result.is_success denied);
+        detach config id;
+        await_phase clock config id "detached"))
 
 let test_fusion_status_hint_wakes_only_its_bound_run () =
   with_fixture (fun env _sw config dir _state ->

@@ -1571,8 +1571,13 @@ type tool_approval_answer =
   ; remembered : bool
   }
 
-let post_keeper_tool_approval ~(expected_workspace : Tui_decode.server_identity) ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
+(* [expected_workspace] is a required labeled argument rather than
+   [?expected_workspace]: this signature has no positional argument, so an
+   optional here can never be erased (warning 16). Both TUI callers
+   always supply the verified server identity. *)
+let post_keeper_tool_approval ~(expected_workspace : Tui_decode.server_identity)
+    ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(tool_call_id : string) ~(allow : bool) :
     (tool_approval_answer, string) result =
   let expected_fields =
     [ ("expected_workspace", `Assoc

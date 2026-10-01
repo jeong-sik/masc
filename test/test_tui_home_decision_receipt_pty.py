@@ -72,7 +72,10 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         assert payload["name"] == held_item["keeper"]
         assert payload["tool_call_id"] == "call-after-receipt"
         assert payload["decision"] == "approve"
-        assert "expected_workspace" in payload
+        assert payload["expected_workspace"] == {
+            "base_path": "",
+            "masc_root": "",
+        }
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 

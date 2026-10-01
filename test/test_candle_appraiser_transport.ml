@@ -257,11 +257,53 @@ let test_all_transport_failures_remain_retryable () =
     [`Service_unavailable; `Internal_server_error]
 ;;
 
-let test_http_bad_request_waits_for_change () =
+let test_transient_http_survives_permanent_cli_failure () =
   with_case (fun ~sw ~net ~clock ~base_path ->
+    let server = F.start_server ~sw ~net ~clock
+      (F.Reply_with (fun _ _ -> `Service_unavailable, unavailable_body)) in
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime]
+      [{F.id="http-recoverable";base_url=server.base_url}];
+    (match run_declared ~base_path (unavailable_cli (ref [])) with
+     | Error (A.Transport_unavailable _) -> ()
+     | _ -> fail "permanent CLI refusal suppressed recoverable HTTP");
+    check int "HTTP attempted once" 1 (F.post_count server);
+    ignore (check_failure "candle_appraisal_unavailable" (recorded_run ~base_path)))
+;;
+
+let test_mixed_http_candidates_remain_retryable () =
+  List.iter (fun reverse ->
+    with_case (fun ~sw ~net ~clock ~base_path ->
+      let unavailable = F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun _ _ -> `Service_unavailable, unavailable_body)) in
+      let refused = F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun _ _ -> `Bad_request, unavailable_body)) in
+      let slots = [{F.id="unavailable";base_url=unavailable.base_url};
+                   {F.id="refused";base_url=refused.base_url}] in
+      publish ~base_path ~cli_slots:[] (if reverse then List.rev slots else slots);
+      (match run_declared ~base_path (unavailable_cli (ref [])) with
+       | Error (A.Transport_unavailable _) -> ()
+       | _ -> fail "HTTP candidate ordering stranded a recovering route");
+      check int "recoverable candidate attempted" 1 (F.post_count unavailable);
+      check int "permanent candidate attempted" 1 (F.post_count refused))) [false;true]
+;;
+
+let test_opaque_provider_failure_remains_retryable () =
+  with_case (fun ~sw ~net ~clock ~base_path ->
+    let body = {|{"error":{"type":"provider_unavailable","message":"disconnected"}}|} in
+    let server = F.start_server ~sw ~net ~clock (F.Reply body) in
+    publish ~base_path ~cli_slots:[] [{F.id="opaque-provider";base_url=server.base_url}];
+    (match run_declared ~base_path (unavailable_cli (ref [])) with
+     | Error (A.Transport_unavailable _) -> ()
+     | _ -> fail "opaque provider envelope invented permanent refusal");
+    check int "provider was observed" 1 (F.post_count server);
+    ignore (check_failure "candle_appraisal_unavailable" (recorded_run ~base_path)))
+;;
+
+let test_http_bad_request_waits_for_change () =
+  List.iter (fun status -> with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture bad request","type":"invalid_request_error"}}|} in
     let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> `Bad_request, body)) in
+      (F.Reply_with (fun _ _ -> status, body)) in
     let slot = "candle-request-refused" in
     publish ~base_path ~cli_slots:[] [{F.id=slot;base_url=server.base_url}];
     let never_cli : Keeper_lane_cli_oneshot.runner =
@@ -277,7 +319,7 @@ let test_http_bad_request_waits_for_change () =
       (recorded_run ~base_path) in
     check (option string) "receipt identifies refusing binding" (Some slot) selected;
     check (list string) "actual HTTP dispatch survives" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)
+    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request; `Payment_required]
 ;;
 
 let test_rate_limit_without_cli_remains_retryable () =
@@ -342,6 +384,54 @@ let test_cli_setup_failure_is_not_binding_rest () =
     check (list string) "setup dispatch remains observable" [F.cli_primary_runtime] (dispatched output))
 ;;
 
+let test_hard_quota_requires_recovery_window () =
+  let module Exact = Agent_core.Exact_output in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  List.iter (fun (retry_after, expected) ->
+    let cause = Exact.Completion_failed
+      {error=Http.ProviderFailure {kind=Http.Hard_quota {retry_after};message="quota"};
+       dispatch=Exact.Generation_dispatch_started} in
+    check bool "hard quota retries only a usable provider window" expected
+      (Server_candle_appraiser.For_testing.retryable_execution cause))
+    [None,false; Some 0.,false; Some (-1.),false; Some nan,false;
+     Some infinity,false; Some 60.,true]
+;;
+
+let test_codex_rpc_refusal_disposition () =
+  List.iter (fun (code, retryable) ->
+    with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+      publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
+      let runner : Keeper_lane_cli_oneshot.runner =
+        fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        Error (Fusion_official_client.Codex_failure (Runtime_codex_app_server.Rpc_error
+          {method_="turn/start";code=Some code;message="fixture RPC refusal";data=None})) in
+      (match run_declared ~base_path runner, retryable with
+       | Error (A.Execution_rejected _), false | Error (A.Transport_unavailable _), true -> ()
+       | _ -> fail "RPC refusal lost its typed retry disposition");
+      let code = if retryable then "candle_appraisal_unavailable" else "candle_appraisal_execution_rejected" in
+      ignore (check_failure code (recorded_run ~base_path))))
+    [-32700,false; -32600,false; -32601,false; -32602,false; -32603,true]
+;;
+
+let test_candidate_admission_refusal_waits_for_change () =
+  with_case (fun ~sw ~net ~clock ~base_path ->
+    let server = F.start_server ~sw ~net ~clock (F.Reply (openai_text (Yojson.Safe.to_string valid_answer))) in
+    let id = "candle-missing-credential" in
+    let snapshot = F.resolver_snapshot ~api_key_env:"MASC_TEST_CANDLE_MISSING_KEY"
+      ~source:base_path [{F.id; base_url=server.base_url}] in
+    ignore (F.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[id] ~cli_slot_ids:[] snapshot
+      : Runtime_exact_output_registry.t);
+    let never_cli : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ -> fail "no CLI declared" in
+    (match run_declared ~base_path never_cli with
+     | Error (A.Execution_rejected _) -> ()
+     | _ -> fail "permanent admission rejection became maintenance retry");
+    check int "missing frozen credential prevents generation" 0 (F.post_count server);
+    let output, selected = check_failure "candle_appraisal_execution_rejected" (recorded_run ~base_path) in
+    check (option string) "no candidate dispatched" None selected;
+    check (list string) "no dispatch invented" [] (dispatched output))
+;;
+
 let test_cli_timeout_remains_retryable () =
   with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
     publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
@@ -361,7 +451,28 @@ let test_cli_timeout_remains_retryable () =
     check (list string) "timeout keeps its dispatch evidence" [F.cli_primary_runtime] (dispatched output))
 ;;
 
-let test_http_permanent_refusal_then_cli_rest_stays_rejected () =
+let test_codex_reasoning_admission_remains_retryable () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      Error (Fusion_official_client.Codex_failure
+        (Runtime_codex_app_server.Reasoning_effort_admission_failed
+          {model = "fixture"; detail = "model/list timed out"})) in
+    (match run_declared ~base_path cli_runner with
+     | Error (A.Transport_unavailable _) -> ()
+     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
+       failf "reasoning admission failure stranded the payout: %s" detail
+     | Ok _ -> fail "failed reasoning admission produced an appraisal");
+    let output, selected = check_failure "candle_appraisal_unavailable"
+      (recorded_run ~base_path) in
+    check (option string) "admission receipt names actual runtime"
+      (Some F.cli_primary_runtime) selected;
+    check (list string) "admission failure keeps dispatch evidence"
+      [F.cli_primary_runtime] (dispatched output))
+;;
+
+let test_http_permanent_refusal_then_cli_rest_retries () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture refused input","type":"invalid_request_error"}}|} in
     let server = F.start_server ~sw ~net ~clock
@@ -370,13 +481,13 @@ let test_http_permanent_refusal_then_cli_rest_stays_rejected () =
     publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id=slot;base_url=server.base_url}];
     let calls = ref [] in
     (match run_declared ~base_path (resting_cli calls) with
-     | Error (A.Execution_rejected _) -> ()
-     | Error (A.Transport_unavailable detail | A.Invalid_response detail) ->
-       failf "CLI account rest erased the HTTP request refusal: %s" detail
+     | Error (A.Transport_unavailable _) -> ()
+     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
+       failf "HTTP refusal suppressed recovering CLI: %s" detail
      | Ok _ -> fail "two failed bindings produced an appraisal");
     check int "refused HTTP tried once" 1 (F.post_count server);
     check (list string) "resting fallback actually attempted" [F.cli_primary_runtime] (List.rev !calls);
-    let output, selected = check_failure "candle_appraisal_execution_rejected"
+    let output, selected = check_failure "candle_appraisal_unavailable"
       (recorded_run ~base_path) in
     check (option string) "receipt retains last dispatched CLI" (Some F.cli_primary_runtime) selected;
     check (list string) "both failed dispatches retained" [slot;F.cli_primary_runtime] (dispatched output);
@@ -569,7 +680,15 @@ let () =
   run
     "candle_appraiser_transport"
     [ ( "declared transports"
-      , [ test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
+      , [ test_case "Codex reasoning admission remains retryable" `Quick
+            test_codex_reasoning_admission_remains_retryable
+        ; test_case "recoverable HTTP survives permanent CLI" `Quick test_transient_http_survives_permanent_cli_failure
+        ; test_case "mixed HTTP candidates recover in either order" `Quick test_mixed_http_candidates_remain_retryable
+        ; test_case "opaque provider failure remains retryable" `Quick test_opaque_provider_failure_remains_retryable
+        ; test_case "hard quota requires a recovery window" `Quick test_hard_quota_requires_recovery_window
+        ; test_case "RPC refusals retain typed retry disposition" `Quick test_codex_rpc_refusal_disposition
+        ; test_case "permanent admission refusal waits for change" `Quick test_candidate_admission_refusal_waits_for_change
+        ; test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
         ; test_case
             "HTTP bad request waits for a change"
             `Quick test_http_bad_request_waits_for_change
@@ -586,8 +705,8 @@ let () =
             "known CLI timeout remains retryable"
             `Quick test_cli_timeout_remains_retryable
         ; test_case
-            "HTTP permanent refusal survives resting CLI fallback"
-            `Quick test_http_permanent_refusal_then_cli_rest_stays_rejected
+            "HTTP refusal preserves resting CLI recovery"
+            `Quick test_http_permanent_refusal_then_cli_rest_retries
         ; test_case
             "invalid HTTP then unavailable CLI remains rejected"
             `Quick

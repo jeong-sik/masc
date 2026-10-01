@@ -108,6 +108,8 @@ function mountEditor(
       onRoutingChange=${() => {}}
       onAssignmentChange=${options.onAssignmentChange ?? (() => {})}
       onBindingFieldChange=${() => {}}
+      modelContextDrafts=${{}}
+      onModelContextChange=${() => {}}
     />`,
     container,
   )
@@ -245,6 +247,26 @@ candidates = ["ollama_cloud.minimax-m3"]
     render(null, container)
   })
 
+  it.each([
+    '[runtime.lanes]\ncoding = { candidates = ["ollama_cloud.deepseek-v4-flash"] }',
+    '[runtime.lanes]\ncoding.candidates = ["ollama_cloud.deepseek-v4-flash"]',
+  ])('offers an inline or dotted declared lane as an assignment: %s', (declaration) => {
+    keepers.value = [{ name: 'nick0cave', status: 'idle' }]
+    const sourceText = sourceTextWithQuotedAssignments
+      .replace('"nick0cave" = "ollama_cloud.deepseek-v4-flash"', '"nick0cave" = "coding"')
+      + '\n' + declaration
+    const onAssignmentChange = vi.fn()
+    const container = document.createElement('div')
+    mountEditor(container, { sourceText, onAssignmentChange })
+    const select = container.querySelector('[aria-label="nick0cave 런타임 배정"]') as HTMLSelectElement
+    expect(select.value).toBe('coding')
+    expect(select.querySelector('optgroup[label="레인"] option')?.textContent).toBe('coding')
+    expect(select.textContent).not.toContain('알 수 없음')
+    fireEvent.change(select, { target: { value: 'coding' } })
+    expect(onAssignmentChange).toHaveBeenLastCalledWith('nick0cave', 'coding')
+    render(null, container)
+  })
+
   it('keeps an assignment the file names but nothing declares as its own option', () => {
     keepers.value = [{ name: 'nick0cave', status: 'idle' }]
     const sourceText = sourceTextWithQuotedAssignments
@@ -317,6 +339,8 @@ function mountSection(
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}
       onBindingFieldChange=${() => {}}
+      modelContextDrafts=${{}}
+      onModelContextChange=${() => {}}
     />`,
     container,
   )

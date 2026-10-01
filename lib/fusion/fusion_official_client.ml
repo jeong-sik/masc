@@ -418,6 +418,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let observed_usage = ref Fusion_types.zero_usage in
     let counter_replaced = ref false in
     (match Runtime_codex_app_server.run_turn
+       ?reasoning_effort:runtime.model.reasoning_effort
        ~on_stream_event:(function
          | Runtime_codex_app_server.Usage_reported {frame=Counted {thread_total; _}; _}
            when not !counter_replaced ->

@@ -216,6 +216,11 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     agent, env = asyncio.run(go())
     assert installed == ["claude-code"]
     assert agent._dist_identity.source_commit == "a" * 40
+    # What the keepers were configured from is recorded with the binary identity.
+    recorded = agent._config_provenance
+    assert recorded.effort == agent.keeper_effort
+    assert len(recorded.runtime_toml_sha256) == 64
+    assert len(recorded.config_dir_sha256) == 64
     kinds = [(k, d) for k, _, d in env.uploads]
     assert ("file", "/opt/masc-bench/bin/masc") in kinds
     assert ("dir", "/opt/masc-bench/config") in kinds
@@ -372,3 +377,33 @@ def test_parent_failure_still_records_the_dist_identity(tmp_path, monkeypatch):
     assert context.metadata["parent"] == "started"
     assert context.metadata["masc_dist"]["source_commit"] == "a" * 40
     assert "keeper_usage" not in context.metadata
+
+
+def test_parent_failure_still_records_the_config_provenance(tmp_path, monkeypatch):
+    async def failing_parent(self, instruction, environment, context):
+        raise RuntimeError("parent failed")
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.claude_code.ClaudeCode.run", failing_parent)
+    agent = make_agent(tmp_path)
+    from masc_config_provenance import ConfigProvenance
+    agent._config_provenance = ConfigProvenance(
+        checkout_commit="c" * 40, checkout_dirty=False,
+        runtime_toml_sha256="r" * 64, config_dir_sha256="d" * 64, effort="high")
+    context = AgentContext()
+    with pytest.raises(RuntimeError, match="parent failed"):
+        asyncio.run(agent.run("solve the task", FakeEnv(), context))
+    assert context.metadata["config_provenance"]["checkout_commit"] == "c" * 40
+    assert context.metadata["config_provenance"]["effort"] == "high"
+
+
+def test_an_agent_that_never_installed_records_no_config_provenance(tmp_path, monkeypatch):
+    async def failing_parent(self, instruction, environment, context):
+        raise RuntimeError("parent failed")
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.claude_code.ClaudeCode.run", failing_parent)
+    context = AgentContext()
+    with pytest.raises(RuntimeError, match="parent failed"):
+        asyncio.run(make_agent(tmp_path).run("solve the task", FakeEnv(), context))
+    assert "config_provenance" not in context.metadata

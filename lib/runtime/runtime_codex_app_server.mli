@@ -310,6 +310,9 @@ end
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Reasoning_effort_admission_failed of { model : string; detail : string }
+      (* Account metadata refused an explicit effort before history or turn
+         input was sent. Retrying this failure cannot replay a model turn. *)
   | Turn_input_write_failed of string
       (* The client and thread were initialized, but complete turn-input
          transmission is unconfirmed. Partial delivery must not be replayed
@@ -400,7 +403,11 @@ val probe_subscription :
 (** Start the official app-server and measure only [initialize] plus
     [account/read]. No thread or model turn is created. *)
 
-type listed_model = { id : string; model : string; display_name : string; is_default : bool }
+type listed_model = {
+  id : string; model : string; display_name : string; is_default : bool;
+  supported_reasoning_efforts : string list;
+  default_reasoning_effort : string;
+}
 val list_models :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config -> (listed_model list, error) result
@@ -439,6 +446,14 @@ val run_turn :
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for
       preparation, spawn, handshake, or incomplete input-write failures. *)
+  ?on_reasoning_effort_resolved:(model:string ->
+    requested:Llm_provider.Reasoning_effort.t option ->
+    effective:Llm_provider.Reasoning_effort.t option -> unit) ->
+  (* Explicit effort is admitted against this account's paginated model/list
+     before turn input is sent. Unsupported values snap to the nearest known
+     lower advertised tier, or the lowest known tier. Unknown upstream strings
+     remain discovery metadata; they never acquire an invented rank. An unset
+     request leaves Codex's default in charge and sends no model/list request. *)
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->

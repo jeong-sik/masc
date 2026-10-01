@@ -52,9 +52,10 @@ val drop_archive_tasks :
   Workspace_utils_backend_setup.config -> ids:string list -> unit
 
 (** Next task number =
-    [max(existing backlog ids, archive ids, durable event task ids) + 1].
+    [max(existing backlog ids, deletion receipt ids, archive ids,
+    durable event task ids) + 1].
     Event history remains authoritative after a workspace state restore, so
     omitting it can alias a new task onto an older lifecycle. Returns [1] when
-    all three sources are empty. *)
+    all four sources are empty. *)
 val next_task_number :
   Workspace_utils_backend_setup.config -> backlog -> int

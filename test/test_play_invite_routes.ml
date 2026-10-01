@@ -205,6 +205,26 @@ let test_invite_routes () =
         check int "a worker's credential is not an invite" 409 (status_of not_invite);
         check bool "and the worker keeps it" true (Option.is_some (Auth.load_credential base_path "codex")))))
 
+let test_invalid_persisted_invite_is_unavailable () =
+  with_dir "play-invalid-expiry-route-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
+    let player = token_for base_path ~agent_name:"visitor" ~role:Masc_domain.Player in
+    let credential = match Auth.load_credential base_path "visitor" with
+      | Some value -> value | None -> fail "fixture Player is missing" in
+    Auth.save_credential base_path { credential with expires_at = Some "invalid-expiry" };
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let result = dispatch ~state ~meth:"GET" ~target:Routes.invites_path ~token:operator ~body:"" in
+      check int "persisted malformed invite returns 503" 503 (status_of result);
+      check string "route preserves the typed expiry failure" "invalid_credential_expiry"
+        (string_member "code" (body_of result));
+      check bool "invalid bearer remains denied" true
+        (Result.is_error (Auth.find_static_credential_by_token base_path ~token:player))))
+
 let () =
   run "play-invite-routes"
-    [ ("routes", [ test_case "issue, list and revoke through the router" `Quick test_invite_routes ]) ]
+    [ ("routes", [ test_case "persisted malformed invite returns 503" `Quick test_invalid_persisted_invite_is_unavailable
+      ; test_case "issue, list and revoke through the router" `Quick test_invite_routes ]) ]

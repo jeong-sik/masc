@@ -141,11 +141,58 @@ label = "x"
           (Result.is_error (Pad.load ~base_path ~saves_name:name)))
       [ ""; "../samguk3"; "a/b"; "samguk3.toml" ])
 
+let test_workspace_read_authority () =
+  with_workspace (fun base_path ->
+    let pads = Pad.pads_dir ~base_path in
+    mkdir_p pads;
+    let check_refused saves_name =
+      match Pad.load ~base_path ~saves_name with
+      | Error _ -> ()
+      | Ok _ -> failf "%s: an unreadable override was treated as builtin or absent" saves_name
+    in
+    List.iter (fun name ->
+      let path = Filename.concat pads (name ^ ".toml") in
+      let entry create remove =
+        create ();
+        Fun.protect ~finally:remove (fun () -> check_refused name)
+      in
+      entry (fun () -> Unix.symlink "missing-layout.toml" path) (fun () -> Unix.unlink path);
+      entry (fun () -> Unix.symlink (name ^ ".toml") path) (fun () -> Unix.unlink path);
+      entry (fun () -> Unix.mkdir path 0o700) (fun () -> Unix.rmdir path);
+      (* No writer: accepting a FIFO would block rather than return a layout. *)
+      entry (fun () -> Unix.mkfifo path 0o600) (fun () -> Unix.unlink path))
+      ["samguk3";"zzt"];
+    let contents = "[BTN_SOUTH]\nkeys = [\"space\"]\nlabel = \"override\"\n" in
+    let target = Filename.concat base_path "layout-target.toml" in
+    Out_channel.with_open_bin target (fun oc -> output_string oc contents);
+    let path = Filename.concat pads "samguk3.toml" in
+    Unix.symlink target path;
+    (match Pad.load ~base_path ~saves_name:"samguk3" with
+     | Ok (Some (Pad.Workspace, layout)) ->
+       check (list (pair string (list string))) "regular symlink override keeps its keys"
+         ["BTN_SOUTH",["space"]] (bound layout)
+     | Ok _ -> fail "a readable symlink override fell back"
+     | Error detail -> fail detail);
+    Unix.unlink path;
+    (* A stat error at an ancestor is also not a missing layout. *)
+    Unix.rmdir pads;
+    Out_channel.with_open_bin pads (fun oc -> output_string oc "not a directory");
+    check_refused "samguk3";
+    Unix.unlink pads;
+    mkdir_p pads;
+    (* A non-root process cannot inspect this configured directory. Restore
+       access before fixture cleanup; privileged test users bypass permissions. *)
+    if Unix.geteuid () <> 0 then
+      Fun.protect ~finally:(fun () -> Unix.chmod pads 0o700) (fun () ->
+        Unix.chmod pads 0;
+        check_refused "samguk3"))
+
 let () =
   run "play-pad"
     [ ( "pad"
       , [ test_case "buttons round-trip and unknown ones are refused" `Quick test_buttons_round_trip
         ; test_case "a layout parses strictly" `Quick test_parse
         ; test_case "workspace file, then builtin, then none" `Quick test_load
+        ; test_case "workspace read failures never select builtin or none" `Quick test_workspace_read_authority
         ] )
     ]

@@ -11,12 +11,17 @@ binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
 reads, an authenticated empty wallet and catalog, PNG delivery, and delivery
-of the exact production dashboard index.
+of the exact production dashboard index. It then authenticates as the synthetic
+Keeper over MCP, buys a free face item, rejects repeat/insufficient purchases
+and unowned equipment, equips the item, and verifies ledger-backed account
+ownership and changed PNG bytes. Restoring the default must restore the
+original PNG; the other slots must stay unchanged.
 
 Inputs are a synthetic paused Keeper in the current metadata schema, an empty
 ledger, and explicit test prices/payout policy. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
-purchase/equipment, a real payout, browser interaction or production rollout.
+purchase/equipment decisions, a paid purchase or real payout, browser interaction
+or production rollout.
 Browser and TUI transition evidence comes from the separate dashboard and
 Test workflows.
 

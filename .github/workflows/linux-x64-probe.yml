@@ -78,7 +78,9 @@ jobs:
           path: |
             ${{ runner.temp }}/item-http-evidence/http-evidence.json
             ${{ runner.temp }}/item-http-evidence/account.json
+            ${{ runner.temp }}/item-http-evidence/account-after.json
             ${{ runner.temp }}/item-http-evidence/portrait.png
+            ${{ runner.temp }}/item-http-evidence/portrait-equipped.png
             ${{ runner.temp }}/item-http-evidence/server.log
           if-no-files-found: error
           retention-days: 14

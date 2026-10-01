@@ -108,6 +108,8 @@ function mountEditor(
       onRoutingChange=${() => {}}
       onAssignmentChange=${options.onAssignmentChange ?? (() => {})}
       onBindingFieldChange=${() => {}}
+      modelContextDrafts=${{}}
+      onModelContextChange=${() => {}}
     />`,
     container,
   )
@@ -337,6 +339,8 @@ function mountSection(
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}
       onBindingFieldChange=${() => {}}
+      modelContextDrafts=${{}}
+      onModelContextChange=${() => {}}
     />`,
     container,
   )

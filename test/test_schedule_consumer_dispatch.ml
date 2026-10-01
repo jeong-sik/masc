@@ -3826,7 +3826,7 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
 let approved_grant_fixture ~base_path ~keeper_name ~input =
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
       Keeper_approval_queue.submit_pending
@@ -3838,7 +3838,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match
      Keeper_approval_queue.resolve_with_policy
@@ -3905,12 +3905,12 @@ let test_consumed_grant_without_outcome_stays_actionable () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
-   | Ok Keeper_approval_queue.Consumption_already_committed ->
+   | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+   | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
-   | Ok Keeper_approval_queue.Consumption_not_matching ->
+   | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
      fail "exact grant did not match its own request"
-   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
   check_single_queued_replay ~base_path ~keeper_name;
   let selection = pending_selection_exn ~base_path ~keeper_name in
   (match
@@ -3959,26 +3959,26 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
-   | Ok Keeper_approval_queue.Consumption_already_committed ->
+   | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+   | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
-   | Ok Keeper_approval_queue.Consumption_not_matching ->
+   | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
      fail "exact grant did not match its own request"
-   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
   (match
      Keeper_approval_queue.record_consumed_resolution_replay
        ~base_path
        ~id:approval_id
-       ~outcome:(Keeper_approval_queue.Replay_applied (replay_result_ref ()))
+       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_result_ref ()))
    with
-   | Ok Keeper_approval_queue.Replay_recorded -> ()
-   | Ok Keeper_approval_queue.Replay_already_recorded ->
+   | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+   | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
      fail "replay outcome was already recorded before the test"
-   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
   Keeper_approval_queue.For_testing.reset_runtime_state ();
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   check_single_queued_replay ~base_path ~keeper_name;
   let selection = pending_selection_exn ~base_path ~keeper_name in
   (match
@@ -4046,15 +4046,15 @@ let test_projection_failure_keeps_spent_replay_queued () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
+   | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
    | Ok _ | Error _ -> fail "fixture grant was not consumed");
   (match
      Keeper_approval_queue.record_consumed_resolution_replay
        ~base_path
        ~id:approval_id
-       ~outcome:(Keeper_approval_queue.Replay_applied (replay_result_ref ()))
+       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_result_ref ()))
    with
-   | Ok Keeper_approval_queue.Replay_recorded -> ()
+   | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
    | Ok _ | Error _ -> fail "fixture replay outcome was not recorded");
   let chat_path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
   let channel = open_out_gen [ Open_append; Open_text ] 0o600 chat_path in
@@ -4084,7 +4084,7 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
       Keeper_approval_queue.submit_pending
@@ -4096,7 +4096,7 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match
      Keeper_approval_queue.resolve_with_policy

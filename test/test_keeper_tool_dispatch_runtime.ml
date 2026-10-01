@@ -281,7 +281,7 @@ let with_exec_fixture
        | Error error ->
          fail
            ("Gate persistence fixture failed: "
-            ^ Masc.Keeper_approval_queue.install_error_to_string error));
+            ^ Masc.Keeper_approval_queue_result.install_error_to_string error));
       let meta =
         let meta = make_meta () in
         if always_allow then { meta with always_allow = Some true } else meta
@@ -1517,7 +1517,7 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
             "internal memory write unexpectedly created %d Gate approvals"
             (List.length entries)
         | Error error ->
-          fail (Masc.Keeper_approval_queue.storage_error_to_string error)))
+          fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)))
 ;;
 
 let test_publication_initialization_crash_is_redacted () =
@@ -3057,7 +3057,7 @@ let test_approved_web_search_grant_executes_exact_request () =
         | Ok entries ->
           failf "expected one pending WebSearch approval, got %d" (List.length entries)
         | Error error ->
-          fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+          fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
       in
       (match
          Masc.Keeper_approval_queue.resolve_with_policy
@@ -3112,11 +3112,11 @@ let test_approved_web_search_grant_executes_exact_request () =
           ~base_path:config.base_path
           ~id:approval_id
       with
-      | Ok Masc.Keeper_approval_queue.Resolution_consumed -> ()
-      | Ok Masc.Keeper_approval_queue.Resolution_unconsumed ->
+      | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> ()
+      | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed ->
         fail "approved WebSearch did not consume its one-shot grant"
       | Error error ->
-        fail (Masc.Keeper_approval_queue.grant_error_to_string error))
+        fail (Masc.Keeper_approval_queue_result.grant_error_to_string error))
 
 let test_approved_web_search_replays_without_model_resubmission () =
   with_exec_fixture "keeper_tool_dispatch_replayed_web_search"
@@ -3160,7 +3160,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
             "expected one pending replay approval, got %d"
             (List.length entries)
         | Error error ->
-          fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+          fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
       in
       (match
          Masc.Keeper_approval_queue.resolve_with_policy
@@ -3245,20 +3245,20 @@ let test_approved_web_search_replays_without_model_resubmission () =
            ~base_path:config.base_path
            ~id:approval_id
        with
-       | Ok Masc.Keeper_approval_queue.Resolution_consumed -> ()
-       | Ok Masc.Keeper_approval_queue.Resolution_unconsumed ->
+       | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> ()
+       | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed ->
          fail "replayed WebSearch did not consume its one-shot grant"
        | Error error ->
-         fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+         fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
       (match
          Masc.Keeper_approval_queue.approved_resolution_delivery
            ~base_path:config.base_path
            ~id:approval_id
        with
        | Ok
-           { state = Masc.Keeper_approval_queue.Resolution_consumed
+           { state = Masc.Keeper_approval_queue_result.Resolution_consumed
            ; replay_outcome =
-               Some (Masc.Keeper_approval_queue.Replay_applied output_ref)
+               Some (Masc.Keeper_approval_queue_result.Replay_applied output_ref)
            ; _
            } ->
          let replay_store = Tool_blob_store.create ~base_path:config.base_path in
@@ -3317,7 +3317,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
               "Do not request the approved operation again")
        | Ok _ -> fail "durable WebSearch replay result was missing"
        | Error error ->
-         fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+         fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
       match
         Masc.Keeper_gate_replay.replay_approved_effect
           ~config
@@ -3362,7 +3362,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
          with
          | Ok submission -> submission.approval_id
          | Error error ->
-           fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+           fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
        in
        (match
           Masc.Keeper_approval_queue.resolve_with_policy
@@ -3383,13 +3383,13 @@ let test_durable_connector_replay_settles_terminal_turn () =
             ~tool_name:"connector_post"
             ~input
         with
-        | Ok (Masc.Keeper_approval_queue.Consumption_committed _)
-        | Ok Masc.Keeper_approval_queue.Consumption_already_committed ->
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _)
+        | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed ->
           ()
-        | Ok Masc.Keeper_approval_queue.Consumption_not_matching ->
+        | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
           fail "exact connector approval did not match"
         | Error error ->
-          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+          fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let output_ref =
          Tool_blob_store.put_durable
            (Tool_blob_store.create ~base_path:config.base_path)
@@ -3400,13 +3400,13 @@ let test_durable_connector_replay_settles_terminal_turn () =
           Masc.Keeper_approval_queue.record_consumed_resolution_replay
             ~base_path:config.base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue.Replay_applied output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
         with
-        | Ok Masc.Keeper_approval_queue.Replay_recorded
-        | Ok Masc.Keeper_approval_queue.Replay_already_recorded ->
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
           ()
         | Error error ->
-          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+          fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let resolution : Keeper_event_queue.hitl_resolution =
          { approval_id
          ; decision = Keeper_event_queue.Hitl_approved
@@ -3480,7 +3480,7 @@ let approved_web_search_resolution
     | Ok entries ->
       failf "expected one repair approval, got %d" (List.length entries)
     | Error error ->
-      fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+      fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match
      Masc.Keeper_approval_queue.resolve_with_policy
@@ -3565,14 +3565,14 @@ let test_blob_failure_repairs_journal_without_second_effect () =
             ~id:approval_id
         with
         | Ok
-            { state = Masc.Keeper_approval_queue.Resolution_consumed
+            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
             ; replay_outcome = None
             ; _
             } ->
           ()
         | Ok _ -> fail "blob failure wrote a terminal replay placeholder"
         | Error error ->
-          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+          fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        match
          Masc.Keeper_gate_replay.replay_approved_effect
            ~config
@@ -3669,7 +3669,7 @@ let test_journal_failure_retries_only_persistence () =
             ~id:approval_id
         with
         | Ok
-            { state = Masc.Keeper_approval_queue.Resolution_consumed
+            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
             ; replay_outcome = None
             ; _
             } ->
@@ -3679,7 +3679,7 @@ let test_journal_failure_retries_only_persistence () =
         | Error error ->
           failf
             "replay sidecar failure blocked the whole Gate store: %s"
-            (Masc.Keeper_approval_queue.grant_error_to_string error));
+            (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        Unix.rmdir replay_path;
        match
          Masc.Keeper_gate_replay.replay_approved_effect
@@ -3850,15 +3850,15 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
            ~id:approval_id
        with
        | Ok
-           { state = Masc.Keeper_approval_queue.Resolution_consumed
+           { state = Masc.Keeper_approval_queue_result.Resolution_consumed
            ; replay_outcome =
-               Some (Masc.Keeper_approval_queue.Replay_indeterminate _)
+               Some (Masc.Keeper_approval_queue_result.Replay_indeterminate _)
            ; _
            } ->
          ()
        | Ok _ -> fail "restart gap did not persist its terminal uncertainty"
        | Error error ->
-         fail (Masc.Keeper_approval_queue.grant_error_to_string error))
+         fail (Masc.Keeper_approval_queue_result.grant_error_to_string error))
 ;;
 
 let test_unsupported_approved_operation_retains_exact_model_issued_path () =
@@ -3945,14 +3945,14 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
             ~id:approval_id
         with
         | Ok
-            { state = Masc.Keeper_approval_queue.Resolution_unconsumed
+            { state = Masc.Keeper_approval_queue_result.Resolution_unconsumed
             ; replay_outcome = None
             ; _
             } ->
           ()
         | Ok _ -> fail "unsupported approval consumed its authorization"
         | Error error ->
-          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+          fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let model_message =
          Masc.Keeper_gate_replay.compose_model_message
            ~base_path:config.base_path
@@ -5133,7 +5133,7 @@ let test_deferred_web_search_keeps_the_turn_going () =
             (List.length entries)
         | Error error ->
           fail
-            (Masc.Keeper_approval_queue.storage_error_to_string error));
+            (Masc.Keeper_approval_queue_result.storage_error_to_string error));
        (match runtime_result with
         | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; cooperative_boundary; _ } ->
           check bool "parked call does not invent a cooperative yield" true
@@ -9612,7 +9612,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       if one_shot then (
         (match Masc.Keeper_approval_queue.approved_resolution_delivery ~base_path ~id:approval_id
            |> require "one-shot grant after delivery" with
-         | {state=Masc.Keeper_approval_queue.Resolution_unconsumed; replay_outcome=None; _} -> ()
+         | {state=Masc.Keeper_approval_queue_result.Resolution_unconsumed; replay_outcome=None; _} -> ()
          | _ -> fail "delivered input consumed the grant or invented an effect");
         let cycle_grant = Masc.Keeper_gate.cycle_grant_of_resolution (Gate.resolution admission)
           |> Option.get in
@@ -9621,7 +9621,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          | _ -> fail "actual exact call could not consume its one-shot grant after input delivery");
         (match Masc.Keeper_approval_queue.approved_resolution_delivery ~base_path ~id:approval_id
            |> require "one-shot grant after exact call" with
-         | {state=Masc.Keeper_approval_queue.Resolution_consumed; replay_outcome=None; _} -> ()
+         | {state=Masc.Keeper_approval_queue_result.Resolution_consumed; replay_outcome=None; _} -> ()
          | _ -> fail "exact call did not consume only its one-shot authorization"));
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
         |> require "same operation completion" |> ignore))
@@ -9871,7 +9871,7 @@ let test_binary_write_reference_survives_replay () =
     check bool "deferred file absent" false (Sys.file_exists target);
     Masc.Keeper_approval_queue.For_testing.reset_runtime_state ();
     (match Masc.Keeper_approval_queue.install_persistence ~base_path:config.base_path with
-     | Ok _ -> () | Error e -> fail (Masc.Keeper_approval_queue.install_error_to_string e));
+     | Ok _ -> () | Error e -> fail (Masc.Keeper_approval_queue_result.install_error_to_string e));
     (match Masc.Keeper_approval_queue.resolve_with_policy ~base_path:config.base_path ~id:approval_id
        ~decision:Keeper_approval_queue_rules_types.Decision.Approve
        ~source:Keeper_approval_queue_rules_types.Auto_judge () with

@@ -108,8 +108,8 @@ type deferred_reason =
   | Mode_state_invalid of string
 
 type unavailable_reason =
-  | Queue_storage_unavailable of Keeper_approval_queue.storage_error
-  | Approval_grant_unavailable of Keeper_approval_queue.grant_error
+  | Queue_storage_unavailable of Keeper_approval_queue_result.storage_error
+  | Approval_grant_unavailable of Keeper_approval_queue_result.grant_error
   | Approval_grant_consumption_in_progress of string
 
 type decision =
@@ -167,25 +167,25 @@ let auto_judge_resume_failure_code_to_string = function
 ;;
 
 let completion_rejection_of_exact_attempt = function
-  | Keeper_approval_queue.Exact_attempt_not_found _ ->
+  | Keeper_approval_queue_result.Exact_attempt_not_found _ ->
     Completion_not_found
-  | Keeper_approval_queue.Exact_attempt_key_mismatch _ ->
+  | Keeper_approval_queue_result.Exact_attempt_key_mismatch _ ->
     Completion_key_mismatch
-  | Keeper_approval_queue.Exact_attempt_invalid_identity _ ->
+  | Keeper_approval_queue_result.Exact_attempt_invalid_identity _ ->
     Completion_invalid_identity
-  | Keeper_approval_queue.Exact_attempt_summary_not_pending _ ->
+  | Keeper_approval_queue_result.Exact_attempt_summary_not_pending _ ->
     Completion_summary_not_pending
-  | Keeper_approval_queue.Exact_attempt_unbound_state _ ->
+  | Keeper_approval_queue_result.Exact_attempt_unbound_state _ ->
     Completion_unbound_state
-  | Keeper_approval_queue.Exact_attempt_disposition_conflict _ ->
+  | Keeper_approval_queue_result.Exact_attempt_disposition_conflict _ ->
     Completion_disposition_conflict
-  | Keeper_approval_queue.Exact_attempt_identity_conflict _ ->
+  | Keeper_approval_queue_result.Exact_attempt_identity_conflict _ ->
     Completion_identity_conflict
-  | Keeper_approval_queue.Exact_attempt_status_conflict _ ->
+  | Keeper_approval_queue_result.Exact_attempt_status_conflict _ ->
     Completion_status_conflict
-  | Keeper_approval_queue.Exact_attempt_provenance_mismatch _ ->
+  | Keeper_approval_queue_result.Exact_attempt_provenance_mismatch _ ->
     Completion_provenance_mismatch
-  | Keeper_approval_queue.Exact_attempt_content_conflict _ ->
+  | Keeper_approval_queue_result.Exact_attempt_content_conflict _ ->
     Completion_content_conflict
 ;;
 
@@ -224,7 +224,7 @@ type auto_judge_resume_report =
   ; finalized_ids : string list
   ; skipped_ids : string list
   ; failures : auto_judge_resume_failure list
-  ; queue_error : Keeper_approval_queue.storage_error option
+  ; queue_error : Keeper_approval_queue_result.storage_error option
   }
 
 type cycle_grant_entry =
@@ -274,13 +274,13 @@ let rec take_matching_cycle_grant grant request =
         Atomic.set grant current;
         Cycle_grant_temporarily_unavailable
           (entry.approval_id, Approval_grant_unavailable error)
-      | Ok Keeper_approval_queue.Consumption_not_matching ->
+      | Ok Keeper_approval_queue_result.Consumption_not_matching ->
         Atomic.set grant current;
         Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue.Consumption_already_committed ->
+      | Ok Keeper_approval_queue_result.Consumption_already_committed ->
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_not_applicable
-      | Ok (Keeper_approval_queue.Consumption_committed audit_receipt) ->
+      | Ok (Keeper_approval_queue_result.Consumption_committed audit_receipt) ->
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_authorized (entry.approval_id, audit_receipt))
     else take_matching_cycle_grant grant request
@@ -315,9 +315,9 @@ let deferred_reason_to_string = function
 
 let unavailable_reason_to_string = function
   | Queue_storage_unavailable error ->
-    Keeper_approval_queue.storage_error_to_string error
+    Keeper_approval_queue_result.storage_error_to_string error
   | Approval_grant_unavailable error ->
-    Keeper_approval_queue.grant_error_to_string error
+    Keeper_approval_queue_result.grant_error_to_string error
   | Approval_grant_consumption_in_progress approval_id ->
     Printf.sprintf "approval %s is being consumed" approval_id
 ;;
@@ -959,7 +959,7 @@ let durable_pre_worker_unavailable_error reason = function
   | Error error ->
     reason
     ^ "; durable pre-worker blocked observation failed: "
-    ^ Keeper_approval_queue.exact_attempt_error_to_string error
+    ^ Keeper_approval_queue_result.exact_attempt_error_to_string error
 ;;
 
 let reserve_pre_worker_start
@@ -970,7 +970,7 @@ let reserve_pre_worker_start
       entry
       ~reason_code:Keeper_approval_queue_rules_types.Summary_pre_worker_start_reserved
       ~operator_detail:
-        Keeper_approval_queue.summary_attempt_start_reserved_operator_detail
+        Keeper_approval_queue_result.summary_attempt_start_reserved_operator_detail
   with
   | Ok true -> Ok ()
   | Ok false ->
@@ -978,7 +978,7 @@ let reserve_pre_worker_start
   | Error error ->
     Error
       ("Auto Judge worker start reservation failed: "
-       ^ Keeper_approval_queue.exact_attempt_error_to_string error)
+       ^ Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 let rec run_reserved_auto_judge_entry_with
@@ -1185,7 +1185,7 @@ and retry_auto_judge_entry
       ~requested_by
   with
   | Error error ->
-    Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+    Error (Keeper_approval_queue_result.exact_attempt_error_to_string error)
   | Ok false -> Ok Retry_skipped
   | Ok true ->
     let reblock reason =
@@ -1251,7 +1251,7 @@ and start_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval
     match Keeper_approval_queue.mark_summary_pending ~id:entry.id with
     | Error error ->
       release_auto_judge entry;
-      Error (Keeper_approval_queue.summary_transition_error_to_string error)
+      Error (Keeper_approval_queue_result.summary_transition_error_to_string error)
     | Ok false ->
       release_auto_judge entry;
       Ok Skipped
@@ -1264,7 +1264,7 @@ and start_auto_judge_entry (entry : Keeper_approval_queue_rules_types.pending_ap
       ~id:entry.id
   with
   | Error error ->
-    Error (Keeper_approval_queue.storage_error_to_string error)
+    Error (Keeper_approval_queue_result.storage_error_to_string error)
   | Ok None -> Ok Skipped
   | Ok (Some current) ->
     (match classify_auto_judge_entry current with
@@ -1373,7 +1373,7 @@ and drain_auto_judge_owner
       ~base_path
       ~keeper_name
       ()
-    |> Result.map_error Keeper_approval_queue.storage_error_to_string
+    |> Result.map_error Keeper_approval_queue_result.storage_error_to_string
   | Ok Keeper_gate_mode.Manual ->
     Ok
       { started_ids = []
@@ -1416,7 +1416,7 @@ and drain_auto_judges ~base_path =
   | Ok (_ : Keeper_gate_mode.t) ->
     (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
      | Error error ->
-       Error (Keeper_approval_queue.storage_error_to_string error)
+       Error (Keeper_approval_queue_result.storage_error_to_string error)
      | Ok entries ->
        let owners =
          List.fold_left
@@ -1453,7 +1453,7 @@ and drain_auto_judges ~base_path =
                    (fun (outcome : auto_judge_drain_outcome) ->
                       outcome.started_ids, outcome.failures, outcome.blocker)
               |> Result.map_error
-                   Keeper_approval_queue.storage_error_to_string)
+                   Keeper_approval_queue_result.storage_error_to_string)
             auto_judge_owners))
 ;;
 
@@ -1502,7 +1502,7 @@ let reclaim_orphaned_start_reservation
          ~keeper_name:entry.keeper_name
          "orphaned Auto Judge start reservation reclaim failed approval=%s: %s"
          entry.id
-         (Keeper_approval_queue.exact_attempt_error_to_string error);
+         (Keeper_approval_queue_result.exact_attempt_error_to_string error);
        entry)
   | _ -> entry
 ;;
@@ -1663,7 +1663,7 @@ let retry_blocked_auto_judge
          ~id:approval_id
      with
      | Error error ->
-       Error (Keeper_approval_queue.storage_error_to_string error)
+       Error (Keeper_approval_queue_result.storage_error_to_string error)
      | Ok None -> Error ("pending approval not found: " ^ approval_id)
      | Ok (Some entry) ->
        (match
@@ -1729,7 +1729,7 @@ let finalize_recovered_judgment
          ~id:entry.id
          ~input_hash:entry.input_hash
          ~sequence:entry.sequence
-       : (bool, Keeper_approval_queue.exact_attempt_error) result)
+       : (bool, Keeper_approval_queue_result.exact_attempt_error) result)
   in
   match entry.exact_attempt with
   | Keeper_approval_queue_rules_types.Exact_unbound ->
@@ -1750,8 +1750,8 @@ let finalize_recovered_judgment
          ~summary
      with
      | Ok
-         { Keeper_approval_queue.write_outcome =
-             Keeper_approval_queue.Fsync_completed
+         { Keeper_approval_queue_result.write_outcome =
+             Keeper_approval_queue_result.Fsync_completed
          ; _
           } ->
        (match resolve_judgment entry ~approval_id:entry.id summary with
@@ -1760,19 +1760,19 @@ let finalize_recovered_judgment
           Error (Resume_judgment_resolution_failed, operator_detail))
       | Ok
           { write_outcome =
-              Keeper_approval_queue.Visible_sync_unconfirmed _detail
+              Keeper_approval_queue_result.Visible_sync_unconfirmed _detail
           ; _
           } ->
        persistence_uncertain ();
        Error
          ( Resume_completion_persistence_uncertain
          , "Exact completion is visible but durability is not confirmed; finalization is withheld." )
-     | Error (Keeper_approval_queue.Exact_attempt_storage_error _error) ->
+     | Error (Keeper_approval_queue_result.Exact_attempt_storage_error _error) ->
        persistence_uncertain ();
        Error
          ( Resume_completion_persistence_uncertain
          , "Exact completion durability is not confirmed; finalization is withheld." )
-     | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
+     | Error (Keeper_approval_queue_result.Exact_attempt_rejected rejection) ->
        let rejection = completion_rejection_of_exact_attempt rejection in
        Error
          ( Resume_completion_rejected rejection
@@ -1881,7 +1881,7 @@ let request_operator_auto_judge_recovery ~base_path =
              Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
            with
            | Error error ->
-             Error (Keeper_approval_queue.storage_error_to_string error)
+             Error (Keeper_approval_queue_result.storage_error_to_string error)
            | Ok entries ->
              let queued =
                List.fold_left
@@ -1905,9 +1905,9 @@ let defer ?observation request reason =
     let approval_id = submission.approval_id in
     let audit_receipts =
       match submission.disposition with
-      | Keeper_approval_queue.Pending_created receipt -> [ receipt ]
-      | Keeper_approval_queue.Pending_deduplicated
-      | Keeper_approval_queue.Folded_onto_unconsumed_grant -> []
+      | Keeper_approval_queue_result.Pending_created receipt -> [ receipt ]
+      | Keeper_approval_queue_result.Pending_deduplicated
+      | Keeper_approval_queue_result.Folded_onto_unconsumed_grant -> []
     in
     let reason =
       match reason with
@@ -1946,9 +1946,9 @@ let defer ?observation request reason =
            mark_pre_worker_unavailable entry ~reason_code ~operator_detail:detail
          with
          | Ok _ -> Ok ()
-         | Error (Keeper_approval_queue.Exact_attempt_storage_error error) ->
+         | Error (Keeper_approval_queue_result.Exact_attempt_storage_error error) ->
            Error error
-         | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
+         | Error (Keeper_approval_queue_result.Exact_attempt_rejected rejection) ->
            ignore
              (Keeper_approval.Audit.record
                 ~base_path:request.base_path
@@ -1966,8 +1966,8 @@ let defer ?observation request reason =
              (Keeper_approval_queue_rules_types
               .summary_attempt_pre_worker_unavailable_code_to_string
                 reason_code)
-             (Keeper_approval_queue.exact_attempt_error_to_string
-                (Keeper_approval_queue.Exact_attempt_rejected rejection));
+             (Keeper_approval_queue_result.exact_attempt_error_to_string
+                (Keeper_approval_queue_result.Exact_attempt_rejected rejection));
            Ok ())
     in
     (match reason with
@@ -2330,8 +2330,8 @@ module For_testing = struct
     plan_fingerprint:string ->
     request_body_sha256:string ->
     summary:Keeper_approval_queue_rules_types.hitl_context_summary ->
-    ( Keeper_approval_queue.exact_attempt_transition
-    , Keeper_approval_queue.exact_attempt_error )
+    ( Keeper_approval_queue_result.exact_attempt_transition
+    , Keeper_approval_queue_result.exact_attempt_error )
       result
 
   let auto_judge_entry_ready = auto_judge_entry_ready

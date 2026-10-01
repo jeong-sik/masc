@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import copy
 import threading
 import re
 import sys
@@ -21,6 +22,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_items.ml",
     "bin/masc_tui_types.ml",
+    "lib/tui_decode.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",
     "bin/masc_tui_keeper_portrait.ml",
@@ -379,6 +381,74 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         terminal_cols=COLUMNS,
     )
 
+def item_account_follows_roster_revision(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    roster_path = "/api/v1/gate/keepers?detailed=true"
+    roster = copy.deepcopy(fixtures[roster_path][1])
+    roster_polls = []
+    roster["candle"] = {"status": "ready", "issued_milli": "12500",
+                        "burned_milli": "0", "circulating_milli": "12500"}
+    for row in roster["keepers"]:
+        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
+        row["candle_account_revision"] = "a" * 64
+    def read_roster():
+        roster_polls.append(copy.deepcopy(roster))
+        return 200, copy.deepcopy(roster)
+
+    fixtures[roster_path] = read_roster
+    account = {"status": "ready", "keeper": "alpha", "balance_milli": "12500",
+               "owned_items": [], "catalog": [
+                   {"id": item, "slot": slot,
+                    "price_status": "priced" if item == "glasses" else "unpriced",
+                    **({"price_milli": "0"} if item == "glasses" else {})}
+                   for item, slot in ITEM_CATALOG]}
+    calls = []
+
+    def read_account():
+        calls.append(copy.deepcopy(account))
+        return 200, copy.deepcopy(account)
+
+    fixtures["/api/v1/keepers/alpha/items"] = read_account
+
+    def await_text(process, fd, output, needle):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: needle in b"\n".join(last_frame_rows(output).values()), timeout=10.0), \
+            f"automatic Item refresh never drew {needle!r}: {last_frame_rows(output)!r}"
+
+    def publish_revision(value):
+        for row in roster["keepers"]:
+            if row["name"] == "alpha":
+                row["candle_account_revision"] = value * 64
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_text(process, fd, output, b"Balance 12.500 Candle")
+        account["owned_items"] = ["glasses"]
+        publish_revision("b")
+        # No key or tab transition: ordinary roster cadence must follow this.
+        await_text(process, fd, output, b"0.000 owned")
+        capture_item_screen(output, "automatic-free-purchase")
+        account["catalog"][0]["price_milli"] = "1"
+        publish_revision("c")
+        await_text(process, fd, output, b"0.001 owned")
+        capture_item_screen(output, "automatic-price-change")
+        previous_polls = len(roster_polls)
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: len(roster_polls) > previous_polls, timeout=10.0), \
+            "ordinary roster cadence stopped after the price change"
+        h.drain_until_quiet(process, fd, output)
+        assert len(calls) == 3, f"unchanged roster revisions reread the account: {len(calls)}"
+        assert all(reading["balance_milli"] == "12500" for reading in calls)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary,
+        description="an open Item account follows free purchase and price-only roster revisions",
+        # The harness defaults to a 60-second cadence for keyboard tests;
+        # this scenario specifically exercises the public refresh cadence.
+        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS, refresh=0.2)
+
 
 def item_account_withdraws_unread_authority(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
@@ -487,5 +557,6 @@ if __name__ == "__main__":
     portrait_as_pixels(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
+    item_account_follows_roster_revision(binary)
     item_account_withdraws_unread_authority(binary)
-    print("tui keeper portrait: PASS (6 scenarios)")
+    print("tui keeper portrait: PASS (7 scenarios)")

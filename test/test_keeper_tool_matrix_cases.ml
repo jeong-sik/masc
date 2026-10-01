@@ -340,11 +340,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_context_status"
   | "keeper_tools_list"
   | "keeper_tasks_audit"
+  | "keeper_candle_balance"
+  | "keeper_candle_catalog"
   | "keeper_task_claim"
   | "keeper_voice_agent"
   | "keeper_voice_sessions"
   | "keeper_voice_session_end" ->
       `Assoc []
+  | "keeper_candle_purchase" ->
+      `Assoc [ "item", `String "glasses" ]
   | "keeper_capability_search" ->
       `Assoc [ "query", `String "keeper_lane_status" ]
   | "keeper_memory_search" ->

@@ -30,6 +30,21 @@ if [[ ",${ARMS_CSV}," == *",l,"* && -z "${FALLBACK_MODELS}" ]]; then
   exit 2
 fi
 
+# Before the dataset download and any arm: start the server for each MASC arm
+# the way a trial does, with no model call (preflight_arms.py; arm a is harbor's
+# own agent and is skipped there). A release that cannot boot a rendered config,
+# or a keeper_up that answers an error, stops the run here and not on the first
+# trial of an arm hours in.
+# It starts its containers on this host's docker, which a modal run does not
+# otherwise need (README). Under modal it runs when a daemon answers and says so
+# when it does not.
+if [[ "${ENVIRONMENT}" == "docker" ]] || docker info >/dev/null 2>&1; then
+  uv run python preflight_arms.py --arms "${ARMS_CSV}" --model "${MODEL}" \
+    --fallback-models "${FALLBACK_MODELS}"
+else
+  echo "preflight skipped: BENCH_ENV=${ENVIRONMENT} and no docker daemon answers on this host" >&2
+fi
+
 # Read the dataset before running it. On docker, the GPU tasks would stop the
 # whole job at trial creation, and a task asking for more CPUs or memory than
 # the daemon has would fail for a reason unrelated to the agent; dataset_plan.py

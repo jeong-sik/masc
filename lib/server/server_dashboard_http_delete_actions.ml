@@ -442,6 +442,16 @@ let keeper_artifact_path config keeper_name artifact =
       (Keeper_chat_store.chat_path
          ~base_dir:config.Workspace.base_path
          ~keeper_name)
+  | Keeper_board_attention_candidates_artifact ->
+    Some
+      (Keeper_board_attention_candidate.ledger_path
+         ~base_path:config.Workspace.base_path
+         ~keeper_name)
+  | Keeper_board_attention_partitions_artifact ->
+    Some
+      (Keeper_board_attention_partition.ledger_path
+         ~base_path:config.Workspace.base_path
+         ~keeper_name)
   | Agent_artifact_bundle _ -> None
 ;;
 
@@ -579,6 +589,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
             | Keeper_chat_store_artifact
+            | Keeper_board_attention_candidates_artifact
+            | Keeper_board_attention_partitions_artifact
             | Agent_artifact_bundle _ -> ());
            (match (match artifact with
              | Keeper_configuration_artifact ->
@@ -610,6 +622,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact
                | Keeper_chat_store_artifact
+               | Keeper_board_attention_candidates_artifact
+               | Keeper_board_attention_partitions_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"

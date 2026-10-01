@@ -2930,7 +2930,8 @@ and surface_needs_of_surface : surface -> surface_needs = function
   (* Home reads decision sources. Work owns Goal evidence and Usage owns
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with needs_operator_approvals = true; needs_asks = true }
+      { nothing with needs_operator_approvals = true; needs_asks = true
+      ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5463,6 +5464,8 @@ type state = {
      lifecycle actions. *)
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
+  mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -7973,6 +7976,8 @@ let create_state
   keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
+  candle_observation = None;
+  candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;

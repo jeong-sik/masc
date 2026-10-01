@@ -1568,7 +1568,7 @@ status: reference
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
     기록되는 사건은 8종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 소유한 장신구의 슬롯별 착용은
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
@@ -1584,7 +1584,7 @@ status: reference
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매 사실을 재생한 값이며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
     원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
@@ -2162,10 +2162,13 @@ status: reference
   - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
-  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
-    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
-    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
-    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+  - 구성 확인과 병합: PR의 REST stack 메타데이터와 Stacks API로 Native Stack인지 먼저 확인한다.
+    API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 선택한 PR까지의 미병합 하위 PR을
+    비동기 병합 API로 함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
+    포함된 각 PR의 현재 head·독립 승인·판정을 검토하고 병합 직전에 스택 구성과 head를 다시 확인한다.
+    stack이 없는 일반 브랜치 체인은 부모부터 병합하고 이후 실제 base와 diff를 다시 확인한다.
+    base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.
+    Native Stack 병합은 비동기 API 접수와 완료를 구분해 확인한다.
     → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
   - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이

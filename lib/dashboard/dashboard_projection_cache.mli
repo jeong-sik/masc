@@ -8,9 +8,10 @@
 val normalize_actor_name : string option -> string
 (** Trim and default a missing/empty actor to ["dashboard"]. *)
 
-val with_current_keeper_portraits :
+val with_current_keeper_observations :
   config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
-(** Refresh only Keeper equipment in an operator/execution/briefing envelope.
+(** Refresh Keeper equipment, wallet balances and currency supply together in
+    an operator/execution/briefing envelope.
     Call after outer HTTP caches as well as the metadata snapshot cache. *)
 
 val get_or_compute_snapshot_json :

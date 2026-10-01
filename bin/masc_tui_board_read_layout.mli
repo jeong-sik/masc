@@ -4,7 +4,7 @@
 type source = {
   post : Masc_tui_types.board_post;
   detail :
-    (Masc_tui_types.board_post * Masc_tui_types.board_comment list)
+    (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option)
       Masc_tui_board_detail.view;
   related_posts : Masc_tui_types.board_post list;
   keeper_names : string list;
@@ -16,7 +16,7 @@ type source = {
 type rows
 type t
 val create : unit -> t
-val get : t -> source:source -> render:(unit -> string list * string list) -> rows
+val get : t -> source:source -> render:(unit -> string list * string list * (string * int) option) -> rows
 (** Exact immutable source equality; refreshed equal data can reuse rows, while
     edits, role changes, width or styling changes replace them. Failed rendering
     never publishes a partial result. *)
@@ -30,3 +30,6 @@ val comment_line_count : rows -> int
 val body_line : rows -> int -> string
 val comment_line : rows -> int -> string
 (** Indexed access to the selected viewport, independent of scroll depth. *)
+
+val initial_comment_offset : rows -> comment_id:string -> int option
+(** Wrapped row of the newest numeric page comment, including retained ancestors. *)

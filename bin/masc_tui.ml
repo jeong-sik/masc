@@ -1805,7 +1805,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
-  | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Connectors_loaded of (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
       results :
@@ -1814,8 +1814,8 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
+  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
+  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list * (unit, string) result
@@ -16654,7 +16654,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           let previous_id =
             Option.bind state.connectors (fun previous ->
                 Option.map
-                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                  (fun (connector : Masc.Tui_decode_connectors.connector) -> connector.cn_id)
                   (List.nth_opt previous.cs_connectors state.connectors_cursor))
           in
           state.connectors <- Some snapshot;
@@ -16665,7 +16665,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              | Some id ->
                  let rec find index = function
                    | [] -> 0
-                   | (connector : Tui_decode.connector) :: rest ->
+                   | (connector : Masc.Tui_decode_connectors.connector) :: rest ->
                        if String.equal connector.cn_id id then index
                        else find (index + 1) rest
                  in
@@ -18060,7 +18060,7 @@ let main
     Option.bind state.connectors (fun snapshot ->
         List.nth_opt snapshot.cs_connectors state.connectors_cursor)
   in
-  let selected_connector_binding (connector : Tui_decode.connector) =
+  let selected_connector_binding (connector : Masc.Tui_decode_connectors.connector) =
     List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =
@@ -18891,7 +18891,7 @@ and is loaded on demand through keeper_skill.
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let name = profile.Masc.Tui_decode.esp_name in
+      let name = profile.Masc.Tui_decode_tools.esp_name in
       let host = server_peer_host in
       let port = state.port in
       (match

@@ -5943,11 +5943,11 @@ type state = {
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
-  mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_inventory: Masc.Tui_decode_tools.tool_snapshot option;
   mutable tools_request_generation: int;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
-  mutable skills_catalog: Tui_decode.skills_catalog option;
+  mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
@@ -5962,7 +5962,7 @@ type state = {
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
-  mutable connectors: Tui_decode.connector_snapshot option;
+  mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
   (* A binding write landed while a load was in flight; read once more when
@@ -6545,8 +6545,8 @@ let reconcile_keeper_message_focus (state : state) ~cols =
 (* One selection shared by Tools actions, pinned heading and document. *)
 let tools_skill_profiles (state : state) =
   match state.tools_inventory with
-  | Some { Tui_decode.ts_effective =
-             Some (Tui_decode.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
+  | Some { Masc.Tui_decode_tools.ts_effective =
+             Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
       ets_skill_profiles
   | Some _ | None -> []
 
@@ -11126,7 +11126,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       listing ~error:state.connectors_error
         (match state.connectors with
          | None -> 0
-         | Some s -> List.length s.Tui_decode.cs_connectors)
+         | Some s -> List.length s.Masc.Tui_decode_connectors.cs_connectors)
   (* The authority row above the list is wrapped to the terminal width, which
      this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
      [runtime_scrolled] with the width, as it does for the Memory overview. *)
@@ -11335,8 +11335,8 @@ let surface_row_texts (state : state) : surface -> string list option =
       Option.map
         (fun s ->
           List.map
-            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
-            s.Tui_decode.cs_connectors)
+            (fun c -> c.Masc.Tui_decode_connectors.cn_id ^ " " ^ c.Masc.Tui_decode_connectors.cn_display_name)
+            s.Masc.Tui_decode_connectors.cs_connectors)
         state.connectors
   | Runtime ->
       if Option.is_some state.runtime_detail_target then None

@@ -116,7 +116,7 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
     | None | Some 0. -> None
     | Some seconds -> Some seconds in
   let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
-    ~messages:(native_messages params) ?body_timeout_s ()
+    ~messages:(native_messages params) ~model_identity:Llm_provider.Complete.Reported_model ?body_timeout_s ()
     |> Result.map_error (fun error -> Provider_error error) in
   let text = L.visible_text_of_response response in
   let* () = if String.trim text = "" then

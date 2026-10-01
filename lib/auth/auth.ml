@@ -8,12 +8,9 @@ open Masc_domain
 include Auth_credential_base
 include Auth_credential_token
 
-let ensure_keeper_credential config ~agent_name
-  : (string * agent_credential, masc_error) result
-  =
-  ignore (ensure_internal_keeper_token config);
-  let existing = load_credential config agent_name in
-  let create_fresh_keeper_token () =
+let ensure_keeper_credential_in_transaction
+    ((Credential_transaction config) as transaction) ~find_token ~agent_name =
+  let create_fresh_keeper_token transaction existing =
     let raw_token = generate_token () in
     let id, agent_id =
       match existing with
@@ -34,30 +31,85 @@ let ensure_keeper_credential config ~agent_name
       ; expires_at = None
       }
     in
-    (match with_credential_transaction config (fun transaction ->
-       persist_raw_token config ~agent_name raw_token;
-       save_credential_in_transaction transaction cred) with
-     | Ok () -> raw_token, cred
-     | Error error -> raise (Sys_error (masc_error_to_string error)))
+    publish_file_backed_credential_in_transaction transaction cred ~raw_token
+    |> Result.map_error file_backed_publication_error
+    |> Result.map (fun () -> raw_token, cred)
   in
-  let result =
-    try
-      match load_raw_token config ~agent_name with
-      | Some raw_token ->
-        (match verify_token config ~agent_name ~token:raw_token with
-         | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
-         | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
-      | None -> Ok (create_fresh_keeper_token ())
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let msg =
-        Printf.sprintf "Failed to save keeper credential: %s" (Printexc.to_string exn)
-      in
-      Log.Auth.error "%s" msg;
-      Error (System (System_error.IoError msg))
-  in
-  result
+    let ( let* ) = Result.bind in
+    let* current = current_credential_in_transaction transaction agent_name in
+    let* raw = raw_token_in_transaction transaction agent_name in
+    let* () = match current, raw with
+      | Some credential, Some raw_token
+        when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+          validate_file_backed_bearer raw_token
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok () in
+    let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
+    match current, raw with
+    | Some credential, Some raw_token
+      when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+      (match find_token ~token:raw_token with
+       | Ok credential -> Ok (raw_token, credential)
+       | Error (Auth _) -> create_fresh_keeper_token transaction current
+       | Error _ as error -> error)
+    | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+      create_fresh_keeper_token transaction current
+;;
+
+let ensure_keeper_credential config ~agent_name =
+  with_credential_transaction config (fun transaction ->
+    ensure_keeper_credential_in_transaction transaction ~agent_name
+      ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
+  |> Result.join
+;;
+
+let ensure_keeper_credentials config ~agent_names =
+  with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
+    let credentials = List.map snd snapshot.current_credentials in
+    let index = build_token_index credentials in
+    let initially_shared = Hashtbl.fold (fun token owners hashes ->
+      if List.length owners > 1 then token :: hashes else hashes) index [] in
+    let find_token ~token =
+      if List.mem (sha256_hash token) initially_shared then
+        Error (Auth (Auth_error.InvalidToken "Credential bearer was shared at batch admission"))
+      else find_static_credential_in_index index ~token in
+    let by_name = Hashtbl.create (List.length credentials) in
+    List.iter (fun (credential : agent_credential) ->
+      Hashtbl.replace by_name credential.agent_name credential) credentials;
+    let update (credential : agent_credential) =
+      (match Hashtbl.find_opt by_name credential.agent_name with
+       | None -> ()
+       | Some previous ->
+         (match Hashtbl.find_opt index previous.token with
+          | None -> ()
+          | Some entries -> Hashtbl.replace index previous.token
+              (List.filter (fun (entry : agent_credential) ->
+                not (String.equal entry.agent_name credential.agent_name)) entries)));
+      let entries = match Hashtbl.find_opt index credential.token with
+        | None -> [] | Some entries -> entries in
+      Hashtbl.replace index credential.token (credential :: entries);
+      Hashtbl.replace by_name credential.agent_name credential in
+    let rec sync = function
+      | [] -> []
+      | agent_name :: rest ->
+        let result = ensure_keeper_credential_in_transaction transaction ~agent_name
+            ~find_token in
+        (agent_name, result) ::
+        (match result with
+         | Ok (_, credential) -> update credential; sync rest
+         | Error _ ->
+             (* Preflight failures leave other Keepers independent. After any
+                failure, re-read admitted authority before deciding whether
+                the remaining names can safely use a rebuilt index. *)
+             (match credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction with
+              | Error error -> List.map (fun name -> name, Error error) rest
+              | Ok snapshot ->
+                  Hashtbl.clear index; Hashtbl.clear by_name;
+                  List.iter (fun (_, credential) -> update credential) snapshot.current_credentials;
+                  sync rest)) in
+    Ok (sync agent_names))
+  |> Result.join
 ;;
 
 type credential_status =
@@ -99,14 +151,9 @@ let verify_workspace_secret config ~cached_hash secret : bool =
   match cached_hash with
   | Some stored_hash -> constant_time_string_equal hash stored_hash
   | None ->
-    let file = workspace_secret_file config in
-    (try
-       if Sys.file_exists file
-       then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
-       else false
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> false)
+    (match read_regular_auth_file (workspace_secret_file config) with
+     | Error _ -> false
+     | Ok content -> constant_time_string_equal hash (String.trim content))
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
@@ -269,18 +316,6 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 (* ============================================ *)
 (* Workspace secret                                  *)
 (* ============================================ *)
-
-(** Initialize workspace secret *)
-let init_workspace_secret config : string =
-  ensure_auth_dirs config;
-  let secret = generate_token () in
-  let hash = sha256_hash secret in
-  save_private_text_file (workspace_secret_file config) hash;
-  (* Update auth config with hash *)
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with workspace_secret_hash = Some hash };
-  secret (* Return raw secret to show user once *)
-;;
 
 (* [verify_workspace_secret] now lives earlier in this file, above
    [check_permission], since the bootstrap/recovery grace branch there

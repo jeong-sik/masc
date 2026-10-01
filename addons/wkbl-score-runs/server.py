@@ -66,7 +66,8 @@ def derive(observation: dict) -> dict | None:
         if delta == (0, 0):
             continue
         next_side = 0 if delta[0] > 0 else 1
-        if item.get("team_side") != next_side + 1:
+        scoring_side = nonnegative_int(item.get("team_side"), "scoring team_side")
+        if scoring_side != next_side + 1:
             raise InvalidInput(f"scoring side conflicts at event_index {index}")
         if side != next_side:
             side, points, start, indexes, ids = next_side, 0, current, [], []

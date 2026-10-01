@@ -1472,9 +1472,27 @@ let test_malformed_answer_quarantines_then_requeues_and_settles () =
    | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
    | _ -> Alcotest.fail "authorized requeue did not restore Ready");
   let recovered = provenance "domain-invalid-recovered" in
+  let valid =
+    `Assoc
+      [ "verdicts",
+        `List
+          [ `Assoc
+              [ "candidate_id", `String persisted.candidate_id
+              ; "decision", `String "relevant"
+              ; "rationale", `String "recovered after requeue"
+              ]
+          ]
+      ]
+  in
+  let recovered_verdict =
+    match ok "parse recovered answer" (J.batch_of_yojson valid) with
+    | [ ({ candidate_id; verdict } : J.batch_item) ]
+      when String.equal candidate_id persisted.candidate_id -> verdict
+    | _ -> Alcotest.fail "recovered answer did not cover the same candidate"
+  in
   let execute_valid ~before_dispatch ~before_advance:_ _candidate =
     ok "bind recovered attempt" (before_dispatch recovered);
-    Ok (judgment recovered J.Relevant)
+    Ok { (judgment recovered J.Relevant) with verdict = recovered_verdict }
   in
   (match
      ok

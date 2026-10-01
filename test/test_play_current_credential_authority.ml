@@ -188,7 +188,20 @@ let test_unresolved_data_does_not_hide_healthy_current_owners () = with_workspac
   check_routes ~state ~operator ~names:[ "guest"; "operator" ] ~invites:[ "guest" ];
   check string "unresolved data with no established owner is preserved" "{" (read unresolved)
 
+let test_stale_invalid_expiry_does_not_override_current_worker () =
+  with_workspace @@ fun base_path state operator ->
+  let _, old, uuid = seed_guest base_path D.Player in
+  let current = { old with D.id = None; role = D.Worker;
+    token = Auth.sha256_hash "current-worker-token" } in
+  Auth.save_private_text_file (Auth.credential_file base_path "guest")
+    (D.agent_credential_to_yojson current |> Yojson.Safe.to_string);
+  Auth.save_private_text_file uuid
+    (D.agent_credential_to_yojson { old with expires_at = Some "invalid-expiry" }
+      |> Yojson.Safe.to_string);
+  check_routes ~state ~operator ~names:["operator"] ~invites:[]
+
 let () = run "Play current named authority" [ "routes", [
+  test_case "invalid stale UUID cannot override current Worker" `Quick test_stale_invalid_expiry_does_not_override_current_worker;
   test_case "removed Player keeps data but loses seat and invite" `Quick (fun () -> test_surviving_data ~role:D.Player Removed);
   test_case "replaced Player uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Player Worker);
   test_case "removed Admin keeps data but loses seat" `Quick (fun () -> test_surviving_data ~role:D.Admin Removed);

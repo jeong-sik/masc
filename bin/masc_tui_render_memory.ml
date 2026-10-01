@@ -110,18 +110,9 @@ let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
-(* Every size on this screen is the recall block the keeper injects, not the
-   snapshot file: the file's first_seen, origin, basis and JSON punctuation
-   never reach a request.
-
-   Read in tokens, because that is the unit the window is declared in and the
-   only unit an operator can hold a keeper's memory against. No provider this
-   fleet runs counts a block inside a request, and this screen carries no turn
-   record to take a ratio from, so the figure is the fleet scale and wears the
-   "≈" every estimated token figure in this TUI wears. The exact count is
-   derivable -- a first round carries the pinned blocks and the post-tool round
-   in the same turn does not, so their (total - carried) difference is the
-   pinned bundle -- and wants the ledger to expose carried tokens per record. *)
+(* Snapshot sizes describe the stored knowledge available through search and
+   paged artifacts. They are not the much smaller recall index injected into
+   a turn; the prompt inspector carries that turn's actual block bytes. *)
 let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
@@ -211,7 +202,7 @@ type memory_context_projection =
 
 let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · stored %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
       (recall_tokens k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
@@ -365,7 +356,7 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · recall %s tok · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s tok · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
       (recall_tokens k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
@@ -899,7 +890,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
          ; Printf.sprintf "%d ordinary + %d source"
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf "recall %s tok"
+         ; Printf.sprintf "stored %s tok"
              (recall_tokens
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"

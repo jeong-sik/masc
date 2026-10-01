@@ -1,8 +1,6 @@
-(** Rendering primitives shared across the surfaces.
-
-    Every value here is reached by at least 10 of the screen
-    renderers, and the set is closed: nothing in it refers back to a
-    single surface's code. That is what lets it compile before them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -113,6 +111,7 @@ let clamped_scroll_now (state : state) = function
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
   | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
   | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
       System_log_detail_scroll state.system_logs_detail_scroll
   | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
@@ -162,6 +161,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
   | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
   | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
   | Lane_run_detail_scroll { scroll; content_height } ->
@@ -5058,3 +5058,32 @@ let answering_lines (state : state) =
    fixed-chrome rule, applied before the panel exists rather than patched
    after (see boxed_surface_chrome_rows for the precedent). *)
 let answering_preview_rows = 3
+
+(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
+   header ("▸ /", "▸ Resources") with no row above it. Every other surface
+   opens on its name, the clock and the connection badge, and the badge is the
+   row that says the server has gone; on these two nothing did. The title row
+   sits above both panes, so each pane gives up one row to it. *)
+let pane_surface_title_rows = 1
+
+let pane_surface_title (state : state) ~name =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%s  %02d:%02d:%02d  %s"
+    (screen_title (" MASC " ^ name))
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    (connection_badge state)
+
+(* The row between the strip and the title, then the title. Every other
+   surface draws that row first -- a gap on its own, the box's top edge beside
+   a roster -- and its title under it. The two pane surfaces drew the title
+   first and left the row to the pane, so alone on the surface the gap fell
+   between the title and the pane's own heading: the title sat one row higher
+   than on every other screen, and the heading read as a second, detached
+   block. Beside the other pane the list's box draws its top edge on that row,
+   so a split frame keeps it there. The row count is the same either way. *)
+let pane_surface_header buf cols (state : state) ~name ~split =
+  if not split then box_top buf cols;
+  box_line buf cols (pane_surface_title state ~name)
+
+let pane_surface_content_height ~rows =
+  max 1 (framed_content_height ~rows - pane_surface_title_rows)

@@ -1825,15 +1825,15 @@ type runtime_probe_annotation =
   | Runtime_probe_failure of string
 
 let runtime_probe_status_label = function
-  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
-  | Tui_decode.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | status -> Tui_decode.runtime_provider_status_to_string status
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
+  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
+  | status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
-    | Tui_decode.Runtime_provider_skipped_cli
-    | Tui_decode.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
     | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
@@ -4767,6 +4767,10 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"
         | Control _ -> Some "button/link" in
+      let label = Option.map (fun label ->
+        match Masc.Browser_scene.control_selection_text anchor.kind with
+        | Some state -> label ^ " · " ^ state
+        | None -> label) label in
       let prefix = match label, index with
         | _, None -> ""
         | None, Some _ ->
@@ -8890,6 +8894,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Runtime_detail_scroll of int
+  | Runtime_params_scroll of int
   | System_log_detail_scroll of int
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
@@ -8989,6 +8994,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
+  | Runtime_params_scroll value -> state.config_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
@@ -9118,6 +9124,18 @@ let surface_body_rows (state : state) ~terminal_rows =
     (terminal_rows
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
+;;
+
+(* Parameters split their body between the cursor-following list and the
+   selected value's document. Both drawing and paging use these row counts;
+   the full-surface page is taller than this document and skips unread lines. *)
+let runtime_params_viewport (state : state) ~terminal_rows =
+  let rows = surface_body_rows state ~terminal_rows in
+  (* The document position has its own row; hints cannot hide it at 40 cells. *)
+  let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
+  let content_height = max 1 (rows - chrome) in
+  let list_height = min 8 (max 1 (content_height / 3)) in
+  list_height, max 0 (content_height - list_height - 1)
 ;;
 
 (* Count the rows after wrapping, shared by the reader and every movement key.
@@ -10628,11 +10646,11 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match snapshot.Tui_decode.rss_probe with
           | None -> "probe unavailable"
           | Some probe ->
-              let summary = probe.Tui_decode.rps_summary in
+              let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
               Printf.sprintf "%d reachable / %d failed / %d skipped"
-                summary.Tui_decode.rpsu_reachable
-                summary.Tui_decode.rpsu_failed
-                summary.Tui_decode.rpsu_skipped
+                summary.Masc.Tui_decode_runtime_probe.rpsu_reachable
+                summary.Masc.Tui_decode_runtime_probe.rpsu_failed
+                summary.Masc.Tui_decode_runtime_probe.rpsu_skipped
         in
         let probe_note =
           match
@@ -10640,7 +10658,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
           with
           | Some detail, _ -> [ "probe: " ^ single_line detail ]
           | None, Some probe ->
-              (match probe.Tui_decode.rps_errors with
+              (match probe.Masc.Tui_decode_runtime_probe.rps_errors with
                | detail :: _ -> [ "probe: " ^ single_line detail ]
                | [] -> [])
           | None, None -> []
@@ -12155,14 +12173,64 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-let keeper_message_status_rows (state : state) =
+(* Foreign turns keep the complete stop command ahead of their descriptive
+   status. Count these physical rows with the same pane width as rendering;
+   otherwise wrapping a long Keeper name would cover the composer below. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
+  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+  let batch_label group =
+    if group.count = 1 then ""
+    else Printf.sprintf "%d messages in one turn · " group.count
+  in
+  let activity group =
+    if group.reconciling_count > 0 then
+      if group.count = 1 then "reconciling"
+      else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+    else
+      let transcript = group.representative.log.tl_transcript in
+      if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then
+        "awaiting continuation"
+      else
+        match Masc_tui_keeper_chat_transcript.phase transcript with
+        | Masc_tui_keeper_chat_transcript.Waiting -> "waiting to start"
+        | Masc_tui_keeper_chat_transcript.Working -> "running"
+        | Masc_tui_keeper_chat_transcript.Stream_ended -> "finishing"
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> "failed"
+  in
+  let summary group =
+    let age =
+      match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
+      | None -> ""
+      | Some text -> " · " ^ text
+    in
+    Printf.sprintf "  (%s%s %s%s)" (batch_label group) (activity group)
+      (Masc_tui_keeper_chat_projection.compact_request_id
+         (turn_log_execution_id group.representative.log)) age
+  in
+  let mine, others = List.partition
+      (fun group -> state.msg_target_keeper_name =
+          Some group.representative.sent_request.keeper_name)
+      (keeper_message_inflight_drawn state) in
+  List.map (fun group -> true, summary group) mine
+  @ List.concat_map (fun group ->
+      let name = Masc.Tui_terminal_text.sanitize_terminal_text
+          group.representative.sent_request.keeper_name in
+      let command_rows =
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          ("/interrupt " ^ name)
+        |> List.map (fun line -> false, "  " ^ line) in
+      command_rows @ [false, summary group]) others
+
+let keeper_message_status_rows (state : state) ~terminal_cols =
+  let chat_cols = Masc_tui_roster_pane.content_cols
+      ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name
       -> 0
     | Some _ | None -> 1
   in
-  List.length (keeper_message_inflight_drawn state)
+  List.length (keeper_message_inflight_rows state ~chat_cols ~now:0.)
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
@@ -12221,7 +12289,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
         (Buffer.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state + 1 in
+       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

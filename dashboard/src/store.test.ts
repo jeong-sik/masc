@@ -289,6 +289,24 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     expect(store.executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/fixture/workspace-a')
   })
 
+  it('reconciles the durable purge receipt even when execution HTTP fails', async () => {
+    const lifecycle = await import('./api/keeper-lifecycle')
+    const hot = await import('./api/dashboard-hot')
+    vi.spyOn(hot, 'fetchDashboardShell').mockResolvedValue({ status: {} } as never)
+    const receipts = vi.spyOn(lifecycle, 'fetchKeeperDeletions').mockResolvedValue({ operations: [{
+      kind: 'runtime_shutdown', source: null, keeperName: 'rondo', operationId: 'purge-1',
+      completed: true, canRetry: false, phase: 'finalized', description: 'completed',
+    }], errors: [], configurationErrors: [] })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ error: 'projection unavailable' }, 503)))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = await import('./store')
+    store.markKeeperPurgePending('rondo')
+    await expect(store.refreshKeeperRuntimeStatus({ force: true })).rejects.toMatchObject({ status: 503 })
+    expect(receipts).toHaveBeenCalledTimes(1)
+    expect(store.keeperPurgePending.value.has('rondo')).toBe(false)
+    expect(store.keeperDeletionInventory.value?.operations[0]?.operationId).toBe('purge-1')
+  })
+
   it('keeps forced manual completion pending until its queued HTTP follow-up is accepted', async () => {
     const old = pendingResponse()
     const forced = pendingResponse()

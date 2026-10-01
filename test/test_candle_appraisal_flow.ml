@@ -22,7 +22,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
           status=Candle_event.Done {completed_at=at}}) task_ids;
-       candidate_task_ids=task_ids;candidate_keepers=[keeper]}}
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
   ]
 ;;
@@ -366,6 +367,29 @@ let test_settlement_requires_complete_snapshot_candidates () =
   let full=payment ["task-a";"task-b";"external"] ["keeper-a",1;"keeper-b",1] in
   check bool "complete eligible Snapshot proof can settle" true
     (Result.is_ok (Candle_payout.validate_settlement waiting original (E.Paid full)));
+  List.iter (fun keepers ->
+    let modified = List.map (fun (event : E.t) -> match event.body with
+      | E.Candidates c -> {event with body=E.Candidates {c with candidate_keepers=keepers}}
+      | _ -> event) original in
+    let forged = payment ["task-a";"task-b";"external"] (List.map (fun keeper -> keeper, 1) keepers) in
+    check bool "changing only durable Keeper set cannot redirect payout" true
+      (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
+    [["keeper-a";"keeper-b";"external-operator"];["keeper-a"]];
+  let mixed_eligibility = List.map (fun (event : E.t) -> match event.body with
+    | E.Candidates c -> {event with body=E.Candidates {c with
+        tasks=List.map (fun (id, task) -> id, (match task with
+          | E.Found task when id="task-b" -> E.Found {task with assignee=Some "keeper-a"}
+          | _ -> task)) c.tasks;
+        candidate_keepers=["keeper-a"];
+        candidate_task_keepers=["task-a",None;"task-b",Some "keeper-a";"external",None]}}
+    | _ -> event) original in
+  let only_ineligible_related = List.map (fun (r : A.task_relation) ->
+    {r with relation=(if r.task_id="task-a" then A.Related else A.Unrelated)}) full.relations in
+  let ineligible_payment = Candle_payment.make ~identity ~grade:Candle_grade.Medium ~total_milli:3001
+    ~grade_trace:(trace "grade") ~relations:only_ineligible_related ~weights_trace:(trace "weights")
+    ~weight_max:10 ~deduction_rate:10 ~deduction_floor:200 ~overdue_hours:30 ~weights:["keeper-a",1] |> ok in
+  check bool "another eligible task cannot grant an ineligible task its Keeper" true
+    (Result.is_error (Candle_payout.validate_settlement waiting mixed_eligibility (E.Paid ineligible_payment)));
   List.iter (fun (omit_observation,omit_candidate) ->
     let modified=List.map (fun (event : E.t) -> match event.body with
       | E.Candidates c -> {event with body=E.Candidates {c with

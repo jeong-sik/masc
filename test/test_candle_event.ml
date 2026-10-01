@@ -75,6 +75,7 @@ let candidates ?(tasks = None) () =
        ; tasks
        ; candidate_task_ids = [ "task-1" ]
        ; candidate_keepers = [ "keeper-a" ]
+       ; candidate_task_keepers = ["task-1", Some "keeper-a"]
        })
 ;;
 
@@ -134,7 +135,7 @@ let test_the_row_format () =
      ^ {|"tasks":[{"task_id":"task-1","state":"found","title":"Write the ledger","assignee":"keeper-a",|}
      ^ {|"status":"done","completed_at":"2026-09-25T00:00:00Z"},{"task_id":"task-2","state":"deleted"},|}
      ^ {|{"task_id":"task-3","state":"found","title":"Still going","assignee":null,"status":"todo",|}
-     ^ {|"completed_at":null}],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+     ^ {|"completed_at":null}],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"],"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]}|})
     (line_of (candidates ()));
   Alcotest.(check string)
     "unattributed"
@@ -156,7 +157,7 @@ let test_a_status_is_spelled_as_the_backlog_spells_it () =
      ^ {|{"task_id":"task-4","state":"found","title":"awaiting","assignee":null,"status":"awaiting_verification","completed_at":null},|}
      ^ {|{"task_id":"task-5","state":"found","title":"done","assignee":null,"status":"done","completed_at":"2026-09-25T00:00:00Z"},|}
      ^ {|{"task_id":"task-6","state":"found","title":"cancelled","assignee":null,"status":"cancelled","completed_at":null}|}
-     ^ {|],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+     ^ {|],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"],"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]}|})
     (line_of (candidates ~tasks:(Some every_status) ()))
 ;;
 
@@ -310,6 +311,10 @@ let test_a_row_that_is_not_exactly_the_schema_is_refused () =
       , replace_first ~sub:{|"candidate_task_ids":["task-1"]|} ~by:{|"candidate_task_ids":"task-1"|} valid_candidates )
     ; ( "candidates without keepers field"
       , replace_first ~sub:{|,"candidate_keepers":["keeper-a"]|} ~by:"" valid_candidates )
+    ; ( "candidates without per-task Keeper eligibility"
+      , replace_first ~sub:{|,"candidate_task_keepers":[{"task_id":"task-1","keeper":"keeper-a"}]|} ~by:"" valid_candidates )
+    ; ( "candidate Keeper eligibility is not an optional name"
+      , replace_first ~sub:{|"keeper":"keeper-a"|} ~by:{|"keeper":true|} valid_candidates )
     ; ( "unattributed with an unknown reason"
       , replace_first ~sub:{|"no_candidates"|} ~by:{|"no_luck"|} valid_unattributed )
     ; ( "unattributed with an extra field"

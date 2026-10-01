@@ -24,6 +24,7 @@ type pass =
 type candidates =
   { candidate_task_ids : string list
   ; candidate_keepers : string list
+  ; candidate_task_keepers : (string * string option) list
   }
 
 let is_settled ~goal_id events =
@@ -149,7 +150,8 @@ let candidates_of (waiting : waiting) events =
               && String.equal c.request_id waiting.request_id
               && String.equal c.verification_run_id waiting.verification_run_id ->
          Some
-           { candidate_task_ids = c.candidate_task_ids; candidate_keepers = c.candidate_keepers }
+           { candidate_task_ids = c.candidate_task_ids; candidate_keepers = c.candidate_keepers;
+             candidate_task_keepers = c.candidate_task_keepers }
        | Candle_event.Candidates _
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
@@ -183,10 +185,10 @@ let validate_settlement (waiting : waiting) events body =
     && verification_run_id = waiting.verification_run_id in
   let candidates = List.find_map (fun (event : Candle_event.t) -> match event.body with
     | Candle_event.Candidates c when matches c.goal_id c.request_id c.verification_run_id ->
-      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers)
+      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers, c.candidate_task_keepers)
     | Candle_event.Candidates _ | Candle_event.Snapshot _ | Candle_event.Payout_owed _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> None) events in
-  let* tasks, ids, keepers = match candidates with
+  let* tasks, ids, keepers, task_keepers = match candidates with
     | None -> Error "settlement requires durable Candidates" | Some c -> Ok c in
   let* () =
     let observed_ids = List.map fst tasks in
@@ -200,6 +202,20 @@ let validate_settlement (waiting : waiting) events body =
       if List.sort String.compare ids <> List.sort String.compare eligible_ids
       then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
       else Ok () in
+  let* () =
+    let observed_ids = List.map fst task_keepers in
+    if List.sort String.compare observed_ids <> List.sort String.compare ids
+       || List.length observed_ids <> List.length (List.sort_uniq String.compare observed_ids)
+    then Error "Keeper eligibility must cover each durable candidate task exactly once"
+    else if List.exists (fun (id, keeper) -> match keeper, List.assoc_opt id tasks with
+        | None, Some (Candle_event.Found _) -> false
+        | Some keeper, Some (Candle_event.Found {assignee=Some assignee;_}) -> not (String.equal keeper assignee)
+        | _ -> true) task_keepers
+    then Error "candidate Keeper eligibility does not match the observed assignee"
+    else
+      let classified = List.filter_map snd task_keepers |> List.sort_uniq String.compare in
+      if List.sort String.compare keepers = classified then Ok ()
+      else Error "candidate Keeper set differs from durable per-task eligibility" in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
     if List.length actual <> List.length (List.sort_uniq String.compare actual)
@@ -209,9 +225,9 @@ let validate_settlement (waiting : waiting) events body =
         | Some (Candle_event.Found _) -> false | Some Candle_event.Deleted | None -> true) ids then
       Error "durable candidate task has no found row"
     else Ok (List.filter_map (fun (r : Candle_appraisal.task_relation) ->
-      match r.relation, List.assoc_opt r.task_id tasks with
-      | Candle_appraisal.Related, Some (Candle_event.Found {assignee=Some name;_}) when List.mem name keepers -> Some name
-      | Candle_appraisal.Related, (Some (Candle_event.Found _) | Some Candle_event.Deleted | None)
+      match r.relation, List.assoc_opt r.task_id task_keepers with
+      | Candle_appraisal.Related, Some (Some keeper) -> Some keeper
+      | Candle_appraisal.Related, (Some None | None)
       | Candle_appraisal.Unrelated, _ -> None) relations |> List.sort_uniq String.compare) in
   match body with
   | Candle_event.Paid p when matches p.identity.goal_id p.identity.request_id p.identity.verification_run_id ->
@@ -260,10 +276,10 @@ let decide_candidates ~goal_created_at ~confirmed_at ~is_keeper tasks =
   let candidates =
     List.filter (fun (_, lookup) -> is_candidate ~goal_created_at ~confirmed_at lookup) tasks
   in
+  let candidate_task_keepers = List.map (fun (id, lookup) ->
+    id, keeper_name ~is_keeper lookup) candidates in
   { candidate_task_ids = List.map fst candidates
-  ; candidate_keepers =
-      List.sort_uniq
-        String.compare
-        (List.filter_map (fun (_, lookup) -> keeper_name ~is_keeper lookup) candidates)
+  ; candidate_keepers = List.filter_map snd candidate_task_keepers |> List.sort_uniq String.compare
+  ; candidate_task_keepers
   }
 ;;

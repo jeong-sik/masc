@@ -74,6 +74,9 @@ type body =
             (** One entry per Task the [Snapshot] linked, in its order. *)
       ; candidate_task_ids : string list
       ; candidate_keepers : string list
+      ; candidate_task_keepers : (string * string option) list
+          (** Each candidate Task has its frozen admitted Keeper name, or [None]
+              when its assignee was not a Keeper at candidate creation. *)
       }
   | Unattributed of
       { goal_id : string

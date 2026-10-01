@@ -1977,7 +1977,7 @@ let test_renewal_preserves_newer_rule_across_delivery_replay () =
            Alcotest.(check string) "HTTP exposes renewal conflict" "conflicted"
              (json |> member "remembered_rule_status" |> to_string));
       (match AQ.approved_resolution_state ~base_path ~id:id_a with
-       | Ok AQ.Resolution_unconsumed -> ()
+       | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
        | _ -> Alcotest.fail "rule conflict revoked the one-shot approval");
       AQ.For_testing.reset_runtime_state ();
       let report = install_exn ~base_path in

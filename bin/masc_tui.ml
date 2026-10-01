@@ -11260,7 +11260,6 @@ let withdraw_keeper_workspace_presentation state ~previous =
    | _ -> ())
 
 let apply_server_identity_reading state reading =
-  let previous = state.workspace_identity in
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same

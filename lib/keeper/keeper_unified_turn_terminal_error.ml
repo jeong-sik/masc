@@ -1,9 +1,10 @@
 module EC = Keeper_error_classify
 
-let handle ~config ~keeper_name ~runtime_id err =
+let handle ~observation_token ~config ~keeper_name ~runtime_id err =
   if EC.is_runtime_exhausted_error err
   then (
     Keeper_registry.mark_turn_runtime_exhausted
+      ~observation_token:(Some observation_token)
       ~base_path:config.Workspace.base_path
       keeper_name;
     Otel_metric_store.inc_counter
@@ -25,6 +26,7 @@ let handle ~config ~keeper_name ~runtime_id err =
       ())
   else (
     Keeper_registry.set_turn_phase
+      ~observation_token:(Some observation_token)
       ~base_path:config.Workspace.base_path
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);

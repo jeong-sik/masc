@@ -78,6 +78,23 @@ val agent_role_of_yojson : Yojson.Safe.t -> (agent_role, string) result
 
 (** {1 Agent credential} *)
 
+module Credential_expiry : sig
+  type t = private No_expiry | At of float
+  type error = Invalid_timestamp of string
+
+  val parse : string option -> (t, error) result
+  (** [None] means no expiry. A present value must be RFC3339; offsets are
+      normalized and fractional seconds truncated before float conversion. *)
+
+  val normalize : string option -> (string option, error) result
+  (** The same parsed instant as canonical UTC whole seconds. Invalid input
+      returns [Error], never a non-expiring credential. *)
+
+  val is_expired : now:float -> t -> bool
+  (** Expired only when [floor now] exceeds the expiry second. The credential
+      remains live throughout that whole second. *)
+end
+
 type agent_credential = {
   id : Ids.Credential_id.t option;  [@default None]
   agent_id : Ids.Agent_id.t option;  [@default None]
@@ -95,7 +112,8 @@ val agent_credential_to_yojson : agent_credential -> Yojson.Safe.t
 val agent_credential_of_yojson :
   Yojson.Safe.t -> (agent_credential, string) result
 (** Requires the exact current credential object. Unknown, duplicate, missing,
-    or mistyped fields are rejected; [role] is the sole role authority. *)
+    or mistyped fields are rejected; [role] is the sole role authority.
+    A present [expires_at] must parse and is normalized to UTC whole seconds. *)
 
 (** {1 Auth configuration} *)
 

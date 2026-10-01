@@ -2,9 +2,9 @@
 
     Context occupancy is projected from the newest TurnRecord (RFC-0233):
     [input_tokens] is the provider-reported prompt total for the last
-    completed turn and [context_window] the window resolved for that same
-    request. The pair describes that completed request; it does not predict the
-    next input. This module is the single wire projection for that
+    completed turn. Prefer its [provider_context_window] when reported; otherwise
+    use the configured [context_window] for that same request. The pair describes
+    that completed request; it does not predict the next input. This module is the single wire projection for that
     measurement, for its typed absence, and for the separate,
     provider-reported last-turn usage.
 
@@ -110,13 +110,22 @@ let latest_turn_observation ~config ~keeper_name =
     Turn_record_read_failed
 ;;
 
+(* The provider's same-turn report is the actual usable window. The configured
+   window remains a fallback for runtimes that do not report one. Never infer
+   the provider window from a vendor-specific percentage. *)
+let context_window_of_record (record : Turn_record.t) =
+  match record.provider_context_window with
+  | Some window -> Some window
+  | None -> record.context_window
+;;
+
 let observed_context_fields (record : Turn_record.t) =
   let opt_int = function
     | Some v -> `Int v
     | None -> `Null
   in
   let tokens = record.usage.input_tokens in
-  let window = record.context_window in
+  let window = context_window_of_record record in
   let ratio =
     match tokens, window with
     | Some tokens, Some window when window > 0 ->
@@ -166,7 +175,7 @@ let context_fields ~config ~keeper_name ~current_trace_id =
     if not (String.equal record.trace_id current_trace_id)
     then context_fields_unavailable (not_observed_json ~reason:reason_trace_mismatch ())
     else (
-      match record.usage.scope, record.usage.input_tokens, record.context_window with
+      match record.usage.scope, record.usage.input_tokens, context_window_of_record record with
       | Runtime_usage_scope.Per_request, None, _ ->
         context_fields_unavailable (not_observed_json ~reason:reason_without_usage ())
       | Runtime_usage_scope.Per_request, Some tokens, Some window

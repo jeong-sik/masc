@@ -353,6 +353,7 @@ class FusionResults(unittest.TestCase):
     def test_export_identity_changes_with_evidence_and_keeps_run(self):
         sys.path.insert(0, str(ADDONS / "fusion-results"))
         spec = importlib.util.spec_from_file_location("fusion_export", ADDONS / "fusion-results/export_snapshot.py")
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         first = module.snapshot(detail(), "fusion")
@@ -377,6 +378,7 @@ class FusionResults(unittest.TestCase):
                             "name": "lane_observe", "arguments": {"binding": {}, "sources": [source(value)]}}},
                         {"jsonrpc": "2.0", "id": 2, "method": "ping"},
                     ])
+                    self.assertEqual(responses[0]["id"], 1)
                     self.assertTrue(responses[0]["result"]["isError"])
                     self.assertNotIn("structuredContent", responses[0]["result"])
                     self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
@@ -410,6 +412,39 @@ class FusionResults(unittest.TestCase):
                     self.assertEqual(responses[0]["error"], {
                         "code": -32602, "message": "JSON nesting exceeds the decoder limit"})
                 self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
+    def test_decoder_recursion_refuses_before_id_and_keeps_next_request(self):
+        # Exercise the decoder failure even on interpreters whose JSON parser
+        # accepts the deep wire used above. The worker and protocol are real;
+        # only the first decoder call is fault-injected.
+        bootstrap = """
+import json, runpy, sys
+from unittest.mock import patch
+loads = json.loads
+calls = 0
+def decode(line):
+    global calls
+    calls += 1
+    if calls == 1:
+        raise RecursionError("injected decoder exhaustion")
+    return loads(line)
+sys.path.insert(0, sys.argv[1])
+with patch.object(json, "loads", side_effect=decode):
+    runpy.run_path(sys.argv[2], run_name="__main__")
+"""
+        requests = [{"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                    {"jsonrpc": "2.0", "id": 2, "method": "ping"}]
+        worker = subprocess.run([sys.executable, "-c", bootstrap, str(ADDONS),
+                                 str(ADDONS / "fusion-results/server.py")],
+                                input="".join(json.dumps(item) + "\n" for item in requests),
+                                capture_output=True, text=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        self.assertEqual(worker.stderr, "")
+        self.assertEqual([json.loads(line) for line in worker.stdout.splitlines()], [
+            {"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32602, "message": "JSON nesting exceeds the decoder limit"}},
+            {"jsonrpc": "2.0", "id": 2, "result": {}},
+        ])
 
     def test_deep_array_id_is_refused_without_echo_or_worker_exit(self):
         request = {"jsonrpc": "2.0", "id": "__deep__", "method": "ping"}

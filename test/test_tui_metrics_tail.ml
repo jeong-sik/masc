@@ -75,6 +75,7 @@ let test_resolve_is_physical_bounded_and_chronological () =
       failf "unexpected row error summary: rows=%d errors=%d" physical_rows
         (List.length errors)
   | Some (Tail.Storage_error _) -> fail "row failures became a storage error"
+  | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed -> fail "local read became a remote observation"
   | None -> fail "row failures were silently discarded"
 
 let test_storage_error_and_empty_selection_are_explicit () =
@@ -104,7 +105,7 @@ let test_storage_error_and_empty_selection_are_explicit () =
            })) ->
        ()
    | Some (Tail.Storage_error _) -> fail "wrong typed storage error"
-   | Some (Tail.Row_errors _) | None -> fail "storage failure was flattened");
+   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Row_errors _) | None -> fail "storage failure was flattened");
   let calls = ref 0 in
   let cleared =
     Tail.for_selection
@@ -179,7 +180,7 @@ let test_a_misfiled_row_is_counted_apart () =
    | Some (Tail.Row_errors { physical_rows; errors }) ->
        failf "unexpected summary: rows=%d errors=%d" physical_rows
          (List.length errors)
-   | Some (Tail.Storage_error _) | None ->
+   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Storage_error _) | None ->
        fail "the misfiled row was not counted");
   check string "the notice says which fault it was"
     "metrics tail read 1 physical row \xc2\xb7 1 misfiled into this store"
@@ -327,7 +328,7 @@ let test_load_does_not_backfill_rejected_rows () =
   | Some (Tail.Row_errors { physical_rows; errors }) ->
       failf "unexpected physical window: rows=%d errors=%d" physical_rows
         (List.length errors)
-  | Some (Tail.Storage_error _) | None -> fail "physical row errors were hidden"
+  | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Storage_error _) | None -> fail "physical row errors were hidden"
 
 let test_load_surfaces_malformed_newest_without_backfill () =
   let base_dir = tmpdir "tui_metrics_tail_malformed_newest" in
@@ -348,7 +349,7 @@ let test_load_surfaces_malformed_newest_without_backfill () =
   | Some (Tail.Row_errors { physical_rows; errors }) ->
       failf "unexpected malformed window: rows=%d errors=%d" physical_rows
         (List.length errors)
-  | Some (Tail.Storage_error _) | None -> fail "malformed newest row was hidden"
+  | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Storage_error _) | None -> fail "malformed newest row was hidden"
 
 let test_load_spans_months_and_rotations () =
   let base_dir = tmpdir "tui_metrics_tail_order" in
@@ -401,7 +402,7 @@ let test_load_surfaces_invalid_layout () =
   | Some (Tail.Storage_error error) ->
       failf "unexpected storage error: %s"
         (Dated_jsonl.read_error_to_string error)
-  | Some (Tail.Row_errors _) | None -> fail "invalid layout was hidden"
+  | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Row_errors _) | None -> fail "invalid layout was hidden"
 
 let test_load_is_bounded_by_tail_not_file_size () =
   let base_dir = tmpdir "tui_metrics_tail_sparse" in

@@ -128,6 +128,9 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val agenda_scroll_position : Masc_tui_types.state -> int
+(** The scroll currently drawn, following a selected target only during
+    target navigation. Page reading retains its own window. *)
 val presets_viewport : Masc_tui_types.state -> int * int
 (** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
@@ -173,3 +176,6 @@ val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
 
 val browser_history_scroll_limit : Masc_tui_types.state -> terminal_rows:int -> cols:int -> Masc_tui_types.Browser_history.t -> int
+
+val schedule_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical-row count and height of the current Schedule evidence reader. *)

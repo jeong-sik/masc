@@ -293,11 +293,12 @@ status: reference
   Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
   Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
   시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
-  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  TUI `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
   Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
   액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
-  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
-  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  TUI에서는 Keeper 상세 화면 맨 위, 대화 화면의 Keeper 목록 아래, 아이템 미리보기, `/about`에
+  그려진다. 터미널이 알려 준 능력에 따라 실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
+  `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
@@ -2114,6 +2115,21 @@ status: reference
   [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
+**ROLL (롤 / 일괄 착지 규약)**
+: 여러 작업 또는 여러 PR을 단일 묶음 PR/커밋으로 묶어 검증한 뒤 한 건만 착지시키는 MASC 내부 일괄 병합 규약.
+  GitHub 공식 기능인 Native Stack이나 수동 브랜치 체인과 구별되는 고유한 운영 프로토콜이다(세계 헌법 `a-34749e1e`·`a-213da42f`).
+  - 고정과 합집합 영수증: BASE와 멤버 PR들의 head를 고정하고, 각 멤버의 필수 테스트 스위트 합집합과
+    실행 결과를 영수증으로 대조한다. 멤버 누락, 빈 목록, tree 또는 main과의 불일치가 있으면 일괄 착지를 거절한다.
+  - 멤버 대체와 독립 검토: 멤버 PR들의 개별 CI·PASS·승인은 ROLL의 종합 영수증으로 대체할 수 있으나,
+    각 멤버는 고정 head·기준 SHA·범위·원문 좌표·검토자를 갖춘 독립적인 내용 검토(CR·FAIL 부재)를 반드시 거쳐야 한다.
+  - 착지와 원본 닫기: 현재 head의 PASS, 독립 승인, approve-guard 및 merge-guard 검증을 거쳐 ROLL PR 한 건만 main에
+    병합하며, 착지 직전 재확인과 도착 부모·tree·포함 증명을 확인한 뒤에만 원본 멤버 PR들을 병합 없이 닫는다.
+  - Native Stack과의 경계: GitHub의 Native Stack(`stack != null`)은 각 층의 PR이 유지되면서 하위 층을 포함해
+    비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
+    원본을 닫는 내부 운영 규약이다.
+  → [docs/constitution.xml](../constitution.xml) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
   할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,
@@ -2547,6 +2563,19 @@ status: reference
 : Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
+
+**Memory OS Recall (기억 회상 / 전송 투영)**
+: 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
+  `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
+  - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
+  - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
+  - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
+  - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
+  - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
+  - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

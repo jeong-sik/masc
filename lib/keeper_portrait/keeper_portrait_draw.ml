@@ -21,7 +21,7 @@ let pose ~flicker ~blink ~bob =
   let within v = lo <= v && v <= hi in
   if within flicker && within bob then Some { flicker; blink; bob } else None
 
-(* Motion, for the animated uses (the TUI splash). Periods are prime-ish to
+(* Motion, for the animated uses (the /about candle). Periods are prime-ish to
    each other so the loop does not visibly repeat every few seconds. *)
 
 (* The flame breathes on two waves: a slow sway and a quick shiver. *)

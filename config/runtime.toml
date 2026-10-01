@@ -76,16 +76,15 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # the machine (a name that is no keeper is reported at boot).
 # When enabled, MASC POSTs each destination's key as an Authorization bearer
 # credential to that destination's endpoint and nowhere else. The JSON body's top-level
-# fields are model, state, and questions. state.items[0] contains candidate_id
-# and only the current signal: kind, post_id, typed comment_id/parent_id,
-# author, title, content, hearth, updated_at,
-# reaction (target_type, target_id, user_id, emoji, reacted) and optional vote
-# (target_kind, target_id, target_author, voter, direction). The persisted post
-# and comment snapshot is not persisted or sent. state.keeper_role sends only
-# the Keeper's name and normalized board_interests; instructions,
-# record/runtime/task identity, and mention lists are not
-# sent. questions.relevance sends type=choice, question text naming the Keeper,
-# and relevant/not_relevant criteria descriptions. The current signal must
+# fields are model, state, and questions. state.signal is only the current
+# signal: kind, post_id, typed comment_id/parent_id, author, title, content,
+# hearth, updated_at, reaction (target_type, target_id, user_id, emoji,
+# reacted) and optional vote (target_kind, target_id, target_author, voter,
+# direction). The persisted post and comment snapshot is not sent.
+# questions.relevance sends type=choice, question text naming the Keeper and
+# its normalized board_interests, and relevant/not_relevant/uncertain criteria
+# descriptions; instructions, record/runtime/task identity, and mention lists
+# are not sent. The current signal must
 # itself address or specifically require the Keeper's role; general topic or
 # capability overlap is not relevant.
 # When on, board attention asks Jev first. A relevant or not-relevant answer

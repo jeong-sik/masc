@@ -1,0 +1,26 @@
+Provenance: frozen copy of installed86751f610442e4d82992ebc54bf9eb8ba45ef6d2 in isolated synthetic fixture PTY,100x18,color.
+Binary SHA25696955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b unchanged before/after.
+Fixture source1b907b070f95ec32d0ba35808b458c5a70a2fc95; executable is the baseline, not that repair head.
+Healthy history answered one exact Keeper change; AUTHORTAIL,SUBJECTTAIL,EXECTAIL are absent from the complete current screen.
+Scope: original metadata clipping only; no repair/matrix/production/installed-update proof.
+PTY bytes SHA256: f8e3b5f76fd58fc81d441215f41234faa7a9d78065790e2d1bf4f68b8b082e81
+Stored repr SHA256: d9817b7ae59b1d43ddb5231899225583ab5db9226102c52ac503a725fc305cc9
+
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Code  16:49:19  HTTP [connected]                                                
+   ▸ history: init.lua                                                                              
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Keeper activity: 24h durable window, 1 exact change                                             
+    08-25 04:36  abc1234  AUTHORHEAD-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…  
+    08-25 04:35  L2→L2         ✓ EDIT   keeper-kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk…  
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+
+  j/k:scroll  h/l:pane  PgUp/PgDn:page  Left / Esc:back  Enter (history):open  q:quit  …?
+ › to alpha   (i to write)                                                                          

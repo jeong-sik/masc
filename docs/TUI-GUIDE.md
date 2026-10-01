@@ -2257,8 +2257,10 @@ Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc
 and keeps its draft through the existing per-Keeper draft store.
 
-If a previously matched server workspace becomes unreadable, the remembered
-conversation opens as history and retains its draft. New messages and waiting messages stay unsent;
+If a previously matched server workspace becomes unreadable, Home shows the
+remembered conversation as unavailable with choose-Keeper guidance. It offers
+no history shortcut until workspace identity matches. Existing conversation
+drafts remain stored. New messages and waiting messages stay unsent;
 Goal confirmation and Task changes require a matching workspace reading. Refresh
 to read the server workspace again. A matching reading restores send authority and resumes already-authorized
 waiting messages once the Keeper roster is reliable. Unsent composer drafts

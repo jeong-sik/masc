@@ -323,8 +323,8 @@ let handle_with ~io ?access ~config ~caller args =
 
 let handle = handle_with ~io:real_cursor_io
 module For_testing = struct
-  let handle ~replace_cursor_file ~sync_file ~sync_parent =
-    handle_with ~io:{replace_cursor_file;sync_file;sync_parent}
+  let handle ?access ~replace_cursor_file ~sync_file ~sync_parent ~config ~caller args =
+    handle_with ~io:{replace_cursor_file;sync_file;sync_parent} ?access ~config ~caller args
   let observe ~sync_file ~sync_parent =
     observe_with ~io:{real_cursor_io with sync_file;sync_parent}
 end

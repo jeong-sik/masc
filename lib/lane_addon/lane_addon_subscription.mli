@@ -23,7 +23,7 @@ module For_testing : sig
     ?access:Lane_addon_sources.access ->
     replace_cursor_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
-    ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+    config:Workspace.config -> caller:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
   val observe : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     config:Workspace.config -> keeper_name:string -> (Yojson.Safe.t, string) result
 end

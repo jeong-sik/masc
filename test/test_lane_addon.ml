@@ -557,11 +557,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
     [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
   let public = unwrap (call foreign Runtime.Inspect []) in
-  check int "unfiltered inspection exposes no private instances" 0
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
     (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "unfiltered inspection exposes no private rows" 0
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
     (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "foreign range query excludes private observations" 0
+  check Alcotest.int "foreign range query excludes private observations" 0
     (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   check bool "claimed owner with unauthenticated HTTP access is refused" true
     (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
@@ -570,11 +570,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
   await_phase clock config id "detached";
   Runtime.For_testing.reset ();
-  check int "owner can read durable rows after host manager restart" 1
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
     (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   denied Runtime.Inspect ["instance_id",`String id];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
-  check int "historical inspection excludes private bindings" 0
+  check Alcotest.int "historical inspection excludes private bindings" 0
     (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
 
 let test_released_shared_bindings_keep_read_and_cleanup () =

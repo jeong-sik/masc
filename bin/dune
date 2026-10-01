@@ -1481,6 +1481,12 @@
   masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc))
 
 (library
+ (name masc_tui_resources_updates)
+ (wrapped false)
+ (modules masc_tui_resources_updates)
+ (libraries masc_tui_types masc_tui_mcp masc))
+
+(library
  (name masc_tui_board_updates)
  (wrapped false)
  (modules masc_tui_board_updates)
@@ -1833,7 +1839,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle

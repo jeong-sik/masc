@@ -1498,7 +1498,8 @@ let footer_hints_git_changes =
 
 let footer_hints_git_diff =
   hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
      ; b Act "p" "open PR"
      ; b Act "t/g" "task / goal"

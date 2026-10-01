@@ -414,10 +414,13 @@
 - Report malformed Skill projection shapes as ledger faults without a fictitious event-log row, while retaining specific invariant faults (#40483).
 - Show inline and dotted TOML lane declarations in Keeper assignment options while preserving standard-table candidate editing. #40484
 - Return HTTP 504 for Dashboard timeout envelopes from both HTTP/2 JSON-value response paths, preserving explicit non-200 statuses. #40485
+- Keep the current memory recall snapshot readable through artifact cleanup, including for paused Keepers; older snapshots follow the existing history retention policy. (#40486)
 - Skip unchanged Board post or comment snapshots during flush while retaining parent reply-count updates and failed-write retries. #40488
 - Preserve producer artifact descriptors in post-effect failure responses when result manifest storage fails, so already-exported bytes remain reusable. #40491
 - Bound applied-effect manifest failures by the caller’s output policy, preserving fitting descriptors and explicitly reporting omitted payloads or artifact handles without replaying projection. (#40491)
+- Allow provider and runtime-binding context-window declarations, with binding settings taking precedence over provider and model defaults while preserving known capability limits. (#40493)
 - Preserve Unicode boundaries and the shared cut mark in TUI HTTP error previews and Board mention hints, fitting hints to the available terminal cells. #40495
+- Resume an unfinished direct Codex request after handling newer waiting input, preserving its operation identity and completed work instead of treating a scheduling reply as completion. (#40496)
 - Fit Planning Goal errors and Harness gate fields to their actual framed width so padding no longer produces a false truncation mark. #40498
 - Fix Keeper observation ownership: delayed cleanup and tool-count callbacks from an earlier turn cannot modify the successor observation or clear its wakeup signal. (#40524)
 - Bind Keeper live progress, FSM, model and measurement callbacks to the originating observation attempt so delayed callbacks cannot update a successor turn. (#40530)

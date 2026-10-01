@@ -2329,9 +2329,8 @@ let planning_detail_pane (state : state)
   (match state.goal_action_error with
    | Some err ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  Error: "
-         ^ fit_width (Terminal_text.single_line err) (cols - 12)
-         ^ Ansi.reset)
+         (row_with_field ~cols ~lead:((Theme.bad ()) ^ "  Error: ")
+            ~field:(Terminal_text.single_line err) ~tail:Ansi.reset)
    | None -> ());
   box_divider buf cols;
 
@@ -8153,8 +8152,9 @@ let harness_ledger_lines ~cols snapshot =
             [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
                 Ansi.dim Ansi.reset calibration.hcal_total
                 calibration.hcal_approve calibration.hcal_reject evaluator
-            ; Printf.sprintf "  %sgate%s    %s" Ansi.dim Ansi.reset
-                (fit_width gates (max 8 (cols - 12)))
+            ; row_with_field ~cols
+                ~lead:(Printf.sprintf "  %sgate%s    " Ansi.dim Ansi.reset)
+                ~field:gates ~tail:""
             ; (if calibration.hcal_labeled > 0 then
                  Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
                    calibration.hcal_labeled

@@ -2219,6 +2219,8 @@ def run_terminal_scenario(
         )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+            # Health and route fixtures must publish the same workspace identity.
+            base_path = os.path.realpath(base_path)
             with test_http_endpoint(
                 with_workspace_identity(http_fixtures, base_path), http_requests
             ) as (

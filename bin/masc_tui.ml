@@ -12716,6 +12716,7 @@ let handle_goal_confirmation_key state ~mailbox =
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
+           state.planning_scroll <- 0;
            launch_workspace_request state ~mailbox ~boundary_error:Fun.id
              ~deliver:(fun result -> Goal_confirmation_submitted result)
              (fun () ->
@@ -20281,7 +20282,8 @@ and is loaded on demand through keeper_skill.
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
-                          "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
+                          "pageup"; "pagedown"; "home"; "end";
+                          "wheel-up"; "wheel-down" ] then
              (match state.goal_confirmation with
               | Goal_confirmation.Inspecting read ->
                   state.goal_confirmation <- Goal_confirmation.Inspecting

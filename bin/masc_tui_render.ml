@@ -1284,7 +1284,7 @@ let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
        then ["[a] Confirm proof"] else []) in
   (* These are commands, so every action stays visible while its evidence is
      read. Their physical rows are subtracted before the reader is allocated. *)
-  Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+  Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
     ("Actions: " ^ String.concat "   " actions)
   |> List.map (fun line -> "  " ^ line)
   |> fun rows -> rows @ (match armed with
@@ -1372,13 +1372,28 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
        wrapped_proof @ metadata @ linked)
 
-let planning_detail_height ~rows ~action_rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + action_rows)
+let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
+  let phase = "  " ^ bracketed ~max_cells:planning_phase_column
+      (planning_phase_label goal.pg_phase) in
+  let identity = Terminal_text.single_line goal.pg_id in
+  let tail = phase ^ " " ^ identity in
+  let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+    ~after:tail ^ tail in
+  if Message_layout.display_width header <= framed_inner_width cols then [header]
+  else
+    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+       ~after:phase ^ phase)
+    :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
+          ("Goal: " ^ identity)
+        |> List.map (fun line -> "  " ^ line))
+
+let planning_detail_height ~rows ~header_rows ~action_rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)
     ~count ~preview_keep:None ~overflow_takes_row:true
 
-let planning_detail_fits ~rows ~action_rows ~count =
-  let height = planning_detail_height ~rows ~action_rows ~count in
-  framed_chrome_rows + action_rows + height
+let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
+  let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
+  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height
     + (if count > height then 1 else 0) <= rows
 
 let planning_detail_viewport (state : state) =
@@ -1393,24 +1408,23 @@ let planning_detail_viewport (state : state) =
            let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id) goal) in
            let count = List.length (planning_detail_lines state ~cols goal
              ~confirmation:(planning_confirmation_view state ~goal_id)) in
-           if planning_detail_fits ~rows ~action_rows ~count
-           then count, planning_detail_height ~rows ~action_rows ~count
+           let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
+           if planning_detail_fits ~rows ~header_rows ~action_rows ~count
+           then count, planning_detail_height ~rows ~header_rows ~action_rows ~count
            else 0, 1)
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
-  let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
-    ~after:(Printf.sprintf "  %s %s"
-      (bracketed ~max_cells:planning_phase_column (planning_phase_label goal.pg_phase))
-      (Terminal_text.single_line goal.pg_id)) in
+  let headers = planning_detail_header_rows state ~cols goal in
   box_top buf cols;
-  box_line buf cols header;
+  List.iter (box_line buf cols) headers;
   box_divider buf cols;
   let actions = planning_detail_action_rows ~cols ~armed goal in
   List.iter (box_line buf cols) actions;
   let lines = planning_detail_lines state ~confirmation ~cols goal in
   let count = List.length lines in
-  let height = planning_detail_height ~rows ~action_rows:(List.length actions) ~count in
+  let height = planning_detail_height ~rows ~header_rows:(List.length headers)
+    ~action_rows:(List.length actions) ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.planning_scroll in
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
@@ -1444,7 +1458,8 @@ let render_planning_detail (state : state)
   let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
   let action_rows = List.length (planning_detail_action_rows ~cols:detail_cols ~armed goal) in
   let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
-  if not (planning_detail_fits ~rows ~action_rows ~count) then begin
+  let header_rows = List.length (planning_detail_header_rows state ~cols:detail_cols goal) in
+  if not (planning_detail_fits ~rows ~header_rows ~action_rows ~count) then begin
     let buf = Buffer.create 96 in
     Buffer.add_string buf (fit_width "Goal detail needs more room; resize to read and act" cols);
     Buffer.add_char buf '\n';

@@ -8,7 +8,7 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml",
                   "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml")
-GOAL_ID = "goal-detail-viewport"
+GOAL_ID = "goal-detail-viewport-distinct-identity-tail"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
 METRIC = "metric-" + "0123456789abcdef" * 14 + "METRICEND"
 TARGET = "TARGETHEAD " + "measured target " * 12 + "TARGETEND"
@@ -33,7 +33,7 @@ def compact(text):
 def window(output):
     match = WINDOW.search(screen(output))
     if match is None:
-        raise AssertionError(f"Task window missing: {screen(output)!r}")
+        raise AssertionError(f"Goal window missing: {screen(output)!r}")
     return tuple(int(group) for group in match.groups())
 
 
@@ -51,8 +51,14 @@ def run(executable):
         {"ts": RAW_CLOCK, "kind": "keeper_event", "lane": "keeper:" + KEEPER,
          "title": "keeper observation", "summary": "TIMELINEEND", "severity": "ok"},
     ]})
-    requests = []
+    confirmation_reads = []
     posted = []
+
+    def confirmation(path):
+        confirmation_reads.append(path)
+        return 503, {"error": "fixture confirmation read must remain hidden"}
+
+    fixtures["/api/v1/goals/confirmation"] = h.PathHttpResponse(confirmation)
 
     def transition(body):
         posted.append(json.loads(body))
@@ -71,7 +77,7 @@ def run(executable):
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go Work", b"TITLEHEAD")
         h.send_and_wait(process, fd, output, b"\r", b"Actions:")
-        for width in (30, 60, 80, 120):
+        for width in (30, 40, 60, 80, 120):
             h.resize_and_wait(process, fd, output, rows=400, columns=width,
                               needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
             h.wait_for_output(process, fd, output, b"TIMELINEEND", start=0, timeout=10)
@@ -87,7 +93,7 @@ def run(executable):
                 h.resize_and_wait(process, fd, output, rows=rows, columns=width,
                                   needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
                 h.drain_until_quiet(process, fd, output)
-                painted = h.screen_rows(bytes(output))
+                painted = h.screen_rows(bytes(output[:output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
                 assert max(painted) <= rows, (width, rows, max(painted))
                 for text in painted.values():
                     assert h.fixture_cell_width(text.decode("utf-8", "replace")) <= width, (width, rows, text)
@@ -107,6 +113,11 @@ def run(executable):
                 h.drain_until_quiet(process, fd, output)
                 start, end, count = window(output)
                 assert start > 1 and end == count, (start, end, count)
+                # At the document tail the metadata ID is off-screen. The
+                # pinned header must retain its full identity at every width.
+                pinned = screen(output).split(b"Actions:", 1)[0]
+                assert compact(GOAL_ID.encode()) in compact(pinned), (width, rows, pinned)
+                assert b"executing" in pinned, (width, rows, pinned)
                 print("GOAL_DETAIL_VIEWPORT " + json.dumps({"width": width, "rows": rows,
                        "window": [start, end, count], "screen": screen(output).decode("utf-8", "replace")}), flush=True)
                 h.send_and_wait(process, fd, output, b"\x1b[H", b"TITLEHEAD")
@@ -128,22 +139,22 @@ def run(executable):
         h.send_and_wait(process, fd, output, b"c", b"press c again")
         h.send_and_wait(process, fd, output, b"c", b"fixture intentionally refuses transition")
         assert posted == [{"goal_id": GOAL_ID, "action": "request_complete"}], posted
-        # Refresh removes the Goal and reconciles the detail back to list mode.
-        # This checks list-mode behavior, not the inconsistent-detail guard.
+        # Refresh removes the visible Goal and reconciles back to the list.
+        # No hidden lifecycle or proof-confirmation command may run.
         fixtures[h.PLANNING_PATH] = h.planning_snapshot([])
         h.send_and_wait(process, fd, output, b"r", b"(no goals)")
         h.drain_until_quiet(process, fd, output)
-        before = len(requests)
+        before = len(confirmation_reads)
         os.write(fd, b"ccxxooaa")
         h.drain_until_quiet(process, fd, output)
         assert len(posted) == 1, posted
-        assert not any("/api/v1/goals/confirmation" in path for path, _ in requests[before:]), requests[before:]
+        assert len(confirmation_reads) == before, confirmation_reads[before:]
         assert b"Actions:" not in screen(output), screen(output)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Goal metadata and all linked Tasks remain reachable",
                             interact=interact, prepare_workspace=prepare,
-                            http_fixtures=fixtures, http_requests=requests)
+                            http_fixtures=fixtures)
 
 
 if __name__ == "__main__":

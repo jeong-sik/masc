@@ -229,10 +229,16 @@ let append ~path cursor suffix =
 let encode ~preceding events =
   let rec go records lines = function
     | [] -> Ok (String.concat "" (List.rev_map (fun line -> line ^ "\n") lines))
-    | event :: rest ->
-      Result.bind (validate_record records event) (fun records ->
-        Result.bind (Candle_event.to_line event) (fun line ->
-          go records (line :: lines) rest))
+    | (event : Candle_event.t) :: rest ->
+      let arithmetic = match event.body with
+        | Candle_event.Paid payment -> Candle_payment.validate_for_append payment
+        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+        | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+        | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _ -> Ok () in
+      Result.bind arithmetic (fun () ->
+        Result.bind (validate_record records event) (fun records ->
+          Result.bind (Candle_event.to_line event) (fun line ->
+            go records (line :: lines) rest)))
   in
   go (List.fold_left remember Goal_records.empty preceding) [] events
 ;;

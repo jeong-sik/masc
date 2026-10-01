@@ -202,7 +202,7 @@ let handle_get state request reqd name =
     answer ~expected_equipment ~cache:process_cache ~build:(current_build ()) ~name
       ~size:(Server_utils.query_param request "size")
       ~keeper_present:(keeper_present config name)
-      ~equipment:(fun () -> Candle_equipment.current ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper:name)
+      ~equipment:(fun () -> Candle_equipment.read_persisted ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper:name)
       ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
   with
   | Invalid_name -> refuse `Bad_request (Printf.sprintf "invalid keeper name: %s" name)

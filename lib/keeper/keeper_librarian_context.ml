@@ -26,7 +26,18 @@ let empty = { sources = []; previous = None; unavailable = []; execution_basis =
 let ( let* ) = Result.bind
 let digest bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 let strings xs = `List (List.map (fun x -> `String x) xs)
-let fresh_id sources = "context-" ^ digest (Yojson.Safe.to_string (strings (List.sort String.compare sources)))
+(* A source can leave an existing context while another source continues that
+   context through an explicit merge. Source-only IDs would then assign the
+   old context's identity to the new group as well. Bind new identities to the
+   observed snapshot version; select and the CAS-protected commit agree, while
+   explicit merge targets keep their existing identity. *)
+let fresh_id ?previous_version sources =
+  let previous = match previous_version with
+    | None -> `Null
+    | Some (generation, revision) -> `List [`String generation; `Int revision] in
+  "context-" ^ digest (Yojson.Safe.to_string (`Assoc
+    ["previous_version", previous;
+     "sources", strings (List.sort String.compare sources)]))
 let source_of_event (selection : Keeper_event_queue_state.pending_selection) =
   { reference = Printf.sprintf "event:%s:%Ld" (Keeper_event_queue_state.source_snapshot_ref selection.source) selection.admitted_revision
   ; content = Keeper_event_queue.stimulus_to_yojson selection.source }
@@ -88,7 +99,9 @@ let select (input : input) json =
     let* merge_contexts = traverse (fun alias -> match List.assoc_opt alias context_aliases with
       | Some id -> Ok id | None -> Error "unknown prior context merge target") p.merge_contexts in
     let references = List.map (fun alias -> List.assoc alias aliases) p.sources in
-    let id = match merge_contexts with [] -> fresh_id references | first :: _ -> first in
+    let id = match merge_contexts with
+      | [] -> fresh_id ?previous_version:(Option.map version input.previous) references
+      | first :: _ -> first in
     Ok {p with id; merge_contexts; sources = references}) pockets in
   validate_partition ~sources:input.sources pockets
 let prompt_json (input : input) =
@@ -199,7 +212,9 @@ let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_
       let merged = List.map (fun (p : pocket) ->
         let inherited = List.filter (fun reference -> live reference && not (List.mem reference selected_refs))
           (List.concat_map (fun (old : pocket) -> if List.mem old.id p.merge_contexts then old.sources else []) previous) in
-        let id = match p.merge_contexts with [] -> fresh_id p.sources | first :: _ -> first in
+        let id = match p.merge_contexts with
+          | [] -> fresh_id ?previous_version:(Option.map version current) p.sources
+          | first :: _ -> first in
         {p with id; merge_contexts = []; sources = p.sources @ inherited}) pockets in
       let same_progress = match current, execution_basis with
         | Some old, Some basis -> old.execution_basis = Some basis

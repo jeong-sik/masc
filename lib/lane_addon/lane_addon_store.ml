@@ -174,7 +174,6 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
-let bindings t = read_directory t "bindings"
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -327,6 +326,23 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
+(* A renamed observation can survive a failed binding write. Recover its
+   sequence for every retained reader; reads still verify the exact record. *)
+let bindings t =
+  let* values = read_directory t "bindings" in
+  let rec reconcile = function
+    | [] -> Ok []
+    | `Assoc fields :: rest ->
+        let* instance_id, sequence = match List.assoc_opt "instance_id" fields,
+            List.assoc_opt "observation_seq" fields with
+          | Some (`String id), Some (`Int seq) when seq >= 0 -> Ok (id, seq)
+          | _ -> Error "invalid retained binding sequence" in
+        let* retained = highwater t instance_id in
+        let* rest = reconcile rest in
+        Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
+          List.remove_assoc "observation_seq" fields) :: rest)
+    | _ -> Error "invalid retained binding" in
+  reconcile values
 let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2

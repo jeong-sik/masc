@@ -75,11 +75,11 @@ let handle_get state request reqd name =
        | Error Candle_status.Off ->
          respond (`Assoc [ "status", `String "off"; "keeper", `String name;
            "account_revision", `Null ])
-       | Error ((Candle_status.Disabled _) as error) ->
+       | Error ((Candle_status.Disabled raw_reason) as error) ->
          let reason = Candle_status.error_to_string error in
          respond (`Assoc [ "status", `String "disabled"; "keeper", `String name;
            "reason", `String reason;
-           "account_revision", `String (Candle_observe.disabled_account_revision reason) ])
+           "account_revision", `String (Candle_observe.disabled_account_revision raw_reason) ])
        | Error ((Candle_status.Invalid_time _ | Candle_status.Invalid_ledger _
            | Candle_status.Ledger_unavailable _) as error) ->
          respond ~status:`Service_unavailable (error_json (Candle_status.error_to_string error))

@@ -56,6 +56,13 @@ let region_role_to_string = function
   | Scroll_area -> "scroll-area"
   | Unknown value -> value
 
+type checked_state = Unchecked | Checked | Mixed
+type control_selection = {
+  checked : bool option;
+  indeterminate : bool option;
+  aria_checked : checked_state option;
+  aria_selected : bool option;
+}
 type kind =
   | Text
   | Raster
@@ -65,7 +72,20 @@ type kind =
       editable : bool;
       disabled : bool;
       href : string option;
+      selection : control_selection;
     }
+let unobserved_control_selection = {
+  checked=None; indeterminate=None; aria_checked=None; aria_selected=None
+}
+let control_selection_text = function
+  | Control {selection;_} ->
+      let parts = List.filter_map Fun.id
+        [ Option.map (function true -> "checked" | false -> "unchecked") selection.checked
+        ; (match selection.indeterminate with Some true -> Some "mixed" | Some false | None -> None)
+        ; Option.map (function Checked -> "aria checked" | Unchecked -> "aria unchecked" | Mixed -> "aria mixed") selection.aria_checked
+        ; Option.map (function true -> "selected" | false -> "not selected") selection.aria_selected ] in
+      (match parts with [] -> None | _ -> Some (String.concat " · " parts))
+  | Text | Raster | Region _ -> None
 type region_ref = { node_id : string; role : region_role; label : string }
 (* HTML local names are observed browser data. Classify the closed heading
    subset once at this boundary so TUI presentation can render an outline
@@ -110,6 +130,19 @@ let optional_href json =
   | Ok `Null -> Ok None
   | Ok (`String value) when String.trim value <> "" -> Ok (Some value)
   | Ok _ -> Error "scene control href must be a nonempty string or null"
+let optional_control_state parse name json =
+  match field name json with
+  | Error _ | Ok `Null -> Ok None
+  | Ok value -> let* value = parse value in Ok (Some value)
+let checked_state = function
+  | `String "true" -> Ok Checked
+  | `String "false" -> Ok Unchecked
+  | `String "mixed" -> Ok Mixed
+  | _ -> Error "scene ariaChecked must be true, false or mixed"
+let selected_state = function
+  | `String "true" -> Ok true
+  | `String "false" -> Ok false
+  | _ -> Error "scene ariaSelected must be true or false"
 let optional_heading_level json =
   match field "headingLevel" json with
   | Error _ | Ok `Null -> Ok None
@@ -163,7 +196,12 @@ let node json =
     | "control" -> let* clickable = get boolean "clickable" json in
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
       let* href = optional_href json in
-      Ok (Control {clickable;editable;disabled;href})
+      let* checked = optional_control_state boolean "checked" json in
+      let* indeterminate = optional_control_state boolean "indeterminate" json in
+      let* aria_checked = optional_control_state checked_state "ariaChecked" json in
+      let* aria_selected = optional_control_state selected_state "ariaSelected" json in
+      Ok (Control {clickable;editable;disabled;href;
+        selection={checked;indeterminate;aria_checked;aria_selected}})
     | _ -> Error "unknown semantic scene node kind" in
   (* The extension always emits sourceContext, null when the element carries
      no dev-source hint. A node without the key is a producer defect, not an

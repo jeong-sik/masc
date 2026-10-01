@@ -429,6 +429,11 @@ let test_invalid_http_then_valid_successor_keeps_both_slots () =
       [ bad_slot; good_slot ]
       (dispatched output);
     check json "accepted answer is retained" valid_answer (U.member "result" output);
+    check int "one successful HTTP attempt records one parsed response" 1
+      (attempts output |> List.filter (fun event ->
+        U.member "kind" event = `String "response"
+        && U.member "slot" event = `String good_slot
+        && U.member "output" event = valid_answer) |> List.length);
     check_http_failure ~slot:bad_slot ~body:malformed_body ~invalid:true output;
     let (Runs.Exact_input input) = run.input in
     check
@@ -496,6 +501,11 @@ let test_declared_cli_success_after_http_failure () =
       [ slot; F.cli_primary_runtime ]
       (dispatched output);
     check json "CLI answer is retained" valid_answer (U.member "result" output);
+    check int "CLI success retains one parsed response alongside its raw response" 1
+      (attempts output |> List.filter (fun event ->
+        U.member "kind" event = `String "response"
+        && U.member "slot" event = `String F.cli_primary_runtime
+        && U.member "output" event = valid_answer) |> List.length);
     check
       bool
       "CLI raw answer is retained under the actual slot"
@@ -509,11 +519,58 @@ let test_declared_cli_success_after_http_failure () =
     [`Service_unavailable; `Bad_request]
 ;;
 
+let test_bookkeeping_terminal_remains_retryable () =
+  with_case (fun ~sw ~net ~clock ~base_path:_ ->
+    let module Exact = Agent_core.Exact_output in
+    let server = F.start_server ~sw ~net ~clock (F.Reply {|{"input_tokens":1}|}) in
+    let id = "candle-bookkeeping" in
+    let snapshot = F.resolver_snapshot ~requires_token_measurement:true
+      ~source:"Candle bookkeeping retry" [{F.id; base_url=server.base_url}] in
+    let admitted_target = Exact.admit_target_ref snapshot id |> Result.get_ok in
+    let first = Exact.make_flow_candidate ~id ~admitted_target |> Result.get_ok in
+    let requirement = Exact.make_output_requirement ~schema:(A.schema request)
+      ~minimum_guarantee:Exact.Json_syntax in
+    let attempt = Exact.snapshot_flow ~first ~rest:[]
+      ~messages:[Agent_core.Types.user_msg "appraise"] requirement
+      |> Result.get_ok |> Exact.start_flow |> Result.get_ok in
+    let measurement = ref None in
+    let result = Exact.execute_flow_once ~net ~clock
+      ~before_measurement_dispatch:(fun receipt -> measurement := Some receipt; Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Error "bookkeeping unavailable")
+      ~before_advance:(fun ~failed:_ ~next:_ -> fail "terminal bookkeeping must not advance")
+      ~validate:(fun _ -> fail "failed dispatch must not validate") attempt in
+    match result, !measurement with
+    | Error (Exact.Flow_execution_terminal
+        {cause=Exact.Flow_before_dispatch_callback_failed {candidate;evidence;_} as cause;_}),
+        Some measurement ->
+        let failures = [cause;
+          Exact.Flow_attempt_start_failed {candidate=candidate.visit;
+            cause=Exact.Call_id_generation_failed "entropy unavailable";evidence};
+          Exact.Flow_measurement_start_failed {candidate=candidate.visit;
+            cause=Exact.Measurement_operation_id_generation_failed "entropy unavailable";evidence};
+          Exact.Flow_before_measurement_dispatch_callback_failed
+            {measurement;cause="measurement intent unavailable";evidence};
+          Exact.Flow_measurement_terminal_callback_failed
+            {measurement;cause="receipt unavailable";evidence}] in
+        List.iter (fun cause ->
+          check bool "same flow remains terminal" true
+            (Exact.flow_execution_terminal_kind cause = Exact.Non_advanceable_terminal);
+          List.iter (fun rejected ->
+            match Server_candle_appraiser.For_testing.terminal_error
+              ~rejected ~retryable:false cause with
+            | A.Transport_unavailable _ -> ()
+            | A.Invalid_response _ | A.Execution_rejected _ ->
+                fail "bookkeeping failure permanently rejected a payout") [false;true]) failures
+    | _ -> fail "fixture did not capture terminal bookkeeping evidence")
+;;
+
 let () =
   run
     "candle_appraiser_transport"
     [ ( "declared transports"
-      , [ test_case
+      , [ test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
+        ; test_case
             "HTTP bad request waits for a change"
             `Quick test_http_bad_request_waits_for_change
         ; test_case

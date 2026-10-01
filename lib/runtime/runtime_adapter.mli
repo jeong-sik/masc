@@ -91,6 +91,10 @@ val binding_to_provider_config
     - [binding.model_id] -> {!Runtime_schema.model_of_id}
     - provider transport + model spec -> {!Llm_provider.Provider_config.make}
 
+    Context declarations resolve binding > provider > model; a genuine catalog
+    context ceiling still clamps the result. Synthetic custom-model capabilities
+    carry the selected window rather than treating the model default as a cap.
+
     An explicitly declared model output-token ceiling overrides the catalog
     or provider-base ceiling. An absent declaration preserves the catalog;
     neither ceiling becomes a request-side [max_tokens] default.

@@ -1,0 +1,11 @@
+{
+  "scope": "synthetic currency wire through a real TUI PTY; not a live workspace",
+  "binary_sha256": "9b21d566cc5d215387bb7a1b0418c2be67ef4976f96713a0b486c12e22940f36",
+  "supply": {
+    "status": "ready",
+    "issued_milli": "18446744073709551614999",
+    "burned_milli": "9007199254740993",
+    "circulating_milli": "18446735066510296874006"
+  },
+  "keeper_balance_milli": "9007199254740993"
+}

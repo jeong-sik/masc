@@ -5,12 +5,15 @@ type t =
   { balances : int Names.t
   ; paid_goals : Goals.t
   ; owned : Keeper_portrait_item.t list Names.t
+  ; selections : (Keeper_portrait_item.slot * Candle_event.equipment_choice) list Names.t
   }
 
 type error =
   | Duplicate_payment of string
   | Balance_overflow of string
   | Negative_purchase of string
+  | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
+  | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
       { keeper : string
       ; item : Keeper_portrait_item.t
@@ -24,6 +27,8 @@ type error =
 let error_to_string = function
   | Duplicate_payment goal -> "duplicate payment for Goal " ^ goal
   | Balance_overflow keeper -> "cumulative Candle balance overflows for " ^ keeper
+  | Unowned_equipment {keeper;item} -> keeper ^ " does not own " ^ Keeper_portrait_item.id item
+  | Wrong_equipment_slot item -> "wrong equipment slot for " ^ Keeper_portrait_item.id item
   | Negative_purchase keeper -> "negative purchase amount for " ^ keeper
   | Already_owned { keeper; item } ->
     Printf.sprintf "%s already owns %s" keeper (Keeper_portrait_item.id item)
@@ -35,7 +40,7 @@ let error_to_string = function
       required_milli
 ;;
 
-let empty = { balances = Names.empty; paid_goals = Goals.empty; owned = Names.empty }
+let empty = { balances = Names.empty; paid_goals = Goals.empty; owned = Names.empty; selections = Names.empty }
 
 let balance state ~keeper =
   match Names.find_opt keeper state.balances with
@@ -94,12 +99,38 @@ let purchase state ~keeper ~item ~amount_milli =
       }
 ;;
 
+let choices state ~keeper =
+  match Names.find_opt keeper state.selections with Some choices -> choices | None -> []
+
+let selection state ~keeper ~slot =
+  match List.assoc_opt slot (choices state ~keeper) with Some choice -> choice | None -> Candle_event.Default
+
+let equipment state ~keeper =
+  List.fold_left (fun equipment (_, choice) -> match choice with
+    | Candle_event.Default -> equipment
+    | Candle_event.Item item -> Keeper_portrait_item.preview item equipment)
+    (Keeper_portrait_look.equipment_of_name keeper) (choices state ~keeper)
+
+let equip state ~keeper ~slot ~choice =
+  let ( let* ) = Result.bind in
+  let* () = match choice with
+    | Candle_event.Default -> Ok ()
+    | Candle_event.Item item when Keeper_portrait_item.slot item <> slot -> Error (Wrong_equipment_slot item)
+    | Candle_event.Item item when not (List.mem item (owned state ~keeper)) -> Error (Unowned_equipment {keeper;item})
+    | Candle_event.Item _ -> Ok () in
+  let remaining = List.remove_assoc slot (choices state ~keeper) in
+  let choices = match choice with
+    | Candle_event.Default -> remaining
+    | Candle_event.Item _ -> (slot, choice) :: remaining in
+  Ok {state with selections = Names.add keeper choices state.selections}
+
 let of_events events =
   List.fold_left
     (fun result (event : Candle_event.t) ->
        Result.bind result (fun state ->
          match event.body with
          | Candle_event.Paid payment -> credit state payment
+         | Candle_event.Equipped e -> equip state ~keeper:e.keeper ~slot:e.slot ~choice:e.choice
          | Candle_event.Purchased p ->
            purchase state ~keeper:p.keeper ~item:p.item ~amount_milli:p.amount_milli
          | Candle_event.Snapshot _

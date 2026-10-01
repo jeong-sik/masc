@@ -477,6 +477,59 @@ let put_durable =
     ~operation:"put_durable"
 ;;
 
+(* A content address proves identity, not durability of a replacement file.
+   Reuse is bound to the owned snapshot observed after strict publication. *)
+let durable_snapshots : validated_file Validated_file_map.t Atomic.t =
+  Atomic.make Validated_file_map.empty
+
+let record_durable path snapshot =
+  let validated_at = Atomic.fetch_and_add validated_file_sequence 1 in
+  let rec loop () =
+    let current = Atomic.get durable_snapshots in
+    let updated = Validated_file_map.add path { snapshot; validated_at } current
+      |> evict_oldest_validated_file in
+    if not (Atomic.compare_and_set durable_snapshots current updated) then loop () in
+  loop ()
+
+let put_durable_reuse t ~bytes ~mime =
+  let addressed = address_with ~operation:"put_durable_reuse" t ~bytes ~mime in
+  let path = addressed.addressed_path in
+  let read () = Fs_compat.load_owned_regular_file_with_snapshot
+      ~ownership_root:t.ownership_root path in
+  let reusable =
+    match Validated_file_map.find_opt path (Atomic.get durable_snapshots) with
+    | None -> false
+    | Some previous ->
+      (match read () with
+       | Ok (Some observed) ->
+         Fs_compat.equal_owned_regular_file_snapshot previous.snapshot observed.snapshot
+         && String.equal observed.content bytes
+       | Ok None | Error _ -> false) in
+  if reusable then addressed.addressed_ref
+  else
+    let written_identity = ref None in
+    ensure_parent_dir path;
+    (match Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
+       output_string channel bytes;
+       flush channel;
+       let stat = Unix.fstat (Unix.descr_of_out_channel channel) in
+       written_identity := Some (stat.Unix.st_dev, stat.Unix.st_ino)) with
+     | Error error ->
+       raise (Sys_error ("tool_blob_store.put_durable_reuse: "
+         ^ Fs_compat.atomic_replace_failure_to_string error))
+     | Ok () -> ());
+    remove_validated_snapshot path;
+    (* A concurrent non-strict writer may replace the pathname after our
+       rename. Only the inode produced by the strict writer earns reuse. *)
+    (match written_identity.contents, read () with
+     | Some (device, inode), Ok (Some observed)
+       when observed.snapshot.device = device && observed.snapshot.inode = inode
+            && String.equal observed.content bytes ->
+       record_durable path observed.snapshot
+     | (Some _ | None), (Ok (Some _) | Ok None | Error _) -> ());
+    addressed.addressed_ref
+;;
+
 let scan_file_for_ingest ~buffer ~copy_to channel =
   let preview = Buffer.create preview_max in
   let rec loop digest total =

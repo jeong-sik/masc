@@ -428,32 +428,22 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
 
      Written as a reference so Ctrl-] can follow it: naming a goal the
      operator then has to go find by hand is the gap this closes. *)
-  (match
-     List.find_opt (fun (row : Tui_decode.task) -> String.equal row.id task.id)
-       state.tasks
-   with
-   | None -> ()
-   | Some row ->
-     (match state.task_goal_links, row.goal_ids with
-      | Masc_tui_agenda.Not_read, _ ->
-        box_line buf cols
-          (Ansi.dim ^ "  Goal        (membership unknown: links not read)" ^ Ansi.reset)
-      | Masc_tui_agenda.Read_failed reason, _ ->
-        box_line buf cols
-          (Ansi.dim ^ "  Goal        (membership unknown: "
-           ^ Terminal_text.single_line reason ^ ")" ^ Ansi.reset)
-      | Masc_tui_agenda.Read _, [] ->
-        box_line buf cols
-          (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
-      | Masc_tui_agenda.Read _, goal_ids ->
-        List.iteri
-          (fun index goal_id ->
-            let label = if index = 0 then "Goal" else "" in
-            box_line buf cols
-              (Printf.sprintf "  %-11s %s  %s" label
-                 (fit_width goal_id 28)
-                 (Ansi.dim ^ Link.reference Goal goal_id ^ Ansi.reset)))
-          goal_ids));
+  (match task_goal_reading state ~task_id:task.id with
+   | Masc_tui_agenda.Not_read ->
+     box_line buf cols (Ansi.dim ^ "  Goal        links not read" ^ Ansi.reset)
+   | Read_failed _ ->
+     box_line buf cols (Ansi.dim ^ "  Goal        links unavailable" ^ Ansi.reset)
+   | Read [] ->
+     box_line buf cols (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
+   | Read goal_ids ->
+     List.iteri
+       (fun index goal_id ->
+         let label = if index = 0 then "Goal" else "" in
+         box_line buf cols
+           (Printf.sprintf "  %-11s %s  %s" label
+              (fit_width goal_id 28)
+              (Ansi.dim ^ Link.reference Goal goal_id ^ Ansi.reset)))
+       goal_ids);
   (* Each status carries its own timestamps and actors; one exhaustive match
      keeps the row and the status from disagreeing about who did what. The
      note lines stay counted so the body budget below shrinks with them --
@@ -658,9 +648,12 @@ let render_work_tasks (state : state) =
                day.d_completed) flow.daily in
            c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
                      (List.length flow.daily) (Chart.sparkline ~min:0 completed)));
-      (match Terminal_text.optional_single_line state.tasks_error with
-       | None -> ()
-       | Some reason -> c.push (" Coverage: " ^ reason));
+      let link_error = match state.goal_task_links with
+        | Goal_links_read_failed reason -> Some reason
+        | Goal_links_not_read | Goal_links_read _ -> None in
+      (match List.filter_map Terminal_text.optional_single_line [state.tasks_error; link_error] with
+       | [] -> ()
+       | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
       c.push "";
       let room = max 0 (budget - 4) in
       if rows = [] && Option.is_some state.task_flow then
@@ -2323,9 +2316,8 @@ let planning_detail_pane (state : state)
   (match state.goal_action_error with
    | Some err ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  Error: "
-         ^ fit_width (Terminal_text.single_line err) (cols - 12)
-         ^ Ansi.reset)
+         (row_with_field ~cols ~lead:((Theme.bad ()) ^ "  Error: ")
+            ~field:(Terminal_text.single_line err) ~tail:Ansi.reset)
    | None -> ());
   box_divider buf cols;
 
@@ -2388,10 +2380,14 @@ let planning_detail_pane (state : state)
   (match linked_tasks with
    | [] ->
      let note =
-       match local_rows_page state ~error:state.tasks_error with
-       | Page_empty -> "  (none)"
-       | Page_unread -> page_unread_note
-       | Page_failed -> page_failed_note
+       match state.task_reading with
+       | Masc_tui_overview_tasks.Rows_unavailable _ -> page_failed_note
+       | Rows_unread -> page_unread_note
+       | Rows_read _ ->
+           (match state.goal_task_links with
+            | Goal_links_not_read -> "  (links not read)"
+            | Goal_links_read_failed _ -> "  (links unavailable)"
+            | Goal_links_read _ -> "  (none)")
      in
      box_line buf cols (Ansi.dim ^ "  Open tasks" ^ note ^ Ansi.reset)
    | _ ->
@@ -8323,8 +8319,9 @@ let harness_ledger_lines ~cols snapshot =
             [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
                 Ansi.dim Ansi.reset calibration.hcal_total
                 calibration.hcal_approve calibration.hcal_reject evaluator
-            ; Printf.sprintf "  %sgate%s    %s" Ansi.dim Ansi.reset
-                (fit_width gates (max 8 (cols - 12)))
+            ; row_with_field ~cols
+                ~lead:(Printf.sprintf "  %sgate%s    " Ansi.dim Ansi.reset)
+                ~field:gates ~tail:""
             ; (if calibration.hcal_labeled > 0 then
                  Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
                    calibration.hcal_labeled
@@ -8550,41 +8547,32 @@ let render_harness_list (state : state) =
    walked, so a verdict said "pass" without saying what it was passing
    towards. *)
 let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
-  let goal_ids =
-    match
-      List.find_opt
-        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
-        state.tasks
-    with
-    | Some row -> row.goal_ids
-    | None -> []
-  in
   let goal_of id =
     Option.bind state.planning (fun snapshot ->
       List.find_opt
         (fun (goal : Tui_decode.planning_goal) -> String.equal goal.pg_id id)
         snapshot.Tui_decode.pl_goals)
   in
-  match state.task_goal_links, goal_ids with
-  | Masc_tui_agenda.Not_read, _ ->
-      [ Ansi.dim, "  Towards      membership unknown: goal links not read" ]
-  | Masc_tui_agenda.Read_failed reason, _ ->
-      [ Ansi.dim, "  Towards      membership unknown: " ^ Terminal_text.single_line reason ]
-  | Masc_tui_agenda.Read _, [] ->
+  match task_goal_reading state ~task_id:verdict.hv_task_id with
+  | Masc_tui_agenda.Not_read ->
+    [ Ansi.dim, "  Towards      goal links not read" ]
+  | Read_failed _ ->
+    [ Ansi.dim, "  Towards      goal links unavailable" ]
+  | Read [] ->
     (* Two different silences, told apart. A task this screen has never seen
        (the backlog has not loaded, or the verdict judged something already
        archived) is not the same as a task that serves no goal, and drawing
        nothing for both leaves the reader unable to tell which. *)
     let known_task =
       List.exists
-        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
-        state.tasks
+        (fun (row : Masc_domain.task) -> String.equal row.id verdict.hv_task_id)
+        state.tasks_domain
     in
     if known_task then
       [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
     else
       [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
-  | Masc_tui_agenda.Read _, goal_ids ->
+  | Read goal_ids ->
     (Ansi.bold, "  TOWARDS")
     :: List.concat_map
          (fun id ->

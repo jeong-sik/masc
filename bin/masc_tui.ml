@@ -7221,8 +7221,8 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
     state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
-    append_chat_history state request Message_status
-      "Requesting priority for this message; waiting for server confirmation";
+    state.keeper_run_next_receipts <- List.filter (fun (old, _) ->
+      not (Keeper_chat.same_request_identity old request)) state.keeper_run_next_receipts;
     let priority_predecessors =
       if automatic then
         let rec earlier reversed = function
@@ -7529,6 +7529,8 @@ let inflight_for state keeper_name =
 ;;
 
 let drop_inflight state request =
+  state.keeper_run_next_receipts <- List.filter (fun (received, _) ->
+    not (Keeper_chat.same_request_identity received request)) state.keeper_run_next_receipts;
   state.keeper_run_next_pending <- List.filter
     (fun pending -> not (Keeper_chat.same_request_identity pending request))
     state.keeper_run_next_pending;
@@ -13230,6 +13232,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             {view with loading=false;installer=Some installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
   | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
+      Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
+        ~generation ~outcome:(match result with
+          | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
       let current_control = match control_generation with
         | Some generation -> finish_keeper_chat_control state keeper_name ~generation
         | None -> false in
@@ -15526,16 +15531,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_run_next_done (request, result) ->
-      if List.exists (Keeper_chat.same_request_identity request)
-           state.keeper_run_next_inflight then begin
-        state.keeper_run_next_inflight <- List.filter
-          (fun inflight -> not (Keeper_chat.same_request_identity inflight request))
-          state.keeper_run_next_inflight;
-        append_chat_history state request Message_status
-          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail);
-        dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name
-      end
+      (match settle_keeper_run_next state request result with
+       | Run_next_untracked -> ()
+       | (Run_next_received | Run_next_retired) as completion ->
+           (match completion, result with
+            | Run_next_received, Error detail ->
+                append_chat_history state request Message_error
+                  ("다음 순서 확인 불가: " ^ detail)
+            | (Run_next_untracked | Run_next_retired), _
+            | Run_next_received, Ok _ -> ());
+           dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name)
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
+      settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
+        | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
+        | Ok (Not_signalled _) | Error _ -> Priority_unconfirmed);
       let current = keeper_chat_control_result_current state keeper_name ~generation in
       if finish_keeper_chat_control state keeper_name ~generation then launch_keeper_turns_load state ~mailbox;
       if current then state.keeper_observed_interrupts <- List.map (fun item ->
@@ -15548,6 +15557,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
   | Keeper_chat_interrupt_done (request, generation, result) ->
       let keeper_name = request.Keeper_chat.keeper_name in
+      settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
+        | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
+        | Ok (Not_signalled _) | Error _ -> Priority_unconfirmed);
       let current = keeper_chat_control_result_current state keeper_name ~generation in
       if finish_keeper_chat_control state keeper_name ~generation then
         launch_keeper_turns_load state ~mailbox;

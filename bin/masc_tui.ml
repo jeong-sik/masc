@@ -4274,15 +4274,19 @@ let visible_item_revision state =
       let balance = match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
         | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
         | Unobserved | Invalid _ | Absent -> None in
-      Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance)
+      Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance,
+        Option.map (fun identity ->
+          (Masc_tui_types.canonical_path identity.Tui_decode.sid_base_path,
+           Masc_tui_types.canonical_path identity.sid_masc_root,
+           identity.sid_state_ready)) state.server_identity)
   | _ -> None
 
 let refresh_changed_keeper_items state ~mailbox previous =
   let current = visible_item_revision state in
   if current <> previous then
     match current with
-    | Some (keeper_name, Ok _, _) -> launch_keeper_items state ~mailbox keeper_name
-    | Some (_, Error detail, _) ->
+    | Some (keeper_name, Ok _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (_, Error detail, _, _) ->
         withdraw_keeper_items state; state.item_account_error <- Some detail
     | None -> ()
 

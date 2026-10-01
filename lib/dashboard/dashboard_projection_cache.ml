@@ -37,11 +37,55 @@ let with_snapshot_publication_generation f =
     f (Atomic.get snapshot_invalidation_generation_ref))
 ;;
 
-let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
+(* Order read admission, independently of metadata cache invalidation. A slow
+   older read keeps its older identity even when it finishes after a new read.
+   Equal immutable observations reuse their identity, preserving encoded-cache
+   reuse when neither ledger state nor clock-derived balances changed. *)
+let candle_read_sequence = Atomic.make 0
+let candle_observation_mu = Stdlib.Mutex.create ()
+let candle_observations = Hashtbl.create 4
+
+let candle_observation_sequence ~base_path ~request_sequence observation =
+  let previous = Stdlib.Mutex.protect candle_observation_mu (fun () ->
+    Hashtbl.find_opt candle_observations base_path) in
+  (* Comparing immutable ledger observations may traverse their event history.
+     Do that outside the short publication lock, then confirm the same memo. *)
+  let unchanged_request = match previous with
+    | Some (latest_request, _, previous)
+      when request_sequence = latest_request + 1 && observation = previous ->
+      Some latest_request
+    | Some _ | None -> None in
+  Stdlib.Mutex.protect candle_observation_mu (fun () ->
+    match Hashtbl.find_opt candle_observations base_path with
+    | Some (latest_request, sequence, _) when request_sequence > latest_request ->
+      (* A gap may hide an older in-flight read of different state. Reusing an
+         earlier identity would let that read outrank this newer observation. *)
+      let sequence =
+        if unchanged_request = Some latest_request then sequence else request_sequence in
+      Hashtbl.replace candle_observations base_path (request_sequence, sequence, observation);
+      sequence
+    | Some _ -> request_sequence
+    | None ->
+      Hashtbl.add candle_observations base_path (request_sequence, request_sequence, observation);
+      request_sequence)
+
+let with_current_keeper_observations_using ~read ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
      Equipment, balances and supply share one fresh ledger view per response. *)
-  let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+  let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
+  let candle = read () in
+  let observation_sequence = candle_observation_sequence
+    ~base_path:config.base_path ~request_sequence candle in
   let equipment = Candle_observe.equipment candle in
+  let revisions = Hashtbl.create 16 in
+  let account_revision keeper =
+    match Hashtbl.find_opt revisions keeper with
+    | Some revision -> revision
+    | None ->
+      let revision = Candle_observe.account_revision candle ~keeper in
+      Hashtbl.add revisions keeper revision;
+      revision
+  in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
   let set key value fields =
     if List.mem_assoc key fields then
@@ -59,7 +103,7 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
         | Some keeper -> Candle_observe.balance candle ~keeper
         | None -> None in
       let account_revision = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | Some keeper -> account_revision keeper
         | None -> None in
       `Assoc (fields |> set "portrait" value
         |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)
@@ -78,10 +122,20 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
           | "keepers", `List rows -> "keepers", `List (List.map row rows)
           | field -> field) fields)
       | field -> field) fields in
+    let projected = set "candle_observation_sequence" (`Int observation_sequence) projected in
     (match List.assoc_opt "keepers" fields with
      | Some (`Assoc _) -> `Assoc projected
      | _ -> `Assoc (set "candle" summary projected))
   | json -> json
+
+let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
+  with_current_keeper_observations_using
+    ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
+    ~config snapshot
+
+module For_test = struct
+  let with_current_keeper_observations = with_current_keeper_observations_using
+end
 
 let get_or_compute_snapshot_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in

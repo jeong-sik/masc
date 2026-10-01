@@ -84,7 +84,7 @@ describe('Candle existing screen consumers', () => {
     fetchDashboardExecution.mockRejectedValueOnce(new Error('current endpoint failed'))
     await act(async () => { await refreshExecution({ immediate: true }) })
     expect(screen.getByTestId('candle-summary').textContent).toContain('current endpoint failed')
-    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('current endpoint failed')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('Workspace authority is being verified')
     expect(keepers.value[0]?.name).toBe('alpha')
     fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
     await act(async () => { await refreshExecution({ immediate: true }) })

@@ -23,7 +23,8 @@ def run(executable):
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         h.palette_go(process, master_fd, output, b"go Usage", b"MASC Usage")
-        h.wait_for_output(process, master_fd, output, b"usage-layout-keeper", start=0, timeout=10)
+        h.send_and_wait(process, master_fd, output, b"v", b"Quota scope trend")
+        h.send_and_wait(process, master_fd, output, b"v", b"usage-layout-keeper")
         for width in (80, 60, 120):
             frame = h.resize_and_wait(process, master_fd, output, rows=50, columns=width,
                                       needle=b"usage-layout-keeper", controls=(h.FULL_REDRAW,),
@@ -31,8 +32,8 @@ def run(executable):
             # Read this resize's completed frame so an earlier, wider screen
             # cannot supply coverage that disappeared at the current width.
             screen = h.unwrapped(h.screen_text(frame))
-            for evidence in (b"tokens 9876 (9 reported, 3 missing)",
-                             b"cost $0.1234 (8 reported, 4 missing)",
+            for evidence in (b"Tokens 9876 \xc2\xb7 9 reported, 3 missing",
+                             b"Cost $0.1234 \xc2\xb7 8 reported, 4 missing",
                              b"7 malformed rows"):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")

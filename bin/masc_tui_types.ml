@@ -4714,6 +4714,10 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type usage_section = Usage_plan | Usage_trend | Usage_keepers
+let next_usage_section = function
+  | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
+
 type keeper_composer_draft = {
   kcd_text : string;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
@@ -4784,6 +4788,7 @@ type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
+  mutable usage_section: usage_section;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -7718,6 +7723,7 @@ let create_state
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
+  usage_section = Usage_plan;
   agents = [];
   tasks = [];
   tasks_domain = [];

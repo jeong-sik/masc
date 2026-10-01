@@ -21550,6 +21550,9 @@ and is loaded on demand through keeper_skill.
             | Home_create_keeper -> handle_keeper_create ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <- next_usage_section state.usage_section;
+            state.metrics_scroll <- 0
         | Some ("p" | "P") when state.view = Metrics ->
             state.usage_telemetry_open <- not state.usage_telemetry_open;
             state.metrics_scroll <- 0
@@ -21562,6 +21565,7 @@ and is loaded on demand through keeper_skill.
                | Some "3" | None | Some _ -> Section_tools)
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <- Usage_trend;
             state.provider_history_days <-
               (match state.provider_history_days with
                | 1 -> 7

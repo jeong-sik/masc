@@ -85,6 +85,27 @@ def name_contains(text: bytes, name: bytes) -> bool:
                for line in text.splitlines() if b"Name:" in line)
 
 
+def help_candle_diagnostic(text: bytes, expected: str) -> bool:
+    # Help has two columns. Read the diagnostic's consecutive left-column
+    # rows, excluding Dashboard help on the right of the column boundary.
+    rows = text.decode("utf-8", "replace").splitlines()
+    boundary = next((row.index("◆ Dashboard") for row in rows
+                     if "◆ Dashboard" in row), None)
+    if boundary is None:
+        return False
+    left = [row[:boundary].strip(" │") for row in rows]
+    for index, row in enumerate(left):
+        if row != "Candle details":
+            continue
+        parts = []
+        for continuation in left[index + 1:]:
+            if not continuation:
+                break
+            parts.append(continuation)
+        return " ".join(" ".join(part.split()) for part in parts) == expected
+    return False
+
+
 class CurrencyRoster:
     def __init__(self, original):
         self.original = original
@@ -306,9 +327,9 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             (captures / "authority-identity-error-help.pty").write_bytes(output)
         # Unavailable retains its diagnostic in Help without restoring amounts.
         assert no_currency(help_frame), help_frame
-        assert b"Candle details" in help_frame, help_frame
-        assert (b"Candle unavailable: live keeper status unreadable: "
-                b"Server workspace identity is unavailable") in help_frame, help_frame
+        assert help_candle_diagnostic(help_frame,
+            "Candle unavailable: live keeper status unreadable: "
+            "Server workspace identity is unavailable"), help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")

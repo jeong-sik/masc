@@ -203,8 +203,6 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
-(** One verdict the harness recorded: which gate ran on which task, what it
-    decided, and which evaluator decided it. *)
 val decode_memory_health_snapshot :
   Yojson.Safe.t -> (memory_health_snapshot, string) result
 (** Decode the fleet memory-health snapshot served at

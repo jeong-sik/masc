@@ -120,7 +120,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}
     ${account ? html`
       <div class="flex flex-wrap items-center gap-5 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
-        <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} previewItem=${previewItem} sizePx=${112} fallback=${previewItem
+        <${KeeperPortrait} name=${keeper.name} accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} previewItem=${previewItem} sizePx=${112} fallback=${previewItem
           ? html`<p role="alert" class="m-0 text-xs text-[var(--color-fg-muted)]">미리보기 그림을 불러오지 못했습니다. 현재 착용 보기로 돌아가 다시 선택해주세요.</p>`
           : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
         <div>

@@ -19,7 +19,7 @@ vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 import { KeeperItemsPanel } from './keeper-items-panel'
 import {
   executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration,
-  resetExecutionSnapshotGeneration, serverStatus,
+  resetExecutionSnapshotGeneration, serverStatus, keeperRosterObservationRevision,
 } from '../store'
 let refreshExecutionActual: typeof import('../store')['refreshExecution']
 beforeEach(async () => { refreshExecutionActual = (await vi.importActual<typeof import('../store')>('../store')).refreshExecution })
@@ -40,12 +40,12 @@ let fixtureEpoch = ''
 let fixtureEpochSequence = 0
 let fixtureGeneration = 0
 let fixtureConnectionGeneration = 0
-function observeWorkspace(root: unknown, includeRoot = true) {
+function observeWorkspace(root: unknown, includeRoot = true, project = 'same-project') {
   expect(hydrateExecutionSnapshot({
     execution_publication_epoch: fixtureEpoch,
     execution_publication_generation: ++fixtureGeneration,
     // Deliberately identical project label across distinct canonical roots.
-    status: { project: 'same-project', ...(includeRoot ? { workspace_root: root } : {}) },
+    status: { project, ...(includeRoot ? { workspace_root: root } : {}) },
   } as Parameters<typeof hydrateExecutionSnapshot>[0], {
     requestGeneration: fixtureConnectionGeneration,
   })).toBe(true)
@@ -611,4 +611,49 @@ describe('Keeper Item tab', () => {
     expect(screen.queryByText(/\/api\//)).toBeNull()
   })
 
+  it('withdraws a held Item read when only the project revision changes', async () => {
+    const oldRead = pendingAccount()
+    const newRead = pendingAccount()
+    fetchKeeperItems.mockReturnValueOnce(oldRead.promise).mockReturnValueOnce(newRead.promise)
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(1))
+    const authority = executionWorkspaceAuthority.peek()
+    await act(async () => { observeWorkspace('/fixture/workspace-a', true, 'other-project') })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    await act(async () => { oldRead.resolve(account(['crown'], '900')) })
+    expect(screen.queryByText('0.900 Candle')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Item 계정 불러오는 중…')
+    await act(async () => { newRead.resolve(account(['crown', 'beanie'], '300')) })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
+  })
+  it('retries a settled failure on the next unchanged roster observation without aborting a pending read', async () => {
+    let finish!: (value: unknown) => void
+    fetchKeeperItems.mockRejectedValueOnce(new Error('temporary disconnect'))
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText(/temporary disconnect/)).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+    await act(async () => { keeperRosterObservationRevision.value += 1 })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    const signal = fetchKeeperItems.mock.calls[1]?.[2]
+    if (!(signal instanceof AbortSignal)) throw new Error("Expected pending Item read signal")
+    await act(async () => { keeperRosterObservationRevision.value += 1 })
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+    expect(signal.aborted).toBe(false)
+    await act(async () => { finish({ status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog }) })
+    expect(await screen.findByText('0.800 Candle')).toBeTruthy()
+  })
+  it('rejects an intermediate account revision even when the roster returns to its original revision', async () => {
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', account_revision: 'b'.repeat(64), keeper: 'rondo', balance_milli: '300', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText(/Item 계정 관측이 변경되었습니다/)).toBeTruthy()
+    expect(screen.queryByText('0.300 Candle')).toBeNull()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+    await act(async () => { keeperRosterObservationRevision.value += 1 })
+    expect(await screen.findByText('0.800 Candle')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+  })
 })

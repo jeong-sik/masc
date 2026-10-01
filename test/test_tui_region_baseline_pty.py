@@ -100,6 +100,44 @@ CONFIG_LOADED = b"first-value = 1"
 
 
 
+def assert_board_contract(rows, *, left, right, selected_title, where):
+    """Check rendered relationships rather than an old map of row numbers."""
+    footer = region.TERMINAL_ROWS - COMPOSER_ROWS["board"]
+    body = {row: region.body_row(rows, row, left=left, right=right)
+            for row in range(2, footer)}
+    titles = [row for row, text in body.items() if "MASC Board" in text]
+    previews = [row for row, text in body.items() if text.startswith("Selected post · ")]
+    headers = [row for row, text in body.items() if "TITLE" in text.split()]
+    if len(titles) != 1 or len(previews) != 1 or len(headers) != 1:
+        raise AssertionError(f"{where}: Board title, selected preview or table header missing: {body!r}")
+    title, preview, header = titles[0], previews[0], headers[0]
+    if not title < preview < header or body[preview] != "Selected post · " + selected_title:
+        raise AssertionError(f"{where}: selected title does not precede its table: {body!r}")
+    rules = [row for row in body if region.is_rule(
+        region.cells(rows[row], left, right))]
+    if not any(title < row < preview for row in rules) or not any(
+            preview < row < header for row in rules):
+        raise AssertionError(f"{where}: Board title/preview/table divisions lost: {body!r}")
+    posts = []
+    for identity, text in (("post-r1", "Retry"), ("post-r2", "Rollout"),
+                           ("post-r3", "Prose"), ("post-r4", "Hostile")):
+        matching = [row for row, value in body.items()
+                    if row > header and text in value.split()]
+        if len(matching) != 1 or not header < matching[0] < footer - 1:
+            raise AssertionError(f"{where}: fixture post {identity} lost from table: {body!r}")
+        if "ID" in body[header].split() and identity not in body[matching[0]].split():
+            raise AssertionError(f"{where}: shown ID no longer names {text}: {body!r}")
+        posts.extend(matching)
+    if posts != sorted(posts) or not any(header < row < posts[0] for row in rules):
+        raise AssertionError(f"{where}: table divider or post ordering lost: {body!r}")
+    # Chrome_screen's lower edge is an empty row (box_bottom), followed by
+    # hints and the composer. Keep that boundary even when content rows move.
+    if body[footer - 1] or any(text.startswith(region.BOX_BOTTOM_LEFT) for text in body.values()):
+        raise AssertionError(f"{where}: Board lower edge was overwritten or replaced: {body!r}")
+    if body[2]:
+        raise AssertionError(f"{where}: full-screen Board top edge was overwritten: {body!r}")
+
+
 class Counted:
     """A fixture that counts the requests it answers."""
 
@@ -125,7 +163,7 @@ def observer_stream():
         time.sleep(OBSERVER_KEEPALIVE_SECONDS)
 
 
-def fixtures() -> region.ServedFixtures:
+def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     """Every request the TUI makes on its way to these screens, answered.
 
     Where nothing is waiting -- no approvals, asks, schedules, pull requests,
@@ -138,6 +176,10 @@ def fixtures() -> region.ServedFixtures:
     # Keep Board's four posts while restoring the observed Keepers and their
     # portraits over Board's empty Overview roster.
     served[roster_path] = keeper_roster
+    if absent_live_roster:
+        status, payload = keeper_roster
+        served[roster_path] = (status, {**payload, "count": 0, "total": 0,
+                                      "truncated": False, "keepers": []})
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
@@ -198,10 +240,10 @@ def fixtures() -> region.ServedFixtures:
     return region.ServedFixtures(served)
 
 
-def interaction(served: region.ServedFixtures):
+def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
-    def take(process, fd, output, screen: str, columns: int) -> None:
+    def take(process, fd, output, screen: str, columns: int, *, selected_post="Retry") -> None:
         region.settle(process, fd, output)
         rows = region.whole_screen(output)
         where = f"{screen} at {columns}"
@@ -217,21 +259,43 @@ def interaction(served: region.ServedFixtures):
         measured[(screen, columns)] = region.measure(
             rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
             left=left, right=right)
+        if screen == "board":
+            assert_board_contract(rows, left=left, right=right,
+                selected_title=selected_post, where=where)
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
         if screen == "keeper-detail-roster":
             measured[(screen, columns)]["body_pane"] = region.measure_pane(
                 rows, left=left, right=right)
+        if screen == "keepers":
+            health_rows = [row for row in rows
+                           if region.body_row(rows, row, left=left, right=right).startswith("Health ")]
+            if health_rows != [5]:
+                raise AssertionError(f"{where}: Health must have its own row 5: {health_rows!r}")
+            health = region.body_row(rows, 5, left=left, right=right)
+            if health != "Health 1 healthy · 1 idle":
+                raise AssertionError(f"{where}: Health lost the exact fixture reading: {health!r}")
+            title = region.body_row(rows, 3, left=left, right=right)
+            if any(text in title for text in ("Health", "1 healthy", "1 idle")):
+                raise AssertionError(f"{where}: Health was repeated in the title")
+            measured[(screen, columns)]["health_row"] = 5
         if screen in ("keeper-detail", "keeper-detail-roster"):
             if not measured[(screen, columns)]["windows"]:
                 raise AssertionError(f"{where}: overflowing Info pane has no scroll-window indicator")
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
-            for text in ("Identity", "Name: alpha", "Paused: no", "Current failure",
-                         "Board attention", "Gate"):
+            for text in ("Identity", "Name: alpha", "Paused: no",
+                         "Current failure", "Board attention", "Gate"):
                 if text not in body:
                     raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
+            unavailable = "Portrait: unavailable: absent from live roster"
+            if absent_live_roster:
+                if unavailable not in body:
+                    raise AssertionError(f"{where}: Info omitted {unavailable!r}: {body!r}")
+            else:
+                if unavailable in body or not any(glyph in body for glyph in ("▀", "▄")):
+                    raise AssertionError(f"{where}: live equipment lost its portrait: {body!r}")
         if screen == "config":
             # The body ends on a source line whose number leads the row. A
             # height one off shows a line more or fewer, or the frame cuts.
@@ -261,12 +325,49 @@ def interaction(served: region.ServedFixtures):
             raise AssertionError("the input sentinel was not erased")
 
     def interact(process, fd, _slave, output, _base):
+        if absent_live_roster:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
+            h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                              columns=157, needle=INFO_TAB, controls=(h.FULL_REDRAW,))
+            h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+            sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
+            region.print_measured(measured)
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+            return
         h.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
         board = h.screen_header(b"MASC Board", b" (4)")
         h.palette_go(process, fd, output, b"go board", board)
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
+        os.write(fd, b"j")
+        board_columns = WIDTHS[-1]
+        board_right = (board_columns - h.ACTING_PANE_NARROW_COLUMNS
+                       if board_columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else board_columns)
+        def selected(title):
+            drawn = h.screen_rows(bytes(output))
+            return any(region.body_row(drawn, row, left=0, right=board_right)
+                == "Selected post · " + title for row in drawn)
+        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Rollout"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("moving Board selection did not update the selected title")
+        take(process, fd, output, "board", WIDTHS[-1], selected_post="Rollout")
+        os.write(fd, b"\r")
+        if not h.wait_for_fixture_state(process, fd, output,
+                lambda: any(b"MASC Board" in text and b"post-r2" in text
+                    for text in h.screen_rows(bytes(output)).values()),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("Enter did not open the post named by Board selection")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Selected post")
+        os.write(fd, b"k")
+        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Retry"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("returning Board selection did not restore its title")
+        take(process, fd, output, "board", WIDTHS[-1])
 
         h.tab_until(process, fd, output, b"MASC System")
         sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
@@ -326,6 +427,9 @@ def interaction(served: region.ServedFixtures):
         if FILE_CHANGE_READS.count == reads_before:
             raise AssertionError(f"the unfold at row {gate_row} read no file changes")
 
+        board_widths = {width for (screen, width) in measured if screen == "board"}
+        if board_widths != set(WIDTHS):
+            raise AssertionError(f"Board functional checks did not cover every width: {board_widths!r}")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 
@@ -339,5 +443,12 @@ if __name__ == "__main__":
         description="Region baseline: Board, Config, keeper detail and chat",
         interact=interaction(served),
         http_fixtures=served,
+    )
+    absent = fixtures(absent_live_roster=True)
+    h.run_terminal_scenario(
+        os.path.abspath(sys.argv[1]),
+        description="Region baseline: Info refuses equipment absent from live roster",
+        interact=interaction(absent, absent_live_roster=True),
+        http_fixtures=absent,
     )
     print("region baseline: PASS")

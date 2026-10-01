@@ -11,10 +11,10 @@ import {
 } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
-import { createPost } from '../../api'
-import { requestBoardContextInference } from '../../api/board'
+import { createPost, fetchBoardPost } from '../../api'
+import { requestBoardContextInference, voteComment } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailFocusedCommentId, detailPost, detailComments, detailCommentPage, detailLoading } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -61,6 +61,7 @@ vi.mock('../../api/actions', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  voteComment: vi.fn().mockResolvedValue(undefined),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
     supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
@@ -604,6 +605,43 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
+  })
+
+  it('clears focused-route ancestry when returning to a retained compact thread', async () => {
+    const post = makePost({ id: 'retained-thread', title: 'Retained thread', author: 'keeper', post_kind: 'direct' })
+    const reply = { id: 'retained-reply', post_id: post.id, parent_id: 'older-parent', author: 'keeper', content: 'Current reply', created_at: post.created_at }
+    const parent = { ...reply, id: 'older-parent', parent_id: null, content: 'Older parent' }
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    detailPostId.value = post.id
+    detailPost.value = post
+    detailFocusedCommentId.value = reply.id
+    detailComments.value = [parent, reply]
+    detailCommentPage.value = { offset: 0, total: 21 }
+    detailLoading.value = false
+    route.value = { tab: 'board', params: { post: post.id, comment: reply.id } } as any
+    vi.mocked(fetchBoardPost).mockReset().mockResolvedValue({
+      ...post, comments: [reply], commentPage: { offset: 20, total: 21 },
+    } as any)
+
+    const view = render(h(BoardSurface, null))
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('← 게시판으로 돌아가기'))
+    route.value = { tab: 'board', params: {} } as any
+    // The router stub is plain data; remount the surface as the focused detail leaves.
+    view.unmount()
+    render(h(BoardSurface, null))
+
+    await waitFor(() => expect(detailFocusedCommentId.value).toBeNull())
+    await waitFor(() => expect(detailLoading.value).toBe(false))
+    expect(selectedBoardPostId.value).toBe(post.id)
+    const compact = screen.getByTestId('bd-thread-detail')
+    fireEvent.click(within(compact).getByRole('button', { name: '댓글 추천' }))
+    await waitFor(() => expect(voteComment).toHaveBeenCalledWith(reply.id, 'up'))
+    await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([[post.id], [post.id]])
+    expect(detailCommentPage.value).toEqual({ offset: 20, total: 21 })
+    expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
   })
 
   it('renders sub-board rail and filters posts by sub-board', () => {

@@ -94,16 +94,22 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Invalid_response (answer, detail) -> ["status",`String "invalid_response";
           "error",`String detail;"response",S.create_message_result_to_yojson answer]
       | Invocation_exception detail -> ["status",`String "outcome_unknown";"error",`String detail]) in
-    let* evidence = match retain fields with
-      | Ok evidence -> Ok evidence
-      | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
-          "error",`String detail;"request",Types.evidence_to_json request])) in
-    let references = `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence] in
-    let* () = match save (Finished evidence) with
-      | Ok () -> Ok ()
-      | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
-          "error",`String detail;"request",Types.evidence_to_json request;
-          "evidence",references])) in
+    (* Once invocation has returned, cancellation must not orphan a known
+       result between its immutable blob and the durable recovery index. *)
+    let retained = Eio.Cancel.protect (fun () ->
+      let* evidence = match retain fields with
+        | Ok evidence -> Ok evidence
+        | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
+            "error",`String detail;"request",Types.evidence_to_json request])) in
+      let references = `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence] in
+      let* () = match save (Finished evidence) with
+        | Ok () -> Ok ()
+        | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
+            "error",`String detail;"request",Types.evidence_to_json request;
+            "evidence",references])) in
+      Ok references) in
+    Eio.Fiber.check ();
+    let* references = retained in
     match outcome with
     | Answer answer ->
         let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in

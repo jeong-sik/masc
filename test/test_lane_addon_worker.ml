@@ -638,7 +638,52 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check bool "model callback adds no container environment injection" false (List.mem "--env" argv);
   unwrap (Worker.stop worker))
 
+exception Cancel_after_model
+let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "cancelled-model-evidence") in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let params = match S.create_message_params_of_yojson (`Assoc [
+    "messages",`List [`Assoc ["role",`String "user";"content",`Assoc [
+      "type",`String "text";"text",`String "retained input"]]];
+    "maxTokens",`Int 8]) with Ok value -> value | Error detail -> fail detail in
+  List.iter (fun (instance_id,answer) ->
+    let cancelled = ref false in
+    (try Eio.Cancel.sub (fun cc ->
+      let invoke ~route:_ ~request:_ _ =
+        Eio.Cancel.cancel cc Cancel_after_model;
+        answer in
+      let broker = match Sampling.create ~store ~package ~instance_id ~route:"fixture-route" ~invoke () with
+        | Ok value -> value | Error detail -> fail detail in
+      let handler = match Sampling.for_worker broker ~package ~instance_id with
+        | Ok value -> value | Error detail -> fail detail in
+      ignore (handler params);
+      fail "known sampling completion swallowed cancellation")
+     with Eio.Cancel.Cancelled Cancel_after_model -> cancelled := true);
+    check bool "original cancellation is re-raised after retention" true !cancelled;
+    let index = match Store.sampling_requests store ~instance_id with
+      | Ok [value] -> value | Ok _ -> fail "missing exact sampling request" | Error detail -> fail detail in
+    check string "cancelled call still has a finished recovery index" "finished"
+      Yojson.Safe.Util.(index |> member "state" |> to_string);
+    let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" index) with
+      | Ok value -> value | Error detail -> fail detail in
+    let outcome = match Store.read_blob store reference with
+      | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+    check bool "retained outcome links the exact original request" true
+      (Yojson.Safe.Util.member "request" outcome = Yojson.Safe.Util.member "request" index);
+    match answer with
+    | Ok expected -> check bool "exact returned answer remains readable" true
+        (Yojson.Safe.Util.member "response" outcome = S.create_message_result_to_yojson expected)
+    | Error detail -> check string "known host refusal remains readable" detail
+        Yojson.Safe.Util.(outcome |> member "error" |> to_string))
+    ["answered",Ok {S.role=Assistant;content=Text {type_="text";text="exact answer"};
+       model="actual-model";stop_reason=Some "endTurn";_meta=None};
+     "host-error",Error "actual host refusal"])
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;

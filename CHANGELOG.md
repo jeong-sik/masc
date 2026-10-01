@@ -9,6 +9,7 @@
 
 
 
+
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
@@ -52,6 +53,7 @@
 - Start the MASC server and every keeper of the arm for each arm before a Terminal-Bench run, so a release that cannot boot a rendered config or bring its keepers up stops the run before the dataset download (#40509).
 - Batch Jev questions for newly pushed Board attention candidates; retain durable partition ownership, owner delivery and worker fallback. (#40521)
 - Show Candle wallet balances and issued, burned and circulating supply in the TUI and dashboard, using exact decimal amounts from the authoritative ledger. (#40024)
+- Edit model context windows from runtime settings with direct token input and 500K / 1M presets; invalid drafts block saving. (#40552)
 
 ### Changed
 
@@ -501,6 +503,30 @@
 - Use the shared admitted handoff through HTTP, MCP, Keeper descriptor and Keeper fallback dispatch, while publishing queued Board notices after the Auth lock is released. #40577
 - Source TUI restarts now preserve the requested workspace, server port and refresh interval. The README explains how to rebuild and restart the TUI while checking its exit log. (#40570)
 - Keep delayed Automation and Identity responses attached to the Keeper and request that started them, preserving the selected Keeper's schedule reading, login links and notices when switching between Keepers. (#40146)
+- #40039 Keep the dashboard Item account current after free purchases and Candle price edits by publishing a revision of the authoritative balance, ownership and catalog with each Keeper observation.
+- #40039 Preserve short Dashboard summaries by fitting the complete Candle block only into spare rows; show its typed status in Health and full diagnostics and exact amounts in global Help. (#40039)
+- Use the Keepers navigation command in the account-login PTY fixture after Dashboard navigation changed. (#40039)
+- Check Candle short-screen summaries at the supported 15- and 16-row terminal sizes, and verify the compact resize guidance below the shared viewport floor (#40039).
+- Withdraw Candle observations at server authority changes, booting and failed refreshes, and reject delayed scoped rosters across A/B/A workspace returns. (#40039)
+- Withdraw Dashboard summary and Keeper wallet observations at unknown workspace, epoch invalidation, reconnect and current warm-up responses. (#40039)
+- #40114 Keep Candle and portrait observation readers out of the dashboard’s eager Effect schema dependency while preserving strict wire validation; reject trailing line terminators in monetary amounts and account revisions.
+- #40114 Show the Item request failure reason without exposing its internal HTTP endpoint in the account panel.
+- Dashboard Keeper Items follows the accepted workspace identity, withdraws previous accounts during workspace changes and reconnects, and admits only current account responses. (#40190)
+- Run the A/B/A workspace browser scenario with the existing Item browser CI
+  capture and record the published source files in its audit manifest. (#40190)
+- Dashboard Candle and Portrait observations share strict validation between the existing pure domains and lazy API schemas, preserve canonical account revisions, and retain immutable observations while rejecting missing roster rows. (#40241)
+- Resolve focused Board comments and every displayed reply's ancestors from one server snapshot, preserving loaded ranges across refresh and reconciling page changes before displaying new totals. (#40241)
+- Let failed full-history Board reads toggle back to the newest comment page. (#40241)
+- Read paginated TUI comment ancestors from the server context, refuse mixed revisions in full history, and reset ordinary Dashboard comments and subsequent requests when route focus is cleared (#40241).
+- Keep recently active reply threads visible, clear stale focus on ordinary reopen, and bind comment revisions to ordered IDs and parent links rather than votes (#40241).
+- Open ancestor-enriched TUI threads at the newest numeric-page reply and keep history mode stable while its refresh is in flight (#40241).
+- Dashboard Item wallets and catalog prices share Candle's canonical millicandle predicate, removing duplicated validation while preserving the existing accepted values, explicit zero prices and exact large amounts. (#40252)
+- Include the parent Candle account revision decoder repair so the Item amount change can generate the dashboard bundle. (#40252)
+- Point the Item account schema directly at the existing Candle domain amount predicate when composing the refreshed domain parent. (#40252)
+- #40466 Withdraw the Item account and accessory preview during execution warm-up, refuse old held replies, and reload the account after workspace recovery.
+- Distinguish configured context requests from same-turn client reports; use reported windows for occupancy and mark missing reports unmeasured. (#40554)
+- Link the chat queue wiring test against the TUI key library so its folded-turn expansion assertion compiles. #40589
+- Keep Candle payout eligibility, appraisal recovery and observation matches exhaustive over their closed domain variants so focused compilation does not fail on fragile catch-all patterns. (#40595)
 
 ### Performance
 
@@ -536,6 +562,10 @@
 - Add RFC board-attention-asks-jev-once-per-event: ask Jev once per Board event with one question per eligible keeper, move task verification off the shared GLM slots, and record the before and after measurements of the Jev confidence gate. #40450
 - Record in RFC board-attention-asks-jev-once-per-event that one Jev request carrying 21 to 24 keeper questions was accepted for 13 real events in 0.24 to 0.55 s. The measured purge-plan gap predates #40508, which now removes the Board attention ledgers when a keeper is purged. #40507
 - Describe Candle equipment events in the ledger, the keeper_candle_equip tool, and candle.toml configuration lifecycle invariants in the glossary (#40471).
+- Preserve Item frontend browser captures, preview failure/restoration behavior and the separately observed historical HTTP404 (missing route versus unknown Keeper not distinguished), including exact source provenance and verification limits. (#40461)
+- Verify the selected preview URL and hold the observed portrait response until restoration settles to the fixture badge fallback. (#40461)
+- Preserve relevant browser-source blobs, qualify unretained cold-run and installed-route claims, redact operator paths, and reset page scroll for future captures (#40461).
+- Retain the separately executed scroll-corrected Chromium captures and their exact scenario/component hashes, including the failed server-start attempt. (#40461)
 
 ### Internal
 
@@ -574,6 +604,17 @@
 - Verify the real Goal confirmation and payout worker path keeps one payment across pending reopen/drop, re-verification and worker restart; retain scoped integration evidence. (#40047)
 - Cover literal payment receipts through ledger recovery, balance projection and new-append refusal, including malformed rows that must reject the entire read. (#40066)
 - Add a manual macOS arm64 runtime probe with relocatable companions, source identity, dependency metadata, and artifact checksums. #40205
+- Separate terminal approval rows and per-source reading status from shared Types, with dedicated surface navigation and direct consumer interfaces (#40203).
+- Associate the extracted Home, Approvals and surface-navigation owners with their existing focused PTY suites (#40203).
+- Register Home decision, receipt, layout, viewport and Goal confirmation suites against the extracted Home implementation and interface (#40203).
+- Move approval queue, approval detail and question-reader rendering into a dedicated executable module with frame and viewport interfaces (#40211).
+- Declare the extracted renderer as a source input of the PTY approval-selection, detail, question and Home-to-Approvals scenarios so edited-source selection reaches their actual runnable owners. (#40211)
+- Track the Approvals renderer in the Dashboard operator-menu PTY and timestamp-zone source guard. (#40211)
+- Include the Approvals renderer in the body-budget source guard and declare every scanned renderer as a test input. (#40211)
+- Select the registered agenda navigation PTY suite when either extracted Approvals renderer source or interface changes. (#40211)
+- Run the execution warm-up browser scenario in manual Item capture, preserving its own manifest and current focused-test source receipt. (#40466)
+- Ignore delayed warm-up/error responses after a newer execution publication was accepted, preserving its Item account authority (#40466).
+- Verify that a superseded warm-up reply also preserves current Candle balance and does not schedule a stale retry. (#40466)
 
 ## [0.48.0] - 2026-09-29
 

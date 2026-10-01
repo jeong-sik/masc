@@ -753,7 +753,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1080,7 +1080,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; account_home = config.account_home
       ; isolated_home = None
       ; model = config.model
-      ; context_window = Runtime.max_context_of_runtime_id runtime_id
+      ; context_window
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
@@ -1399,16 +1399,18 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         in
         (match
        Runtime_codex_app_server.run_turn
-         ~handoff_requested:(fun () ->
+         ?await_handoff:(
            match Keeper_owner_registry.get ~base_path ~keeper_name with
-           | Error _ -> false
+           | Error _ -> None
            | Ok owner ->
-             let operations = Keeper_owner.operation_projection owner in
              (match Keeper_owner.turn_in_flight owner with
               | Some { lane = Keeper_owner.Autonomous; _ } ->
-                not operations.store_unavailable && operations.has_claimable_queued
+                Some (fun () -> Keeper_owner.await_claimable_operation owner)
+              (* Direct operations need a resumable outcome before early
+                 completion can safely release their slot. A scheduling reply
+                 must not mark an unfinished direct request as succeeded. *)
               | Some { lane = (Keeper_owner.Chat_operation | Keeper_owner.Maintenance); _ }
-              | None -> false))
+              | None -> None))
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
@@ -1662,7 +1664,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1748,7 +1750,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope

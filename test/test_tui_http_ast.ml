@@ -189,7 +189,7 @@ let test_tui_render_asks_the_theme_for_a_categorical_hue () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -213,7 +213,7 @@ let test_tui_status_colors_use_theme_tokens () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -499,6 +499,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
     ; "bin/masc_tui_render_code.ml"
+    ; "bin/masc_tui_render_resources.ml"
     ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_approvals.ml"
     ; "bin/masc_tui_render_memory.ml"
@@ -1819,7 +1820,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int (module_path ^ " performs no direct flushes") 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -3060,7 +3061,7 @@ let test_the_pane_surfaces_open_on_a_title_row () =
     Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
   in
   let in_code = calls ~module_path:"bin/masc_tui_render_code.ml" in
-  let in_resources = calls ~module_path:"bin/masc_tui_render.ml" in
+  let in_resources = calls ~module_path:"bin/masc_tui_render_resources.ml" in
   let in_prim = calls ~module_path:"bin/masc_tui_render_prim.ml" in
   check int "render_code draws the title row once" 1
     (in_code "render_code" "pane_surface_header");
@@ -3120,7 +3121,7 @@ let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_message_status_rows"
-       ~callee:"keeper_message_inflight_drawn");
+       ~callee:"keeper_message_inflight_rows");
   check int "and reads the raw in-flight list nowhere in that sum" 0
     (Ast_grep.count_field_reads_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
@@ -3129,7 +3130,7 @@ let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message"
-       ~callee:"Masc_tui_types.keeper_message_inflight_drawn")
+       ~callee:"Masc_tui_types.keeper_message_inflight_rows")
 ;;
 
 let () =

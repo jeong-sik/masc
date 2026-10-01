@@ -2503,7 +2503,10 @@ let test_runtime_budget_source_survives_to_status_json () =
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
        | Runtime_instance.Override -> ()
-       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability) as other ->
+       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability
+         | Runtime_instance.Provider_override | Runtime_instance.Binding_override
+         | Runtime_instance.Provider_override_clamped_by_capability
+         | Runtime_instance.Binding_override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
            (Runtime_instance.max_context_source_to_string other));

@@ -1341,6 +1341,13 @@ def row_budget_http_fixtures() -> HttpFixtures:
         for index in range(1, 6)
     ]
     return {
+        # This layout scenario has no currency. Answer the Overview's roster
+        # read so an unrelated fixture failure does not consume a body row.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (
             200,
@@ -1539,6 +1546,13 @@ def with_workspace_identity(
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
+        # The Overview reads the roster for its Candle observation even when
+        # the Keeper pane is hidden. An unrelated scenario has no currency.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
@@ -1611,6 +1625,7 @@ def keeper_runtime_http_fixtures(
     fixtures["/api/v1/gate/keepers?detailed=true"] = (
         200,
         {
+            "candle": {"status": "off"},
             "count": 2,
             "total": 2,
             "truncated": False,
@@ -1627,6 +1642,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1641,6 +1657,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
@@ -15180,10 +15197,9 @@ def run_http_badge_refresh_regression(executable: str) -> None:
 
 def run_http_conditional_read_regression(executable: str) -> None:
     """A dashboard read sends the tag of the answer it kept, and a 304 answers
-    with that answer. The briefing is the first read of every full pass and
-    the goal tree the last one on the Overview, so a slow goal tree keeps one
-    pass out across several ticks; the briefing's tag must still go out on
-    the pass after it."""
+    with that answer. On Work, the briefing is the first read of a full pass
+    and the goal tree the last. A slow goal tree keeps one pass out across
+    several ticks; the briefing's tag must still go out on the pass after it."""
     fixtures = overview_event_http_fixtures()
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
@@ -15193,6 +15209,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
     briefing_tag = 'W/"briefing-fixture"'
     reads = {"untagged": 0, "tagged": 0}
     slow_goals = threading.Event()
+    goals_requested = threading.Event()
     slow_goals_done = threading.Event()
 
     def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
@@ -15209,6 +15226,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
 
     def answer_goals() -> HttpResponse:
+        goals_requested.set()
         if slow_goals.is_set() and not slow_goals_done.is_set():
             # Longer than three refresh ticks at refresh=0.5.
             time.sleep(1.6)
@@ -15244,6 +15262,11 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
         if b"HTTP 304" in output:
             raise AssertionError("a 304 reached the screen as a refusal")
+        tab_until(process, master_fd, output, b"MASC Work")
+        if not wait_for_fixture_event(
+            process, master_fd, output, goals_requested, timeout=4.0
+        ):
+            raise AssertionError("Work did not request its goal tree")
         slow_goals.set()
         if not wait_for_fixture_state(
             process, master_fd, output, slow_goals_done.is_set, timeout=4.0
@@ -16720,13 +16743,29 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             executable,
             description="pressing a row chooses, then opens it",
             interact=pressing_a_row_chooses_then_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
         )
         run_terminal_scenario(
             executable,
             description="pressing a row of a scrolled list opens it",
             interact=pressing_a_row_of_a_scrolled_list_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
             prepare_workspace=seed_long_roster,
         )
         run_terminal_scenario(

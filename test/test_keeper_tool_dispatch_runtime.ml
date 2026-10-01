@@ -9199,6 +9199,8 @@ default = "official.primary"
         | Some {Runtime_instance.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
       Masc.Keeper_codex_runtime.run
+        ~context_window:(Some (Runtime_instance.max_context_of_runtime
+          (Runtime.get_runtime_by_id "official.gate" |> Option.get)))
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name

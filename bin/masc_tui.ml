@@ -11045,10 +11045,6 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.tools_skill_cursor <- 0;
   state.tools_scroll <- 0;
   state.msg_loaded_pages <- [];
-  (* Detail requests belong to the authority that launched them. Removing
-     their pending tokens rejects late replies, including A -> B -> A; the
-     monotonic request generation is deliberately not reset. *)
-  state.detail_reads <- [];
   state.item_account <- None;
   state.item_account_error <- None;
   state.msg_journal_inflight <- [];
@@ -14700,7 +14696,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          && item_authority_ready state then
         let result = Result.bind result (fun reading ->
           Masc_tui_keeper_items.match_revision
-            ~expected_revision:(keeper_item_revision state request.drr_keeper) reading) in
+            ~expected_revision:(keeper_item_revision state request.drr_keeper) reading
+          |> Result.map (fun _ -> reading)) in
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

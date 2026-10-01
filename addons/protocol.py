@@ -22,22 +22,22 @@ class UnknownMethod(ValueError):
     pass
 
 
-def finite_json(value: Any) -> None:
-    """Require finite numbers and UTF-8 strings before projection or encoding."""
+def validate_json(value: Any) -> None:
+    """Refuse values that cannot be encoded as finite UTF-8 JSON."""
     if isinstance(value, float) and not math.isfinite(value):
         raise InvalidInput("JSON data must contain only finite numbers")
     if isinstance(value, str):
         try:
             value.encode("utf-8")
         except UnicodeEncodeError as error:
-            raise InvalidInput("JSON strings must be representable as UTF-8") from error
+            raise InvalidInput("JSON strings must be valid UTF-8") from error
     if isinstance(value, dict):
         for key, item in value.items():
-            finite_json(key)
-            finite_json(item)
+            validate_json(key)
+            validate_json(item)
     elif isinstance(value, (list, tuple)):
         for item in value:
-            finite_json(item)
+            validate_json(item)
 
 
 def object_value(value: Any, field: str) -> dict:
@@ -189,7 +189,7 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         try:
             request = object_value(json.loads(line), "request")
             # An invalid string ID cannot be echoed in a UTF-8 error reply.
-            finite_json(request.get("id"))
+            validate_json(request.get("id"))
             request_id = request.get("id")
             method = request.get("method")
             if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
@@ -213,13 +213,13 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                     raise InvalidInput("unknown tool")
                 arguments = object_value(params.get("arguments"), "arguments")
                 try:
-                    finite_json(arguments)
+                    validate_json(arguments)
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
-                    finite_json(output)
+                    validate_json(output)
                     encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
                                if text_summary is None else string(text_summary(output), "output summary"))
-                    finite_json(encoded)
+                    validate_json(encoded)
                     result = {"content": [{"type": "text", "text": encoded}],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:

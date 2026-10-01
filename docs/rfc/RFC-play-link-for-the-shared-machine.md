@@ -111,7 +111,10 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 ### 2.4 초대 발급과 회수
 
 - 발급은 `CanAdmin` 만 한다. `POST /api/v1/play/invites {name, hours}` 와 TUI `/play invite <이름> <시간>`.
-  - `Auth.create_token_expiring_in ~role:Player ~hours` 로 만든다. 기한 없는 초대는 두지 않는다.
+  - `Auth.create_token_expiring_in_if_absent ~role:Player ~hours` 로 만든다. 기한 없는 초대는 두지 않는다.
+    Auth credential transaction 하나가 이름 파일 존재 확인, 저장, token cache 무효화를 묶는다.
+    라우트 밖 credential writer가 먼저 저장했으면 초대는 `Name_taken Credential`로 거절한다.
+    손상된 파일·대상 없는 redirect·dangling symlink도 이미 차지한 이름이다.
   - 발급은 다음 조건에서만 한다. 조건이 안 맞으면 거절하고 무엇이 빠졌는지 말한다.
     - `MASC_HTTP_BASE_URL` 이 있다.
     - 워크스페이스 인증이 켜져 있고 `require_token = true` 다. 인증이 꺼져 있으면 모든 요청이
@@ -141,7 +144,10 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
       답을 기다리라고 알린다. 대기열에 넣지 않는다.
   - raw token 은 이 답에서 한 번만 나온다. 서버에는 SHA-256 만 남는다.
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
-  - `Auth.delete_credential` 로 지운다.
+  - 같은 Auth credential transaction 안에서 현재 이름과 역할을 확인하고
+    `Auth.delete_credential_in_transaction`으로 지운다. 그 transaction 안에서 조종권도 푼다.
+    실제 이름 파일이 없을 때만 이미 회수된 것으로 처리한다. 파일을 읽을 수 없거나 다른 이름의
+    credential로 풀리면 503으로 거절하고 credential과 조종권을 보존한다. 다른 역할은 409로 거절한다.
   - 그 이름이 조종권을 쥐고 있으면 같이 비운다. `Dos_lane.release_left ~holder ~announce` 가 이미
     "holder 가 아직 쥐고 있으면 비운다"를 한다. 떠난 사람이 쥔 조종권은 이 회수와 §2.8 의
     "떠난 조종자" 규칙으로만 푼다. 오래 가만히 있었다고 푸는 규칙은 두지 않는다.
@@ -149,6 +155,9 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
     닿으면 빈 조종권을 다시 잡을 수 있다. 그 이름은 더 요청을 보내지 못하므로 조종권이 묶인다.
     이 경우와 기한 지난 초대는 "떠난 조종자" 규칙이 푼다(§2.8).
 - 목록: `GET /api/v1/play/invites` (`CanAdmin`). 이름, 기한, 지금 조종자인지.
+  - 현재 이름 credential 의 역할과 기한을 읽는다. 이름 binding 이 사라진 뒤 남은 UUID·alias 데이터는
+    초대나 넘길 대상으로 취급하지 않는다. 발견된 소유자의 현재 binding 을 읽을 수 없으면 503 으로
+    답하고 조종권을 바꾸지 않는다. 소유자를 확정하지 못하는 데이터 행은 기존 발견 정책대로 제외한다.
 
 ### 2.5 DOS 사람 입력 라우트
 
@@ -206,8 +215,12 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   (`Play_seat.hand_to`, 플레이 페이지가 보여 주는 목록과 같다). 다른 이름은 거절하고 아무것도 바꾸지 않는다.
 - 이 검사는 모든 요청이 credential 을 가져야 하는 워크스페이스(인증 켜짐, `require_token = true`)에서만 한다.
   초대 발급 조건과 같다. 그렇지 않은 곳에서는 이름을 스스로 정할 수 있어 명단이 없으므로 지금처럼 넘긴다.
-- Keeper 가 움직이든, 플레이 페이지 라우트든, MCP 클라이언트든 도구를 부르기 전에 같은 문
-  (`Keeper_dos_controller.before_call`)을 지난다.
+- Keeper 가 움직이든, 플레이 페이지 라우트든, MCP 클라이언트든 같은 실행 경계
+  (`Keeper_dos_controller.execute`)을 지난다.
+- handoff 대상 명단 조회·떠난 조종권 해제·실제 `Dos_lane.pass`는 하나의 Auth credential transaction 안에서 진행한다.
+  대상 회수가 먼저 끝나면 명단에서 빠져 거절한다. handoff가 먼저 admission을 얻으면 회수는 handoff가 끝날 때까지 기다린 뒤 그 대상의 조종권을 푼다.
+  실제 DOS 변경 중에는 알림을 큐에 넣기만 하고, Board 전송은 Auth 잠금을 놓은 뒤 한다. HTTP 본문을 기다리며 이 잠금을 잡지 않는다.
+  이미 인증한 요청의 주체를 다시 인증하거나 이미 발송된 요청을 취소하는 정책을 추가하지 않는다(§2.4).
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
 - "떠난 조종자"(`Keeper_dos_controller.holder_left`)는 다음 움직임 전에 풀린다.
   - 멈춘 keeper.
@@ -219,8 +232,12 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   - 인증이 켜지고 토큰이 필수인 워크스페이스에서, keeper 가 아닌 이름 중 credential 파일이 없는 이름(회수된 초대).
     이런 곳에서는 credential 없이 기계를 움직일 수 없으므로 따로 회수 기록을 남기지 않는다.
     파일이 있는데 읽지 못하면 떠났다고 볼 근거가 없으므로 조종권을 지킨다.
-  - 기한이 지난 운영자(`Admin`)·에이전트(`Worker`) credential 은 풀지 않는다. 같은 이름으로 다시 발급받아
-    돌아오기 때문이다(`masc_auth_refresh`, TUI 의 운영자 토큰 갱신). 초대는 다시 발급되지 않는다.
+    발급·회수와 같은 Auth credential transaction의 이름 파일 조회를 쓴다. ENOENT만 없는 파일이고,
+    dangling symlink·대상 없는 redirect와 조회 I/O 오류는 조종권을 지킨다.
+    이 경계까지 전파된 읽기 I/O 예외와 이름 파일 조회 오류는 원인을 로그에 남긴다.
+  - 기한이 지난 운영자(`Admin`)·에이전트(`Worker`) credential도 인증이 강제되는 곳에서는 푼다.
+    credential 갱신과 떠남 판단·조종권 해제는 같은 Auth transaction으로 직렬화된다.
+    갱신이 먼저 완료되면 새 기한으로 판단하고, 해제가 먼저 완료되면 갱신된 참가자는 빈 조종권을 다시 잡는다.
   - 인증이 꺼진 곳에서는 이름을 스스로 정할 수 있어 떠났는지 알 수 없으므로, credential 이 없는 이름도 조종권을 지킨다.
 
 ### 2.9 masc 패드

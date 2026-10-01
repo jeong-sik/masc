@@ -389,6 +389,7 @@ let test_expired_uuid_retires_validated_aliases () =
   check (list string) "no orphan remains for a second prune" [] (names (auth_ok (prune base_path)))
 
 let test_alias_raw_cleanup_failure_retains_retry_authority () =
+  let read path = In_channel.with_open_bin path In_channel.input_all in
   with_workspace @@ fun base_path ->
   let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
   let _, _ = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"alias") in
@@ -417,6 +418,7 @@ let test_alias_raw_cleanup_failure_retains_retry_authority () =
 
 
 let test_normalized_canonical_survives_uuid_cleanup_failure () =
+  let read path = In_channel.with_open_bin path In_channel.input_all in
   with_workspace @@ fun base_path ->
   let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"Alice") in
   let credential = { credential with expires_at = Some expired } in

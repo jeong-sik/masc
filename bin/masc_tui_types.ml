@@ -5286,6 +5286,9 @@ type home_chat_receipt =
   | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
+
+type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
+
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5347,6 +5350,7 @@ type state = {
      the selection of another Goal or a Task. A removed identity opens nothing
      until an explicit navigation key selects another target. *)
   mutable agenda_selected: Masc_tui_agenda.destination;
+  mutable agenda_navigation: agenda_navigation;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -8039,6 +8043,7 @@ let close_context_inspector (state : state) =
 let close_agenda (state : state) =
   state.agenda_open <- false;
   state.agenda_scroll <- 0;
+  state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
@@ -8091,6 +8096,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   agenda_selected = Masc_tui_agenda.Nowhere;
+  agenda_navigation = Agenda_read_rows;
   hints_visible = true;
   coalesce_queued_input = false;
   user_input_priority_next = false;

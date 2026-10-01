@@ -16110,6 +16110,17 @@ let agenda_viewport (state : state) =
   let count = List.length (agenda_lines state) in
   (count, overlay_window_height ~rows ~count)
 
+let agenda_scroll_position (state : state) =
+  let lines = agenda_lines state in
+  let count, height = agenda_viewport state in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.agenda_scroll in
+  match state.agenda_navigation with
+  | Agenda_read_rows -> scroll
+  | Agenda_follow_selection ->
+      (match Agenda.selected_index lines ~selected:state.agenda_selected with
+       | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+       | None -> scroll)
+
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -16240,8 +16251,8 @@ let render_agenda (state : state) =
      naming a key that would do nothing. *)
   let hints =
     match Agenda.target_indexes lines with
-    | [] -> "j/k:scroll  Esc:close"
-    | _ -> "j/k:move  Enter:open  Esc:close"
+    | [] -> "j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close"
+    | _ -> "j/k:move  PgUp/PgDn:page  g/G:first/last  Enter:open  Esc:close"
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
@@ -16251,15 +16262,9 @@ let render_agenda (state : state) =
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->
       let count, height = agenda_viewport state in
-      let scroll =
-        Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
-      in
-      (* A refresh can move the selected identity beyond the old viewport.
-         Reveal its new row without changing which target Enter owns. *)
-      let scroll = match selected with
-        | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
-        | None -> scroll
-      in
+      (* Selection follows refreshes while navigating targets. Reading pages
+         owns its window, so repainting cannot pull it away from schedules. *)
+      let scroll = agenda_scroll_position state in
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then

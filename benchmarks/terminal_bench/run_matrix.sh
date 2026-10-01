@@ -35,8 +35,15 @@ fi
 # own agent and is skipped there). A release that cannot boot a rendered config,
 # or a keeper_up that answers an error, stops the run here and not on the first
 # trial of an arm hours in.
-uv run python preflight_arms.py --arms "${ARMS_CSV}" --model "${MODEL}" \
-  --fallback-models "${FALLBACK_MODELS}"
+# It starts its containers on this host's docker, which a modal run does not
+# otherwise need (README). Under modal it runs when a daemon answers and says so
+# when it does not.
+if [[ "${ENVIRONMENT}" == "docker" ]] || docker info >/dev/null 2>&1; then
+  uv run python preflight_arms.py --arms "${ARMS_CSV}" --model "${MODEL}" \
+    --fallback-models "${FALLBACK_MODELS}"
+else
+  echo "preflight skipped: BENCH_ENV=${ENVIRONMENT} and no docker daemon answers on this host" >&2
+fi
 
 # Read the dataset before running it. On docker, the GPU tasks would stop the
 # whole job at trial creation, and a task asking for more CPUs or memory than

@@ -10,15 +10,19 @@ every HTTP lane.
 
 Per arm: render the config, start a clean container of the trial platform,
 upload the fetched release binaries, the driver and the config as
-MascAgent.install does, and run bootstrap.sh with the first keeper named in
-BENCH_KEEPER_POOL. bootstrap.sh then starts the server, brings that keeper up
-and sets its approval stance. That is every stage of a trial before the first
-model request.
+MascAgent.install does, and run bootstrap.sh with every keeper of the arm named
+in BENCH_KEEPER_POOL (bench-1 to bench-N, the count the arm declares). bootstrap.sh
+starts the server, brings each keeper up and sets its approval stance.
 
 No model is called and no credential is used: the provider key is a
-placeholder. The server logs what it logs without a key; that is not a failure.
+placeholder, and GH_TOKEN only decides whether gh is staged. The server logs what
+it logs without a key; that is not a failure.
 
-Not covered: a task's own image, user and PATH, and whether a model answers.
+A trial differs in three places. run_episode.sh brings the keepers up itself,
+with keeper-instructions.txt and a 90 s limit each, where bootstrap.sh uses its
+own pool instructions and 180 s. A task's Skills are rendered into the config
+and checked against the catalog. A task's own image, user and PATH replace
+the plain image used here. Whether a model answers is not tested.
 
 Exit status: 0 every arm came up, 1 an arm did not (named with its stage),
 2 nothing started (bad arguments, dist/ missing).
@@ -31,9 +35,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import inspect
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -52,6 +58,7 @@ from masc_dist import (  # noqa: E402
     UNAME_MARK,
     container_distribution,
 )
+from agents.masc_sidecar import pool_names  # noqa: E402
 from render_configs import ARMS, PROVIDERS, keeper_route, render_arm  # noqa: E402
 
 # Arm a is harbor's own agent for the same model, not MASC (run_matrix.sh).
@@ -61,8 +68,6 @@ DEFAULT_IMAGE = "ubuntu:24.04"
 # Terminal-Bench 4.0.0 task images are prebuilt for amd64 (agents/masc_dist.py),
 # emulated on Apple Silicon.
 DEFAULT_PLATFORM = "linux/amd64"
-# keepers/bench-1.toml, which render_arm writes for every arm.
-FIRST_KEEPER = "bench-1"
 PLACEHOLDER_KEY = "preflight-placeholder-no-credential"
 # What a trial renders with: run_matrix.sh passes no effort, so MascAgent's default applies.
 DEFAULT_EFFORT = inspect.signature(MascAgent.__init__).parameters["effort"].default
@@ -74,8 +79,13 @@ CONTAINER_START_TIMEOUT_S = 600
 # docker cp and a short docker exec.
 DOCKER_STEP_TIMEOUT_S = 120
 # bootstrap.sh installs packages over the network and then waits up to 60 s for
-# MCP. 52 s was measured for arm b on emulated amd64, 2026-10-01.
+# MCP, then brings each keeper up. 49 s (arm b, 1 keeper) to 89 s (arm h, 8 keepers)
+# were measured on emulated amd64, 2026-10-01.
 BOOTSTRAP_TIMEOUT_S = 900
+# The container sleeps this long and is then removed on its own (docker run
+# --rm), so a preflight killed past its cleanup leaves a container for at most
+# this long. The stages above add up to less.
+CONTAINER_LIFETIME_S = 3600
 FAILURE_TAIL_LINES = 30
 SERVER_LOG_TAIL_LINES = 40
 
@@ -93,8 +103,11 @@ def tail(text: str, lines: int) -> str:
 
 def docker(stage: str, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
     try:
+        # errors="replace": the output is only read to explain a failure, and
+        # one byte that is not UTF-8 must not replace that explanation.
         return subprocess.run(
-            ["docker", *args], capture_output=True, text=True, timeout=timeout)
+            ["docker", *args], capture_output=True, text=True, errors="replace",
+            timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         raise StageFailed(stage, f"docker {args[0]} did not finish in {timeout}s") from exc
     except OSError as exc:
@@ -108,6 +121,26 @@ def docker_ok(stage: str, *args: str, timeout: int = DOCKER_STEP_TIMEOUT_S) -> N
             stage,
             f"docker {args[0]} exited {done.returncode}\n"
             f"{tail(done.stdout + done.stderr, FAILURE_TAIL_LINES)}")
+
+
+def exit_on_signal(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def termination_runs_cleanup():
+    """SIGTERM and SIGHUP end a Python process without running its finally blocks.
+
+    As SystemExit they run: the container is removed and the scratch directories
+    go. SIGINT already raises KeyboardInterrupt.
+    """
+    signals = (signal.SIGTERM, signal.SIGHUP)
+    previous = {number: signal.signal(number, exit_on_signal) for number in signals}
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 class ConstantMachine:
@@ -141,8 +174,8 @@ def preflight_arm(
             route = keeper_route(agent.arm, agent.runtime_id, agent.fallback_runtime_ids)
         except (OSError, ValueError, KeyError) as exc:
             raise StageFailed("render", str(exc)) from exc
-        docker_ok("container", "run", "-d", "--name", name, "--platform", platform,
-                  image, "sleep", "infinity", timeout=CONTAINER_START_TIMEOUT_S)
+        docker_ok("container", "run", "-d", "--rm", "--name", name, "--platform", platform,
+                  image, "sleep", str(CONTAINER_LIFETIME_S), timeout=CONTAINER_START_TIMEOUT_S)
         docker_ok("upload", "exec", name, "mkdir", "-p", f"{REMOTE}/bin")
         for binary in binaries:
             docker_ok("upload", "cp", str(binary), f"{name}:{REMOTE}/bin/{binary.name}")
@@ -154,7 +187,7 @@ def preflight_arm(
             "bootstrap", "exec",
             "-e", f"{key_env}={PLACEHOLDER_KEY}",
             "-e", f"BENCH_RUNTIME_ID={route}",
-            "-e", f"BENCH_KEEPER_POOL={FIRST_KEEPER}",
+            "-e", f"BENCH_KEEPER_POOL={','.join(pool_names(agent.arm))}",
             name, "bash", f"{REMOTE}/driver/bootstrap.sh",
             timeout=BOOTSTRAP_TIMEOUT_S)
         if done.returncode != 0:
@@ -171,7 +204,11 @@ def preflight_arm(
     finally:
         # Best effort: it must not replace the failure that brought it here.
         try:
-            docker("cleanup", "rm", "-f", name, timeout=DOCKER_STEP_TIMEOUT_S)
+            removed = docker("cleanup", "rm", "-f", name, timeout=DOCKER_STEP_TIMEOUT_S)
+            if removed.returncode != 0:
+                print(f"preflight arm={agent.arm}: container {name} was not removed: "
+                      f"{tail(removed.stdout + removed.stderr, FAILURE_TAIL_LINES)}",
+                      file=sys.stderr, flush=True)
         except StageFailed as exc:
             print(f"preflight arm={agent.arm}: container {name} was not removed: {exc.detail}",
                   file=sys.stderr, flush=True)
@@ -197,7 +234,7 @@ def main(argv: list[str] | None = None, *, bench_root: Path = BENCH_ROOT) -> int
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     args = parser.parse_args(argv)
 
-    arms = [arm for arm in args.arms.split(",") if arm and arm != BASELINE_ARM]
+    arms = [arm for arm in (part.strip() for part in args.arms.split(",")) if arm and arm != BASELINE_ARM]
     if not arms:
         print("preflight: no MASC arm in the list, nothing to start")
         return 0
@@ -206,7 +243,7 @@ def main(argv: list[str] | None = None, *, bench_root: Path = BENCH_ROOT) -> int
         print(f"preflight: unknown arm {unknown}; expected one of {sorted(ARMS)}", file=sys.stderr)
         return 2
 
-    with tempfile.TemporaryDirectory(prefix="masc-bench-preflight-") as scratch:
+    with termination_runs_cleanup(), tempfile.TemporaryDirectory(prefix="masc-bench-preflight-") as scratch:
         scratch_dir = Path(scratch)
         try:
             agents = [build_agent(arm, args.model, args.effort, args.fallback_models,
@@ -214,8 +251,8 @@ def main(argv: list[str] | None = None, *, bench_root: Path = BENCH_ROOT) -> int
             distribution = asyncio.run(container_distribution(
                 ConstantMachine(MACHINE_BY_PLATFORM[args.platform]),
                 SimpleNamespace(default_user=None),
-                bench_root, scratch_dir / "dist", with_gh=False))
-        except (RuntimeError, ValueError) as exc:
+                bench_root, scratch_dir / "dist", with_gh=bool(os.environ.get("GH_TOKEN"))))
+        except (OSError, RuntimeError, ValueError) as exc:
             print(f"preflight: {exc}", file=sys.stderr)
             return 2
         print(f"preflight: masc {distribution.identity.release_version} "

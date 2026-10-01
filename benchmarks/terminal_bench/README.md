@@ -44,11 +44,21 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
     python aggregate.py results/jobs # → CSV
 
 `run_matrix.sh` 는 데이터셋을 받기 전에 `preflight_arms.py` 로 MASC arm 마다 컨테이너에서
-서버를 띄워 본다. `bootstrap.sh` 가 서버를 켜고 첫 keeper 를 올리고 승인 모드를 정하는
-데까지 가며, 모델은 부르지 않고 provider 키는 자리표시자다. arm 하나라도 못 올라오면
-멈춘 단계와 로그 끝을 적고 실행을 시작하지 않는다. 에뮬레이션 amd64 에서 arm 마다
-1~2분 걸린다(2026-10-01, v0.48.0, b 55초, e 94초, f 53초, h 65초). 태스크 이미지 자체
-(사용자, PATH)와 모델의 답은 다루지 않는다.
+서버를 띄워 본다. `bootstrap.sh` 가 서버를 켜고, arm 이 선언한 keeper 를 전부(`bench-1`부터
+1·4·8명) 올리고, 승인 모드를 정하는 데까지 가며, 모델은 부르지 않고 provider 키는 자리표시자다.
+arm 하나라도 못 올라오면 멈춘 단계와 로그 끝을 적고 실행을 시작하지 않는다. 에뮬레이션
+amd64 에서 arm 마다 1~2분 걸린다(2026-10-01, v0.48.0, b 55초, e 94초, f 53초, h 65초).
+
+trial 과 다른 점은 셋이다.
+
+- trial 은 f·h 의 keeper 를 `run_episode.sh` 가 `keeper-instructions.txt` 와 keeper 당
+  90초 제한으로 올린다. 사전 점검은 `bootstrap.sh` 의 자체 지침과 180초 제한을 쓴다.
+- 태스크 Skills 는 렌더링에도 점검에도 들어가지 않는다.
+- 태스크 이미지(사용자, PATH) 대신 `ubuntu:24.04` 를 쓰고, 모델의 답은 다루지 않는다.
+
+`GH_TOKEN` 이 있으면 `gh` 를 올리는 것까지 trial 과 같이 하고, 토큰 값은 컨테이너에 넣지 않는다.
+`BENCH_ENV=modal` 에서는 이 호스트의 docker 데몬이 답할 때만 돌리고, 답하지 않으면 건너뛴다고
+출력한다.
 
 그 다음 데이터셋을 받아(`results/datasets/`, 끝까지 받았을 때만 `.complete`)
 `dataset_plan.py` 로 판정한다.

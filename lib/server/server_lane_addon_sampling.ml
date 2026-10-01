@@ -7,6 +7,7 @@ type failure =
   | Runtime_unavailable of string
   | Unsupported_controls of control list
   | Invalid_request of string
+  | Invalid_response of string
   | Provider_error of Llm_provider.Http_client.http_error
 
 let control_name = function
@@ -25,7 +26,7 @@ let provider_error_detail = function
   | Llm_provider.Http_client.AcceptRejected {reason} -> reason
 
 let failure_detail = function
-  | Runtime_unavailable detail | Invalid_request detail -> detail
+  | Runtime_unavailable detail | Invalid_request detail | Invalid_response detail -> detail
   | Unsupported_controls controls ->
       "Selected runtime cannot enforce sampling controls: "
       ^ String.concat ", " (List.map control_name controls)
@@ -38,12 +39,36 @@ let route_of_binding = function
   | _ -> Error "host sampling requires an object binding"
 
 let route_candidates route =
-  match Runtime.resolve_assignment route with
-  | `Lane lane -> (match Runtime_lane.ordered_candidates lane with
-      | [] -> Error "host model route has no configured candidates"
-      | candidates -> Ok candidates)
-  | `Unavailable missing -> Error (Runtime.missing_catalog_model_to_string missing)
-  | `Missing -> Error ("host model route is not configured: " ^ route)
+  match Keeper_turn_driver.assignment_walk_order ~now:(Time_compat.now ())
+      ~walk:Keeper_turn_driver.Every_mark_demotes route with
+  | Ok {order=[];_} -> Error "host model route has no configured candidates"
+  | Ok {order;_} -> Ok order
+  | Error refusal -> Error (Keeper_turn_driver.assignment_refusal_to_string refusal)
+
+let note_answered (runtime : Runtime.t option) = Option.iter (fun (runtime : Runtime.t) ->
+  Runtime_candidate_backpressure.note_candidate_success ~candidate:runtime.candidate_backpressure;
+  Runtime_quota_window.note_succeeded ~scope:(Runtime_instance.quota_scope_of_runtime runtime)) runtime
+
+let note_provider_failure runtime error =
+  let module Route = Keeper_runtime_failure_route in
+  let cause = Agent_core.Error.Provider (Llm_provider.Error.of_http_error error) in
+  match Route.route_of_error ~boundary:Route.Agent_core_execution cause with
+  | Route.Retry_after_observed {retry_class=Rate_limited;retry_after} ->
+      Option.iter (fun (runtime : Runtime.t) -> Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:runtime.candidate_backpressure ~retry_after) runtime
+  | Retry_after_observed {retry_class=Hard_quota;retry_after} ->
+      Option.iter (fun runtime ->
+        let scope=Runtime_instance.quota_scope_of_runtime runtime in
+        match Route.usable_retry_after retry_after with
+        | Some seconds -> Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. seconds)
+        | None -> Runtime_quota_window.note_observed_exhausted ~scope) runtime
+  | Retry_after_observed {retry_class=Empty_completion _;_} -> note_answered runtime
+  | Retry_after_observed {retry_class=(Server_error | Network_transient | Provider_timeout | Provider_capacity);_}
+  | Rotate_now _ | Exhausted_visible_alive _ ->
+      (* Like the shared one-shot walk, this call has no recurring Keeper
+         recorder to retry a failed-attempt mark. Quota and rate-limit evidence
+         still belong to the shared runtime cells; every answer clears them. *)
+      ()
 
 let unsupported_common (params : S.create_message_params) =
   let stops = match params.stop_sequences with None | Some [] -> [] | Some (_ :: _) -> [Stop_sequences] in
@@ -98,6 +123,8 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
       Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
     else Ok () in
+  let* () = if String.trim response.model = "" then
+      Error (Invalid_response "host response has no model identity") else Ok () in
   Ok {S.role=S.Assistant;content=S.Text {type_="text";text};
     model=response.model;stop_reason=sampling_stop_reason response.stop_reason;
     _meta=Some (`Assoc ["masc.lane_provider",`Assoc ["stop_reason",
@@ -119,17 +146,23 @@ let invoke ~sw ~net ~route ~request:_ params =
     | [] -> Error (Yojson.Safe.to_string (`Assoc ["route",`String route;
         "attempts",`List (List.rev failures)]))
     | runtime_id :: rest ->
+        let runtime = Runtime.get_runtime_by_id runtime_id in
         match attempt ~sw ~net ~runtime_id params with
         | Error failure ->
+            (match failure with
+             | Provider_error error -> note_provider_failure runtime error
+             | Invalid_response _ -> note_answered runtime
+             | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _ -> ());
             let stop = match failure with
               | Provider_error (Llm_provider.Http_client.ProviderFailure
                   {kind=Empty_completion {stop_reason};message=_}) ->
                   ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
-              | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _
+              | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _ | Invalid_response _
               | Provider_error _ -> [] in
             walk (`Assoc (["runtime_id",`String runtime_id;
               "error",`String (failure_detail failure)] @ stop) :: failures) rest
         | Ok answer ->
+            note_answered runtime;
             let metadata = match answer.S._meta with
               | Some (`Assoc fields) -> fields
               | Some _ | None -> [] in

@@ -1,13 +1,17 @@
 (** Production host sampling for an exact installed worker and its binding.
     Package model preferences never select credentials or a runtime route.
     Only [binding.model_route] selects the configured host route, whose declared
-    candidates are tried in order. Requests and terminal outcomes are retained
+    candidates use the shared one-shot quota/backpressure walk order, excluding
+    none. Quota and rate-limit refusals update the shared runtime state; answers
+    clear candidate pressure and undated exhausted quota observations. As with
+    other one-shot walks, transient failures do not invent a Keeper recorder. Requests and terminal outcomes are retained
     by {!Lane_addon_sampling} before/after the provider boundary.
 
     Native Agent Core completions carry the requested output limit and
     temperature into the provider request unless the model declares a fixed
     operator temperature. Thinking-only responses are empty text completions
     and continue to the next declared candidate, retaining their stop reason.
+    Responses with no model identity also continue the route before admission.
     Temperature support remains owned
     by the model's capability/codec contract; this does not promise that a
     reasoning model applies it. Stop sequences and sampling tools are refused explicitly.

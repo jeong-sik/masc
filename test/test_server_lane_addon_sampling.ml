@@ -16,7 +16,7 @@ let params : S.create_message_params = {
   temperature=Some 0.25;max_tokens=37;stop_sequences=None;metadata=None;
   tools=None;tool_choice=None;_meta=None}
 
-let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
+let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -36,7 +36,9 @@ let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?
     Fs_compat.remove_tree root);
   let config = Workspace.default_config root in
   let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  let requests = ref [] in
+  let requests = ref [] and expected_retained_requests = ref 1 in
+  Runtime_quota_window.reset_for_testing ();
+  Eio.Switch.on_release sw Runtime_quota_window.reset_for_testing;
   let retained_requests () =
     let directory = Filename.concat (Store.root store) "evidence" in
     if not (Sys.file_exists directory) then [] else
@@ -47,18 +49,29 @@ let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?
   let callback _connection request body =
     let body = Eio.Buf_read.(of_flow ~max_size:1048576 body |> take_all) |> Yojson.Safe.from_string in
     let captures = retained_requests () in
-    check int "request is durable before the provider receives HTTP" 1 (List.length captures);
+    check int "request is durable before the provider receives HTTP" !expected_retained_requests (List.length captures);
     check string "retained request belongs to the exact worker" "installed-analysis-worker"
       (text "instance_id" (List.hd captures));
     check string "retained request uses the operator binding route" "analysis"
       (text "route" (List.hd captures));
     requests := (Cohttp.Request.resource request,body) :: !requests;
     if String.starts_with ~prefix:"/primary/" (Cohttp.Request.resource request) then
-      if thinking_only_primary then
-        Cohttp_eio.Server.respond_string ~status:`OK
+      (match primary_reply with
+      | `Thinking -> Cohttp_eio.Server.respond_string ~status:`OK
           ~body:{|{"id":"thinking-only","model":"actual-primary-model","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"Provider reasoning without an answer."},"finish_reason":"length"}],"usage":{"prompt_tokens":9,"completion_tokens":37,"total_tokens":46}}|} ()
-      else Cohttp_eio.Server.respond_string ~status:`Bad_request
-        ~body:{|{"error":{"message":"synthetic primary unavailable"}}|} ()
+      | `Missing_model | `Blank_model ->
+          let model = match primary_reply with `Blank_model -> ["model",`String "  "] | _ -> [] in
+          let body = `Assoc (model @ ["id",`String "identityless";"choices",`List [`Assoc [
+            "index",`Int 0;"message",`Assoc ["role",`String "assistant";"content",`String "Unusable claimed answer"];
+            "finish_reason",`String "stop"]]]) |> Yojson.Safe.to_string in
+          Cohttp_eio.Server.respond_string ~status:`OK ~body ()
+      | `Rate_limit -> Cohttp_eio.Server.respond_string ~status:(Cohttp.Code.status_of_code 429)
+          ~headers:(Cohttp.Header.of_list ["retry-after","30"])
+          ~body:{|{"error":{"message":"synthetic throttling"}}|} ()
+      | `Quota -> Cohttp_eio.Server.respond_string ~status:(Cohttp.Code.status_of_code 402)
+          ~body:{|{"error":{"message":"synthetic quota exhaustion"}}|} ()
+      | `Bad_request -> Cohttp_eio.Server.respond_string ~status:`Bad_request
+          ~body:{|{"error":{"message":"synthetic primary unavailable"}}|} ())
     else Cohttp_eio.Server.respond_string ~status:`OK
       ~body:{|{"id":"actual-response","model":"actual-secondary-model","choices":[{"index":0,"message":{"role":"assistant","content":"The image comparison is retained."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":6,"total_tokens":15}}|} () in
   let socket = Eio.Net.listen env#net ~sw ~backlog:4 ~reuse_addr:true
@@ -99,6 +112,14 @@ is-default=true
   require (Runtime.init_default ~config_path:runtime_path);
   check (option (float 0.)) "declared liveness window is admitted unchanged" turn_timeout_s
     (Runtime_inference.resolve_turn_timeout_s ~runtime_id:"primary.sample");
+  let runtime id = match Runtime.get_runtime_by_id id with Some value -> value | None -> fail "fixture runtime missing" in
+  let primary = runtime "primary.sample" and secondary = runtime "secondary.sample" in
+  (match initial_pressure with
+   | None -> Runtime_candidate_backpressure.note_rate_limit ~candidate:secondary.candidate_backpressure ~retry_after:None
+   | Some `Rate_limit -> Runtime_candidate_backpressure.note_rate_limit ~candidate:primary.candidate_backpressure ~retry_after:None
+   | Some `Quota -> Runtime_quota_window.note_observed_exhausted ~scope:(Runtime_instance.quota_scope_of_runtime primary)
+   | Some `Failed -> Runtime_candidate_backpressure.note_failed_attempt ~candidate:primary.candidate_backpressure
+       ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"other-keeper"));
   let manifest = Filename.concat root "lane.toml" in
   write manifest {|id="sampling-proof"
 revision="1"
@@ -130,9 +151,14 @@ max_reply_bytes=4194304
     (match answer.content with S.Text {text;_} -> text | S.Image _ -> fail "unexpected image answer");
   check (option string) "provider stop reason maps to MCP vocabulary" (Some "endTurn") answer.stop_reason;
   let sent_requests = List.rev !requests in
-  check int "primary failure walks only the declared secondary" 2 (List.length sent_requests);
-  check (list string) "model hint never changes the operator's ordered route"
-    ["/primary/chat/completions";"/secondary/chat/completions"] (List.map fst sent_requests);
+  let expected_paths = match initial_pressure with
+    | None -> ["/primary/chat/completions";"/secondary/chat/completions"]
+    | Some _ -> ["/secondary/chat/completions"] in
+  check (list string) "shared backpressure orders only the declared route"
+    expected_paths (List.map fst sent_requests);
+  check bool "successful response clears candidate backpressure" true
+    (Runtime_candidate_backpressure.candidate_backpressure ~now:(Time_compat.now ())
+      ~candidate:secondary.candidate_backpressure = None);
   List.iter (fun (_,body) ->
     check int "requested provider output limit is serialized" 37 Yojson.Safe.Util.(member "max_tokens" body |> to_int);
     check (float 0.) "operator temperature wins; undeclared models use the request"
@@ -158,12 +184,25 @@ max_reply_bytes=4194304
     (member "masc.lane_provider" metadata |> text "stop_reason");
   let host = member "masc.lane_host" metadata in
   check string "selected concrete runtime is retained" "secondary.sample" (text "runtime_id" host);
-  check int "failed primary attempt is retained" 1 (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.length);
-  check string "failed attempt identifies the primary configured runtime" "primary.sample"
-    (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "runtime_id");
-  if thinking_only_primary then
+  let failed = member "failed_attempts" host |> Yojson.Safe.Util.to_list in
+  check int "only actually attempted failures are retained" (if Option.is_none initial_pressure then 1 else 0)
+    (List.length failed);
+  if Option.is_none initial_pressure then
+    check string "failed attempt identifies the primary configured runtime" "primary.sample"
+      (List.hd failed |> text "runtime_id");
+  if primary_reply=`Thinking then
     check string "thinking-only failure preserves its exact provider stop reason" "max_tokens"
       (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "provider_stop_reason");
+  let expected_http_count = ref (List.length expected_paths) in
+  (match primary_reply with
+   | `Rate_limit | `Quota ->
+       expected_retained_requests := 2;
+       ignore (require (handler request_params));
+       incr expected_http_count;
+       check (list string) "observed refusal demotes the provider on the next request"
+         (expected_paths @ ["/secondary/chat/completions"])
+         (List.rev !requests |> List.map fst)
+   | `Bad_request | `Thinking | `Missing_model | `Blank_model -> ());
   check bool "unknown route is rejected before HTTP" true (Result.is_error (create "unconfigured"));
   check bool "missing binding route cannot use the host default" true
     (Result.is_error (Server_lane_addon_sampling.create_handler ~config ~net:env#net ~sw ~store
@@ -176,7 +215,7 @@ max_reply_bytes=4194304
   let tool_result = handler {params with tools=Some [{S.name="unexpected-tool";
     description=None;input_schema=`Assoc ["type",`String "object"]}]} in
   check bool "unsupported sampling tools are refused before HTTP" true (Result.is_error tool_result);
-  check int "refused control performs no additional HTTP" 2
+  check int "refused control performs no additional HTTP" !expected_http_count
     (List.length !requests)
 
 let test_invalid_sampling_route_is_stable_until_runtime_update () =
@@ -313,11 +352,25 @@ let () = run "Server Lane sampling HTTP composition" ["host boundary",[
     test_invalid_sampling_route_is_stable_until_runtime_update;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
+  test_case "missing model identity walks the secondary" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_reply:`Missing_model);
+  test_case "blank model identity walks the secondary" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_reply:`Blank_model);
+  test_case "existing rate limit demotes the primary" `Quick
+    (test_actual_http_route_and_durable_sampling ~initial_pressure:`Rate_limit);
+  test_case "existing quota exhaustion demotes the primary" `Quick
+    (test_actual_http_route_and_durable_sampling ~initial_pressure:`Quota);
+  test_case "another Keeper's failed attempt demotes the primary" `Quick
+    (test_actual_http_route_and_durable_sampling ~initial_pressure:`Failed);
+  test_case "sampling records a rate limit for its next request" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_reply:`Rate_limit);
+  test_case "sampling records hard quota for its next request" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_reply:`Quota);
   test_case "declared zero liveness reaches providers and retains the answer" `Quick
     (test_actual_http_route_and_durable_sampling ~turn_timeout_s:0.);
   test_case "declared positive liveness reaches providers and retains the answer" `Quick
     (test_actual_http_route_and_durable_sampling ~turn_timeout_s:30.);
   test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick
-    (test_actual_http_route_and_durable_sampling ~thinking_only_primary:true ~fixed_temperature:0.75);
+    (test_actual_http_route_and_durable_sampling ~primary_reply:`Thinking ~fixed_temperature:0.75);
   test_case "fixed model temperature survives an omitted request value" `Quick
     (test_actual_http_route_and_durable_sampling ~fixed_temperature:0.75 ~omit_temperature:true)]]

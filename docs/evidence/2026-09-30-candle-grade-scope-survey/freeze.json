@@ -1,0 +1,28 @@
+{
+  "status": "prepared_not_executed",
+  "frozen_at": "2026-09-29T17:29:57.278675+00:00",
+  "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "executable_sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "plan_sha256": "7aa1f89ec36acf18f5f4ce7ec4c4f7ba71efb806038181d4eb99be6ee035f233",
+  "cases_sha256": "a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2",
+  "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+  "prompt_sha256": {
+    "candle_appraiser_grade.md": "ea0085dc4b0de14f1cd3a61e9edb9ec216c973bb23ca8eb6d9866736c9482a85",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "case_count": 20,
+  "trials_each": 20,
+  "planned_calls": 400,
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "credential_reference_only": "ZAI_API_KEY_SB",
+  "container": "masc-candle-eval-4fae8f4e3f",
+  "container_fixture": "/fixture/glm-grade-scope-survey-20x20",
+  "container_evidence": "/output/glm-grade-scope-survey-20x20",
+  "human_labels": "not_supplied",
+  "assistant_grades_in_input": false,
+  "scope": "Grade-only scope distribution and repeatability on 20 synthetic Goals; no human agreement or acceptance score",
+  "no_live_goal_task_candle_ledger_or_paid_writes": true,
+  "retry_policy": "Keep every attempted trial including transport errors; no replacement, fallback, or retrospective retry"
+}

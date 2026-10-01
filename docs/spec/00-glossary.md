@@ -1431,7 +1431,7 @@ status: reference
 
 **Connector Connection (커넥터 연결)**
 : Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
-  (`Masc.Tui_decode.connector_connection`) — `Connector_connected`·
+  (`Masc.Tui_decode_connectors.connector_connection`) — `Connector_connected`·
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
   `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
   `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
@@ -1444,7 +1444,7 @@ status: reference
   `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
   번만 그린다.
   → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
-  [Tui_decode.connector_connection](../../lib/tui_decode.mli)
+  [Tui_decode_connectors.connector_connection](../../lib/tui_decode_connectors.mli)
 
 ## Collaboration State
 

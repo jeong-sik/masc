@@ -444,6 +444,12 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
         if not (String.starts_with ~prefix:config.base_path path) then fail "policy escaped fixture";
         Out_channel.with_open_bin path (fun oc -> output_string oc "malformed policy");
+        let observation = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+        (match Candle_status.observed_view ~now:Time_compat.now ~base_path:config.base_path,
+               Candle_observe.equipment observation ~keeper:"alpha" with
+         | Error (Candle_status.Disabled reason), Error message ->
+           check string "disabled prefix occurs once" ("Candle is disabled: " ^ reason) message
+         | _ -> fail "malformed policy did not report Disabled");
         (match portrait (read ()) with
          | Keeper_portrait_equipment.Unavailable reason -> check bool "failure has evidence" true (String.length reason>0)
          | Keeper_portrait_equipment.Ready _ -> fail "cached name gear concealed an unreadable policy");
@@ -451,10 +457,23 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         check bool "repair is visible inside the same cached roster" true (portrait (read ()) = expected))
       (fun json -> check bool "Off uses server-selected starting equipment" true (portrait json = expected)))
 
+let test_shared_roster_omits_currency () =
+  List.iter (fun detailed ->
+    keeper_list ~names:["alpha"; "beta"] ~args:(`Assoc ["detailed", `Bool detailed])
+      (fun json ->
+        check bool "no shared currency envelope" true (Json_util.assoc_member_opt "candle" json = None);
+        let rows = Yojson.Safe.Util.(to_list (member (if detailed then "keepers" else "items") json)) in
+        List.iter (fun row ->
+          check bool "no other keeper balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None)) rows;
+        if detailed then match Tui_decode.decode_keeper_runtime_list json with
+          | Ok (rows, [], _, _, Error _) -> check int "strict decoder retains both public rows" 2 (List.length rows)
+          | _ -> fail "private currency omission broke the public roster")) [false; true]
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
-      , [ test_case "truncated answer reports the whole directory" `Quick
+      , [ test_case "shared roster omits currency" `Quick test_shared_roster_omits_currency
+        ; test_case "truncated answer reports the whole directory" `Quick
             test_truncated_reports_the_whole_directory
         ; test_case "complete answer is not marked truncated" `Quick
             test_complete_answer_is_not_marked_truncated

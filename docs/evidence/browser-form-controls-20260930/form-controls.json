@@ -1,0 +1,812 @@
+{
+  "scene": {
+    "schema": "masc.browser.scene.v1",
+    "documentId": "86be257fd4742b620ff03a794484f7a2",
+    "url": "about:blank",
+    "title": "Browser form controls fixture",
+    "viewport": {
+      "width": 1100,
+      "height": 850,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "nodes": [
+      {
+        "kind": "text",
+        "nodeId": "n21",
+        "tag": "h1",
+        "text": "Observed form controls",
+        "rects": [
+          {
+            "x": 32,
+            "y": 32,
+            "width": 408.09375,
+            "height": 41
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 36,
+        "fontWeight": "700",
+        "whiteSpace": "normal",
+        "headingLevel": 1
+      },
+      {
+        "kind": "control",
+        "nodeId": "n23",
+        "tag": "label",
+        "text": "Card A",
+        "rects": [
+          {
+            "x": 40,
+            "y": 105.109375,
+            "width": 81.046875,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "label",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "checked": false,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n24",
+        "tag": "label",
+        "text": "Card B",
+        "rects": [
+          {
+            "x": 142.0625,
+            "y": 105.109375,
+            "width": 82.03125,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "label",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "checked": true,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n25",
+        "tag": "label",
+        "text": "Locked card",
+        "rects": [
+          {
+            "x": 245.109375,
+            "y": 105.109375,
+            "width": 124.0625,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "label",
+        "disabled": true,
+        "editable": false,
+        "role": null,
+        "checked": false,
+        "clickable": false,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n26",
+        "tag": "label",
+        "text": "Locked external label",
+        "rects": [
+          {
+            "x": 40,
+            "y": 168.109375,
+            "width": 196.125,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "label",
+        "disabled": true,
+        "editable": false,
+        "role": null,
+        "checked": false,
+        "clickable": false,
+        "headingLevel": null
+      },
+      {
+        "kind": "text",
+        "nodeId": "n27",
+        "tag": "label",
+        "text": "Notes",
+        "rects": [
+          {
+            "x": 53,
+            "y": 263.109375,
+            "width": 47.03125,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n28",
+        "tag": "textarea",
+        "text": "Notes",
+        "rects": [
+          {
+            "x": 100.03125,
+            "y": 244.109375,
+            "width": 182,
+            "height": 36
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "pre-wrap",
+        "controlType": "textarea",
+        "disabled": false,
+        "editable": true,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "text",
+        "nodeId": "n29",
+        "tag": "label",
+        "text": "Unassociated text",
+        "rects": [
+          {
+            "x": 329.046875,
+            "y": 263.109375,
+            "width": 143.078125,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n30",
+        "tag": "form",
+        "text": "Submit amount",
+        "rects": [
+          {
+            "x": 32,
+            "y": 305.109375,
+            "width": 1036,
+            "height": 23
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "form",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n31",
+        "tag": "input",
+        "text": "Amount",
+        "rects": [
+          {
+            "x": 32,
+            "y": 307.109375,
+            "width": 153,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "text",
+        "disabled": false,
+        "editable": true,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n32",
+        "tag": "button",
+        "text": "Submit amount",
+        "rects": [
+          {
+            "x": 185,
+            "y": 307.109375,
+            "width": 105.65625,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "button",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n33",
+        "tag": "div",
+        "text": "Card search",
+        "rects": [
+          {
+            "x": 40,
+            "y": 336.109375,
+            "width": 179,
+            "height": 49
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": "combobox",
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n34",
+        "tag": "input",
+        "text": "Search card",
+        "rects": [
+          {
+            "x": 53,
+            "y": 351.109375,
+            "width": 153,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "text",
+        "disabled": false,
+        "editable": true,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n35",
+        "tag": "div",
+        "text": "Custom card",
+        "rects": [
+          {
+            "x": 240.015625,
+            "y": 336.109375,
+            "width": 128.046875,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": "radio",
+        "ariaChecked": "true",
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n36",
+        "tag": "div",
+        "text": "Mixed selection",
+        "rects": [
+          {
+            "x": 389.078125,
+            "y": 336.109375,
+            "width": 150.0625,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": "checkbox",
+        "ariaChecked": "mixed",
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n37",
+        "tag": "div",
+        "text": "Locked action",
+        "rects": [
+          {
+            "x": 560.15625,
+            "y": 336.109375,
+            "width": 137.078125,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": true,
+        "editable": false,
+        "role": "button",
+        "clickable": false,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n38",
+        "tag": "div",
+        "text": "Expense menu",
+        "rects": [
+          {
+            "x": 718.25,
+            "y": 336.109375,
+            "width": 146.078125,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": "menuitem",
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n39",
+        "tag": "div",
+        "text": "Inline menu",
+        "rects": [
+          {
+            "x": 885.34375,
+            "y": 336.109375,
+            "width": 119.0625,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n40",
+        "tag": "summary",
+        "text": "More",
+        "rects": [
+          {
+            "x": 40,
+            "y": 401.109375,
+            "width": 67.015625,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "summary",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "text",
+        "nodeId": "n41",
+        "tag": "p",
+        "text": "Expanded content",
+        "rects": [
+          {
+            "x": 32,
+            "y": 474.109375,
+            "width": 145.125,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "headingLevel": null
+      },
+      {
+        "kind": "text",
+        "nodeId": "n42",
+        "tag": "div",
+        "text": "Inline opened",
+        "rects": [
+          {
+            "x": 32,
+            "y": 515.109375,
+            "width": 108.109375,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "headingLevel": null
+      }
+    ],
+    "chars": 242,
+    "truncated": false,
+    "scope": null,
+    "view": "content",
+    "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+  },
+  "elements": {
+    "url": "about:blank",
+    "title": "Browser form controls fixture",
+    "total": 16,
+    "truncated": false,
+    "elements": [
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(1)",
+        "tag": "label",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Card A",
+        "href": null,
+        "disabled": false,
+        "checked": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(2)",
+        "tag": "label",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Card B",
+        "href": null,
+        "disabled": false,
+        "checked": true
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(3)",
+        "tag": "label",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Locked card",
+        "href": null,
+        "disabled": true,
+        "checked": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > label:nth-of-type(1)",
+        "tag": "label",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Locked external label",
+        "href": null,
+        "disabled": true,
+        "checked": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(4) > textarea:nth-of-type(1)",
+        "tag": "textarea",
+        "role": null,
+        "type": null,
+        "name": "Notes",
+        "text": "",
+        "href": null,
+        "disabled": false,
+        "value": "",
+        "readOnly": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1)",
+        "tag": "form",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Submit amount",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > input:nth-of-type(1)",
+        "tag": "input",
+        "role": null,
+        "type": "text",
+        "name": "Amount",
+        "text": "",
+        "href": null,
+        "disabled": false,
+        "readOnly": false,
+        "value": "42"
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "tag": "button",
+        "role": null,
+        "type": "button",
+        "name": "",
+        "text": "Submit amount",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(2)",
+        "tag": "div",
+        "role": "combobox",
+        "type": null,
+        "name": "Card search",
+        "text": "",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(2) > input:nth-of-type(1)",
+        "tag": "input",
+        "role": null,
+        "type": "text",
+        "name": "Search card",
+        "text": "",
+        "href": null,
+        "disabled": false,
+        "readOnly": false,
+        "value": ""
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(3)",
+        "tag": "div",
+        "role": "radio",
+        "type": null,
+        "name": "",
+        "text": "Custom card",
+        "href": null,
+        "disabled": false,
+        "ariaChecked": "true"
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(4)",
+        "tag": "div",
+        "role": "checkbox",
+        "type": null,
+        "name": "",
+        "text": "Mixed selection",
+        "href": null,
+        "disabled": false,
+        "ariaChecked": "mixed"
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(5)",
+        "tag": "div",
+        "role": "button",
+        "type": null,
+        "name": "",
+        "text": "Locked action",
+        "href": null,
+        "disabled": true
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(6)",
+        "tag": "div",
+        "role": "menuitem",
+        "type": null,
+        "name": "",
+        "text": "Expense menu",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(7)",
+        "tag": "div",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Inline menu",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > details:nth-of-type(1) > summary:nth-of-type(1)",
+        "tag": "summary",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "More",
+        "href": null,
+        "disabled": false
+      }
+    ]
+  }
+}

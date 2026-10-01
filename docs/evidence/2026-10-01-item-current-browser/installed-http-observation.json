@@ -25,26 +25,26 @@
       "repo_head_commit_source": "runtime_repo_head",
       "repo_head_commit_unix_ts": 1790572670.0,
       "repo_head_commit_age_seconds": 237988,
-      "executable_path": "/Users/dancer/.local/bin/masc",
-      "executable_dir": "/Users/dancer/.local/bin",
-      "repo_root": "/Users/dancer/me",
+      "executable_path": "<operator-home>/.local/bin/masc",
+      "executable_dir": "<operator-home>/.local/bin",
+      "repo_root": "<operator-home>/me",
       "runtime_instance_id": "01a0f49a-3d9c-7000-9be8-1f6ad4d2841e",
       "started_at": "2026-09-30T23:15:44Z",
       "uptime_seconds": 514
     },
     "paths": {
-      "cwd": "/Users/dancer/me",
-      "effective_base_path": "/Users/dancer/me",
-      "effective_masc_root": "/Users/dancer/me/.masc",
-      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "cwd": "<operator-home>/me",
+      "effective_base_path": "<operator-home>/me",
+      "effective_masc_root": "<operator-home>/me/.masc",
+      "current_task_path": "<operator-home>/me/.masc/current_task",
       "current_task_shape": "absent",
       "effective_has_masc_dir": true,
       "roots_diverge": false,
       "strict_mode_requested": false,
       "startup_rejected": false,
       "startup_abort_eligible": false,
-      "input_base_path": "/Users/dancer/me",
-      "env_masc_base_path": "/Users/dancer/me",
+      "input_base_path": "<operator-home>/me",
+      "env_masc_base_path": "<operator-home>/me",
       "resolution_source": "explicit_cli"
     }
   },
@@ -63,5 +63,12 @@
       "content_type": "application/json; charset=utf-8"
     }
   },
-  "credential_capture": false
+  "credential_capture": false,
+  "redaction": "Operator home prefix replaced with <operator-home>; relative layout and build identity preserved.",
+  "limitations": "No exact Keeper roster/control response retained; HTTP404 alone does not distinguish missing route from missing Keeper.",
+  "evidence_limits": {
+    "keeper_presence": "not captured; no roster entry or successful exact-Keeper control request retained",
+    "route_availability": "unverified; this HTTP404 alone cannot distinguish unknown Keeper from missing route",
+    "source_inspection": "not retained in this observation"
+  }
 }

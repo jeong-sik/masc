@@ -39,15 +39,46 @@ B has a pending measurement, verifies that B's entire entry is unchanged, and
 checks that B's own hook and measurement binding still work.
 
 This protects `current_turn_observation`, not every Keeper-scoped projection.
-`Keeper_turn_preview` still stores streaming preview by Keeper name, and pending
-measurement production belongs to the Keeper lifecycle. Both require space
-attribution before concurrent execution. Session/checkpoint and external-effect
+Pending measurement production belongs to the Keeper lifecycle and requires
+space attribution before concurrent execution. Preview callback ownership is
+addressed in the next slice below. Session/checkpoint and external-effect
 ownership are also unchanged. Source review and parsing are not runtime proof.
+
+## Third change: preview writer ownership
+
+Each `run_turn` creates a private preview writer before constructing any hooks.
+The writer owns response text, tool/attempt/failure state, and the streaming
+redactor's held partial line. Every callback captures that writer. The displayed
+Keeper preview points to the most recently installed writer; an old callback can
+update only its original private state, never the successor's displayed state.
+
+Claude/Codex adapters already emit native tool start events to the per-execution
+stream callback. Duplicate name-scoped preview writes are removed from those
+adapters. The writer tracks tool indexes through stream start/stop so native
+completion still refreshes the corresponding tool observation. Text-only stops
+do not claim tool activity. Native-action evidence and raw trace observation
+remain independent.
+
+The stream regression interleaves A's unfinished text with B's split secret,
+then sends A's stop/tool/failure/retry/final-text callbacks. B's snapshot remains
+unchanged and B's own final delta is redacted with its original held prefix.
+
+This is top-level execution ownership. Provider retries within the same
+`run_turn` still share the writer; per-provider stream attempt attribution is not
+claimed. Display selection remains latest-created execution by Keeper name.
+Measurement production, event-bus FSM emission and durable sessions remain
+separate shared boundaries. In particular, the event bus emits FSM records before
+its token-protected registry count callback; those are not the Registry FSM.
+
+Validation is source review and parsing, not executed tests or deployed UI proof.
+The consulted Keeper lane also reports no OCaml/Dune/Opam toolchain; it cannot
+supply runtime evidence. Native GitHub stack membership was observed for #40524
+and #40530 after initial PR creation; direct base alone is not merge scope.
 
 ## Remaining stack order
 
-1. Partition streaming preview and lifecycle measurement production by execution
-   space; registry callback mutation is now attributed to the captured attempt.
+1. Partition lifecycle measurement production and displayed execution selection
+   by space. Registry callback mutation and preview writers have owned executions.
 2. Partition provider history/checkpoints and official-client session stores by
    execution space, preserving existing CAS, effect and continuation contracts.
 3. Scope event subscriptions and emitted events by execution identity. The current

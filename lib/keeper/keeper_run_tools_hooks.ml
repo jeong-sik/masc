@@ -408,6 +408,7 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
 ;;
 
 let assemble_hooks
+      ?preview
       ?observation_token
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -607,6 +608,7 @@ let assemble_hooks
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
+        ?preview
         ?observation_token
         ~config
         ~meta_ref
@@ -795,7 +797,7 @@ let assemble_hooks
               | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
                 (* A pre-hook observes a request, before validation/approval.
                    Include Skill without claiming the handler has started. *)
-                Keeper_turn_preview.note_tool ~keeper_name:meta.name
+                Keeper_turn_preview.note_tool ~writer:preview
                   ~now:(Time_compat.now ()) tool_name;
                 if not (String.equal tool_name
                           Keeper_tool_composition_catalog.skill_tool_name)

@@ -831,6 +831,10 @@ let run_turn
       ()
   : Keeper_agent_result.turn_settlement
   =
+  let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
+      ~now:(Time_compat.now ())
+      ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
+                    ~keeper_name:meta.name)) in
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
@@ -1084,6 +1088,7 @@ let run_turn
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_run_tools.prepare_agent_setup
+      ?preview
       ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools
       ?repetition_execution
@@ -1471,6 +1476,7 @@ let run_turn
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
+        ~preview
         ~observation_token
         ~config
         ~keeper_name:meta.name
@@ -1728,7 +1734,7 @@ let run_turn
                         (fun attempt ->
                            last_dispatched_checkpoint_owner :=
                              Some attempt.Keeper_turn_driver.checkpoint_owner;
-                           Keeper_turn_preview.note_attempt ~keeper_name:meta.name
+                           Keeper_turn_preview.note_attempt ~writer:preview
                              ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id;
                            (* Each lane attempt assembles its own request.
                               Without this clear, a failed attempt's evidence
@@ -1755,7 +1761,7 @@ let run_turn
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
-                           Keeper_turn_preview.note_failure ~keeper_name:meta.name
+                           Keeper_turn_preview.note_failure ~writer:preview
                              ~now:(Time_compat.now ()) ~runtime_id
                              (Agent_core.Error.to_string error);
                            (* The candidate this error belongs to, and whether

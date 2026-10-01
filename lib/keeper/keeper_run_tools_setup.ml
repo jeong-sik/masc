@@ -315,6 +315,7 @@ let initial_tool_calls
 ;;
 
 let prepare_agent_setup
+      ?preview
       ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -972,6 +973,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
+    ?preview
     ?observation_token
     ?dynamic_context_for_tools
     ?repetition_execution

@@ -58,12 +58,13 @@ agent core RFC-AC-020이 요구하는 consumer SLO를 추가하려면 agent core
 - `runtime` lane 숫자는 MCP transport가 아니라 local runtime ceiling 영향을 크게 받는다.
 - 인증이 켜진 서버에서 `quick-bench.sh` 또는 `runtime` lane을 실행할 때는
   `MASC_TOKEN`에 Admin credential이 필요하다. `masc_runtime_verify`는 endpoint마다
-  실제 chat completion을 호출하므로 read-only benchmark가 아니다.
+  실제 chat completion을 호출하므로 read-only benchmark가 아니다. 그래서 `MASC_URL`에는 기본값이 없고,
+  운영 서버(8935)를 가리키면 안 된다.
 - `local64`는 target runtime profile 이름이지 achieved fact가 아니다. 실제 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`로 확인한다.
 
 환경 변수:
 ```
-MASC_URL=http://127.0.0.1:8935/mcp
+MASC_URL=http://127.0.0.1:9400/mcp   # 필수. 격리한 벤치 서버(포트 9400 이상). 운영 서버(8935)는 쓰지 않는다
 MASC_AGENT=bench
 MASC_TOKEN=<Admin token required for quick-bench/runtime lane when auth is enabled>
 ```

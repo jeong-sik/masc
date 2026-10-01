@@ -112,8 +112,25 @@ let script = {js|function interactInPage(args) {
   // leaves an element that still reports client rects and its own computed
   // display. Checking only the element acted on a link the read surface had
   // already stopped showing.
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
+  };
   const observable = element => {
-    if (!element.getClientRects().length) return false;
+    if (!element.getClientRects().length && !labelTextRects(element).length) return false;
     if (getComputedStyle(element).visibility !== 'visible') return false;
     for (let node = element; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -245,7 +262,11 @@ let script = {js|function interactInPage(args) {
       element = elements[0];
     }
     if (!observable(element)) throw new Error("element_not_visible");
-    if (element.matches(":disabled")) throw new Error("element_disabled");
+    const activationTarget=(element.localName === 'label' && element.control) || element;
+    if (activationTarget.matches(":disabled")) throw new Error("element_disabled");
+    for (const start of new Set([element,activationTarget]))
+      for (let parent=start; parent; parent=parent.parentElement)
+      if (parent.getAttribute?.('aria-disabled') === 'true') throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
     effectStarted = true;

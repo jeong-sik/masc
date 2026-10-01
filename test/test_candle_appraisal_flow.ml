@@ -90,7 +90,7 @@ let paid config goal_id =
   List.filter_map (fun (event : E.t) -> match event.body with
     | E.Paid payment when payment.identity.goal_id = goal_id -> Some payment
     | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
-    | E.Unattributed _ | E.Purchased _ | E.Payout_failed _ -> None) (events config)
+    | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) (events config)
 
 let one_payment config goal_id = match paid config goal_id with
   | [payment] -> payment | _ -> fail "expected exactly one Paid row"
@@ -164,7 +164,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     ["paid-once:2";"paid-once:3";"paid-once:4"]
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
-  check bool "ledger decode replays the same integer calculation" true (decoded = p)
+  check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
 
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->

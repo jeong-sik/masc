@@ -1079,3 +1079,17 @@ describe('official-client local claim refusal', () => {
     expect(cleared?.runtime_blocker_summary).toBeNull()
   })
 })
+
+
+describe('Keeper portrait projection', () => {
+  it('preserves equipped snapshots and reports corrupt or absent equipment without dropping the Keeper', () => {
+    const equipment = { face: 'glasses', neck: 'medal', head: 'crown', hand: 'book', base: 'dish_oak' }
+    const ready = normalizeKeepers([{ name: 'equipped', status: 'active', portrait: { state: 'ready', equipment } }])[0]
+    expect(ready?.portrait).toEqual({ state: 'ready', equipment })
+    for (const portrait of [undefined, { state: 'ready', equipment: { ...equipment, head: 'book' } }, { state: 'unavailable', reason: 'ledger corrupt' }]) {
+      const keeper = normalizeKeepers([{ name: 'equipped', status: 'active', portrait }])[0]
+      expect(keeper?.name).toBe('equipped')
+      expect(keeper?.portrait?.state).toBe('unavailable')
+    }
+  })
+})

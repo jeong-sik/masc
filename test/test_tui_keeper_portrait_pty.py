@@ -635,7 +635,7 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                             refresh=0.2)
 
 
-def instructions_read_recovers_workspace_authority(binary: str) -> None:
+def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs: bool = False) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
@@ -656,8 +656,10 @@ def instructions_read_recovers_workspace_authority(binary: str) -> None:
         reads.append(True)
         marker = old if len(reads) == 1 else current
         # The actual config-view projection reads this nested runtime field.
-        value = {"name": "alpha", "execution": {"selected_runtime_id": marker.decode()},
-                 "prompt": {"instructions": "Synthetic Instructions recovery fixture"}}
+        value = ({"state": "no_local_stream", "backend": None, "instances": [],
+                  "tail": 200, "reason": marker.decode()} if sandbox_logs else
+                 {"name": "alpha", "execution": {"selected_runtime_id": marker.decode()},
+                  "prompt": {"instructions": "Synthetic Instructions recovery fixture"}})
         if len(reads) != 1:
             return 200, value
         held.set()
@@ -668,7 +670,8 @@ def instructions_read_recovers_workspace_authority(binary: str) -> None:
         return h.StreamingHttpResponse(chunks)
 
     fixtures["/health"] = health
-    fixtures["/api/v1/keepers/alpha/config"] = config
+    fixtures[("/api/v1/gate/keeper-sandbox-logs" if sandbox_logs else
+              "/api/v1/keepers/alpha/config")] = config
 
     def wait_refreshes(process, fd, output):
         before = identity["probes"]
@@ -684,11 +687,15 @@ def instructions_read_recovers_workspace_authority(binary: str) -> None:
         try:
             open_alpha_detail(process, fd, output)
             h.resize_and_wait(process, fd, output, rows=45, columns=COLUMNS, needle=INFO_TAB)
-            # Info -> Items -> Sandbox -> Instructions. The config endpoint
-            # arrival, rather than a tab-strip label, confirms pane entry.
-            os.write(fd, b"]]]")
+            # Enter Instructions, or Sandbox plus its separate initial log
+            # read. Endpoint arrival confirms the request actually started.
+            os.write(fd, b"]]o" if sandbox_logs else b"]]]")
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
+            wait_refreshes(process, fd, output)
+            # A manual read during revocation must not create a new token
+            # that would admit an answering but unverified endpoint.
+            os.write(fd, b"o" if sandbox_logs else b"r")
             wait_refreshes(process, fd, output)
             assert reads == [True], "unread authority restarted the held detail read"
             assert old not in frame(output)
@@ -704,13 +711,14 @@ def instructions_read_recovers_workspace_authority(binary: str) -> None:
             assert current in frame(output) and old not in frame(output)
             assert old not in output[start:], "obsolete Instructions callback replaced the recovery"
             assert len(reads) == 2, "ordinary full/scoped refresh relaunched the settled detail"
-            capture_item_screen(output, "instructions-authority-recovery")
+            capture_item_screen(output, "sandbox-log-authority-recovery" if sandbox_logs else "instructions-authority-recovery")
             os.write(fd, b"q")
         finally:
             release.set()
 
     h.run_terminal_scenario(binary,
-        description="Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery",
+        description=("Held Sandbox logs are revoked and resumed on authority recovery" if sandbox_logs else
+                     "Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery"),
         interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
         prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())), refresh=0.2)
 
@@ -722,7 +730,7 @@ if __name__ == "__main__":
         captures = Path(artifact_root) / "keeper-items-tui"
         captures.mkdir(parents=True, exist_ok=True)
         (captures / "manifest.json").write_text(json.dumps({
-            "scope": "synthetic Item account and Instructions authority-recovery HTTP responses through the real TUI in a PTY",
+            "scope": "synthetic Item account, Instructions and Sandbox log authority-recovery HTTP responses through the real TUI in a PTY",
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "source_sha": os.environ.get("GITHUB_SHA"),
             "columns": COLUMNS, "item_rows": SHORT_ROWS,
@@ -736,4 +744,5 @@ if __name__ == "__main__":
     item_account_withdraws_unread_authority(binary)
     item_account_is_withdrawn_at_workspace_boundary(binary)
     instructions_read_recovers_workspace_authority(binary)
-    print("tui keeper portrait: PASS (9 scenarios)")
+    instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
+    print("tui keeper portrait: PASS (10 scenarios)")

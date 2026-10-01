@@ -60,16 +60,23 @@ val pass_of : waiting -> Candle_event.t list -> pass option
 type candidates =
   { candidate_task_ids : string list
   ; candidate_keepers : string list
+  ; candidate_task_keepers : (string * string option) list
   }
 
 val candidates_of : waiting -> Candle_event.t list -> candidates option
 (** What the [Candidates] row written for the payout's request and verifier run decided. *)
 
 val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body -> (unit, string) result
-(** Cross-record admission: exact confirmed run, durable candidate Task coverage,
+(** Cross-record admission: exact confirmed run, Snapshot-linked completed Task
+    eligibility within the confirmed window, durable candidate Task coverage,
     unique relation decisions and exactly the eligible related Keeper recipients.
     Payment arithmetic alone cannot prove recipient eligibility. Call before the
     atomic append, or against the preceding ledger when validating a fold. *)
+
+val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
+(** Validate a settlement against preceding rows in file order. A settlement
+    requires an open obligation, its matching Snapshot, and durable Candidates.
+    Non-settlement records do not change this admission policy. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t

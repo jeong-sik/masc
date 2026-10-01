@@ -50,7 +50,6 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   runtime: { state: 'idle' },
   measurement: { captured: false },
   invariants: {
-    no_runtime_before_measurement: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -96,7 +95,6 @@ const REAL_COMPOSITE_PAYLOAD = {
   runtime: { state: 'idle' },
   measurement: { captured: false },
   invariants: {
-    no_runtime_before_measurement: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -149,7 +147,10 @@ describe('FSM Hub integration — API response shape', () => {
       const parsed = parseKeeperCompositeSnapshot(REAL_COMPOSITE_PAYLOAD)
       expect(parsed.phase).toBe('running')
       expect(parsed.collapsed_from).toBeUndefined()
-      expect(parsed.invariants.no_runtime_before_measurement).toBe(true)
+      expect(parsed.invariants).toEqual({
+        event_priority_monotone: true,
+        phase_derivation_agreement: true,
+      })
       expect(parsed.last_outcome).toBeNull()
     })
 
@@ -212,7 +213,6 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('all invariants are boolean — InvariantsPanel renders full or partial', () => {
       const inv = REAL_COMPOSITE_SHAPE.invariants
-      expect(typeof inv.no_runtime_before_measurement).toBe('boolean')
       expect(typeof inv.event_priority_monotone).toBe('boolean')
     })
   })

@@ -24,6 +24,7 @@ let librarian_pass_end_words = function
   | Masc.Tui_decode_memory_health.Pass_off -> "switched off"
   | Masc.Tui_decode_memory_health.Pass_lane_unconfigured -> "no model lane set up"
   | Masc.Tui_decode_memory_health.Pass_drained -> "caught up"
+  | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded to waiting work"
   | Masc.Tui_decode_memory_health.Pass_not_committed -> "last pass saved nothing"
   | Masc.Tui_decode_memory_health.Pass_stopped _ -> "stopped on an error"
   | Masc.Tui_decode_memory_health.Pass_raised _ -> "crashed"

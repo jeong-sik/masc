@@ -10830,7 +10830,6 @@ let withdraw_keeper_workspace_presentation state =
    | _ -> ())
 
 let apply_server_identity_reading state reading =
-  let previous = state.workspace_identity in
   (* A withdrawal invalidates outstanding roster reads even if the same
      workspace becomes ready again before those reads finish. *)
   if not (same_currency_workspace state.server_identity (Result.to_option reading))

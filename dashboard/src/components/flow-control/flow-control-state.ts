@@ -39,29 +39,60 @@ export function syncFlowStateFromDashboardSignals(): boolean {
   return false
 }
 
+// Once a direct read has established authority, dashboard projections only
+// trigger a new authoritative read; their stale status cannot overwrite it.
+let hasDirectReadback = false
+let pauseReadSequence = 0
+
 effect(() => {
-  syncFlowStateFromDashboardSignals()
+  void namespaceTruth.value
+  void namespaceTruthInitializing.value
+  void namespaceTruthError.value
+  void serverStatus.value
+  if (hasDirectReadback) {
+    void revalidateWorkspacePause()
+  } else {
+    syncFlowStateFromDashboardSignals()
+  }
 })
 
 async function readWorkspacePause(): Promise<boolean> {
-  const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
-  if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
-    || typeof observed.paused !== 'boolean') {
-    throw new Error('Namespace pause readback is unavailable.')
+  const sequence = ++pauseReadSequence
+  try {
+    const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
+    if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
+      || typeof observed.paused !== 'boolean') {
+      throw new Error('Namespace pause readback is unavailable.')
+    }
+    if (sequence === pauseReadSequence) {
+      hasDirectReadback = true
+      flowState.value = observed.paused ? 'paused' : 'running'
+    }
+    return observed.paused
+  } catch (error) {
+    if (sequence === pauseReadSequence) flowState.value = 'unknown'
+    throw error
   }
-  flowState.value = observed.paused ? 'paused' : 'running'
-  return observed.paused
+}
+
+async function revalidateWorkspacePause(): Promise<void> {
+  try { await readWorkspacePause() } catch { /* The current read withdraws its own state. */ }
 }
 
 export async function fetchPauseStatus(): Promise<void> {
+  if (hasDirectReadback) {
+    await revalidateWorkspacePause()
+    return
+  }
   if (syncFlowStateFromDashboardSignals()) {
     if (flowState.value !== 'running') return
     // A healthy SSE stream does not refresh Workspace pause authority.
-    try { await readWorkspacePause() } catch { flowState.value = 'unknown' }
+    await revalidateWorkspacePause()
     return
   }
   await refreshNamespaceTruth({ force: true })
   syncFlowStateFromDashboardSignals()
+  if (flowState.value === 'running') await revalidateWorkspacePause()
 }
 
 async function changeNamespacePause(paused: boolean): Promise<void> {

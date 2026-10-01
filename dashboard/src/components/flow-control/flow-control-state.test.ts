@@ -32,17 +32,20 @@ vi.mock('../../store', () => ({
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
 vi.mock('../common/confirm-dialog', () => ({ requestConfirm: mocks.requestConfirm }))
 
-import {
-  fetchPauseStatus, flowState, flowLoading,
-  pauseWorkspace, resumeWorkspace, runGarbageCollection,
-} from './flow-control-state'
+let fetchPauseStatus: typeof import('./flow-control-state').fetchPauseStatus
+let flowState: typeof import('./flow-control-state').flowState
+let flowLoading: typeof import('./flow-control-state').flowLoading
+let pauseWorkspace: typeof import('./flow-control-state').pauseWorkspace
+let resumeWorkspace: typeof import('./flow-control-state').resumeWorkspace
+let runGarbageCollection: typeof import('./flow-control-state').runGarbageCollection
 
 function snapshot(paused: boolean): void {
   mocks.namespaceTruth.value = { root: { status: { paused } } }
 }
 
 describe('flow-control-state', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules()
     vi.resetAllMocks()
     mocks.namespaceTruth.value = null
     mocks.namespaceTruthInitializing.value = false
@@ -51,6 +54,7 @@ describe('flow-control-state', () => {
     mocks.shellAuthSummary.value = {
       effective_role: 'admin', auth_error_code: null, auth_error_detail: null,
     }
+    ;({ fetchPauseStatus, flowState, flowLoading, pauseWorkspace, resumeWorkspace, runGarbageCollection } = await import('./flow-control-state'))
     flowState.value = 'unknown'
     flowLoading.value = false
     mocks.dispatchOperatorAction.mockResolvedValue({
@@ -92,6 +96,13 @@ describe('flow-control-state', () => {
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
   })
 
+  it('revalidates running after the initial forced projection read', async () => {
+    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(false))
+    await fetchPauseStatus()
+    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(flowState.value).toBe('paused')
+  })
+
   it('retains initializing and unknown states', async () => {
     mocks.namespaceTruthInitializing.value = true
     await fetchPauseStatus()
@@ -102,8 +113,8 @@ describe('flow-control-state', () => {
   })
 
   it.each([
-    ['namespace_resume', resumeWorkspace, true, false, 'Namespace resumed.'],
-    ['namespace_pause', pauseWorkspace, false, true, 'Namespace paused.'],
+    ['namespace_resume', () => resumeWorkspace(), true, false, 'Namespace resumed.'],
+    ['namespace_pause', () => pauseWorkspace(), false, true, 'Namespace paused.'],
   ] as const)('confirms %s then reads its result', async (action, run, before, after, message) => {
     snapshot(before)
     mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(before))
@@ -213,7 +224,7 @@ describe('flow-control-state', () => {
     expect(mocks.showToast).toHaveBeenCalledWith('Current role is reader; admin role is required.', 'error', 6000)
   })
 
-  it.each([pauseWorkspace, resumeWorkspace])('rejects worker namespace actions before dispatch', async run => {
+  it.each([() => pauseWorkspace(), () => resumeWorkspace()])('rejects worker namespace actions before dispatch', async run => {
     mocks.shellAuthSummary.value = { effective_role: 'worker' }
     await run()
     expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()

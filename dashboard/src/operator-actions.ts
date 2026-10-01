@@ -32,6 +32,8 @@ let nextLogId = 1
 
 let snapshotRefreshInflight: Promise<void> | null = null
 let workspaceDigestRefreshInflight: Promise<void> | null = null
+let snapshotFollowup: Promise<void> | null = null
+let digestFollowup: Promise<void> | null = null
 let lastSnapshotRefreshAt = 0
 let lastWorkspaceDigestRefreshAt = 0
 
@@ -74,7 +76,18 @@ function isFresh(lastAt: number, opts?: RefreshOptions): boolean {
 }
 
 export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<void> {
-  if (snapshotRefreshInflight) return snapshotRefreshInflight
+  if (snapshotRefreshInflight) {
+    if (!opts?.force) return snapshotRefreshInflight
+    // A read admitted before the action cannot acknowledge that action.
+    // Coalesce callers behind one read admitted after the current one ends.
+    if (!snapshotFollowup) {
+      snapshotFollowup = snapshotRefreshInflight.then(() => {
+        snapshotFollowup = null
+        return refreshOperatorSnapshot({ force: true })
+      })
+    }
+    return snapshotFollowup
+  }
   if (isFresh(lastSnapshotRefreshAt, opts)) return
   operatorLoading.value = true
   operatorError.value = null
@@ -99,7 +112,18 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
 }
 
 export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Promise<void> {
-  if (workspaceDigestRefreshInflight) return workspaceDigestRefreshInflight
+  if (workspaceDigestRefreshInflight) {
+    if (!opts?.force) return workspaceDigestRefreshInflight
+    // A read admitted before the action cannot acknowledge that action.
+    // Coalesce callers behind one read admitted after the current one ends.
+    if (!digestFollowup) {
+      digestFollowup = workspaceDigestRefreshInflight.then(() => {
+        digestFollowup = null
+        return refreshOperatorWorkspaceDigest({ force: true })
+      })
+    }
+    return digestFollowup
+  }
   if (isFresh(lastWorkspaceDigestRefreshAt, opts)) return
   operatorDigestLoading.value = true
   operatorDigestError.value = null

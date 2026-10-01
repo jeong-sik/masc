@@ -251,6 +251,27 @@ describe('background action projections', () => {
   })
 })
 
+it('queues one post-confirmation read behind both held projection reads', async () => {
+  let finishSnapshot!: (value: unknown) => void
+  let finishDigest!: (value: unknown) => void
+  apiMocks.fetchOperatorSnapshot.mockImplementationOnce(() => new Promise(resolve => { finishSnapshot = resolve }))
+  apiMocks.fetchOperatorDigest.mockImplementationOnce(() => new Promise(resolve => { finishDigest = resolve }))
+  const { mod, signals } = await load()
+  const pending = Promise.all([mod.refreshOperatorSnapshot(), mod.refreshOperatorWorkspaceDigest()])
+  await mod.confirmOperatorPendingAction('vincent', 'tok-1', 'confirm', { refresh: 'background' })
+  await mod.confirmOperatorPendingAction('vincent', 'tok-2', 'confirm', { refresh: 'background' })
+  expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
+  expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
+  finishSnapshot({ ...validSnapshot, trace_id: 'before-confirmation' })
+  finishDigest({})
+  await pending
+  await vi.waitFor(() => {
+    expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(2)
+    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(2)
+    expect(signals.operatorSnapshot.value?.trace_id).not.toBe('before-confirmation')
+  })
+})
+
 describe('refreshOperatorSnapshot', () => {
   it('fetches, normalizes, and stores the snapshot while toggling the loading signal', async () => {
     apiMocks.fetchOperatorSnapshot.mockResolvedValue({

@@ -1131,8 +1131,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
         (* Keep canonical discovery authority until every dependent path is
            retired. A failed sidecar/alias/UUID unlink must remain retryable. *)
         unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
-        List.iter (fun alias -> unlink_prune_path (credential_file config alias))
-          retirement.alias_names;
+        List.iter (fun alias ->
+          unlink_prune_path (raw_token_file config alias);
+          unlink_prune_path (credential_file config alias)) retirement.alias_names;
         Option.iter unlink_prune_path retirement.uuid_target;
         unlink_prune_path (credential_file config retirement.retiring_agent_name);
         Ok ())

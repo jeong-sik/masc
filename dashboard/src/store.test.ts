@@ -247,6 +247,23 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     expect(store.hydrateExecutionSnapshot({ ...snapshot, candle_observation_sequence: 3 })).toBe(true)
   })
 
+  it('does not replace a newer same-generation Candle reading with a delayed HTTP failure', async () => {
+    const held = pendingResponse()
+    const fetch = vi.fn().mockReturnValueOnce(held.promise)
+    vi.stubGlobal('fetch', fetch)
+    const store = await import('./store')
+    store.hydrateExecutionSnapshot({ ...execution(1), candle: { status: 'off' }, candle_observation_sequence: 1 })
+    const requested = store.refreshExecution({ force: true })
+    const rejected = expect(requested).rejects.toThrow('superseded')
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    store.hydrateExecutionSnapshot({ ...execution(1), candle: { status: 'off' }, candle_observation_sequence: 2 })
+    const candle = store.candleObservation.peek()
+    held.resolve(json({ error: 'old read failed' }, 503))
+    await rejected
+    expect(store.candleObservation.peek()).toBe(candle)
+    expect(store.executionError.value).toBeNull()
+  })
+
   it('refreshes independent deletion receipts when execution reconciliation fails', async () => {
     const fetch = vi.fn(async (input: string) => {
       if (input.includes('/dashboard/execution')) return json({ error: 'execution unavailable' }, 503)

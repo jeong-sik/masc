@@ -666,21 +666,29 @@ let index_of haystack needle =
   in
   walk 0
 
-(* A column label that is a prefix of another label matches the wrong column
-   and says nothing about it. "ST" is inside "STARTED", so after the Memory
-   table renamed STATE to ST (#33919) the Fusion case read the first column
-   as the state one and reported its offset as 0. A label occurs once in a
-   header row, so more than one occurrence is the question being asked
-   wrongly rather than an answer. *)
+(* Match a complete space-delimited cell. "ST" inside "STARTED" or "STORED"
+   is another column's text, while two complete "ST" cells are ambiguous. *)
 let offset_of needle text =
-  match index_of text needle with
-  | None -> failf "%S is not in %S" needle text
-  | Some index ->
-    let rest = String.sub text (index + String.length needle)
-                 (String.length text - index - String.length needle) in
-    (match index_of rest needle with
-     | Some _ -> failf "%S appears more than once in %S" needle text
-     | None -> index)
+  let text_length = String.length text in
+  let needle_length = String.length needle in
+  let rec walk index found =
+    if index + needle_length > text_length then
+      match found with
+      | Some offset -> offset
+      | None -> failf "%S is not in %S" needle text
+    else
+      let is_cell =
+        (index = 0 || text.[index - 1] = ' ')
+        && (index + needle_length = text_length
+            || text.[index + needle_length] = ' ')
+        && String.sub text index needle_length = needle in
+      if is_cell then
+        match found with
+        | Some _ -> failf "%S appears more than once in %S" needle text
+        | None -> walk (index + needle_length) (Some index)
+      else walk (index + 1) found
+  in
+  walk 0 None
 
 (* Offsets are asked in display cells, not bytes: the delta column is headed
    with a two-byte glyph that occupies one cell. *)

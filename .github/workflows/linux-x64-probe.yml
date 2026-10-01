@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
-          python3 test/test_tui_keeper_portrait_pty.py "$PROBE_OUT/masc_tui.exe" \
+          python3 -u test/test_tui_keeper_portrait_pty.py "$PROBE_OUT/masc_tui.exe" 2>&1 \
             | tee "$RUNNER_TEMP/keeper-items-tui.log"
 
       - name: Set up Node for Item HTTP acceptance

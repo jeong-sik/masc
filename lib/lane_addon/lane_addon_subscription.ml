@@ -90,7 +90,11 @@ let producer ~access bindings s =
         get "id" text owner=Ok s.installation_id
         && (match get "kind" text phase with Ok "detached" | Ok "detaching" -> false | _ -> true)
     | _ -> false in
-  match List.filter matches bindings with
+  (* Hidden and absent installations share one public result. Filter by
+     durable read authority before counting possible producers. *)
+  let readable = List.filter (fun value ->
+    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~access value)) bindings in
+  match List.filter matches readable with
   | [value] ->
       let* () = Lane_addon_runtime.authorize_retained_read ~access value in
       let* instance = get "instance_id" text value in

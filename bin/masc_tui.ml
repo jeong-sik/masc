@@ -13127,7 +13127,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if Option.fold ~none:false ~some:(fun (id, incarnation) ->
           view.screen <> Masc_tui_lane_addons.Detail (id, incarnation)) initial_detail
         then {view with loading=false} else
-        let initialize_result = Option.is_some initial_detail && view.row_cursor < 0 in
         match result with
         | Error (`Inventory detail) ->
             {view with loading=false;error=None;snapshot_read_error=Some detail}
@@ -13142,8 +13141,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             let view = match reply.lar_receipt with
               | None -> view
               | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in
-            let view = match initialize_result, reply.lar_snapshot, reply.lar_diagnostic with
-              | true, Some _, None -> Masc_tui_lane_addons.select_initial_result view
+            let view = match initial_detail, reply.lar_snapshot, reply.lar_diagnostic with
+              | Some _, Some _, None when view.row_cursor < 0 -> Masc_tui_lane_addons.select_initial_result view
               | _ -> view in
             let snapshot_read_error = match reply.lar_inventory_read with
               | `Unchanged -> view.snapshot_read_error

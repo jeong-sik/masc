@@ -1290,7 +1290,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
-  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+  rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
 }
 
 (** Load the Runtime operator surface from its identity projection and optional
@@ -1319,7 +1319,7 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              match probe_result with
              | Error detail -> Error ("runtime probe load failed: " ^ detail)
              | Ok probe_json ->
-                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
                   | Ok probe -> Ok probe
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
@@ -1821,7 +1821,7 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
 let load_keeper_roster ~(host : string) ~(port : int) :
-    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
   match fetch_keeper_runtimes ~host ~port with
   | Error transport ->
@@ -1836,8 +1836,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total, candle) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show

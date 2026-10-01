@@ -47,11 +47,11 @@ let test_only_this_keepers_effects_count () =
   (* Unfolded: the queue has a row of its own. Folded it is a count on the
      progress line, which [test_a_folded_turn_gives_the_queue_no_row] pins. *)
   state.msg_turn_folded <- false;
-  let empty = Tui_types.keeper_message_status_rows state in
+  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   state.gate_pending <-
     [ pending ~keeper:"archivist" ~tool:"Execute" "appr-1" ];
   check int "another keeper's effect reserves nothing" empty
-    (Tui_types.keeper_message_status_rows state);
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80);
   check int "and is not this keeper's" 0
     (List.length
        (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"));
@@ -60,7 +60,7 @@ let test_only_this_keepers_effects_count () =
     ; pending ~keeper:"polisher" ~tool:"WebFetch" "appr-2"
     ];
   check int "this keeper's effect reserves one row" (empty + 1)
-    (Tui_types.keeper_message_status_rows state);
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80);
   check int "and only its own" 1
     (List.length
        (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"))
@@ -73,13 +73,13 @@ let test_many_effects_still_reserve_one_row () =
   let state = state () in
   state.msg_target_keeper_name <- Some "polisher";
   state.msg_turn_folded <- false;
-  let empty = Tui_types.keeper_message_status_rows state in
+  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   state.gate_pending <-
     List.init 7 (fun index ->
       pending ~keeper:"polisher" ~tool:"Execute"
         (Printf.sprintf "appr-%d" index));
   check int "seven effects are still one row" (empty + 1)
-    (Tui_types.keeper_message_status_rows state)
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
 ;;
 
 (* With no chat target there is no keeper to attribute a row to, and the pane
@@ -87,10 +87,10 @@ let test_many_effects_still_reserve_one_row () =
 let test_no_target_reserves_nothing () =
   let state = state () in
   state.msg_target_keeper_name <- None;
-  let empty = Tui_types.keeper_message_status_rows state in
+  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   state.gate_pending <- [ pending ~keeper:"polisher" ~tool:"Execute" "appr-1" ];
   check int "no target, no row" empty
-    (Tui_types.keeper_message_status_rows state)
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
 ;;
 
 (* The reservation and the drawing must read the same list. Two filters over
@@ -138,19 +138,19 @@ let test_a_folded_turn_gives_the_queue_no_row () =
   state.msg_tool_visibility <- Tui_types.Tools_full;
   state.msg_target_keeper_name <- Some "polisher";
   state.msg_turn_folded <- true;
-  let empty = Tui_types.keeper_message_status_rows state in
+  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   state.gate_pending <-
     [ pending ~keeper:"polisher" ~tool:"WebFetch" "appr-1"
     ; pending ~keeper:"polisher" ~tool:"Execute" "appr-2"
     ];
   check int "a folded turn reserves no queue row" empty
-    (Tui_types.keeper_message_status_rows state);
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80);
   check int "and the count the line reports is the queue's own" 2
     (List.length
        (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"));
   state.msg_turn_folded <- false;
   check int "unfolded it takes its row back" (empty + 1)
-    (Tui_types.keeper_message_status_rows state)
+    (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
 ;;
 
 let () =

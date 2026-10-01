@@ -80,6 +80,7 @@ jobs:
             ${{ runner.temp }}/item-http-evidence/browser-evidence.json
             ${{ runner.temp }}/item-http-evidence/item-server-*.png
             ${{ runner.temp }}/item-http-evidence/http-evidence.json
+            ${{ runner.temp }}/item-http-evidence/tool-calls.json
             ${{ runner.temp }}/item-http-evidence/account.json
             ${{ runner.temp }}/item-http-evidence/account-after.json
             ${{ runner.temp }}/item-http-evidence/account-restarted.json

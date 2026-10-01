@@ -14,19 +14,19 @@ let comments = List.init 128 (fun index ->
     bc_created_at = "2026-09-08" })
 
 let source : Layout.source =
-  { post; detail = Detail.Ready (post, comments); related_posts = [post];
+  { post; detail = Detail.Ready (post, comments, None); related_posts = [post];
     keeper_names = ["keeper"]; columns = 100; styles = ["cyan"];
     table_frame = false }
 
 let render source () =
   let body = [source.Layout.post.bp_body] in
   let rows = match source.detail with
-    | Detail.Ready (_, comments) -> List.map (fun c -> c.bc_content) comments
+    | Detail.Ready (_, comments, _) -> List.map (fun c -> c.bc_content) comments
     | Detail.Absent -> ["absent"]
     | Detail.Loading -> ["loading"]
     | Detail.Failed error -> [error]
   in
-  body, rows
+  body, rows, None
 
 let test_long_thread_scroll_reuses_rows () =
   let cache = Layout.create () in
@@ -44,7 +44,7 @@ let test_long_thread_scroll_reuses_rows () =
     (Layout.comment_line_count first);
   (* A JSON refresh creates fresh records even when the document is unchanged. *)
   let copied = List.map (fun c -> {c with bc_content = String.concat "" [c.bc_content; ""]}) comments in
-  ignore (get {source with detail = Detail.Ready (post, copied)});
+  ignore (get {source with detail = Detail.Ready (post, copied, None)});
   Alcotest.(check int) "equal refresh reuses wrapping" 1 !renders
 
 let test_live_inputs_replace_rows () =
@@ -52,11 +52,11 @@ let test_live_inputs_replace_rows () =
     [ "body", {source with post = {post with bp_body = "edited body"}};
       "post author", {source with post = {post with bp_author = "new-author"}};
       "comment edit", {source with detail = Detail.Ready (post,
-        List.map (fun c -> if c.bc_id = "127" then {c with bc_content = "edited tail"} else c) comments)};
+        List.map (fun c -> if c.bc_id = "127" then {c with bc_content = "edited tail"} else c) comments, None)};
       "append", {source with detail = Detail.Ready (post,
-        comments @ [{(List.hd comments) with bc_id = "128"; bc_content = "new reply"}])};
+        comments @ [{(List.hd comments) with bc_id = "128"; bc_content = "new reply"}], None)};
       "reply parent", {source with detail = Detail.Ready (post,
-        List.map (fun c -> if c.bc_id = "127" then {c with bc_parent_id = Some "0"} else c) comments)};
+        List.map (fun c -> if c.bc_id = "127" then {c with bc_parent_id = Some "0"} else c) comments, None)};
       "related posts", {source with related_posts = [{post with bp_body = "new reference"}]};
       "keeper roles", {source with keeper_names = []};
       "width", {source with columns = 60};
@@ -72,7 +72,7 @@ let test_live_inputs_replace_rows () =
     let rows = Layout.get cache ~source:changed ~render:(fun () ->
       incr renders; render changed ()) in
     Alcotest.(check int) label 1 !renders;
-    let expected_body, expected_comments = render changed () in
+    let expected_body, expected_comments, _ = render changed () in
     Alcotest.(check string) (label ^ " body") (List.hd expected_body) (Layout.body_line rows 0);
     List.iteri (fun index expected ->
       Alcotest.(check string) (label ^ " comment") expected (Layout.comment_line rows index)) expected_comments

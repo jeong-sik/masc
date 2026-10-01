@@ -357,6 +357,7 @@ val board_comment_request_of_query :
 
 val board_post_detail_json :
   ?comment_request:Board.Comment_page.request ->
+  ?focused_comment:string ->
   config:Workspace.config option ->
   voter:string option ->
   reaction_actor:string option ->
@@ -383,7 +384,10 @@ val board_post_detail_json :
 
     [comment_page] carries offset, returned, total and next_offset. By default
     the page ends at the newest comment and contains at most 20; an explicit
-    [comment_offset] begins at that oldest-first position.
+    [comment_offset] begins at that oldest-first position. [comment_context]
+    contains the same page plus its ancestors and the optional focused comment
+    with its ancestors, resolved from this one read. [comment_revision] identifies
+    the complete thread snapshot so clients can refuse mixed page generations.
 
     {2 Status / body}
 

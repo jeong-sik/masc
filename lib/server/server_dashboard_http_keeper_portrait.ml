@@ -86,6 +86,7 @@ let process_cache = Cache.create ~byte_budget:cache_byte_budget
 type answer =
   | Invalid_name
   | Invalid_size of string
+  | Invalid_preview of string
   | Invalid_equipment of string
   | Equipment_changed
   | Unknown_keeper
@@ -133,12 +134,19 @@ let build_tag digest ~name ~equipment size =
   Http.Response.etag_of_body
     (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size); Keeper_portrait_equipment.key equipment ])
 
-let answer ~cache ~build ~name ~size ~expected_equipment ~keeper_present ~equipment ~holds_tag =
+let answer ~cache ~build ~name ~size ~preview ~expected_equipment ~keeper_present ~equipment ~holds_tag =
   if not (Keeper_config.validate_name name) then Invalid_name
   else
     match size_of_request size with
     | Error raw -> Invalid_size raw
     | Ok size ->
+      let preview = match preview with
+        | None -> Ok None
+        | Some id -> Option.to_result ~none:id
+            (Option.map Option.some (Keeper_portrait_item.of_id id)) in
+      match preview with
+      | Error id -> Invalid_preview id
+      | Ok preview ->
       match expected_equipment with
       | Some (Error detail) -> Invalid_equipment detail
       | Some (Ok _) | None ->
@@ -152,6 +160,9 @@ let answer ~cache ~build ~name ~size ~expected_equipment ~keeper_present ~equipm
             | Some (Ok expected) -> expected <> equipment
             | Some (Error _) | None -> false) -> Equipment_changed
         | Ok equipment ->
+        let equipment = match preview with
+          | None -> equipment
+          | Some item -> Keeper_portrait_item.preview item equipment in
         match build with
         | Executable digest ->
           let etag = build_tag digest ~name ~equipment size in
@@ -201,6 +212,7 @@ let handle_get state request reqd name =
   match
     answer ~expected_equipment ~cache:process_cache ~build:(current_build ()) ~name
       ~size:(Server_utils.query_param request "size")
+      ~preview:(Server_utils.query_param request "preview")
       ~keeper_present:(keeper_present config name)
       ~equipment:(fun () -> Candle_equipment.read_persisted ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper:name)
       ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
@@ -213,6 +225,7 @@ let handle_get state request reqd name =
   | Invalid_equipment detail -> refuse `Bad_request ("invalid expected equipment: " ^ detail)
   | Equipment_changed -> refuse `Conflict "Keeper equipment changed; refresh the Keeper observation before reading its portrait"
   | Unknown_keeper -> refuse `Not_found (Printf.sprintf "keeper %S not found" name)
+  | Invalid_preview id -> refuse `Bad_request (Printf.sprintf "unknown portrait item: %s" id)
   | Lookup_failed message -> refuse `Service_unavailable message
   | Encode_failed message -> refuse `Internal_server_error message
   | Not_modified etag -> Http.Response.bytes_not_modified ~etag ~cache_control reqd

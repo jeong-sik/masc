@@ -47,7 +47,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(executable, description="Usage metric coverage survives resize and scroll",
-                            interact=interact, http_fixtures=fixtures, terminal_rows=50)
+                            interact=interact, http_fixtures=fixtures)
 
 
 if __name__ == "__main__":

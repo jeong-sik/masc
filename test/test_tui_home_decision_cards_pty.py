@@ -273,7 +273,10 @@ def seed_operator_task(base, *, backup=False):
 
 
 def operator_task_survives_supplemental_failure(executable):
-    for relative in ("tasks-archive.json", "tasks/goal_task_links.json"):
+    cases = (("tasks-archive.json", None), ("tasks/goal_task_links.json", None),
+             ("tasks/goal_task_links.json", []),
+             ("tasks/goal_task_links.json", [{"goal_id": "goal-recovery", "task_ids": ["task-777"]}]))
+    for relative, recovery_links in cases:
         fixtures = fixtures_with_held([])
         fixtures["/api/v1/dashboard/tasks/history?task_id=task-777&limit=50"] = (200, [])
         requests = []
@@ -281,11 +284,9 @@ def operator_task_survives_supplemental_failure(executable):
         def prepare(base):
             seed_operator_task(base)
             (Path(base) / ".masc" / relative).write_text("{broken supplemental source")
-            if relative == "tasks/goal_task_links.json":
+            if recovery_links is not None:
                 recovery = Path(base) / ".masc" / (relative + ".last-good")
-                recovery.write_text(json.dumps({"version": 1, "links": [
-                    {"goal_id": "goal-recovery", "task_ids": ["task-777"]}
-                ]}))
+                recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
 
         def interact(process, fd, _slave, output, base):
             h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
@@ -324,7 +325,8 @@ def operator_task_survives_supplemental_failure(executable):
             assert_selected(output, b"Operator task")
             os.write(fd, b"q")
 
-        run(executable, f"Home current task and exact detail survive {relative} failure",
+        backup_kind = "no-backup" if recovery_links is None else "empty-backup" if not recovery_links else "linked-backup"
+        run(executable, f"Home current task and exact detail survive {relative} failure ({backup_kind})",
             fixtures, interact, requests, prepare=prepare)
 
 
@@ -551,4 +553,4 @@ if __name__ == "__main__":
                      refresh_identity_and_deletion, many_cards_keep_continuation,
                      goal_opens_exact_detail, question_identity_and_return):
         scenario(executable)
-    print("Home decision cards PTY: PASS (15 scenarios)")
+    print("Home decision cards PTY: PASS (17 scenarios)")

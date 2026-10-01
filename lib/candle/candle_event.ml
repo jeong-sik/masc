@@ -59,6 +59,7 @@ type body =
       ; reason : unattributed_reason
       }
   | Paid of Candle_payment.t
+  | Purchased of { keeper : string; item : Keeper_portrait_item.t; amount_milli : int }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
@@ -72,6 +73,7 @@ let kind = function
   | Candidates _ -> "candidates"
   | Unattributed _ -> "unattributed"
   | Paid _ -> "paid"
+  | Purchased _ -> "purchased"
   | Payout_failed _ -> "payout_failed"
 ;;
 
@@ -159,6 +161,11 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "reason", `String (unattributed_reason_text u.reason)
     ] @ attribution_fields u.reason
   | Paid payment -> Candle_payment.to_fields payment
+  | Purchased p ->
+    [ "keeper", `String p.keeper
+    ; "item", `String (Keeper_portrait_item.id p.item)
+    ; "amount_milli", `Int p.amount_milli
+    ]
   | Payout_failed f -> ["goal_id", `String f.goal_id; "request_id", `String f.request_id;
       "verification_run_id", `String f.verification_run_id;
       "reason", `String "unreadable_due_date"; "due_date", `String f.due_date]
@@ -311,6 +318,18 @@ let payout_failed_of_fields ~context fields =
   let* () = Candle_json.finish ~context fields in
   Ok (Payout_failed {goal_id;request_id;verification_run_id;due_date})
 
+let purchased_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* keeper, fields = field "keeper" Candle_json.as_non_blank fields in
+  let* item_id, fields = field "item" Candle_json.as_string fields in
+  let* item = match Keeper_portrait_item.of_id item_id with
+    | Some item -> Ok item
+    | None -> Error (Printf.sprintf "%s: unknown item %S" context item_id) in
+  let* amount_milli, fields = field "amount_milli" Candle_appraisal.as_int fields in
+  let* () = if amount_milli < 0 then Error (context ^ ": purchase amount must not be negative") else Ok () in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Purchased { keeper; item; amount_milli })
+
 let of_yojson json =
   let context = "candle event" in
   let* fields = Candle_json.object_fields ~context json in
@@ -324,6 +343,7 @@ let of_yojson json =
     | "candidates" -> candidates_of_fields ~context fields
     | "unattributed" -> unattributed_of_fields ~context fields
     | "paid" -> Result.map (fun p -> Paid p) (Candle_payment.of_yojson (`Assoc fields))
+    | "purchased" -> purchased_of_fields ~context fields
     | "payout_failed" -> payout_failed_of_fields ~context fields
     | unknown -> Error (Printf.sprintf "%s: unknown kind %S" context unknown)
   in

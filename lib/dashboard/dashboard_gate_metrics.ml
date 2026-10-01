@@ -186,7 +186,7 @@ let approval_queue_summary_of_entries ~now_ts entries : approval_summary =
     }
 
 let approval_queue_summary ~now_ts ~base_path ()
-  : (approval_summary, Keeper_approval_queue.storage_error) result
+  : (approval_summary, Keeper_approval_queue_result.storage_error) result
   =
   Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
   |> Result.map (approval_queue_summary_of_entries ~now_ts)
@@ -223,11 +223,11 @@ let gate_tool_events_json_with_pending_result
   let approval_queue_state, approval_queue =
     match pending_result with
     | Ok entries ->
-      ( Keeper_approval_queue.approval_queue_ready_state_json
+      ( Keeper_approval_queue_result.approval_queue_ready_state_json
       , approval_queue_summary_of_entries ~now_ts entries
         |> approval_queue_json )
     | Error error ->
-      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      ( Keeper_approval_queue_result.approval_queue_unavailable_state_json error
       , `Null )
   in
   `Assoc [

@@ -119,6 +119,8 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val presets_viewport : Masc_tui_types.state -> int * int
+(** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop
@@ -134,7 +136,8 @@ val frame_choice :
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
-  | `Agenda | `Answering | `Patch | `Link | `Surface ]
+  | `Agenda | `Answering | `Patch | `Link
+  | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
 val render :

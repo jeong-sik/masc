@@ -19,7 +19,7 @@ exception Exact_terminalization_persistence_failed of string
 type execution_boundary =
   | Executed
   | Identity_unbound_blocked
-  | Exact_rejection_blocked of Keeper_approval_queue.exact_attempt_rejection
+  | Exact_rejection_blocked of Keeper_approval_queue_result.exact_attempt_rejection
 
 type finish_outcome =
   | Conclusive_terminalization
@@ -136,8 +136,8 @@ module For_testing : sig
     -> call_id:string
     -> plan_fingerprint:string
     -> request_body_sha256:string
-    -> ( Keeper_approval_queue.exact_attempt_transition
-       , Keeper_approval_queue.exact_attempt_error )
+    -> ( Keeper_approval_queue_result.exact_attempt_transition
+       , Keeper_approval_queue_result.exact_attempt_error )
        result
 
   type exact_completion_transition =
@@ -149,8 +149,8 @@ module For_testing : sig
     -> plan_fingerprint:string
     -> request_body_sha256:string
     -> summary:Keeper_approval_queue_rules_types.hitl_context_summary
-    -> ( Keeper_approval_queue.exact_attempt_transition
-       , Keeper_approval_queue.exact_attempt_error )
+    -> ( Keeper_approval_queue_result.exact_attempt_transition
+       , Keeper_approval_queue_result.exact_attempt_error )
        result
 
   type exact_quarantine_transition =
@@ -162,8 +162,8 @@ module For_testing : sig
     -> plan_fingerprint:string
     -> request_body_sha256:string
     -> cause:Keeper_approval_queue_rules_types.exact_attempt_quarantine_cause
-    -> ( Keeper_approval_queue.exact_attempt_transition
-       , Keeper_approval_queue.exact_attempt_error )
+    -> ( Keeper_approval_queue_result.exact_attempt_transition
+       , Keeper_approval_queue_result.exact_attempt_error )
        result
 
   type exact_queue_ops

@@ -4643,6 +4643,13 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
@@ -5132,6 +5139,9 @@ type state = {
   mutable events: event list;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* A refused creation remains editable, including malformed JSON. The
+     editor owns a temporary file, so the declaration must survive here. *)
+  mutable keeper_creation_draft: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -5490,6 +5500,8 @@ type state = {
   mutable clients_surface_inflight: bool;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
+  mutable client_detail: Tui_decode.client_row option;
+  mutable client_detail_scroll: int;
   mutable clients_surface_generation: int;
   (* Run drill-down under the standalone observation rows. [lane_runs] is the
      summary page of the lane named in [lanes_mode]; payloads stay behind the
@@ -5727,6 +5739,8 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
+  mutable code_diff_hscroll: int;
+  mutable code_diff_max_width: int;
   (* The file pane's notes view: m on an open file swaps the content for
      the memos written as comments in the file itself. Read off the rows
      once at load, like the width above: the memos change when the file
@@ -5906,7 +5920,9 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  (* The entire unsent payload belongs to its Keeper, including image-only
+     drafts. Restoring another target cannot inherit its staged media. *)
+  mutable msg_drafts: (string * message_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -7154,6 +7170,8 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_diff_open <- false;
   state.code_diff_scroll <- 0;
+  state.code_diff_hscroll <- 0;
+  state.code_diff_max_width <- 0;
   state.code_memos <- [];
   state.code_notes_open <- false;
   state.code_notes_scroll <- 0;
@@ -7161,6 +7179,19 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_focus_file <- Right_pane;
   state.followed_from <- Some (state.view, None);
   state.view <- Code
+
+(* A visible overlay owns navigation; panning one must never move the
+   file hidden underneath it. History and notes currently have no pan axis. *)
+let pan_code_content (state : state) ~direction =
+  if state.repository_changes_open || state.code_history_open || state.code_notes_open then ()
+  else if state.code_diff_open then
+    state.code_diff_hscroll <-
+      max 0 (min (max 0 (state.code_diff_max_width - 1))
+        (state.code_diff_hscroll + direction))
+  else
+    state.code_file_hscroll <-
+      max 0 (min (max 0 (state.code_file_max_width - 1))
+        (state.code_file_hscroll + direction))
 
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
@@ -7322,6 +7353,7 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some state.client_detail
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -7348,6 +7380,8 @@ let close_key_modals (state : state) =
   state.help_scroll <- 0;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
+  state.client_detail <- None;
+  state.client_detail_scroll <- 0;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state
 
@@ -7551,6 +7585,7 @@ let create_state
   events = [];
   keepers = [];
   keepers_error = None;
+  keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_action_inflight = None;
@@ -7718,6 +7753,8 @@ let create_state
   clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
+  client_detail = None;
+  client_detail_scroll = 0;
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_standalone_cursor = 0;
@@ -7855,6 +7892,8 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
+  code_diff_hscroll = 0;
+  code_diff_max_width = 0;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;
@@ -8393,6 +8432,7 @@ type clamped_scroll =
   | Acting_selection of int * int
   | Acting_detail_scroll of int
   | Memory_fact_detail_scroll of int
+  | Client_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -8439,6 +8479,7 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  | Preset_detail_scroll of int
   (* The Keepers list window, which the frame keeps still while the cursor
      is on it. Worked out from the cursor alone, the cursor sat on the bottom
      row once the list scrolled, and choosing a row above it moved the whole
@@ -8489,6 +8530,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
   | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Memory_fact_detail_scroll value -> state.memory_fact_detail_scroll <- value
+  | Client_detail_scroll value -> state.client_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
@@ -8511,6 +8553,7 @@ let apply_clamped_scroll (state : state) = function
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Preset_detail_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
@@ -10379,8 +10422,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
        (* The voice pane draws neither the file nor a list the state holds.
           It was counted as the file's rows, a bound that has nothing to do
           with what it draws; the frame reports [Voice_scroll] instead. *)
-       | Config_voice -> None
-       | Config_runtime | Config_params | Config_prompts | Config_presets
+       | Config_voice | Config_presets -> None
+       | Config_runtime | Config_params | Config_prompts
        | Config_themes ->
          listing ~error:state.runtime_config_view_error (file_rows ()))
   (* Acting counts rows the drawing builds out of formatted text, not rows the

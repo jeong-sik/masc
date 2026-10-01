@@ -332,11 +332,21 @@ type reply = { status : int; headers : (string * string) list; body : string }
 
 let get ~router ?if_none_match ?token path =
   let output = Buffer.create 4096 in
+  let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
+    (Server_request_authority.make_trust_policy
+       ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None) in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    let request = Httpun.Reqd.request reqd in
+    match Server_request_authority.classify_http1_request ~trust_policy request with
+    | Server_request_authority.Single authority ->
+      Server_request_authority.with_current authority (fun () ->
+        Http.Router.dispatch router request reqd)
+    | Server_request_authority.Missing | Server_request_authority.Multiple
+    | Server_request_authority.Malformed | Server_request_authority.Untrusted ->
+      fail "fixture request did not pass HTTP authority admission") in
   let optional name = Option.fold ~none:"" ~some:(fun value -> name ^ ": " ^ value ^ "\r\n") in
   let raw_request =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: x\r\n%s%sContent-Length: 0\r\n\r\n" path
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Length: 0\r\n\r\n" path
       (optional "If-None-Match" if_none_match)
       (optional "Authorization" (Option.map (fun token -> "Bearer " ^ token) token)) in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw_request) raw_request in

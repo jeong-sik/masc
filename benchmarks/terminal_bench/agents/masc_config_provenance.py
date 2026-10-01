@@ -6,12 +6,11 @@ metadata names the checkout commit, a digest of the rendered runtime.toml, a
 digest of the whole rendered directory and the effort, so a result can be
 matched to a config without rendering it again.
 
-`render_arm` is deterministic: the same checkout and arguments give a
-byte-identical directory, so equal digests mean equal configs.
+`render_arm` is deterministic for a given checkout and arguments (plus
+external OpenRouter model limits when queried): equal digests mean equal configs.
 """
 from __future__ import annotations
 
-import functools
 import hashlib
 import subprocess
 from dataclasses import dataclass
@@ -44,12 +43,11 @@ def _git(repo_root: Path, *args: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-@functools.lru_cache(maxsize=None)
 def checkout_state(repo_root: Path) -> tuple[str | None, bool | None]:
-    """HEAD and whether tracked files differ from it, read once per process.
+    """HEAD and whether tracked files differ from it at observation time.
 
-    A run renders from one checkout; reading it for every trial would cost a
-    `git status` each and could not say more.
+    Each trial's provenance reads current checkout state so edits or HEAD
+    movements between renders are attributed accurately.
     """
     head = _git(repo_root, "rev-parse", "HEAD")
     commit = head.strip() if head and head.strip() else None

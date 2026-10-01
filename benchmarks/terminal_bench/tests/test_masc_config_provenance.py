@@ -2,7 +2,7 @@
 
 These hold the digests (same bytes, same digest; any change, a different one),
 the git reading (a commit, a clean or dirty tree, and unknown when git cannot
-say), and that git is asked once per checkout and not once per trial.
+say), and that each trial observes fresh checkout state.
 """
 import hashlib
 import os
@@ -116,20 +116,56 @@ def test_a_missing_git_is_unknown_not_clean(tmp_path, monkeypatch):
     assert provenance.checkout_state(tmp_path / "anywhere") == (None, None)
 
 
-def test_git_is_asked_once_per_checkout_whatever_the_number_of_trials(tmp_path, monkeypatch):
+def test_git_timeout_or_error_returns_unknown_not_clean(tmp_path, monkeypatch):
     repo = repo_with_one_commit(tmp_path)
-    calls = []
-    real = provenance._git
 
-    def counting(root, *args):
-        calls.append(args)
-        return real(root, *args)
+    def timeout_git(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=30)
 
-    monkeypatch.setattr(provenance, "_git", counting)
-    config = config_tree(tmp_path / "config", **{"runtime.toml": "a = 1\n"})
-    for _ in range(5):
-        provenance.config_provenance(config, repo, "high")
-    assert calls == [("rev-parse", "HEAD"), ("status", "--porcelain", "--untracked-files=no")]
+    monkeypatch.setattr(provenance.subprocess, "run", timeout_git)
+    assert provenance.checkout_state(repo) == (None, None)
+
+
+def test_subsequent_render_reflects_tracked_file_edit_as_dirty(tmp_path):
+    repo = repo_with_one_commit(tmp_path)
+    initial_commit = git(repo, "rev-parse", "HEAD")
+    config1 = config_tree(tmp_path / "config1", **{
+        "runtime.toml": (repo / "tracked.txt").read_text(),
+    })
+    prov1 = provenance.config_provenance(config1, repo, "high")
+    assert prov1.checkout_commit == initial_commit
+    assert prov1.checkout_dirty is False
+
+    # Edit tracked file in the repository without committing
+    (repo / "tracked.txt").write_text("two\n")
+    config2 = config_tree(tmp_path / "config2", **{
+        "runtime.toml": (repo / "tracked.txt").read_text(),
+    })
+    prov2 = provenance.config_provenance(config2, repo, "high")
+    assert prov2.checkout_commit == initial_commit
+    assert prov2.checkout_dirty is True
+    assert prov2.runtime_toml_sha256 != prov1.runtime_toml_sha256
+    assert prov2.config_dir_sha256 != prov1.config_dir_sha256
+
+
+def test_subsequent_render_reflects_head_commit_advance(tmp_path):
+    repo = repo_with_one_commit(tmp_path)
+    initial_commit = git(repo, "rev-parse", "HEAD")
+    config1 = config_tree(tmp_path / "config1", **{"runtime.toml": "a = 1\n"})
+    prov1 = provenance.config_provenance(config1, repo, "high")
+    assert prov1.checkout_commit == initial_commit
+    assert prov1.checkout_dirty is False
+
+    # Advance HEAD with a new commit
+    (repo / "tracked.txt").write_text("second commit\n")
+    git(repo, "commit", "-q", "-am", "second")
+    second_commit = git(repo, "rev-parse", "HEAD")
+    assert second_commit != initial_commit
+
+    config2 = config_tree(tmp_path / "config2", **{"runtime.toml": "a = 2\n"})
+    prov2 = provenance.config_provenance(config2, repo, "high")
+    assert prov2.checkout_commit == second_commit
+    assert prov2.checkout_dirty is False
 
 
 def test_metadata_carries_every_field_and_nothing_when_nothing_was_installed():

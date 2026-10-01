@@ -264,8 +264,21 @@ let test_attention_read_failure_is_not_empty () =
       replace "incidents" `Null;
       List.remove_assoc "recommended_actions" fields;
       replace "recommended_actions" (`Assoc []);
+      (* The judgment writer accepts {}, and the digest preserves it in a list. *)
+      replace "recommended_actions" (`List [`Assoc []]);
+      replace "recommended_actions" (`List [`Assoc ["action_type", `String "inspect";
+        "target_type", `String "keeper"; "reason", `String ""]]);
       replace "summary" (`Assoc []);
-      replace "incidents" (`List [`Assoc []]) ]
+      replace "incidents" (`List [`Assoc []]) ];
+  let valid_action = `Assoc ["action_type", `String "inspect";
+    "target_type", `String "keeper"; "reason", `String "review recent failure"] in
+  (match read (replace "recommended_actions" (`List [valid_action])) with
+   | Error detail -> failwith detail
+   | Ok summary ->
+     assert (Yojson.Safe.Util.member "recommended_action_count" summary = `Int 1));
+  (match read (replace "recommended_actions" (`List [valid_action; `Assoc []])) with
+   | Error _ -> ()
+   | Ok _ -> failwith "mixed malformed actions were counted as observable recommendations")
 
 (* ── runner ───────────────────────────────────────────────── *)
 

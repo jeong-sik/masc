@@ -61,6 +61,18 @@ let compact_briefing_summary_json briefing =
   in
   let* incidents = list "incidents" in
   let* actions = list "recommended_actions" in
+  (* Match the action surface's required display contract. The writer accepts
+     object-valued judgments, so a list entry is not itself an actionable row. *)
+  let valid_action action =
+    List.for_all (fun name ->
+      match member_assoc name action with
+      | `String value -> not (String.equal value "")
+      | _ -> false) [ "action_type"; "target_type"; "reason" ]
+  in
+  let* () =
+    if List.for_all valid_action actions then Ok ()
+    else Error "briefing recommended_actions contains an undisplayable action"
+  in
   let* summary = field "summary" in
   let* health =
     match member_assoc "workspace_health" summary with

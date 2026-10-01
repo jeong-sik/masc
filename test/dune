@@ -3697,6 +3697,7 @@
   masc_tui_answering
   masc_tui_keys
   masc.fusion_core
+  masc_tui_fetched
   alcotest
   ast_grep
   astring

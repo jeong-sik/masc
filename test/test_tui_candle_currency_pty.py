@@ -62,7 +62,48 @@ def await_screen(process, fd, output, predicate, description):
 
 
 def balance_contains(text: bytes, value: bytes) -> bool:
-    return any(b"Candle balance:" in line and value in line for line in text.splitlines())
+    # Long values occupy rows below the label. Read only this field's
+    # contiguous right-pane rows, not the separate Candle details section.
+    rows = text.decode("utf-8", "replace").splitlines()
+    label = "Candle balance:"
+    for index, row in enumerate(rows):
+        if label not in row:
+            continue
+        column = row.index(label)
+        parts = [row[column + len(label):].strip()]
+        for continuation in rows[index + 1:]:
+            part = continuation[column:].strip()
+            if not part:
+                break
+            parts.append(part)
+        return " ".join(" ".join(part.split()) for part in parts if part) == value.decode("ascii")
+    return False
+
+
+def name_contains(text: bytes, name: bytes) -> bool:
+    return any(line.split(b"Name:", 1)[1].strip() == name
+               for line in text.splitlines() if b"Name:" in line)
+
+
+def help_candle_diagnostic(text: bytes, expected: str) -> bool:
+    # Help has two columns. Read the diagnostic's consecutive left-column
+    # rows, excluding Dashboard help on the right of the column boundary.
+    rows = text.decode("utf-8", "replace").splitlines()
+    boundary = next((row.index("◆ Dashboard") for row in rows
+                     if "◆ Dashboard" in row), None)
+    if boundary is None:
+        return False
+    left = [row[:boundary].strip(" │") for row in rows]
+    for index, row in enumerate(left):
+        if row != "Candle details":
+            continue
+        parts = []
+        for continuation in left[index + 1:]:
+            if not continuation:
+                break
+            parts.append(continuation)
+        return " ".join(" ".join(part.split()) for part in parts) == expected
+    return False
 
 
 class CurrencyRoster:
@@ -148,12 +189,18 @@ def run(binary: str, phase: str, captures: Path | None):
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
-            balance_status = b"disabled:" if phase == "disabled" else b"unavailable:"
+            balance_status = {
+                "disabled": b"disabled: ledger deliberately unavailable",
+                "malformed-supply": (b"unavailable: Candle observation.issued_milli: "
+                                     b"Candle amount must be a canonical nonnegative decimal string"),
+                "malformed-balance": (b"unavailable: keepers[0]: "
+                                      b"Candle amount must be a canonical nonnegative decimal string"),
+            }
             await_screen(process, fd, output,
-                lambda text: b"Name:" in text and b"alpha" in text and b"Paused:" in text
+                lambda text: name_contains(text, b"alpha") and b"Paused:" in text
                 and BALANCE not in text
                 and (b"Candle balance:" not in text if phase == "off"
-                     else balance_contains(text, balance_status)),
+                     else balance_contains(text, balance_status[phase])),
                 "retain Keeper identity and truthful balance after " + phase)
             capture(output, "changed-info")
 
@@ -274,7 +321,15 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         os.write(fd, b"r")
         seen("identity-error", lambda text: b"MASC Dashboard" in text and no_currency(text))
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        help_frame = screen(output)
+        if captures is not None:
+            (captures / "authority-identity-error-help.txt").write_bytes(help_frame)
+            (captures / "authority-identity-error-help.pty").write_bytes(output)
+        # Unavailable retains its diagnostic in Help without restoring amounts.
+        assert no_currency(help_frame), help_frame
+        assert help_candle_diagnostic(help_frame,
+            "Candle unavailable: live keeper status unreadable: "
+            "Server workspace identity is unavailable"), help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")
@@ -282,7 +337,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         publish("a-ready")
         os.write(fd, b"r")
         seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
-        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
         # Activity asks for no roster. Entering Dashboard therefore launches
         # a scoped roster request; its A response is frozen before the switch.
         with lock:
@@ -307,7 +362,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             publish("a-ready")
             os.write(fd, b"r")
             seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
-            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             held_started.clear()
             release_held.clear()
             with lock:

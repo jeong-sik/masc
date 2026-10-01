@@ -225,8 +225,9 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
     {ll_path = path; ll_inside = inside; ll_line = line}
   in
   let answer location =
-    Code_results.apply_lsp_answer state ~question:"definition" ~symbol:"first"
-      (Ok (Decode.Lsp_locations [location]))
+    let request = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"first" with
+      | Some request -> request | None -> Alcotest.fail "question did not start" in
+    Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location]))
   in
   Alcotest.(check bool) "same-file definition requests reveal, not another load" true
     (answer (location "new.ml" true 1) = Code_results.Reveal_cursor);
@@ -240,6 +241,88 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
     (answer (location "other.ml" true 7) = Code_results.Load_file "other.ml");
   Alcotest.(check (option int)) "new read keeps the destination line" (Some 7)
     state.code_target_line
+;;
+
+let test_lsp_replies_belong_to_their_source_reading () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let read path =
+    let next, request = start_read ~equal:String.equal state.code_file path in
+    state.code_file <- next;
+    Code_results.apply_file state request (Ok "let first = 1\nlet second = 2")
+  in
+  let ask question =
+    match Code_results.start_lsp_question state ~question ~symbol:"first" with
+    | Some request -> request
+    | None -> Alcotest.fail "question did not start"
+  in
+  let location : Decode.lsp_location =
+    {ll_path = "destination.ml"; ll_inside = true; ll_line = 5} in
+  let rejected request result =
+    let before = state.code_file_cursor, state.code_target_line, state.code_lsp_note,
+                 state.code_jump_back, state.code_lsp_query in
+    Alcotest.(check bool) "stale reply has no followup" true
+      (Code_results.apply_lsp_answer state request result = Code_results.No_followup);
+    Alcotest.(check bool) "stale reply changes no note, jump, target or query" true
+      (before = (state.code_file_cursor, state.code_target_line, state.code_lsp_note,
+                 state.code_jump_back, state.code_lsp_query))
+  in
+  read "source.ml";
+  let from_source = ask "definition" in
+  read "other.ml";
+  rejected from_source (Ok (Decode.Lsp_locations [location]));
+  read "source.ml";
+  let from_project = ask "definition" in
+  let same_scope_file = Option.get (Fetched.current_request state.code_file) in
+  state.code_lsp_note <- Some "current query";
+  state.code_target_line <- Some 7;
+  set_code_scope state Code_scope_project;
+  Alcotest.(check bool) "same scope preserves the source reading token" true
+    (match Fetched.current_request state.code_file with
+     | Some current -> Fetched.same_request ~equal:String.equal same_scope_file current
+     | None -> false);
+  Alcotest.(check bool) "same scope preserves the in-flight query" true
+    (Fetched.is_current ~equal:code_lsp_query_equal state.code_lsp_query from_project);
+  Alcotest.(check (option string)) "same scope preserves the current note" (Some "current query")
+    state.code_lsp_note;
+  Alcotest.(check (option int)) "same scope preserves the current target" (Some 7)
+    state.code_target_line;
+  set_code_scope state (Code_scope_keeper "alpha");
+  Alcotest.(check bool) "new scope cannot reuse the old source reading" true
+    (Option.is_none (Fetched.current_request state.code_file));
+  Alcotest.(check bool) "new query waits for a read belonging to the new scope" true
+    (Option.is_none (Code_results.start_lsp_question state ~question:"definition" ~symbol:"first"));
+  Alcotest.(check (option string)) "scope change clears obsolete LSP note" None state.code_lsp_note;
+  Alcotest.(check (option int)) "scope change clears obsolete jump target" None state.code_target_line;
+  rejected from_project (Error "project server failed");
+  read "source.ml";
+  let new_scope_query = ask "hover" in
+  ignore (Code_results.apply_lsp_answer state new_scope_query
+            (Ok (Decode.Lsp_hover (Some "keeper reading"))));
+  Alcotest.(check (option string)) "same path newly read in the new scope accepts its own answer"
+    (Some "first: keeper reading") state.code_lsp_note;
+  set_code_scope state Code_scope_project;
+  rejected from_project (Ok (Decode.Lsp_locations [location]));
+  read "source.ml";
+  let before_same_path = ask "definition" in
+  state.code_file <- Fetched.clear state.code_file;
+  read "source.ml";
+  rejected before_same_path (Ok (Decode.Lsp_locations [location]));
+  let first = ask "definition" in
+  Alcotest.(check bool) "same in-flight question is not dispatched twice" true
+    (Option.is_none (Code_results.start_lsp_question state ~question:"definition" ~symbol:"first"));
+  let latest = ask "hover" in
+  rejected first (Error "superseded server error");
+  rejected first (Ok (Decode.Lsp_locations [location]));
+  Alcotest.(check bool) "latest answer settles its own query" true
+    (Code_results.apply_lsp_answer state latest (Ok (Decode.Lsp_hover (Some "current hover")))
+     = Code_results.No_followup);
+  Alcotest.(check (option string)) "only current hover is shown" (Some "first: current hover")
+    state.code_lsp_note;
+  let repeated = ask "hover" in
+  rejected latest (Error "old duplicate answer");
+  ignore (Code_results.apply_lsp_answer state repeated (Error "actual current error"));
+  Alcotest.(check (option string)) "current error is shown" (Some "first: actual current error")
+    state.code_lsp_note
 ;;
 
 let () =
@@ -257,7 +340,9 @@ let () =
         ] )
     ; ( "reply navigation"
       , [ Alcotest.test_case "late reply and definitions preserve current content" `Quick
-            test_file_reply_and_lsp_navigation_share_current_content ] )
+            test_file_reply_and_lsp_navigation_share_current_content
+        ; Alcotest.test_case "LSP replies belong to their source reading" `Quick
+            test_lsp_replies_belong_to_their_source_reading ] )
     ; ( "scope"
       , [ Alcotest.test_case "a shared path is not a shared request" `Quick
             test_a_shared_path_is_not_a_shared_request

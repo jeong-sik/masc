@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "scope": "Source files from a6938d8ac7a578ea97c1decf26851eeae45def3a plus regenerated evidence metadata in this evidence-only commit; manifest excludes itself.",
+  "scope": "Source files at 308ab9eb1d8a25c01906a7e48c055e39d4d7fd43 plus refreshed evidence metadata; manifest excludes itself. Historical check records identify their own older source commit.",
   "files": [
     {
       "path": "changelog.d/40256.md",
@@ -8,15 +8,15 @@
     },
     {
       "path": "lib/auth/auth.ml",
-      "sha256": "b1a15697ae070588f20cfda4aa170e65da3c0c8495736bef8584c71356b17120"
+      "sha256": "9d6b485fbc7081dbbb6ad876c82877bd72e356679f5d88512718f4a8f47b01be"
     },
     {
       "path": "lib/auth/auth.mli",
-      "sha256": "f5cb798abe03f2f0fb31423b74aed7373beb7961ab2a6dee2b5d28fb0e5b4622"
+      "sha256": "23c0c295ea16c6d839591bfa5ece3ad4a9b94d82825fa14c141ba527cecb2439"
     },
     {
       "path": "lib/auth/auth_credential_base.ml",
-      "sha256": "2e9fb4e2379b097b2938488aab7d13f898a1308e7392ba93e9631c4e9d3bfb28"
+      "sha256": "e3d36ab5275756dc853f5c4b86a6edb2091265dda78d718566e3af72f270b0fe"
     },
     {
       "path": "lib/auth/auth_login.ml",
@@ -36,7 +36,7 @@
     },
     {
       "path": "test/dune",
-      "sha256": "38bc9cf3eb9e81c6f1f3be56acd32fb29d5ba22fd39f70a881caf001557fc252"
+      "sha256": "629fbc097107caead5d68a2520d01666d07cfef3573e8558a454d048c6823f67"
     },
     {
       "path": "test/stanzas/test_auth_regular_read_boundary.inc",
@@ -48,11 +48,11 @@
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/README.md",
-      "sha256": "98dae40e0bf37a67b704c9812a989dbe825d38e5e71f599787fc9f3b63b17571"
+      "sha256": "ae45f976d8518cfb3b280b16ae979399a76fdbe35ba233e03d728e69e5ff1336"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/composition.json",
-      "sha256": "7bfa091a31effe601203caa2c3f3c22413ae9853f566f18f52bffaff95af2dcf"
+      "sha256": "2481963b412557d6e0a09a2288de247eacd45a0d9d605bcb8ec2e30808ab975d"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/parse-checks.json",
@@ -63,5 +63,5 @@
       "sha256": "d7a24aeeea11185e9d17ab5065f23da5dc9f2122c6c38711318d8ffbd2bf8db3"
     }
   ],
-  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a"
+  "source_commit": "308ab9eb1d8a25c01906a7e48c055e39d4d7fd43"
 }

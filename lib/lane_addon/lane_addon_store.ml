@@ -265,7 +265,7 @@ let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
     |> Result.map_error (fun detail -> Observation_rejected detail) in
   match replace_file path bytes with
   | Ok () -> Ok ()
-  | Error failure ->
+  | Error (failure : Fs_compat.atomic_replace_failure) ->
     match failure.Fs_compat.stage with
     | Fs_compat.Before_rename -> Error (Publication_failed {failure;verification_error=None})
     | Fs_compat.After_rename ->

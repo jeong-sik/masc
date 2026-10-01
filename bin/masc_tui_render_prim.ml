@@ -114,7 +114,7 @@ let clamped_scroll_now (state : state) = function
   | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
       System_log_detail_scroll state.system_logs_detail_scroll
-  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -163,7 +163,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
   | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
-  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Planning_detail_scroll value | Planning_confirmation_scroll (value, _) ->
+      Some (Planning_detail_scroll (step value))
   | Lane_run_detail_scroll { scroll; content_height } ->
       Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
   | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))

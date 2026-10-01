@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml")
+SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml",
+                  "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml")
 GOAL_ID = "goal-detail-viewport"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
 METRIC = "metric-" + "0123456789abcdef" * 14 + "METRICEND"
@@ -115,6 +116,16 @@ def run(executable):
                           needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
         h.send_and_wait(process, fd, output, b"c", b"press c again")
         assert not posted, posted
+        h.resize_and_wait(process, fd, output, rows=18, columns=20,
+                          needle=b"Goal detail needs", final_cursor=b"\x1b[?25l")
+        assert b"Actions:" not in screen(output), screen(output)
+        for key in (b"c", b"x", b"o", b"a"):
+            h.press_and_settle(process, fd, output, key)
+        assert not posted, "hidden actions dispatched through the too-small frame"
+        h.resize_and_wait(process, fd, output, rows=400, columns=80,
+                          needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
+        # An unrelated key cancels the arm; restore it on the readable frame.
+        h.send_and_wait(process, fd, output, b"c", b"press c again")
         h.send_and_wait(process, fd, output, b"c", b"fixture intentionally refuses transition")
         assert posted == [{"goal_id": GOAL_ID, "action": "request_complete"}], posted
         # Refresh removes the Goal and reconciles the detail back to list mode.

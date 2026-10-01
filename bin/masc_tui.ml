@@ -12075,6 +12075,8 @@ let handle_goal_confirmation_key state ~mailbox =
        | Goal_confirmation.Submitting _ -> ()
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
+       | Ready confirmation when state.goal_confirmation_presented <> Some confirmation ->
+           report_action state "system" "Read through the proof binding before confirming"
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
@@ -12100,6 +12102,7 @@ let handle_goal_confirmation_key state ~mailbox =
             | Already_loading -> ()
             | Started (loading, request) ->
                 state.goal_confirmation <- Goal_confirmation.Inspecting loading;
+                state.goal_confirmation_presented <- None;
                 state.goal_action_error <- None;
                 state.planning_scroll <- 0;
                 Eio.Fiber.fork ~sw (fun () ->
@@ -17188,6 +17191,10 @@ let main
     with
     | Frame_presenter.Presented _ as presented ->
         state.frames_presented <- state.frames_presented + 1;
+        (match reader with
+         | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
+             state.goal_confirmation_presented <- Some confirmation
+         | Some _ | None -> ());
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;

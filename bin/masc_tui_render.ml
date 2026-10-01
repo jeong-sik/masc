@@ -2216,6 +2216,12 @@ let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
                 (planning_action_label action) (planning_action_key action))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
+let planning_proof_rows ~width lines =
+  List.concat_map (fun (line : Planning_detail.line) ->
+    match Masc_tui_text_block.rows ~max_cells:width line.text with
+    | [] -> [{line with text=""}]
+    | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) lines
+
 let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_goal) =
   let width = max 1 (framed_inner_width cols - 2) in
   let field ?(tone = Planning_detail.Note) label text =
@@ -2281,10 +2287,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
      | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
          confirmation_rows @ measurement)
     @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
-  let wrapped_proof = List.concat_map (fun (line : Planning_detail.line) ->
-    match Masc_tui_text_block.rows ~max_cells:width line.text with
-    | [] -> [{line with text=""}]
-    | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) proof in
+  let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
    | `Inspect Absent -> metadata @ linked @ wrapped_proof
    | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
@@ -2293,6 +2296,11 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
 let planning_detail_height ~rows ~action_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + action_rows)
     ~count ~preview_keep:None ~overflow_takes_row:true
+
+let planning_detail_fits ~rows ~action_rows ~count =
+  let height = planning_detail_height ~rows ~action_rows ~count in
+  framed_chrome_rows + action_rows + height
+    + (if count > height then 1 else 0) <= rows
 
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2306,7 +2314,9 @@ let planning_detail_viewport (state : state) =
            let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id) goal) in
            let count = List.length (planning_detail_lines state ~cols goal
              ~confirmation:(planning_confirmation_view state ~goal_id)) in
-           count, planning_detail_height ~rows ~action_rows ~count)
+           if planning_detail_fits ~rows ~action_rows ~count
+           then count, planning_detail_height ~rows ~action_rows ~count
+           else 0, 1)
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
@@ -2332,7 +2342,14 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
     (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll
+  let seen = match confirmation with
+    | `Inspect (Ready proof) ->
+        let width = max 1 (framed_inner_width cols - 2) in
+        let last = List.length (planning_proof_rows ~width
+          (Planning_detail.confirmation_lines ~width proof)) - 1 in
+        if last >= scroll && last < scroll + height then Some proof else None
+    | `Submitting | `Inspect (Absent | Loading | Stale _ | Failed _) -> None in
+  scroll, seen
 ;;
 
 (* The goal list stays beside its detail. Opening one used to replace the
@@ -2345,8 +2362,17 @@ let render_planning_detail (state : state)
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let action_rows = List.length (planning_detail_action_rows ~cols:detail_cols ~armed goal) in
+  let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
+  if not (planning_detail_fits ~rows ~action_rows ~count) then begin
+    let buf = Buffer.create 96 in
+    Buffer.add_string buf (fit_width "Goal detail needs more room; resize to read and act" cols);
+    Buffer.add_char buf '\n';
+    finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols buf
+  end else begin
   let buf = Buffer.create 4096 in
-  let scroll =
+  let scroll, seen =
     if cols < keeper_split_threshold_cols then
       planning_detail_pane state ~armed ~confirmation ~rows ~cols goal buf
     else begin
@@ -2387,20 +2413,21 @@ let render_planning_detail (state : state)
         ~focused:false
         ~labels:(List.map format_sidebar_goal goals)
         ~selected;
-      let scroll =
+      let scroll, seen =
         planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
           right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
-      scroll
+      scroll, seen
     end
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints ~detail_open:true state.view));
-  finish_surface state ~clamped:(Planning_detail_scroll scroll)
+  finish_surface state ~clamped:(Planning_confirmation_scroll (scroll, seen))
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
+  end
 
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this

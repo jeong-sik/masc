@@ -107,7 +107,7 @@ let same_confirmation_binding left right =
 
 let confirmation_lines ~width { goal_id; verdict; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
-  [ "CONFIRM THIS PROOF — [a] confirms; Esc cancels"
+  [ "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels"
   ; "Goal: " ^ goal_id
   ; "Title: " ^ criterion.title
   ; "Target: " ^ Option.value criterion.metric ~default:"not declared"

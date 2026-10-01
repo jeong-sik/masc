@@ -2083,29 +2083,6 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
-(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
-    briefing writes [null] for a Keeper with no registry entry (an offline
-    Keeper that never booted this process), which is a different fact from a
-    word this build cannot name; neither is folded into a phase. *)
-type overview_keeper_phase =
-  | Keeper_phase of Tui_decode.keeper_phase
-  | Keeper_phase_absent
-  | Keeper_phase_unreadable of string
-
-(** One [keeper_briefs] row from the operator snapshot. *)
-type overview_keeper = {
-  okp_name: string;
-  okp_phase: overview_keeper_phase;
-  okp_last_turn_ago_s: float option;
-      (** [None] when the Keeper has not finished a turn this process saw. *)
-  okp_paused: bool option;
-      (** The brief's [paused]: an operator paused this Keeper. It is read
-          apart from [okp_phase] because a paused Keeper is left out of
-          autoboot, so after a server restart it has no registry entry and
-          its phase is [null] while [paused] still says [true]. [None] when
-          the brief carried no boolean there. *)
-}
-
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
@@ -2114,8 +2091,6 @@ type overview_snapshot = {
           could not list the Keeper directory, so [ov_keepers] counts nothing
           it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
-  ov_keeper_rows: overview_keeper list;
-      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
   ov_generated_at: string;
@@ -4165,6 +4140,18 @@ module Browser_lane_view = struct
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let listed_clients t = Option.value t.clients ~default:[]
+  type browser_choice = Connected_browser of client | Stagehand_browser | Automation_browser
+  let browser_choices t =
+    List.map (fun client -> Connected_browser client) (listed_clients t)
+    @ [Stagehand_browser; Automation_browser]
+  let browser_choice_selected t = function
+    | Connected_browser client -> t.source = Live && t.selected_client = Some client
+    | Stagehand_browser -> t.source = Stagehand
+    | Automation_browser -> t.source = Automation
+  let browser_choice_label = function
+    | Connected_browser client -> browser_name client.browser ^ " · existing login · " ^ client.client_id
+    | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
+    | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -4206,17 +4193,28 @@ module Browser_lane_view = struct
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
-    { t with selected_client = Some client; selected_tab = None;
+    { t with source = Live; selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
       scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+  let choose_browser choice t =
+    if browser_choice_selected t choice then { t with client_picker = None }
+    else match choice with
+      | Connected_browser client -> choose_client client t
+      | Stagehand_browser -> switch_source Stagehand t
+      | Automation_browser -> switch_source Automation t
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
+         | Error detail when t.source <> Live && purpose = Choose_client ->
+             { t with clients = None; client_picker = Some 0; load = Failed detail }, false
          | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
+             if t.source <> Live && purpose = Choose_client then
+               { next with client_picker = Some 0 }, false
+             else
              match t.selected_client, clients, purpose with
              | None, [client], Read_after_discovery -> choose_client client next, true
              | Some _, _, _ when selected_client_available next ->
@@ -5288,6 +5286,9 @@ type home_chat_receipt =
   | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
+
+type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
+
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5312,11 +5313,13 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Tasks whose only exit belongs to the operator, as
-     [Operator_task_attention] projected them from the same load. [None] until
-     the first load answers: an empty list is a fact about the workspace and
-     "not looked yet" is not. *)
-  mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Primary backlog authority, shared by Home and Agenda. Supplemental
+     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
+  (* Availability of the registry behind each task row's goal_ids. An empty
+     projection cannot claim an absent link when the registry was not read.
+     The reading payload is empty; memberships live on task.goal_ids. *)
+  mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
      names them on every surface rather than only on Planning. *)
@@ -5349,6 +5352,7 @@ type state = {
      the selection of another Goal or a Task. A removed identity opens nothing
      until an explicit navigation key selects another target. *)
   mutable agenda_selected: Masc_tui_agenda.destination;
+  mutable agenda_navigation: agenda_navigation;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -6275,6 +6279,8 @@ type state = {
   mutable repository_changes_diff_error: string option;
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
+  mutable repository_changes_diff_hscroll: int;
+  mutable repository_changes_diff_max_width: int;
   mutable repository_changes_return_chat: bool;
   (* The patch review overlay: the pending diff to scroll, and [e] to open it
      in $EDITOR. *)
@@ -6406,6 +6412,8 @@ type state = {
      answer no longer holds. Out of range closes the view. *)
   mutable changes_diff_row: int option;
   mutable changes_diff_scroll: int;
+  mutable changes_diff_hscroll: int;
+  mutable changes_diff_max_width: int;
   (* The tree's reading of the same file. Held beside the tool-call reading
      rather than replacing it: one says what the keeper tried to write and the
      other what survived, and they disagree often enough that a single field
@@ -8042,6 +8050,7 @@ let close_context_inspector (state : state) =
 let close_agenda (state : state) =
   state.agenda_open <- false;
   state.agenda_scroll <- 0;
+  state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
@@ -8080,7 +8089,8 @@ let create_state
   tasks = [];
   tasks_domain = [];
   task_flow = None;
-  operator_stalled = None;
+  operator_stalled = Masc_tui_agenda.Not_read;
+  task_goal_links = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
@@ -8094,6 +8104,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   agenda_selected = Masc_tui_agenda.Nowhere;
+  agenda_navigation = Agenda_read_rows;
   hints_visible = true;
   coalesce_queued_input = false;
   user_input_priority_next = false;
@@ -8539,6 +8550,8 @@ let create_state
   repository_changes_diff_error = None;
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
+  repository_changes_diff_hscroll = 0;
+  repository_changes_diff_max_width = 0;
   repository_changes_return_chat = false;
   patch_modal_open = false;
   patch_modal_scroll = 0;
@@ -8586,6 +8599,8 @@ let create_state
   changes_scroll = 0;
   changes_diff_row = None;
   changes_diff_scroll = 0;
+  changes_diff_hscroll = 0;
+  changes_diff_max_width = 0;
   changes_tree_diff = None;
   changes_tree_diff_error = None;
   changes_tree_diff_path = None;
@@ -9318,15 +9333,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  let stalled =
-    match state.operator_stalled, state.tasks_error with
-    | None, Some error ->
-      Masc_tui_agenda.Read_failed error
-    | None, None -> Masc_tui_agenda.Not_read
-    | Some rows, _ -> Masc_tui_agenda.Read rows
-  in
   Masc_tui_agenda.project ~scheduled ~awaiting
-    ~confirming:state.goals_to_confirm ~stalled
+    ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -9499,20 +9507,6 @@ type memory_fact_row =
   | Memory_row_source_fact of Masc.Tui_decode_memory_facts.memory_source_fact
   | Memory_row_invalidation of Masc.Tui_decode_memory_facts.memory_invalidation
 
-(* The three palette matchers fold case themselves, on both sides. A caller
-   hands them the operator's text as typed; "ADM" and "adm" find the same
-   rows, and a new caller cannot forget a step it never had. *)
-
-(* Prefix match: the label starts with the query. An empty query is a prefix
-   of everything. *)
-let palette_starts_with ~needle haystack =
-  String.starts_with
-    ~prefix:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
-
-let palette_contains ~needle haystack =
-  Masc_tui_pick_list.lowercase_contains ~needle haystack
-
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
 let surface_search_query surface query =
@@ -9634,8 +9628,8 @@ let visible_memory_keepers (state : state) =
     else
       List.filter
         (fun k ->
-          palette_contains ~needle:query k.mkh_keeper_id
-          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+          Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
+          || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
         sorted_keepers
 
 
@@ -9752,7 +9746,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
         else
           List.filter
             (fun row ->
-              palette_contains ~needle:query (memory_fact_search_text row))
+              Masc_tui_pick_list.lowercase_contains ~needle:query (memory_fact_search_text row))
             all_rows
       in
       (match state.memory_facts_sort with
@@ -11426,10 +11420,10 @@ let home_decision_rows (state : state) =
     | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
     | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
   in
-  let tasks = match state.tasks_error, state.operator_stalled with
-    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | None, Some rows ->
+  let tasks = match state.operator_stalled with
+    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
           Home_request (Home_operator_task row.task_id),
           Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
@@ -11558,7 +11552,8 @@ let home_initial_reading_ready state selected =
   | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state && Option.is_some state.operator_stalled
+      approvals_reading_current state
+      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 
@@ -12002,7 +11997,7 @@ let code_file_search_count ~query rows =
       let count =
         Array.fold_left (fun count segments ->
           let text = String.concat "" (List.map fst segments) in
-          if palette_contains ~needle:query text then count + 1 else count) 0 rows
+          if Masc_tui_pick_list.lowercase_contains ~needle:query text then count + 1 else count) 0 rows
       in
       code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
       count
@@ -12021,7 +12016,7 @@ let surface_search_count (state : state) surface ~query =
         (fun rows ->
           if String.equal query "" then 0
           else List.fold_left (fun count text ->
-            if palette_contains ~needle:query text then count + 1 else count) 0 rows)
+            if Masc_tui_pick_list.lowercase_contains ~needle:query text then count + 1 else count) 0 rows)
         (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
@@ -12487,97 +12482,6 @@ let keeper_message_support_status_rows state ~status_rows =
   status_rows + if keeper_message_reading_back state then 0 else 1
 
 
-(* Command-palette jump targets. Surfaces come from the same ring the strip
-   draws; keepers come from the loaded roster, so the palette can only offer
-   a chat the roster can open. *)
-type gate_lane = Workspace_gate | External_gate
-
-let gate_lane_label = function
-  | Workspace_gate -> "Workspace"
-  | External_gate -> "Outside services"
-
-let gate_mode_label = function
-  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
-  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
-  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
-
-type palette_action =
-  | Palette_browser_lane
-  | Palette_hide_browser_lane
-  (* Connectors draws two screens: the transport list, and the Browser Lane
-     that [show_browser_lane] opens under the same view. A plain
-     [Palette_goto Connectors] lands on whichever the lane's visibility says,
-     so the list -- the half with no key of its own -- would still be
-     unreachable whenever the lane had been opened once. This one names the
-     list and closes the lane to get there. *)
-  | Palette_connectors
-  | Palette_msx
-  | Palette_dos
-  | Palette_lane_addons
-  | Palette_goto of surface
-  | Palette_config of config_pane
-  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
-  | Palette_chat of string
-  | Palette_task of string
-  | Palette_board_hearth of string option
-  | Palette_board_post of string
-  (* (question, symbol): a language-server question about a name on the
-     Code pane's cursor line — the K/D candidates ride the palette as
-     entries so one keypress can also be a choice among several names. *)
-  | Palette_lsp of string * string
-
-(* The identifier names on the file pane's cursor line, in reading order,
-   first occurrence only. The open file already carries its lexed segments,
-   so the scan skips what the lexer called a keyword, a string, a comment,
-   or a number -- those offer no name a language server answers about --
-   rather than keeping a second keyword list that could drift. *)
-let code_cursor_line_symbols (state : state) =
-  match Masc_tui_fetched.current state.code_file with
-  | Some (_, Masc_tui_fetched.Ready rows) -> (
-      match Rows.at (Rows.of_array rows) state.code_file_cursor with
-      | None -> []
-      | Some segments ->
-          let name_kind kind =
-            not
-              (List.exists (String.equal kind)
-                 [ Masc_tui_code_lexer.kind_keyword;
-                   Masc_tui_code_lexer.kind_string;
-                   Masc_tui_code_lexer.kind_comment;
-                   Masc_tui_code_lexer.kind_number ])
-          in
-          let starts c =
-            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
-          in
-          let continues c =
-            starts c || (c >= '0' && c <= '9') || c = '\''
-          in
-          let names = ref [] in
-          List.iter
-            (fun (text, kind) ->
-              if name_kind kind then begin
-                let n = String.length text in
-                let i = ref 0 in
-                while !i < n do
-                  if starts text.[!i] then begin
-                    let j = ref (!i + 1) in
-                    while !j < n && continues text.[!j] do
-                      incr j
-                    done;
-                    let name = String.sub text !i (!j - !i) in
-                    if not (List.exists (String.equal name) !names) then
-                      names := name :: !names;
-                    i := !j
-                  end
-                  else incr i
-                done
-              end)
-            segments;
-          List.rev !names)
-  (* No open file, still reading, or the read failed: nothing to name. *)
-  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
-  | Some (_, Masc_tui_fetched.Absent)
-  | None -> []
-
 (* The Code pane asks the server for at most this many entries per directory
    and the server answers a bare list, so a full page is the only sign that a
    directory holds more. The title says so rather than presenting the page as
@@ -12590,181 +12494,6 @@ let workspace_entries_count_label total =
   else if total >= workspace_entries_limit then
     Printf.sprintf " (%d+, more not listed)" total
   else Printf.sprintf " (%d)" total
-
-(* The prefixes a typed palette line uses to ask the language server, paired
-   with the question each names. One list, because two readers use it: the
-   entries the palette offers are built from it, and the palette's Enter arm
-   parses a typed line with it. A question spelled in one and not the other
-   is a line the operator can type and nothing answers. *)
-let lsp_question_prefixes =
-  [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
-
-(* A Code question is a whole command word, followed by an optional symbol.
-   Other text remains a palette filter. Both Enter and the preview read this. *)
-let palette_typed_question query =
-  let query = String.trim query in
-  let word, symbol =
-    match String.index_opt query ' ' with
-    | None -> query, None
-    | Some index ->
-        let symbol = String.trim (String.sub query (index + 1)
-            (String.length query - index - 1)) in
-        String.sub query 0 index,
-        (if String.equal symbol "" then None else Some symbol)
-  in
-  List.find_map (fun (prefix, question) ->
-      if String.equal word (String.trim prefix) then Some (question, symbol)
-      else None) lsp_question_prefixes
-
-let palette_entries (state : state) =
-  [ "settings", Palette_config Config_params ]
-  @ List.concat_map (fun lane ->
-      List.map (fun mode ->
-        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
-         Palette_gate_mode (lane, mode)))
-        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
-      [Workspace_gate; External_gate]
-  (* Both halves, because they are one reading split in two: Task Review lists
-     what waits for a ruling and Task Verdicts what was ruled. They sit one [v]
-     apart under Planning, so offering a jump to one and not the other makes the
-     nearer half look like the only one there is. *)
-  @ [ "go Task Review", Palette_goto Verification ]
-  @ [ "go Task Verdicts", Palette_goto Harness ]
-  @ [ "go Lanes", Palette_goto Lanes ]
-  @ [ "go Clients", Palette_goto Clients ]
-  @ [ "go Schedules", Palette_goto Schedules ]
-  @ [ "go Code", Palette_goto Code ]
-  @ [ "go Resources", Palette_goto Resources ]
-  @ [ "go Tools", Palette_goto Tools ]
-  (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
-     under Keepers behind [f], and the palette is where a destination is
-     reached by name when the key path to it is not known. Changes follows the
-     keeper selected on Keepers and says so when there is none. *)
-  @ [ "go Runtime", Palette_goto Runtime ]
-  @ [ "go Changes", Palette_goto Changes ]
-  @ (match browser_lane_on_screen state with
-      | None -> []
-      | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
-  @ [ "go Browser Lane", Palette_browser_lane ]
-  (* The transport list had no way in at all between #32242 and now: the one
-     place that sets [view <- Connectors] is [show_browser_lane], which opens
-     the lane in the same breath, and neither the surface ring nor Esc comes
-     back to the list. The palette is where a destination is reached by name
-     when there is no key path to it. *)
-  @ [ "go Connectors", Palette_connectors ]
-  @ [ "go MSX", Palette_msx ]
-  @ [ "go DOS", Palette_dos ]
-  @ [ "go Lane Add-ons", Palette_lane_addons ]
-  @ [ "go Logs", Palette_goto System_logs ]
-  @ [ "go Activity", Palette_goto Acting ]
-  @ [ "go Approvals", Palette_goto Approvals ]
-  @ [ "go Memory", Palette_goto Memory ]
-  @ [ "go Fusion", Palette_goto Fusion ]
-  @ List.map
-      (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
-      surface_ring
-  (* After the ring, so "go system" still leads with the System surface: the
-     ranks tie on a label that starts with the query, and a tie keeps entry
-     order. *)
-  @ List.map
-      (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
-      config_panes
-  @ List.map
-      (fun (keeper : keeper) ->
-        ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
-      state.keepers
-  @ List.map
-      (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
-      state.tasks
-  @ [ "hearth all", Palette_board_hearth None ]
-  @ List.map (fun (name, count) ->
-      (Printf.sprintf "hearth %s (%s)" name (Masc_tui_message_layout.count_noun count "post"), Palette_board_hearth (Some name)))
-      state.board_hearths
-  @ List.map
-      (fun (p : board_post) ->
-        ("post " ^ p.bp_title, Palette_board_post p.bp_id))
-      state.board_posts
-  @ (* With a file focused on the Code surface, the cursor line's names are
-       askable: K/D/R pre-fill the matching prefix, and [palette_matches]
-       ranks a label that starts with the query first, so these lead the
-       list. *)
-  (if state.view = Code && state.code_focus_file = Right_pane then
-     List.concat_map
-       (fun name ->
-         List.map
-           (fun (prefix, question) -> (prefix ^ name, Palette_lsp (question, name)))
-           lsp_question_prefixes)
-       (code_cursor_line_symbols state)
-   else [])
-
-(* Subsequence match: every query character appears in order. "kadm" finds
-   "keeper adm-race". *)
-let palette_subsequence ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  let hl = String.length h and nl = String.length n in
-  let rec walk hi ni =
-    if ni >= nl then true
-    else if hi >= hl then false
-    else if Char.equal h.[hi] n.[ni] then walk (hi + 1) (ni + 1)
-    else walk (hi + 1) ni
-  in
-  walk 0 0
-
-(* Other words an entry answers to, kept off its row. Metrics used to be five
-   rows -- "go Metrics", "metrics", "telemetry", "charts", "stats" -- each the
-   same jump, so an empty query listed one destination five times. The slash
-   commands fold their aliases into one entry the same way
-   (Masc_tui_command.spelled_catalog). *)
-let palette_action_words = function
-  | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
-  | Palette_goto
-      ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
-      | Approvals | Planning | Schedules | Verification | Harness | Fusion
-      | Repositories | Code | Changes | Connectors | Runtime | Config
-      | Resources | Tools | System_logs )
-  | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_msx | Palette_dos
-  | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
-  | Palette_chat _ | Palette_task _ | Palette_board_hearth _
-  | Palette_board_post _ | Palette_lsp _ ->
-      []
-
-let palette_matches (state : state) =
-  let needle = String.trim state.palette_query in
-  let entries =
-    match state.palette_mode with
-    | Palette_jump ->
-        let entries = palette_entries state in
-        (match palette_typed_question state.palette_query with
-         | None -> entries
-         | Some (question, None) ->
-             List.filter (function
-               | _, Palette_lsp (candidate_question, _) ->
-                   String.equal question candidate_question
-               | _ -> false) entries
-         | Some (_, Some _) -> [])
-    | Palette_choice { choice_question; _ } ->
-        List.map
-          (fun name -> (name, Palette_lsp (choice_question, name)))
-          (code_cursor_line_symbols state)
-  in
-  (* Three ranks, entry order kept inside each: a label that starts with the
-     query, then one that contains it, then one that only has its characters
-     in order. Typed Code questions retain only executable symbol candidates;
-     ordinary jump filters continue ranking destinations and content. *)
-  let rank (label, action) =
-    let texts = label :: palette_action_words action in
-    if List.exists (palette_starts_with ~needle) texts then Some 0
-    else if List.exists (palette_contains ~needle) texts then Some 1
-    else if List.exists (palette_subsequence ~needle) texts then Some 2
-    else None
-  in
-  entries
-  |> List.filter_map (fun entry ->
-         Option.map (fun r -> (r, entry)) (rank entry))
-  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
-  |> List.map snd
 
 (* The side walks under the same keys the provider does: both are closed sets,
    and the reader is picking either way. *)

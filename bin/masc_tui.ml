@@ -1847,7 +1847,7 @@ type async_msg =
       (** approval id, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
-  | Gate_mode_set of gate_lane * string * (unit, string) result
+  | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of
@@ -3101,8 +3101,8 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
     let result =
       try
         (match lane with
-         | Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
-         | External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
+         | Masc_tui_palette.Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
+         | Masc_tui_palette.External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -5227,11 +5227,38 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~base_ref:tree_diff_base_ref ())
 
+let diff_text_max_width text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun widest line ->
+       max widest (Message_layout.display_width (Terminal_text.single_line line))) 0
+
+let git_diff_body_max_width (diff : Tui_decode.git_diff) =
+  List.fold_left (fun widest (row : Tui_decode.git_diff_row) ->
+    max widest (Message_layout.display_width
+      (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
+
+let refresh_recorded_diff_bounds state ~reset =
+  let width = match opened_file_change state with
+    | None -> 0
+    | Some change ->
+        (match change.Tui_decode.fc_kind with
+         | Tui_decode.Fc_edited { before; after; _ } ->
+             max (diff_text_max_width before) (diff_text_max_width after)
+         | Tui_decode.Fc_inserted { text; _ } -> diff_text_max_width text
+         | Tui_decode.Fc_written { content } -> diff_text_max_width content
+         | Tui_decode.Fc_materialized _ -> 0) in
+  state.changes_diff_max_width <- width;
+  state.changes_diff_hscroll <-
+    if reset then 0
+    else min state.changes_diff_hscroll (max 0 (width - 1))
+
 let open_repository_change_diff state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- Some change.rc_path;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
     ~scope ~path:change.rc_path
@@ -5240,6 +5267,8 @@ let close_repository_changes_diff state =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0
 
 let open_repository_changes state ~mailbox ~scope =
@@ -5252,6 +5281,8 @@ let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_load state ~mailbox ~scope
 
@@ -5266,6 +5297,8 @@ let close_repository_changes state =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0
 
 let refresh_repository_changes state ~mailbox =
@@ -6314,7 +6347,7 @@ let search_jump ?(backwards = false) state ~query ~after =
       let total = Array.length texts in
       if String.length query > 0 && total > 0 then begin
         let matches index =
-          Masc_tui_types.palette_contains ~needle:query texts.(index)
+          Masc_tui_pick_list.lowercase_contains ~needle:query texts.(index)
         in
         let rec scan step =
           if step > total then ()
@@ -9225,6 +9258,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_cursor <- index;
               state.changes_scroll <- 0;
               state.changes_diff_row <- Some index;
+              refresh_recorded_diff_bounds state ~reset:true;
               state.changes_diff_scroll <- 0;
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
@@ -11220,6 +11254,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
   if not !refresh_inflight then begin
     refresh_inflight := true;
     state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
+    (* One generation of kept dashboard answers per full pass. A pass reads
+       its addresses one after another and can outlive several ticks, and an
+       answer read early in it is still kept when the next pass asks. *)
+    Masc_tui_http.start_read_generation ();
     let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
@@ -15456,11 +15494,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Ok () ->
            report_action state "system"
-             (Printf.sprintf "%s Gate set to %s" (gate_lane_label lane) mode);
+             (Printf.sprintf "%s Gate set to %s" (Masc_tui_palette.gate_lane_label lane) mode);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            report_action state "error"
-             (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
+             (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
        | Ok (modes, exact_lanes) ->
@@ -16300,6 +16338,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (match result with
               | Ok diff ->
                   state.repository_changes_diff <- Some (request.rdr_path, diff);
+                  state.repository_changes_diff_max_width <- git_diff_body_max_width diff;
+                  state.repository_changes_diff_hscroll <-
+                    min state.repository_changes_diff_hscroll
+                      (max 0 (state.repository_changes_diff_max_width - 1));
                   state.repository_changes_diff_error <- None
               | Error detail -> state.repository_changes_diff_error <- Some detail)
        | Patch_diff_reader ->
@@ -16403,6 +16445,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.changes_scroll <- 0;
                  state.changes_diff_scroll <- 0);
             state.changes_diff_row <- kept_row;
+            refresh_recorded_diff_bounds state
+              ~reset:(Option.is_some state.changes_tree_diff_path || Option.is_none kept_row);
             state.changes_tree_diff <- None;
             state.changes_tree_diff_error <- None;
             state.changes_tree_diff_path <- None
@@ -16415,6 +16459,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok diff ->
             state.changes_tree_diff <- Some diff;
+            state.changes_diff_max_width <- git_diff_body_max_width diff;
+            state.changes_diff_hscroll <-
+              min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
   | Lanes_loaded result ->
@@ -20909,6 +20956,17 @@ and is loaded on demand through keeper_skill.
            let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
+            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
+                let count, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                state.agenda_navigation <- Agenda_read_rows;
+                state.agenda_scroll <-
+                  (match k with
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height scroll
+                   | "home" | "g" -> 0
+                   | "end" | "G" -> Masc_tui_scroll.maximum ~count ~height
+                   | _ -> scroll)
             | "j" | "down" | "k" | "up" ->
                 let lines = Masc_tui_render.agenda_lines state in
                 (match Masc_tui_agenda.target_indexes lines with
@@ -20926,6 +20984,7 @@ and is loaded on demand through keeper_skill.
                      state.agenda_scroll <-
                        move ~count ~height state.agenda_scroll
                  | _ :: _ ->
+                     state.agenda_navigation <- Agenda_follow_selection;
                      let direction =
                        match k with
                        | "j" | "down" -> Masc_tui_agenda.Next
@@ -20944,8 +21003,17 @@ and is loaded on demand through keeper_skill.
                           ~selected:state.agenda_selected))
             | "\r" ->
                 let lines = Masc_tui_render.agenda_lines state in
-                (match Masc_tui_agenda.selected_line lines
-                         ~selected:state.agenda_selected with
+                let _, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                let selected =
+                  match Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected with
+                  | Some index when index >= scroll && index < scroll + height ->
+                      Masc_tui_agenda.selected_line lines
+                        ~selected:state.agenda_selected
+                  | Some _ | None -> None
+                in
+                (match selected with
                  | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
                  | None -> ()
                  | Some
@@ -21224,11 +21292,11 @@ and is loaded on demand through keeper_skill.
            in
            let typed_question =
              match state.palette_mode with
-             | Palette_jump -> palette_typed_question state.palette_query
+             | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
              | Palette_choice _ -> None
            in
            let move_palette by =
-             let last = max 0 (List.length (palette_matches state) - 1) in
+             let last = max 0 (List.length (Masc_tui_palette.palette_matches state) - 1) in
              let current = max 0 (min state.palette_cursor last) in
              state.palette_cursor <- max 0 (min last (current + by))
            in
@@ -21241,7 +21309,7 @@ and is loaded on demand through keeper_skill.
                   (* Bare "def " or "hover ": run the highlighted candidate
                      entry -- the cursor line's names ride the palette list,
                      so Enter alone picks the one in view. *)
-                  let matches = Masc_tui_types.palette_matches state in
+                  let matches = Masc_tui_palette.palette_matches state in
                   let chosen =
                     List.nth_opt matches
                       (max 0
@@ -21250,7 +21318,7 @@ and is loaded on demand through keeper_skill.
                   in
                   close ();
                   (match chosen with
-                  | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                  | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
                       start_code_lsp_question state
                         ~mailbox:async_messages ~question ~symbol
@@ -21269,7 +21337,7 @@ and is loaded on demand through keeper_skill.
                     start_code_lsp_question state ~mailbox:async_messages
                       ~question ~symbol)
             | "\r" ->
-                let matches = Masc_tui_types.palette_matches state in
+                let matches = Masc_tui_palette.palette_matches state in
                 let chosen =
                   List.nth_opt matches
                     (max 0 (min state.palette_cursor (List.length matches - 1)))
@@ -21281,18 +21349,18 @@ and is loaded on demand through keeper_skill.
                      state.lane_addons <- None
                  | Some _, None | None, (Some _ | None) -> ());
                 (match chosen with
-                 | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
+                 | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      hide_browser_lane state
-                 | Some (_, Masc_tui_types.Palette_msx) ->
+                 | Some (_, Masc_tui_palette.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
-                 | Some (_, Masc_tui_types.Palette_dos) ->
+                 | Some (_, Masc_tui_palette.Palette_dos) ->
                      open_dos_screen state ~mailbox:async_messages
-                 | Some (_, Masc_tui_types.Palette_lane_addons) ->
+                 | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
-                 | Some (_, Masc_tui_types.Palette_browser_lane) ->
+                 | Some (_, Masc_tui_palette.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
-                 | Some (_, Masc_tui_types.Palette_connectors) ->
+                 | Some (_, Masc_tui_palette.Palette_connectors) ->
                      (* Close the lane first: Connectors renders the lane
                         whenever it is on screen, so asking for the transport
                         list has to say the lane is not. [hide_browser_lane]
@@ -21301,19 +21369,19 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state;
                      goto_surface state ~mailbox:async_messages
                        Masc_tui_types.Connectors
-                 | Some (_, Masc_tui_types.Palette_goto destination) ->
+                 | Some (_, Masc_tui_palette.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
-                 | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
+                 | Some (_, Masc_tui_palette.Palette_gate_mode (lane, mode)) ->
                      launch_gate_mode_set state ~mailbox:async_messages ~lane
                        ~mode:(Masc.Keeper_gate_mode.to_string mode)
-                 | Some (_, Masc_tui_types.Palette_config pane) ->
+                 | Some (_, Masc_tui_palette.Palette_config pane) ->
                      state.config_pane <- pane;
                      state.config_scroll <- 0;
                      state.runtime_params_cursor <- 0;
                      state.runtime_param_edit <- None;
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
-                 | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
+                 | Some (_, Masc_tui_palette.Palette_chat keeper_name) ->
                      open_message_for_keeper
                        ~return_to:Keeper_chat_return_list state keeper_name
                        ~drain_queue:(fun () ->
@@ -21322,7 +21390,7 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
-                 | Some (_, Masc_tui_types.Palette_task task_id) ->
+                 | Some (_, Masc_tui_palette.Palette_task task_id) ->
                      (* The palette lands where Enter on the task list would:
                         Overview with the task's detail open and the cursor
                         on its row. *)
@@ -21335,7 +21403,7 @@ and is loaded on demand through keeper_skill.
                        task_id;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id
-                 | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
+                 | Some (_, Masc_tui_palette.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
                      state.board_mode <- Board_list;
@@ -21344,7 +21412,7 @@ and is loaded on demand through keeper_skill.
                        ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup ~mailbox:async_messages
-                 | Some (_, Masc_tui_types.Palette_board_post post_id) ->
+                 | Some (_, Masc_tui_palette.Palette_board_post post_id) ->
                      goto_surface state ~mailbox:async_messages Board;
                      let rec find i = function
                        | [] -> None
@@ -21358,7 +21426,7 @@ and is loaded on demand through keeper_skill.
                           open_board_post state ~mailbox:async_messages
                             ~focus:Right_pane post
                       | None -> ())
-                 | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                 | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                    ->
                      start_code_lsp_question state ~mailbox:async_messages
                        ~question ~symbol
@@ -21366,7 +21434,7 @@ and is loaded on demand through keeper_skill.
             | "down" | "\014" -> move_palette 1
             | "up" | "\016" -> move_palette (-1)
             | "home" -> state.palette_cursor <- 0
-            | "end" -> state.palette_cursor <- max 0 (List.length (palette_matches state) - 1)
+            | "end" -> state.palette_cursor <- max 0 (List.length (Masc_tui_palette.palette_matches state) - 1)
             | "\021" -> state.palette_query <- ""; state.palette_cursor <- 0
             | "\127" | "\b" ->
                 state.palette_query <-
@@ -21819,16 +21887,19 @@ and is loaded on demand through keeper_skill.
                  | "c" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Stagehand view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "j" | "down" | "k" | "up" ->
+                 | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (browser_choices view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt (listed_clients view) cursor with
+                     (match List.nth_opt (browser_choices view) cursor with
                       | None -> ()
-                      | Some client ->
-                          state.browser_lane <- Some (choose_client client view);
-                          launch_browser_lane state ~mailbox:async_messages Read)
+                      | Some choice ->
+                          state.browser_lane <- Some (choose_browser choice view);
+                          if not (browser_choice_selected view choice) then
+                            (match choice with
+                             | Connected_browser _ -> launch_browser_lane state ~mailbox:async_messages Read
+                             | Stagehand_browser | Automation_browser -> refresh_browser_lane state ~mailbox:async_messages))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_none (browser_history_on_screen state)
@@ -21953,7 +22024,7 @@ and is loaded on demand through keeper_skill.
                  | "l" -> switch_to Live
                  | "a" -> switch_to Automation
                  | "c" -> switch_to Stagehand
-                 | "b" when view.source = Live && not (busy view) ->
+                 | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
@@ -22807,9 +22878,8 @@ and is loaded on demand through keeper_skill.
             | Home_agenda ->
                 state.agenda_open <- true;
                 state.agenda_scroll <- 0;
-                state.agenda_selected <-
-                  Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
-                    ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+                state.agenda_navigation <- Agenda_read_rows;
+                state.agenda_selected <- Masc_tui_agenda.Nowhere
             | Home_resume keeper_name ->
                 open_message_for_keeper ~return_to:Keeper_chat_return_home state
                   keeper_name ~drain_queue:(fun () ->
@@ -23064,11 +23134,10 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
-           (* Open on the first row that leads somewhere rather than on the
-              heading above it, so the first Enter answers something. *)
-           state.agenda_selected <-
-             Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
-               ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+           state.agenda_navigation <- Agenda_read_rows;
+           (* Start with the scheduled rows. A target is selected explicitly
+              with j/k, and Enter opens only a marked row in the window. *)
+           state.agenda_selected <- Masc_tui_agenda.Nowhere
        | Some "i" when state.view = Overview ->
            goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
@@ -23183,6 +23252,19 @@ and is loaded on demand through keeper_skill.
            | Right_pane ->
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
+       | Some ("shift-left" | "shift-right") as key
+         when state.repository_changes_open
+              && Option.is_some state.repository_changes_diff_path ->
+           let direction = if key = Some "shift-left" then -1 else 1 in
+           state.repository_changes_diff_hscroll <-
+             max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
+               (state.repository_changes_diff_hscroll + direction))
+       | Some ("shift-left" | "shift-right") as key
+         when state.view = Changes && Option.is_some (opened_file_change state) ->
+           let direction = if key = Some "shift-left" then -1 else 1 in
+           state.changes_diff_hscroll <-
+             max 0 (min (max 0 (state.changes_diff_max_width - 1))
+               (state.changes_diff_hscroll + direction))
        | Some "shift-left"
          when state.view = Code && state.code_focus_file = Right_pane ->
            pan_code_content state ~direction:(-1)
@@ -23240,7 +23322,7 @@ and is loaded on demand through keeper_skill.
              | "R" -> "references"
              | "D" | _ -> "definition"
            in
-           (match Masc_tui_types.code_cursor_line_symbols state with
+           (match Masc_tui_palette.code_cursor_line_symbols state with
             | [] ->
                 state.code_lsp_note <-
                   Some "the cursor line has no name to ask about"
@@ -25413,6 +25495,7 @@ and is loaded on demand through keeper_skill.
                         report_action state "error" "no change under the cursor"
                     | Some _ ->
                         state.changes_diff_row <- Some state.changes_cursor;
+                        refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -25764,10 +25847,12 @@ and is loaded on demand through keeper_skill.
                            reading needs a path under it"
                     | Some path ->
                         state.changes_diff_row <- Some state.changes_cursor;
+                        refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- Some path;
+                        state.changes_diff_max_width <- 0;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"

@@ -56,11 +56,28 @@ let test_a_render_that_never_finishes_is_a_timeout () =
   | Ok _ -> fail "nothing was rendered, yet the window did not end the render"
 ;;
 
+let test_workspace_root_matches_item_admission_through_symlink () =
+  let root = Filename.temp_dir "execution-root-" "" in
+  let alias = root ^ "-alias" in
+  Unix.symlink root alias;
+  Fun.protect ~finally:(fun () -> Unix.unlink alias; Masc.Fs_compat.remove_tree root) (fun () ->
+    let config = Masc.Workspace.default_config alias in
+    let diagnostics = Masc.Server_base_path_diagnostics.detect
+      ~effective_base_path:config.base_path ~effective_masc_root:(Masc.Workspace.masc_dir config) () in
+    let status = Execution.For_test.workspace_status_json config in
+    let observed = Yojson.Safe.Util.(status |> member "workspace_root" |> to_string) in
+    check string "execution and Item admission use one canonical identity"
+      diagnostics.effective_base_path observed;
+    check string "the alias resolves to the actual workspace" (Unix.realpath root) observed)
+;;
+
 let () =
   run
     "dashboard_execution_render_window"
     [ ( "render window"
-      , [ test_case
+      , [ test_case "workspace symlink uses Item admission identity" `Quick
+          test_workspace_root_matches_item_admission_through_symlink
+      ; test_case
             "a render that finished as the window closed is the render"
             `Quick
             test_a_render_that_finished_as_the_window_closed_is_the_render

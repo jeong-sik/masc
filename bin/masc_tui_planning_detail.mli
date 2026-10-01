@@ -39,7 +39,8 @@ val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool
 val confirmation_lines : width:int -> confirmation -> line list
 (** The exact proof displayed before the operator confirms. Its binding is
-    retained for the POST, so a newer proof cannot silently replace it. *)
+    retained for the POST, so a newer proof cannot silently replace it. Confirmation
+    requires a presented reader frame containing the final proof-binding row. *)
 
 val timestamp_line : label:string -> string -> string
 (** One timeline row of the detail pane. The field is one wider than the

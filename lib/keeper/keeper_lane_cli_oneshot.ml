@@ -79,6 +79,7 @@ let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = funct
   | Runtime_codex_app_server.Turn_failed { codex_error_info = None; detail = _ }
   | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _

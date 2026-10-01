@@ -51,7 +51,8 @@ let candle_toml base_path =
   path
 ;;
 
-let enable base_path = write_file (candle_toml base_path) {|[payout]
+let enable_with_half_life base_path half_life =
+  write_file (candle_toml base_path) ("half_life = " ^ half_life ^ "\n" ^ {|[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -61,7 +62,9 @@ small = 2000
 medium = 3000
 large = 4000
 epic = 5000
-|}
+|})
+
+let enable base_path = enable_with_half_life base_path "\"off\""
 
 let row : Candle_event.t =
   let time text = Result.get_ok (Candle_time.of_rfc3339 text) in
@@ -166,11 +169,93 @@ let test_a_ledger_that_does_not_read_disables_candle_until_it_is_repaired () =
   check bool "enabled after the repair" true (is_enabled (Candle_status.current ~base_path))
 ;;
 
+(* These scenarios exercise the read/publication boundary, without recovery. *)
+let view_exn ~now ~base_path =
+  match Candle_status.current_view ~now ~base_path with
+  | Ok view -> view
+  | Error error -> fail (Candle_status.error_to_string error)
+
+let ledger_bytes base_path =
+  In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all
+
+let test_observation_records_only_changed_policy_and_rejects_stale_clock () =
+  with_base_path @@ fun base_path ->
+  enable base_path;
+  let clock = ref 2_000_000_000. in
+  let now () = !clock in
+  let first = view_exn ~now ~base_path in
+  (match first.events with
+   | [{Candle_event.body=Candle_event.Half_life_set Candle_decay.Off;_}] -> ()
+   | _ -> fail "the first view did not publish explicit Off");
+  let initial = ledger_bytes base_path in
+  clock := !clock +. 1.;
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  check string "an unchanged policy adds no rounding fact" initial (ledger_bytes base_path);
+  enable_with_half_life base_path "2";
+  let changed = view_exn ~now ~base_path in
+  check bool "the projected policy is recorded" true
+    (Candle_balance.half_life changed.balance = Some changed.policy.half_life);
+  (match changed.events with
+   | [{Candle_event.body=Candle_event.Half_life_set Candle_decay.Off;_};
+      {Candle_event.body=Candle_event.Half_life_set current;_}] ->
+     check bool "the only new row records the actual policy" true
+       (current = changed.policy.half_life)
+   | _ -> fail "a changed policy did not produce exactly one fact");
+  let committed = ledger_bytes base_path in
+  clock := !clock -. 2.;
+  (match Candle_status.current_view ~now ~base_path with
+   | Error (Candle_status.Invalid_ledger (Candle_balance.Clock_reversed _)) -> ()
+   | _ -> fail "a backwards observation was accepted");
+  check string "a backwards clock cannot change the ledger" committed (ledger_bytes base_path)
+
+let test_observation_never_repairs_a_tail_or_exposes_unpublished_policy () =
+  with_base_path @@ fun base_path ->
+  enable base_path;
+  let now () = 2_000_000_000. in
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  let damaged = ledger_bytes base_path ^ "{\"kind\":\"half_life_set\"" in
+  write_file (Candle_ledger.path ~base_path) damaged;
+  enable_with_half_life base_path "2";
+  let observation = Candle_observe.read ~now ~base_path in
+  (match Candle_observe.summary observation with
+   | Candle_observation.Disabled _ -> ()
+   | Candle_observation.Off | Candle_observation.Ready _ -> fail "an unwritable desired policy exposed a ready view");
+  check (option string) "unpublished policy exposes no amount" None
+    (Candle_observe.balance observation ~keeper:"keeper");
+  check string "observation preserves every damaged byte" damaged (ledger_bytes base_path)
+
+let test_read_only_observation_keeps_policy_bytes () =
+  with_base_path @@ fun base_path ->
+  enable base_path;
+  let now () = 2_000_000_000. in
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  let before = ledger_bytes base_path in
+  enable_with_half_life base_path "2";
+  (match Candle_status.observed_view ~now ~base_path with
+   | Ok view -> check bool "amount replay retains recorded policy" true
+       (Candle_balance.half_life view.balance = Some Candle_decay.Off)
+   | Error error -> fail (Candle_status.error_to_string error));
+  (match Candle_observe.summary (Candle_observe.read ~now ~base_path) with
+   | Candle_observation.Ready _ -> ()
+   | _ -> fail "read-only roster observation should remain available");
+  let keeper = Result.get_ok (Keeper_id.Keeper_name.of_string "keeper") in
+  (match Candle_shop.observed_account ~now ~base_path ~keeper with
+   | Ok _ -> () | Error error -> fail (Candle_shop.error_to_string error));
+  check string "read-only paths never publish desired policy" before (ledger_bytes base_path);
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  check bool "authorized policy writer still publishes" true (before <> ledger_bytes base_path)
+
 let () =
   run
     "candle_status"
     [ ( "current"
-      , [ test_case "no candle.toml is off and touches nothing" `Quick
+      , [ test_case "read-only paths retain recorded policy without appending" `Quick
+            test_read_only_observation_keeps_policy_bytes
+        ; test_case "observation records policy changes and rejects a backwards clock" `Quick
+            test_observation_records_only_changed_policy_and_rejects_stale_clock
+        ; test_case "unpublished policy disables observation without repairing a tail" `Quick
+            test_observation_never_repairs_a_tail_or_exposes_unpublished_policy
+        ; test_case "no candle.toml is off and touches nothing" `Quick
             test_no_candle_toml_is_off_and_touches_nothing
         ; test_case "the answer follows candle.toml on every call" `Quick
             test_the_answer_follows_candle_toml_on_every_call

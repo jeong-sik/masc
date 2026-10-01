@@ -1,6 +1,6 @@
 (** What the Channels pane says about one transport's connection. *)
 
-val badge_word : Masc.Tui_decode.connector_connection -> string
+val badge_word : Masc.Tui_decode_connectors.connector_connection -> string
 (** The word the connection badge spells, in the case the pane draws it. *)
 
 val badge_words : string list
@@ -24,7 +24,7 @@ val list_row_name_cells : inner:int -> fixed_cells:int -> tail_cells:int -> int
     state. Never below a floor, and never above {!name_cells_preferred}, so a
     wide frame draws the row it drew yesterday. *)
 
-val runtime_state_to_draw : Masc.Tui_decode.connector -> string option
+val runtime_state_to_draw : Masc.Tui_decode_connectors.connector -> string option
 (** The gateway state, or the poll state for a transport without a gateway,
     when it says something the badge does not. [None] where the transport
     reports no state of its own, or where the state is a word the badge

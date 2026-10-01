@@ -38,9 +38,11 @@ describe('runtime-resolved schema', () => {
     'provider_override_clamped_by_capability',
     'binding_override_clamped_by_capability',
   ])('accepts scoped context provenance %s', (source) => {
-    expect(parseRuntimeResolvedResponse(responseWith({
+    const parsed = parseRuntimeResolvedResponse(responseWith({
       ...validRuntime, max_context_source: source,
-    })).default_runtime.max_context_source).toBe(source)
+    }))
+    if (parsed.default_runtime === null) throw new Error('expected a resolved default runtime')
+    expect(parsed.default_runtime.max_context_source).toBe(source)
   })
 
   it('accepts a complete resolved max-context contract', () => {

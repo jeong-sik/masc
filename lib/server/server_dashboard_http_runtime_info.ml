@@ -1771,6 +1771,7 @@ let runtime_declared_spec_json (rt : Runtime_instance.t) =
           [ "id", `String rt.provider.id
           ; "display_name", `String rt.provider.display_name
           ; "protocol", `String rt.provider.protocol
+          ; "max_context", Json_util.int_opt_to_json rt.provider.max_context
           ; "api_format", `String (runtime_api_format_wire rt.provider.api_format)
           ; "transport", `String (runtime_transport_string rt.provider.transport)
           ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
@@ -1805,6 +1806,7 @@ let runtime_declared_spec_json (rt : Runtime_instance.t) =
       , `Assoc
           [ "provider_id", `String rt.binding.provider_id
           ; "model_id", `String rt.binding.model_id
+          ; "max_context", Json_util.int_opt_to_json rt.binding.max_context
           ; "is_default", `Bool rt.binding.is_default
           ; "max_concurrent", Json_util.int_opt_to_json rt.binding.max_concurrent
           ; "disable_parallel_tool_use", `Bool rt.binding.disable_parallel_tool_use

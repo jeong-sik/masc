@@ -15,6 +15,8 @@
 // rows (no-stub): disclose absence instead of faking presence.
 
 import { Fragment } from 'preact'
+import { turnContextWindow } from '../lib/turn-context-window'
+import { ContextWindowFacts } from './common/context-window-facts'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
@@ -321,10 +323,8 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   const inputTok = row.record.input_tokens
   const requestBodyBytes = row.record.request_body_bytes
   const inputComponentsUnavailable = row.record.input_components === null
-  const ctxWin = row.record.context_window
-  const pct = row.record.usage_scope === 'per_request' && inputTok != null && ctxWin != null && ctxWin > 0
-    ? Math.round((inputTok / ctxWin) * 100)
-    : null
+  const context = turnContextWindow(row.record)
+  const pct = context.percent === null ? null : Math.round(context.percent)
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
@@ -338,8 +338,8 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
             ? html`${memFmtTok(inputTok)} provider tok`
             : html`${parts.length}개 구성요소`}
           · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}
-          ${ctxWin != null ? html` · ${memFmtTok(ctxWin)} 윈도우` : null}
-          · 점유율 ${pct != null ? `${pct}%` : '미상'}
+          · <${ContextWindowFacts} record=${row.record} />
+          · ${context.label} 점유율 ${pct != null ? `${pct}%` : '미상'}
           ${row.record.request_runtime_profile != null
             ? html` · ${row.record.request_runtime_profile}`
             : null}

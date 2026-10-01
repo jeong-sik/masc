@@ -224,11 +224,34 @@ let test_observation_never_repairs_a_tail_or_exposes_unpublished_policy () =
     (Candle_observe.balance observation ~keeper:"keeper");
   check string "observation preserves every damaged byte" damaged (ledger_bytes base_path)
 
+let test_read_only_observation_keeps_policy_bytes () =
+  with_base_path @@ fun base_path ->
+  enable base_path;
+  let now () = 2_000_000_000. in
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  let before = ledger_bytes base_path in
+  enable_with_half_life base_path "2";
+  (match Candle_status.observed_view ~now ~base_path with
+   | Ok view -> check bool "amount replay retains recorded policy" true
+       (Candle_balance.half_life view.balance = Some Candle_decay.Off)
+   | Error error -> fail (Candle_status.error_to_string error));
+  (match Candle_observe.summary (Candle_observe.read ~now ~base_path) with
+   | Candle_observation.Ready _ -> ()
+   | _ -> fail "read-only roster observation should remain available");
+  let keeper = Result.get_ok (Keeper_id.Keeper_name.of_string "keeper") in
+  (match Candle_shop.observed_account ~now ~base_path ~keeper with
+   | Ok _ -> () | Error error -> fail (Candle_shop.error_to_string error));
+  check string "read-only paths never publish desired policy" before (ledger_bytes base_path);
+  ignore (view_exn ~now ~base_path : Candle_status.view);
+  check bool "authorized policy writer still publishes" true (before <> ledger_bytes base_path)
+
 let () =
   run
     "candle_status"
     [ ( "current"
-      , [ test_case "observation records policy changes and rejects a backwards clock" `Quick
+      , [ test_case "read-only paths retain recorded policy without appending" `Quick
+            test_read_only_observation_keeps_policy_bytes
+        ; test_case "observation records policy changes and rejects a backwards clock" `Quick
             test_observation_records_only_changed_policy_and_rejects_stale_clock
         ; test_case "unpublished policy disables observation without repairing a tail" `Quick
             test_observation_never_repairs_a_tail_or_exposes_unpublished_policy

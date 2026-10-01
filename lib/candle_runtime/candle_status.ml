@@ -92,6 +92,16 @@ let enabled ~base_path = match configured ~base_path with
   | Candle_config.Disabled {reason} -> Error (Disabled reason)
   | Candle_config.Enabled policy -> Ok policy
 
+let observed_view ~now ~base_path =
+  let* policy = enabled ~base_path in
+  let* ledger = Candle_ledger.read ~base_path
+    |> Result.map_error (fun error -> Ledger_unavailable (Candle_ledger.read_error_to_string error)) in
+  let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+  let events = Candle_ledger.events ledger in
+  let* balance = Candle_balance.of_events ~at events
+    |> Result.map_error (fun error -> Invalid_ledger error) in
+  Ok {policy;at;events;balance}
+
 let current_view ~now ~base_path =
   let* (_ : Candle_config.policy) = enabled ~base_path in
   Candle_ledger.update ~base_path (fun ledger ->

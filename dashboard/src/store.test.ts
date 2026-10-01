@@ -234,6 +234,42 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     return { promise, resolve }
   }
 
+  it('refreshes independent deletion receipts when execution reconciliation fails', async () => {
+    const fetch = vi.fn(async (input: string) => {
+      if (input.includes('/dashboard/execution')) return json({ error: 'execution unavailable' }, 503)
+      if (input.includes('/keepers/deletions')) return json({
+        operations: [], errors: [], configuration_removals: [], configuration_errors: [],
+      })
+      return json({})
+    })
+    vi.stubGlobal('fetch', fetch)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = await import('./store')
+    store.hydrateExecutionSnapshot(execution(0))
+    await expect(store.refreshKeeperRuntimeStatus({ force: true })).rejects.toMatchObject({ status: 503 })
+    expect(fetch.mock.calls.some(([url]) => url.includes('/keepers/deletions'))).toBe(true)
+    expect(store.keeperDeletionInventory.value).toMatchObject({ operations: [], errors: [] })
+    expect(store.keeperDeletionError.value).toBeNull()
+  })
+
+  it('does not withdraw newer SSE authority for a stale initializing response', async () => {
+    const held = pendingResponse()
+    const fetch = vi.fn().mockReturnValueOnce(held.promise)
+    vi.stubGlobal('fetch', fetch)
+    const store = await import('./store')
+    store.hydrateExecutionSnapshot(execution(1))
+    const requested = store.refreshExecution({ force: true })
+    const rejected = expect(requested).rejects.toThrow('superseded')
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    store.hydrateExecutionSnapshot(execution(2))
+    const current = store.executionWorkspaceAuthority.peek()
+    const candle = store.candleObservation.peek()
+    held.resolve(json({ status: { project: 'initializing' } }))
+    await rejected
+    expect(store.executionWorkspaceAuthority.peek()).toBe(current)
+    expect(store.candleObservation.peek()).toBe(candle)
+  })
+
   it('rejects actual HTTP503, keeps the error signals, and permits a new successful refresh', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json({ error: 'Item observation unavailable' }, 503))
       .mockResolvedValueOnce(json(execution(1)))

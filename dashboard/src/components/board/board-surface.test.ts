@@ -36,12 +36,15 @@ vi.mock('../../store', async (importOriginal) => {
   }
 })
 
-vi.mock('../../router', () => ({
-  route: { value: { tab: 'board', params: {}, postId: null } },
-  navigate: vi.fn(),
-  navigateToPost: vi.fn(),
-  hashForRoute: vi.fn(() => '#board'),
-}))
+vi.mock('../../router', async () => {
+  const { signal } = await import('@preact/signals')
+  return {
+    route: signal({ tab: 'board', params: {}, postId: null }),
+    navigate: vi.fn(),
+    navigateToPost: vi.fn(),
+    hashForRoute: vi.fn(() => '#board'),
+  }
+})
 
 vi.mock('../../api', () => ({
   currentDashboardActor: vi.fn(() => 'dashboard-test'),
@@ -703,13 +706,11 @@ describe('BoardSurface Component', () => {
     vi.mocked(fetchBoardPost).mockReset().mockReturnValueOnce(readA).mockReturnValueOnce(readB)
     boardPosts.value = []
     route.value = { tab: 'board', params: { post: postA.id } } as any
-    const view = render(h(BoardSurface, null))
+    render(h(BoardSurface, null))
     await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postA.id))
     expect(detailLoading.value).toBe(true)
 
     route.value = { tab: 'board', params: { post: postB.id } } as any
-    // The router mock is plain data; update the existing mounted surface.
-    view.rerender(h(BoardSurface, null))
     await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postB.id))
     expect(detailPostId.value).toBe(postB.id)
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)
@@ -757,7 +758,7 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardPost).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('← 게시판으로 돌아가기'))
     route.value = { tab: 'board', params: {} } as any
-    // The router stub is plain data; remount the surface as the focused detail leaves.
+    // Exercise returning to the retained thread on a fresh surface.
     view.unmount()
     render(h(BoardSurface, null))
 

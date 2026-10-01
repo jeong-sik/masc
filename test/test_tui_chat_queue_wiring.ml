@@ -4283,6 +4283,99 @@ let test_priority_completion_survives_controls () =
   check bool "duplicate callback has no effect" true
     (Tui_types.settle_keeper_run_next state beta.sent_request (Error "duplicate") = Tui_types.Run_next_untracked)
 
+let test_priority_workspace_withdrawal () =
+  check int "workspace boundary withdraws chat request owners" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"withdraw_keeper_workspace_presentation"
+       ~callee:"Masc_tui_types.withdraw_keeper_chat_requests");
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let old = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
+  state.msg_inflight <- [old];
+  state.keeper_run_next_inflight <- [old.sent_request];
+  ignore (Tui_types.settle_keeper_run_next state old.sent_request (Ok "old receipt"));
+  let generation = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "receipt is held by the pending control" true
+    (Tui_types.keeper_run_next_receipt_provisional state old.sent_request);
+  state.keeper_run_next_retired <- [old.sent_request];
+  Tui_types.withdraw_keeper_chat_requests state;
+  check bool "A receipts disappear when B becomes authoritative" true
+    (state.keeper_run_next_receipts = []);
+  check bool "pending control ownership disappears" true
+    (state.keeper_priority_controls = [] && state.keeper_run_next_retired = []);
+  Tui_types.withdraw_keeper_chat_requests state;
+  let fresh = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
+  state.msg_inflight <- [fresh];
+  state.keeper_run_next_inflight <- [fresh.sent_request];
+  let fresh_generation = Tui_types.begin_keeper_chat_control state "alpha" in
+  Tui_types.settle_keeper_priority_control state "alpha" ~generation
+    ~outcome:Tui_types.Priority_superseded;
+  check bool "old A control cannot settle returned A control" true
+    (Tui_types.keeper_run_next_receipt_provisional state fresh.sent_request);
+  check bool "old A callback stays untracked after returning to A" true
+    (Tui_types.settle_keeper_run_next state old.sent_request (Ok "late") = Tui_types.Run_next_untracked);
+  Tui_types.settle_keeper_priority_control state "alpha" ~generation:fresh_generation
+    ~outcome:Tui_types.Priority_unconfirmed;
+  check bool "new A receipt is accepted" true
+    (Tui_types.settle_keeper_run_next state fresh.sent_request (Ok "fresh") = Tui_types.Run_next_received);
+  check bool "only the new receipt is present" true
+    (state.keeper_run_next_receipts = [fresh.sent_request, Ok "fresh"])
+
+let test_fusion_workspace_withdrawal () =
+  check int "workspace boundary withdraws Fusion read owners" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"withdraw_keeper_workspace_presentation"
+       ~callee:"Masc_tui_types.withdraw_fusion_workspace");
+  let module F = Masc_tui_fetched in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let run : Masc.Tui_decode_fusion.fusion_run =
+    { fur_run_id = "same-run"; fur_keeper = "alpha"; fur_preset = "A-only";
+      fur_topology = Fusion_types.Simple; fur_started_at = 1.;
+      fur_finished_at = Some 2.; fur_status = Masc.Tui_decode_fusion.Fusion_completed;
+      fur_stage = Masc.Tui_decode_fusion.Fusion_stage_completed;
+      fur_decision = None; fur_summary = None } in
+  let snapshot : Masc.Tui_decode_fusion.fusion_snapshot =
+    { fus_generated_at = "workspace A"; fus_runs = [run];
+      fus_replay = Masc.Tui_decode_fusion.Fusion_not_replayed;
+      fus_historical_evidence = [] } in
+  let start () = match F.start ~equal:Unit.equal state.fusion_runs ~key:() with
+    | F.Already_loading -> fail "withdrawal did not release the read owner"
+    | F.Started (next, request) -> state.fusion_runs <- next; request in
+  let initial = start () in
+  state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs initial (Ok snapshot);
+  let held = start () in
+  let generation = state.fusion_detail_generation in
+  state.fusion_mode <- Tui_types.Fusion_detail "same-run";
+  state.fusion_detail_inflight <- Some (generation, "same-run");
+  let reference : Masc.Tui_decode_fusion.fusion_historical_evidence =
+    { fhe_run_id = "same-run"; fhe_post_id = "same-post";
+      fhe_title = "A evidence"; fhe_created_at = 1. } in
+  state.fusion_historical_inflight <- Some (generation, reference);
+  Tui_types.withdraw_fusion_workspace state;
+  check bool "B has no retained A snapshot" true
+    (Tui_types.fusion_snapshot state = None);
+  check bool "both detail owners are released" true
+    (state.fusion_detail_inflight = None && state.fusion_historical_inflight = None);
+  check bool "held detail answers lose their generation" true
+    (generation <> state.fusion_detail_generation);
+  let b = start () in
+  state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs held (Ok snapshot);
+  check bool "late A cannot release B's list owner" true
+    (F.is_current ~equal:Unit.equal state.fusion_runs b);
+  state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs b (Error "B failed");
+  check bool "failed B refresh cannot retain A data" true
+    (Tui_types.fusion_runs_view state = F.Failed "B failed");
+  Tui_types.withdraw_fusion_workspace state;
+  state.fusion_mode <- Tui_types.Fusion_detail "same-run";
+  check bool "returning to the same A run does not revive old detail generation" true
+    (generation <> state.fusion_detail_generation);
+  let current = start () in
+  state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs held (Ok snapshot);
+  check bool "late A cannot release returned A's list owner" true
+    (F.is_current ~equal:Unit.equal state.fusion_runs current);
+  state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs current (Ok snapshot);
+  check bool "a new authoritative A read is accepted" true
+    (Tui_types.fusion_snapshot state = Some snapshot)
+
 let test_status_details_and_fold_counts_reach_the_frame () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
@@ -4334,7 +4427,9 @@ let () =
   run
     "tui_chat_queue_wiring"
     [ ( "status ownership",
-        [ test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
+        [ test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
+        ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal
+        ; test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
     ; ( "link card layout", [test_case "actual body width and preview cache changes" `Quick test_link_cards_use_actual_message_body_width] )
     ; ( "wiring"

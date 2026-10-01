@@ -23,6 +23,7 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  context_window:int option ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -59,7 +60,10 @@ val run :
   config:Runtime_execution.codex_app_server ->
   unit ->
   attempt_outcome
-(** [on_model_input_window_observation] receives how much of the offered
+(** [context_window] comes from the selected runtime snapshot; [None] keeps
+    the account default. The adapter does not re-resolve it from the catalog.
+
+    [on_model_input_window_observation] receives how much of the offered
     history a [Start] carried. Without it the turn record is written with no
     window and no input composition, which is what [/context] reads. A
     [Resume] sends no history and reports no window.

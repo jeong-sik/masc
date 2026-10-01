@@ -138,7 +138,7 @@ val verify
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
   -> cwd_path:string
   -> timeout_s:float
-  -> Runtime.t
+  -> Runtime_instance.t
   -> result
 
 (** {!verify} the way the [runtime-verify] command runs it: installs the
@@ -154,7 +154,7 @@ val verify_as_command
   -> sw:Eio.Switch.t
   -> private_dir:string
   -> timeout_s:float
-  -> Runtime.t
+  -> Runtime_instance.t
   -> result
 
 module For_testing : sig

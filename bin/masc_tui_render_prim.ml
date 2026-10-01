@@ -99,12 +99,15 @@ let clamped_scroll_now (state : state) = function
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Keeper_logs_scroll { cols; _ } ->
+      Keeper_logs_scroll { scroll = state.log_scroll; cols }
   | Acting _ -> Acting state.acting_scroll
   | Acting_selection _ ->
       Acting_selection (state.acting_scroll, state.acting_cursor)
   | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
   | Memory_fact_detail_scroll _ ->
       Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Client_detail_scroll _ -> Client_detail_scroll state.client_detail_scroll
   | Verification_detail_scroll _ ->
       Verification_detail_scroll state.verification_detail_scroll
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
@@ -127,6 +130,7 @@ let clamped_scroll_now (state : state) = function
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Preset_detail_scroll _ -> Preset_detail_scroll state.config_scroll
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
@@ -152,6 +156,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
   | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
   | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Client_detail_scroll value -> Some (Client_detail_scroll (step value))
   | Verification_detail_scroll value ->
       Some (Verification_detail_scroll (step value))
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
@@ -171,6 +176,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Preset_detail_scroll value -> Some (Preset_detail_scroll (step value))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
@@ -182,6 +188,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
+  (* Logs use their own bounded Metrics_tail movement through the key path. *)
+  | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
@@ -1499,12 +1507,10 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* The roster shows when the terminal can spare its columns and the reader
-   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
-   is theirs, and hiding survives a resize because it is a decision rather
-   than a measurement. *)
+(* Resolve the chat default or explicit choice before applying the terminal's
+   width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
-  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+  Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
 
 
 (** Render the keeper list view *)

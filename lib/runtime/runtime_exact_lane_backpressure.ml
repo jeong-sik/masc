@@ -4,7 +4,7 @@ module Backpressure = Runtime_candidate_backpressure
 
 let candidate_of_slot slot_id =
   Option.map
-    (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
+    (fun (runtime : Runtime_instance.t) -> runtime.candidate_backpressure)
     (Runtime.get_runtime_by_id slot_id)
 ;;
 
@@ -24,10 +24,10 @@ let candidate_of_slot slot_id =
 let resting ~now slot_id =
   match Runtime.get_runtime_by_id slot_id with
   | None -> false
-  | Some (runtime : Runtime.t) ->
+  | Some (runtime : Runtime_instance.t) ->
     let quota_exhausted =
       Runtime_quota_window.is_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime runtime)
+        ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
         ~now
     in
     let rate_limited =

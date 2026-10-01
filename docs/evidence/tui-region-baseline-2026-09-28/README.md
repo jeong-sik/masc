@@ -191,3 +191,39 @@ observer stream, and `run_terminal_scenario` kills the process in its outer
 `finally`. The fixture cleanup check is retained. Geometry, missing-frame,
 unanswered-read, clipping and click assertions are unchanged. A new CI run
 must confirm the updated expectation and normal shutdown together.
+
+
+## Chat portrait and displaced composer — 2026-09-29
+
+[PR #39883 run 36529156143, job 109278685601](https://github.com/jeong-sik/masc/actions/runs/36529156143/job/109278685601)
+on `05dc861f1584fa64a102cd63dee0c5bc56c965b3` captured the two frames in
+`chat-portrait-failure/`. They were decoded from the job's existing
+zlib/base64 log records; these are **before-fix failure evidence**, not a
+successful rerun. The original `screens/` captures remain unchanged.
+
+Replaying both sets through `tui_region_harness.whole_screen` and slicing
+cells 34 through the terminal width shows exactly one changed chat row at
+both 110 and 157 columns:
+
+| Row | Original right pane | Failed PR right pane |
+|---|---|---|
+| 27 | `    >` | empty |
+
+The failed frame instead draws `>` at column 5, in the left pane, while the
+original draws it at column 39. Gate argument rows 6–7 and all other right
+pane rows are byte-equivalent after trailing spaces are removed. These
+frames use a mosaic, so PNG placement cannot be the cause.
+
+The portrait's final spacer called `Masc_tui_ansi.box_bottom`, which emits
+only a newline for an unframed full-screen surface. `write_two_panes` pads
+an exhausted left pane, but joins a present empty line at its actual zero
+width. That moved the corresponding right-hand composer left by 34 cells.
+The fix draws the spacer with `box_line ... ""`, preserving the pane width.
+The portrait PTY now checks the composer's cell column in split chat,
+including mosaic, pixel, resized and colour-disabled layouts.
+
+Only the left roster's bottom changes intentionally, from row 27 to 13,
+leaving room for the conversation caption and portrait. The expected right
+pane blank count remains **19**, not the broken frame's 20. A focused CI
+rerun must verify the corrected frame and successful fixture shutdown;
+these captured frames do not establish either result.

@@ -682,7 +682,10 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Timeout _ ->
     Keeper_official_client_session_store.Transport_interrupted
-  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Invalid_config _ ->
+    (* Local configuration and selected-catalog admission finish before
+       thread/start or turn/start; no vendor execution needs recovery. *)
+    Keeper_official_client_session_store.Pre_dispatch_failed
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _
   | Runtime_codex_app_server.Unsupported_server_request _ ->

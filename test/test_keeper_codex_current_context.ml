@@ -139,7 +139,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
-      ?official_client_continuation ?on_event
+      ?official_client_continuation ?on_event ?requested_context_window
       ?(goal="Continue from current World State.") ~instructions ~world () =
     let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
@@ -154,7 +154,8 @@ default = "codex.context"
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
       ?before_dispatch
-      ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+      ~context_window:(Some (Option.value requested_context_window
+        ~default:(Runtime_instance.max_context_of_runtime runtime)))
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
@@ -194,6 +195,29 @@ let test_captured_context_window_survives_catalog_reload () =
   let methods = read_requests capture |> List.map (fun request -> request |> member "method" |> text) in
   check bool "fresh thread started" true (List.mem "thread/start" methods);
   check bool "existing thread resumed" true (List.mem "thread/resume" methods)
+
+let test_context_admission_failure_preserves_settled_conversation () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture in
+  let load () = Keeper_official_client_session_store.load ~base_path
+      ~keeper_name:"context-fixture" |> require |> Option.get in
+  successful (run ~instructions:"Keeper instructions" ~world:"Original context" ());
+  let original = load () in
+  let requests = read_requests capture in
+  let admissions = ref 0 in
+  let rejected = run ~before_dispatch:(fun () -> incr admissions; Ok ())
+      ~requested_context_window:1100000
+      ~instructions:"Keeper instructions" ~world:"Context rejected before dispatch" () in
+  check bool "unsupported context stays an explicit failed request" true
+    (Result.is_error rejected.Keeper_codex_runtime.result);
+  check int "context refusal does not consume continuation authority" 0 !admissions;
+  check bool "local admission keeps the previous settled authority" true (load () = original);
+  check bool "local admission submits neither thread nor turn" true
+    (read_requests capture = requests);
+  successful (run ~instructions:"Keeper instructions" ~world:"Corrected context" ());
+  let methods = read_requests capture |> List.map (fun request -> request |> member "method" |> text) in
+  check int "corrected configuration resumes the original conversation" 1
+    (List.length (List.filter (String.equal "thread/resume") methods))
 
 let test_operator_interrupt_preserves_previous_native_settlement () =
   with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
@@ -1042,6 +1066,7 @@ let test_dispatch_admission_rejection_prevents_start_and_resume () =
 
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "failed dispatch admission prevents fresh and resumed turn/start" `Quick test_dispatch_admission_rejection_prevents_start_and_resume;
+  test_case "context admission failure preserves settled conversation" `Quick test_context_admission_failure_preserves_settled_conversation;
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;

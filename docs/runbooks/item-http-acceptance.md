@@ -57,13 +57,6 @@ runner's native libraries; they are not the relocatable Release package.
 This target provides isolated Mac execution evidence before a separate
 release, installation and live-runtime check.
 
-The macOS target runs natively on `macos-14`, using the Release workflow's
-OCaml dependencies and build flags. Its runtime artifact also records the
-server's dynamic-library dependencies. These raw probe binaries rely on the
-runner's native libraries; they are not the relocatable Release package.
-This target provides isolated Mac execution evidence before a separate
-release, installation and live-runtime check.
-
 The script accepts only a new output directory. Provider credentials and
 operator runtime settings are excluded from the child environment. Login
 credentials remain in the temporary workspace auth directory until cleanup;

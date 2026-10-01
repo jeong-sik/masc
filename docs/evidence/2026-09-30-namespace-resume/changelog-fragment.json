@@ -1,0 +1,11 @@
+{
+  "command": [
+    "python3",
+    "-c",
+    "import pathlib,tempfile,shutil,subprocess; d=tempfile.TemporaryDirectory(dir='.'); shutil.copy('changelog.d/40378.md',d.name); r=subprocess.run(['python3','scripts/changelog-fragments.py','check','--dir',d.name],check=False); d.cleanup(); raise SystemExit(r.returncode)"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume",
+  "started_at": "2026-09-30T15:40:47.552440+00:00",
+  "finished_at": "2026-09-30T15:40:47.601023+00:00",
+  "exit_code": 0
+}

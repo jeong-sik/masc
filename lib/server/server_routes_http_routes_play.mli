@@ -13,7 +13,9 @@
     [409 {code: "name_taken", taken_by}]. One issue or revoke runs at a time,
     so two requests for one name cannot both be issued.
 
-    Listing refuses an invalid expiry projection with
+    Listing reads current named credential authority. Unknown storage answers
+    [503 {code: "credentials_unreadable"}], rather than showing old UUID data
+    as an active invite. Listing refuses an invalid expiry projection with
     [503 {code: "invalid_credential_expiry"}], rather than inventing an
     expired invite row.
 

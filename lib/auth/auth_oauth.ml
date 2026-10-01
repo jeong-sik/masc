@@ -255,11 +255,14 @@ let save_json_private path json =
 ;;
 
 let load_json_opt path =
-  if not (Sys.file_exists path)
-  then Ok None
+  let* present = Auth_credential_base.credential_path_exists path
+    |> Result.map_error (fun error -> Store_error (masc_error_to_string error)) in
+  if not present then Ok None
   else
-    try Ok (Some (Yojson.Safe.from_string (Fs_compat.load_file path))) with
-    | Sys_error msg | Yojson.Json_error msg -> Error (Store_error msg)
+    let* content = Auth_credential_base.read_regular_auth_file path
+      |> Result.map_error (fun error -> Store_error (masc_error_to_string error)) in
+    try Ok (Some (Yojson.Safe.from_string content)) with
+    | Yojson.Json_error msg -> Error (Store_error msg)
 ;;
 
 let rec lock_store fd =
@@ -988,8 +991,10 @@ let find_access_credential ~base_path ~token =
   else
     let hash = token_hash token in
     let path = access_path base_path hash in
-    if not (Sys.file_exists path)
-    then Ok None
+    let* present = Auth_credential_base.credential_path_exists path
+      |> Result.map_error (fun error -> System (System_error.IoError
+        ("OAuth credential store: " ^ masc_error_to_string error))) in
+    if not present then Ok None
     else
       let request_resource = expected_resource () in
       let result =

@@ -8,6 +8,14 @@
 
 open Masc_domain
 
+module Regular_read_for_testing : sig
+  val read_with_open :
+    open_file:(string -> Unix.open_flag list -> int -> Unix.file_descr) ->
+    string -> (string, masc_error) result
+  (** Exercise the production descriptor reader with a deterministic open
+      boundary; no process-wide hook or production reader is changed. *)
+end
+
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string
@@ -51,8 +59,9 @@ exception Auth_config_error of {
 
 val load_auth_config : string -> auth_config
 (** [load_auth_config config] reads [.masc/auth/config.json] under [config].
-    A missing file yields {!default_auth_config}. Malformed or unreadable
-    configuration raises {!Auth_config_error}. *)
+    An absent path yields {!default_auth_config}. Malformed, unreadable or
+    nonregular configuration raises {!Auth_config_error}; dangling links are
+    unreadable. Symlinks to regular files are accepted. Cancellation propagates. *)
 
 val save_auth_config : string -> auth_config -> unit
 (** [save_auth_config config cfg] persists the auth config. *)
@@ -84,7 +93,8 @@ val credential_exists_in_transaction :
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
     file, following its redirect stub to the id-named file. [None] when the
-    file is missing, and also when it cannot be read or decoded. A name that
+    file is missing, nonregular, or cannot be read or decoded. Symlinks to
+    regular files are accepted; cancellation propagates. A name that
     signs in with another name's token (a generated nickname, a Keeper
     transport alias) has no file of its own: the token check maps it to the
     owner ([Auth_credential_token.verify_token_owner_alias]), not this
@@ -144,11 +154,7 @@ val load_credential_of :
 
 val save_credential : string -> agent_credential -> unit
 (** Publish under {!with_credential_transaction}, including token-cache
-    invalidation. Lock admission errors raise [Sys_error], like write errors.
-    Once a named credential or redirect stub is committed, retirement failures for the
-    superseded UUID payload are logged without failing that publication, so a
-    caller that minted a bearer can return it. Superseded payloads do not acquire
-    named-owner authentication or diagnostic-listing authority. *)
+    invalidation. Lock admission errors raise [Sys_error], like write errors. *)
 
 val ensure_credential_alias :
   string ->
@@ -250,7 +256,10 @@ val find_credential_by_token :
 
 val find_static_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
-(** Static bearer-only lookup for the OAuth authorization bootstrap. *)
+(** Static bearer-only lookup for the OAuth authorization bootstrap. A stored
+    UUID payload grants no bearer authority unless its owner's current named
+    credential resolves to the same complete record. Cache rebuilds preserve
+    that rule; unknown or changed named authority is rejected. *)
 
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
@@ -310,17 +319,38 @@ val save_file_backed_raw_token_credential :
   (agent_credential, masc_error) result
 (** [save_file_backed_raw_token_credential config ~agent_name ~role
     ~raw_token] persists both the hashed credential and its private raw token
-    file. Use only for local operator credentials whose bearer must remain
-    available to file-based clients after process restart. *)
+    file under one credential transaction. Refuses unreadable current ownership
+    before writes and reports observed partial publication on write failure.
+    Rejects whitespace and ASCII control bytes before effects; accepted bearer
+    bytes are not normalized. Direct raw-token APIs are unchanged.
+    Use only for local operator credentials whose bearer must remain available
+    to file-based clients after process restart. *)
+
+type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
+
+type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled
+
+val create_file_backed_login_token :
+  string -> agent_name:string -> role:agent_role -> lifetime:file_backed_token_lifetime ->
+  (string * agent_credential * login_auth_change, masc_error) result
+(** Admit current target ownership before login bootstrap config and credential
+    effects; enable required bearer auth and publish both files under one
+    transaction, using the explicit lifetime. Player login is refused before
+    effects. Errors report partial publication; bootstrap config changes may
+    survive failure. This operation does not promise crash rollback. *)
 
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
-    the file is missing, empty after trim, or unreadable. Runtime subprocesses
+    the file is missing, nonregular, blank, or unreadable. Symlinks to regular
+    files are accepted; cancellation propagates. A nonblank opaque token retains
+    its exact bytes, including surrounding whitespace. Runtime subprocesses
     use it when they do not inherit the parent's [MASC_TOKEN] environment. *)
 
 val verify_internal_keeper_token :
   string -> token:string -> bool
+(** Missing, blank, nonregular or unreadable stored hashes fail verification.
+    Symlinks to regular files are accepted and cancellation propagates. *)
 
 val ensure_internal_keeper_token :
   string -> string
@@ -328,18 +358,22 @@ val ensure_internal_keeper_token :
 val ensure_keeper_credentials :
   string -> agent_names:string list ->
   ((string * (string * agent_credential, masc_error) result) list, masc_error) result
-(** Batch startup sync under one admitted token index. Every publisher validates
-    current named-owner and UUID authority before writing. After a failure,
-    authority is reread before any later independent Keeper is synchronized. *)
+(** Batch startup sync under one admitted snapshot. A publication failure stops
+    later writes rather than trusting an index with uncertain store effects. *)
 
 val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
-    backed by a per-keeper raw bearer token file.  The internal
+    backed by a per-keeper raw bearer token file. Current ownership, raw-token
+    reads, reuse or recreation, and publication share one transaction. True
+    absence permits recreation; unreadable or foreign ownership does not.
+    Readable stale raw tokens are replaced using the existing Keeper policy.
+    A matching pair with whitespace or ASCII control bytes refuses reuse before
+    effects; it is not silently normalized or replaced.
+    Errors describe observed partial publication when a write fails. The internal
     keeper MCP token remains separate and is only used for the
-    [x-masc-internal-token] trust path. Existing names must resolve to this
-    exact canonical owner, and UUID ownership is validated before publication. *)
+    [x-masc-internal-token] trust path. *)
 
 type credential_status =
   | Credential_present of agent_credential
@@ -381,6 +415,9 @@ val create_token_expiring_in_if_absent :
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result
+(** Static verification through a UUID or stored redirect alias requires the
+    complete credential to still match its owner's current named binding.
+    Direct UUID data reads do not grant independent bearer authority. *)
 
 (** {1 Permission Checks} *)
 
@@ -426,8 +463,9 @@ val verify_workspace_secret : string -> cached_hash:string option -> string -> b
     against [cached_hash] (the caller's already-loaded [auth_config.
     workspace_secret_hash]) using a constant-time comparison. Falls back to
     a guarded read of the on-disk workspace-secret file only when
-    [cached_hash] is [None]; that fallback fails closed on any read error
-    rather than raising. *)
+    [cached_hash] is [None]; that fallback fails closed on a nonregular file
+    or expected read error. Symlinks to regular files are accepted, and
+    cancellation propagates. *)
 
 (** {1 Auth Toggle} *)
 
@@ -442,4 +480,29 @@ val disable_auth : string -> unit
 val is_auth_enabled : string -> bool
 
 val read_initial_admin : string -> string option
-(** [read_initial_admin config] returns the bootstrap admin agent name. *)
+(** [read_initial_admin config] returns the bootstrap admin agent name.
+    Missing, nonregular, unreadable or blank files yield [None]. Cancellation
+    propagates; symlinks to regular files are accepted. *)
+
+val current_credential_in_transaction :
+  credential_transaction -> string -> (agent_credential option, masc_error) result
+(** Resolve the current named credential under admission, validating its exact
+    owner and UUID binding before authorizing an effect. [None] means the name
+    file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
+
+val list_current_credentials_in_transaction :
+  credential_transaction -> (agent_credential list, masc_error) result
+(** The same current-owner discovery as {!list_current_credentials}, under the
+    caller's existing admission. It acquires no recursive credential lock;
+    keep admission through the effect authorized by this snapshot. *)
+
+val list_current_credentials : string -> (agent_credential list, masc_error) result
+(** Discover credential owners and read their current named bindings under one
+    Auth admission, in name order. A surviving UUID or stored alias is data,
+    never an independent role authority. A truly absent named owner is omitted;
+    an occupied unreadable, malformed or mismatched current binding of a
+    discovered owner is [Error]. Unresolvable data rows that establish no
+    owner are omitted as in store discovery; this is not a directory integrity
+    verdict or an exhaustive inventory of unreadable rows.
+    Discovery read and admission failures are [Error]; cancellation propagates.
+    This does not filter expiry. Do not call inside an Auth transaction. *)

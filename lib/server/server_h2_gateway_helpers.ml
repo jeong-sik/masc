@@ -78,12 +78,20 @@ let h2_respond_cached_payload ?extra_headers h2_reqd
   in
   h2_respond_json_string ~status ?extra_headers h2_reqd payload.raw_json
 
+let json_value_status ?status json =
+  match status with
+  | None | Some `OK ->
+      (Http_server_eio.Response.timeout_envelope_status_override json :> H2.Status.t)
+  | Some status -> status
+
 let h2_respond_json_value ?status ?extra_headers ?compress h2_reqd json =
-  h2_respond_json_string ?status ?extra_headers ?compress h2_reqd
+  let status = json_value_status ?status json in
+  h2_respond_json_string ~status ?extra_headers ?compress h2_reqd
     (Yojson.Safe.to_string json)
 
 let h2_respond_json_value_on_cpu ?status ?(extra_headers = []) ?(compress = true)
     h2_reqd json =
+  let status = json_value_status ?status json in
   let request = H2.Reqd.request h2_reqd in
   let accept_encoding = H2.Headers.get request.headers "accept-encoding" in
   let body, compression_headers =
@@ -91,7 +99,7 @@ let h2_respond_json_value_on_cpu ?status ?(extra_headers = []) ?(compress = true
       Http_response_payload.compress_body ~compress ~accept_encoding
         (Yojson.Safe.to_string json))
   in
-  h2_respond_body ?status ~compress:false
+  h2_respond_body ~status ~compress:false
     ~extra_headers:(compression_headers @ extra_headers)
     ~content_type:"application/json; charset=utf-8" h2_reqd body
 

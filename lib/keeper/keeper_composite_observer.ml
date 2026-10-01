@@ -1,4 +1,4 @@
-(** Composite observer — pure projection. See [.mli] for contract. *)
+(** Composite observer — lifecycle projection with observation metrics. See [.mli] for contract. *)
 
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
@@ -17,12 +17,10 @@ type runtime_state = string
 
 
 type invariant_key =
-  | Invariant_no_runtime_before_measurement
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
 type invariants_check = {
-  no_runtime_before_measurement : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
 }
@@ -155,7 +153,6 @@ let runtime_state_to_string (s : runtime_state) = s
 
 
 let invariant_key_to_string = function
-  | Invariant_no_runtime_before_measurement -> "NoRuntimeBeforeMeasurement"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
   | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
 
@@ -273,13 +270,6 @@ let run_state_to_json (rs : run_state) : Yojson.Safe.t =
 
 (* Invariants *)
 
-let check_no_runtime_before_measurement
-    ~(runtime_state : runtime_state)
-    ~(measurement_captured : bool)
-    : bool =
-  let _ = runtime_state, measurement_captured in
-  true
-
 type event_priority_state = {
   ep_measurement_bind_count : int;
   ep_has_measurement : bool;
@@ -309,26 +299,16 @@ let check_phase_derivation_agreement
     : bool =
   Keeper_state_machine.derive_phase entry.conditions = entry.phase
 
-let compute_invariants
-    (entry : Keeper_registry.registry_entry)
-    ~(phase : Keeper_state_machine.phase)
-    ~(turn_phase : Keeper_registry.packed_turn_phase)
-    ~(runtime_state : runtime_state)
-    ~(measurement_captured : bool)
-    : invariants_check =
+let compute_invariants (entry : Keeper_registry.registry_entry) : invariants_check =
   {
-    no_runtime_before_measurement =
-      check_no_runtime_before_measurement
-        ~runtime_state
-        ~measurement_captured;
     event_priority_monotone = check_event_priority_monotone entry;
     phase_derivation_agreement = check_phase_derivation_agreement entry;
   }
 
 (* Otel_metric_store bump — one counter tick per violated invariant per snapshot.
    Called from [observe]. Backend rate/increase queries distinguish transient
-   from steady-state violations. Labels bounded: keeper × invariant (5)
-   ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
+   from steady-state violations. Labels are keeper and the measured invariant.
+   Mirrors the naming pattern in
    [Runtime_strategy_trace.bump_otel_metric_store_counter]. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
@@ -340,7 +320,6 @@ let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
         ]
         ()
   in
-  bump Invariant_no_runtime_before_measurement inv.no_runtime_before_measurement;
   bump Invariant_event_priority_monotone inv.event_priority_monotone;
   bump Invariant_phase_derivation_agreement inv.phase_derivation_agreement
 
@@ -377,15 +356,7 @@ let observe
   let decision_stage = live_decision_stage entry in
   let runtime_state = live_runtime_state entry in
   let measurement = live_measurement entry in
-  let measurement_captured = Option.is_some measurement in
-  let invariants =
-    compute_invariants
-      entry
-      ~phase:entry.phase
-      ~turn_phase
-      ~runtime_state
-      ~measurement_captured
-  in
+  let invariants = compute_invariants entry in
   bump_invariant_violations ~keeper_name:entry.name invariants;
   let last_skip =
     match entry.last_skip_observation with
@@ -461,7 +432,6 @@ let observe
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
   `Assoc [
-    "no_runtime_before_measurement", `Bool inv.no_runtime_before_measurement;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
     "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;
   ]

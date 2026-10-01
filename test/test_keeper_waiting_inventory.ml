@@ -663,7 +663,7 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
            ~base_path:config.Workspace_utils_backend_setup.base_path
            keeper_name
            meta);
-      Keeper_registry.mark_turn_started
+      Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
         ~base_path:config.Workspace_utils_backend_setup.base_path
         ~wake:Keeper_registry.Proactive_tick
         keeper_name;

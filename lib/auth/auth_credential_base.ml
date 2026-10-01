@@ -57,12 +57,70 @@ let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
-let stat_file path = run_blocking_io (fun () -> Unix.stat path)
-let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content
 let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
 let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
 let remove_file path = run_blocking_io (fun () -> Sys.remove path)
+
+(* Shared file authority for config, raw bearers and canonical credential reads.
+   Expected I/O errors become typed results; Eio cancellation propagates. *)
+let credential_read_result f =
+  try Ok (f ()) with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let credential_path_exists file =
+  try
+    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
+    Ok true
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let read_regular_auth_file_with_open ~open_file path =
+  let ( let* ) = Result.bind in
+  let* result = credential_read_result (fun () -> run_blocking_io (fun () ->
+    (* Following a regular-file symlink remains supported. Nonblocking open
+       prevents a replacement FIFO from waiting for a writer before fstat. *)
+    let fd = open_file path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    let channel = Unix.in_channel_of_descr fd in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        Error (System (System_error.ValidationError
+          (Printf.sprintf "auth path is not a regular file: %s" path)))
+      else
+        let content = In_channel.input_all channel in
+        let after = Unix.fstat fd in
+        let named = Unix.stat path in
+        if before.Unix.st_size <> after.Unix.st_size
+           || before.Unix.st_mtime <> after.Unix.st_mtime
+           || before.Unix.st_ctime <> after.Unix.st_ctime
+           || after.Unix.st_dev <> named.Unix.st_dev
+           || after.Unix.st_ino <> named.Unix.st_ino then
+          Error (System (System_error.IoError
+            (Printf.sprintf "auth path changed during verified read: %s" path)))
+        else Ok content))) in
+  result
+;;
+
+let read_regular_auth_file path =
+  read_regular_auth_file_with_open ~open_file:Unix.openfile path
+;;
+
+module Regular_read_for_testing = struct
+  let read_with_open = read_regular_auth_file_with_open
+end
+;;
 
 (** Ensure auth directories exist *)
 let ensure_auth_dirs config =
@@ -88,15 +146,11 @@ let save_private_text_file path content =
 ;;
 
 let load_internal_keeper_token_hash config =
-  let file = internal_keeper_token_hash_file config in
-  if file_exists file
-  then (
-    try
-      let hash = String.trim (read_text_file file) in
-      if hash = "" then None else Some hash
-    with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (internal_keeper_token_hash_file config) with
+  | Error _ -> None
+  | Ok content ->
+    let hash = String.trim content in
+    if hash = "" then None else Some hash
 ;;
 
 let save_internal_keeper_token_hash config ~raw_token =
@@ -134,15 +188,11 @@ let ensure_internal_keeper_token config =
 
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
-  let file = initial_admin_file config in
-  if file_exists file
-  then (
-    try
-      let name = String.trim (read_text_file file) in
-      if name = "" then None else Some name
-    with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (initial_admin_file config) with
+  | Error _ -> None
+  | Ok content ->
+    let name = String.trim content in
+    if name = "" then None else Some name
 ;;
 
 (* ============================================ *)
@@ -171,36 +221,27 @@ let raise_auth_config_error ~file reason =
   raise (Auth_config_error { file; reason })
 ;;
 
-(* HIGH-RISK-UNREVIEWED: every authenticated request calls this. The stat runs
-   on a system thread, so a filesystem that takes seconds to answer holds the
-   calling fiber rather than the scheduler every other request shares. Which
-   answers load, default, or raise is the same as a stat on the fiber. *)
-(** Load auth config *)
+(* HIGH-RISK-UNREVIEWED: authenticated requests use this configuration.
+   Metadata checks run on system threads through the shared Auth reader,
+   allowing other fibers to proceed while the filesystem answers. *)
+(** Load auth config. Only an absent path selects the secure default;
+    occupied unreadable/nonregular paths refuse before any open or mutation. *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  match
-    try Some (stat_file file) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> None
-    | Unix.Unix_error (error, function_name, argument) ->
-      raise_auth_config_error
-        ~file
-        (Printf.sprintf
-           "%s(%s): %s"
-           function_name
-           argument
-           (Unix.error_message error))
-  with
-  | None -> default_auth_config
-  | Some _ ->
-    (try
-       let content = read_text_file file in
-       let json = Yojson.Safe.from_string content in
-       match auth_config_of_yojson json with
-       | Ok parsed -> parsed
-       | Error msg -> raise_auth_config_error ~file msg
-     with
-     | Sys_error msg -> raise_auth_config_error ~file msg
-     | Yojson.Json_error msg -> raise_auth_config_error ~file msg)
+  match credential_path_exists file with
+  | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+  | Ok false -> default_auth_config
+  | Ok true ->
+    (match read_regular_auth_file file with
+     | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+     | Ok content ->
+       (try
+          let json = Yojson.Safe.from_string content in
+          match auth_config_of_yojson json with
+          | Ok parsed -> parsed
+          | Error msg -> raise_auth_config_error ~file msg
+        with
+        | Yojson.Json_error msg -> raise_auth_config_error ~file msg))
 ;;
 
 (** Save auth config *)
@@ -209,6 +250,16 @@ let save_auth_config config (auth_cfg : auth_config) =
   match auth_config_of_yojson (auth_config_to_yojson auth_cfg) with
   | Ok _ -> persist_auth_config config auth_cfg
   | Error reason -> raise_auth_config_error ~file reason
+;;
+
+let init_workspace_secret config : string =
+  ensure_auth_dirs config;
+  let secret = generate_token () in
+  let hash = sha256_hash secret in
+  save_private_text_file (workspace_secret_file config) hash;
+  let cfg = load_auth_config config in
+  save_auth_config config { cfg with workspace_secret_hash = Some hash };
+  secret
 ;;
 
 (* ============================================ *)
@@ -242,16 +293,12 @@ let credential_of_json agent_name json : agent_credential option =
 
 (* One credential file at [path]: [None] when it is absent, cannot be read,
    or does not decode. *)
-let load_credential_from_path_raw config agent_name path : agent_credential option =
-  if file_exists path
-  then (
-    try
-      let content = read_text_file path in
-      let json = Yojson.Safe.from_string content in
-      credential_of_json agent_name json
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
-  else None
+let load_credential_from_path_raw _config agent_name path : agent_credential option =
+  match read_regular_auth_file path with
+  | Error _ -> None
+  | Ok content ->
+    (try credential_of_json agent_name (Yojson.Safe.from_string content) with
+     | Yojson.Json_error _ -> None)
 ;;
 
 let credential_uuid_file config cid =
@@ -265,18 +312,18 @@ let redirect_target_file config target =
 ;;
 
 let load_redirect_target config path =
-  if not (file_exists path)
-  then None
-  else (
-    try
-      match Yojson.Safe.from_string (read_text_file path) with
-      | `Assoc fields ->
-        (match List.assoc_opt "redirect_to" fields with
-         | Some (`String target) -> redirect_target_file config target
-         | _ -> None)
-      | _ -> None
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+  match read_regular_auth_file path with
+  | Error _ -> None
+  | Ok content ->
+    (try
+       match Yojson.Safe.from_string content with
+       | `Assoc fields ->
+         (match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) -> redirect_target_file config target
+          | _ -> None)
+       | _ -> None
+     with
+     | Yojson.Json_error _ -> None)
 ;;
 
 let remove_file_if_exists path =
@@ -289,29 +336,24 @@ let remove_file_if_exists path =
    to the owner ([Auth_credential_token.verify_token_owner_alias]), not this
    lookup. *)
 let load_credential config agent_name : agent_credential option =
-  let file = credential_file config agent_name in
-  if not (file_exists file)
-  then None
-  else (
-    try
-      let content = read_text_file file in
-      let json = Yojson.Safe.from_string content in
-      (* Redirect stub: { "redirect_to": "<uuid>.json" } — single
-         [List.assoc_opt] walk replaces the [mem_assoc + assoc] pair
-         (two passes, second raises [Not_found]). *)
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "redirect_to" fields with
-         | Some (`String target) ->
-           (match redirect_target_file config target with
-            | Some redirect_path ->
-              load_credential_from_path_raw config agent_name redirect_path
-            | None -> None)
-         | Some _ -> None
-         | None -> credential_of_json agent_name json)
-      | _ -> credential_of_json agent_name json
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+  match read_regular_auth_file (credential_file config agent_name) with
+  | Error _ -> None
+  | Ok content ->
+    (try
+       let json = Yojson.Safe.from_string content in
+       match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) ->
+            (match redirect_target_file config target with
+             | Some redirect_path ->
+               load_credential_from_path_raw config agent_name redirect_path
+             | None -> None)
+          | Some _ -> None
+          | None -> credential_of_json agent_name json)
+       | _ -> credential_of_json agent_name json
+     with
+     | Yojson.Json_error _ -> None)
 ;;
 
 type load_credential_error =
@@ -389,18 +431,7 @@ let with_credential_transaction config f =
       Ok value
 ;;
 
-let credential_path_exists file =
-  try
-    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
-    Ok true
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
+
 
 let credential_exists_in_transaction (Credential_transaction config) agent_name =
   credential_path_exists (credential_file config agent_name)
@@ -534,12 +565,9 @@ let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_err
 ;;
 
 let load_raw_token config ~agent_name =
-  let file = raw_token_file config agent_name in
-  if file_exists file
-  then (
-    try read_text_file file |> String_util.trim_nonempty with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (raw_token_file config agent_name) with
+  | Error _ -> None
+  | Ok raw -> if String.trim raw = "" then None else Some raw
 ;;
 
 let persist_raw_token config ~agent_name raw_token =
@@ -694,14 +722,7 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
-let credential_read_result f =
-  try Ok (f ()) with
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
+
 
 let read_owned_credential_text config path =
   let ( let* ) = Result.bind in
@@ -799,15 +820,7 @@ let list_credential_results config =
       else read_dir dir |> Array.to_list
         |> List.filter (fun file -> Filename.check_suffix file ".json")
         |> List.sort String.compare
-        |> List.filter_map (fun file ->
-          let result = read (Filename.concat dir file) in
-          let owner = match result with
-            | Ok credential -> Some credential.agent_name
-            | Error (Invalid_credential_expiry { agent_name; _ }) -> Some agent_name
-            | Error (Unreadable_credential _) -> None in
-          match owner with
-          | Some name when not (String.equal file (Common.safe_filename name ^ ".json")) -> None
-          | Some _ | None -> Some result)
+        |> List.map (fun file -> read (Filename.concat dir file))
     with
     | Sys_error reason -> [ unreadable dir reason ]
     | Unix.Unix_error (error, operation, argument) ->
@@ -826,9 +839,28 @@ type stored_credential =
   | Unresolved_credential
 
 
-let read_stored_credential config name path =
+
+(* File-backed bearers must survive HTTP header construction and extraction
+   without changing the bytes that were hashed. Direct token APIs retain
+   their separate opaque-token contract. *)
+let validate_file_backed_bearer raw_token =
+  if raw_token = "" || String.exists (fun c -> Char.code c <= 0x20 || Char.code c = 0x7f) raw_token
+  then Error (Auth (Auth_error.InvalidToken
+    "File-backed bearer must not contain whitespace or ASCII control bytes"))
+  else Ok ()
+;;
+
+let read_regular_credential_file path =
+  credential_read_result (fun () -> read_regular_credential_text path)
+;;
+
+type credential_leaf_policy = Owned_regular_only | Follow_regular_symlink
+
+let read_stored_credential ?(leaf_policy = Owned_regular_only) config name path =
   let ( let* ) = Result.bind in
-  let* content = read_owned_credential_text config path in
+  let* content = match leaf_policy with
+    | Owned_regular_only -> read_owned_credential_text config path
+    | Follow_regular_symlink -> read_regular_credential_file path in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
   | json ->
@@ -846,7 +878,7 @@ let read_stored_credential config name path =
        | None -> Ok Unresolved_credential)
 ;;
 
-let resolve_stored_credential config name = function
+let resolve_stored_credential ?(leaf_policy = Owned_regular_only) config name = function
   | Stored_credential credential -> Ok (Some credential)
   | Unresolved_credential -> Ok None
   | Stored_redirect target ->
@@ -854,7 +886,7 @@ let resolve_stored_credential config name = function
     let* present = credential_path_exists target in
     if not present then Ok None
     else
-      let* stored = read_stored_credential config name target in
+      let* stored = read_stored_credential ~leaf_policy config name target in
       (match stored with
        | Stored_credential credential -> Ok (Some credential)
        | Stored_redirect _ | Unresolved_credential -> Ok None)
@@ -900,7 +932,7 @@ let credential_prune_authority config name stored (credential : agent_credential
 (* Existing UUID payloads must belong to the exact current credential; a
    redirect must name its embedded UUID. Missing direct UUID payloads are
    distinguishable from an owned existing target. *)
-let credential_owned_uuid_target config name stored (credential : agent_credential) =
+let credential_owned_uuid_target ?(leaf_policy = Owned_regular_only) config name stored (credential : agent_credential) =
   let ( let* ) = Result.bind in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
@@ -910,6 +942,8 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
         (function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false) spelling)
     then refused "credential UUID must use canonical lowercase ASCII letters, digits and hyphens"
     else match redirect_target_file config (spelling ^ ".json") with
+    | Some target when String.equal target (credential_file config name) ->
+      refused "UUID payload and named credential would share a path"
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
@@ -924,7 +958,7 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
     let* present = credential_path_exists target in
     if not present then Ok None
     else
-      let* target_record = read_stored_credential config name target in
+      let* target_record = read_stored_credential ~leaf_policy config name target in
       (match target_record with
        | Stored_credential current
          when String.equal current.agent_name credential.agent_name
@@ -938,6 +972,56 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
   | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
+(* A file-backed publisher must distinguish true absence from an unreadable
+   name or UUID binding before it authorizes replacement or recreation. *)
+let current_credential_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
+  let* present = credential_path_exists (credential_file config name) in
+  if not present then Ok None
+  else
+    let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config name (credential_file config name) in
+    let* resolved = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config name stored in
+    match resolved with
+    | None -> refused "current credential cannot be resolved"
+    | Some credential when not (String.equal credential.agent_name name) ->
+      refused "current credential belongs to another name"
+    | Some credential ->
+      let* _owned_uuid = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config name stored credential in
+      Ok (Some credential)
+;;
+
+let raw_token_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let path = raw_token_file config name in
+  let* present = credential_path_exists path in
+  if not present then Ok None
+  else
+    let* raw = read_regular_auth_file path in
+    (* Empty readable material can be replaced. An opaque bearer that is not
+       blank retains its exact bytes, matching the supplied-token contract. *)
+    if String.trim raw = "" then Ok None else Ok (Some raw)
+;;
+
+let credential_auth_config_result config =
+  try credential_read_result (fun () -> load_auth_config config) with
+  | Auth_config_error { file; reason } ->
+    Error (System (System_error.ValidationError
+      (Printf.sprintf "auth configuration %s: %s" file reason)))
+;;
+
+let require_live_credential ~now (credential : agent_credential) =
+  match Credential_expiry.parse credential.expires_at with
+  | Error (Credential_expiry.Invalid_timestamp stamp) ->
+    Error (Auth (Auth_error.InvalidToken
+      (Printf.sprintf "Invalid credential expiry for %s: %S" credential.agent_name stamp)))
+  | Ok expiry ->
+    if Credential_expiry.is_expired ~now expiry
+    then Error (Auth (Auth_error.TokenExpired credential.agent_name))
+    else Ok credential
 ;;
 
 type credential_publication = Published | Not_published | Publication_unreadable of masc_error
@@ -967,15 +1051,15 @@ let observe_credential_publication config (expected : agent_credential) =
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* raw = credential_read_result (fun () -> read_regular_credential_text path) in
+      let* raw = read_regular_auth_file path in
       Ok (String.equal (sha256_hash raw) expected.token)) in
   let credential = observe (fun () ->
     let path = credential_file config expected.agent_name in
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* stored = read_stored_credential config expected.agent_name path in
-      let* current = resolve_stored_credential config expected.agent_name stored in
+      let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config expected.agent_name path in
+      let* current = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config expected.agent_name stored in
       Ok (current = Some expected)) in
   raw_token, credential
 ;;
@@ -985,7 +1069,7 @@ let publish_file_backed_credential_in_transaction
   let ( let* ) = Result.bind in
   let saved_bytes path =
     let* present = credential_path_exists path in
-    if present then credential_read_result (fun () -> read_regular_credential_text path) |> Result.map Option.some
+    if present then read_regular_credential_file path |> Result.map Option.some
     else Ok None in
   let raw_path = raw_token_file config credential.agent_name in
   let named_path = credential_file config credential.agent_name in
@@ -1032,7 +1116,7 @@ type credential_store_snapshot =
   ; orphaned_names : string list
   ; aliases : (string * string * agent_credential) list }
 
-let credential_store_snapshot_in_transaction (Credential_transaction config) =
+let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only) (Credential_transaction config) =
   let ( let* ) = Result.bind in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
@@ -1045,7 +1129,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists path in
       if not present then discover names orphans aliases rest
       else
-        let* stored = read_stored_credential config name path in
+        let* stored = read_stored_credential ~leaf_policy config name path in
         (match stored with
          | Unresolved_credential -> discover names orphans aliases rest
          | Stored_credential credential -> discover (credential.agent_name :: names) orphans aliases rest
@@ -1053,7 +1137,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
            let* present = credential_path_exists target in
            if not present then discover names (name :: orphans) aliases rest
            else
-             let* resolved = resolve_stored_credential config name stored in
+             let* resolved = resolve_stored_credential ~leaf_policy config name stored in
              (match resolved with
               | None -> discover names orphans aliases rest
               | Some credential -> discover (credential.agent_name :: names) orphans
@@ -1066,8 +1150,8 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists (credential_file config name) in
       if not present then current_credentials acc rest
       else
-        let* stored = read_stored_credential config name (credential_file config name) in
-        let* resolved = resolve_stored_credential config name stored in
+        let* stored = read_stored_credential ~leaf_policy config name (credential_file config name) in
+        let* resolved = resolve_stored_credential ~leaf_policy config name stored in
         (match resolved with
          | Some credential when String.equal credential.agent_name name ->
            current_credentials ((stored, credential) :: acc) rest
@@ -1082,7 +1166,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists (credential_file config name) in
       if not present then current_orphans acc rest
       else
-        let* stored = read_stored_credential config name (credential_file config name) in
+        let* stored = read_stored_credential ~leaf_policy config name (credential_file config name) in
         (match stored with
          | Stored_redirect target ->
            let* present = credential_path_exists target in
@@ -1092,6 +1176,55 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
   in
   let* orphaned_names = current_orphans [] orphans in
   Ok { current_credentials = credentials; orphaned_names; aliases }
+;;
+
+let credential_owner_discovery_in_transaction (Credential_transaction config) =
+  let ( let* ) = Result.bind in
+  let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
+  let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
+      |> List.sort String.compare in
+  let rec discover names orphans = function
+    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans)
+    | file :: rest ->
+      let name = Filename.chop_suffix file ".json" in
+      let path = Filename.concat (agents_dir config) file in
+      let* present = credential_path_exists path in
+      if not present then discover names orphans rest
+      else
+        let* stored = read_stored_credential config name path in
+        (match stored with
+         | Unresolved_credential -> discover names orphans rest
+         | Stored_credential credential -> discover (credential.agent_name :: names) orphans rest
+         | Stored_redirect target ->
+           let* present = credential_path_exists target in
+           if not present then discover names (name :: orphans) rest
+           else
+             let* resolved = resolve_stored_credential config name stored in
+             (match resolved with
+              | None -> discover names orphans rest
+              | Some credential -> discover (credential.agent_name :: names) orphans rest))
+  in
+  discover [] [] files
+;;
+
+
+let list_current_credentials_in_transaction transaction =
+  let ( let* ) = Result.bind in
+  let* names, _orphans = credential_owner_discovery_in_transaction transaction in
+  let rec collect credentials = function
+    | [] -> Ok (List.rev credentials)
+    | name :: rest ->
+      let* current = current_credential_in_transaction transaction name in
+      (match current with
+       | None -> collect credentials rest
+       | Some credential -> collect (credential :: credentials) rest)
+  in
+  collect [] names
+;;
+
+let list_current_credentials config =
+  with_credential_transaction config list_current_credentials_in_transaction
+  |> Result.join
 ;;
 
 (* Prune adds deletion authority only after current-store discovery. Rotation
@@ -1164,9 +1297,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
     - Explicit invalidation from [save_credential] / [delete_credential]
       so writes through this module are visible immediately.
     - Token hash -> [agent_credential list] (not single value) so the
-      #9786 ambiguous-lookup warn path still sees all matches.  The
-      list is built in [list_credentials] order so first-match
-      semantics stay identical to the pre-cache implementation. *)
+      #9786 ambiguous-lookup warn path still sees all matches. Current named
+      owners are indexed in sorted name order; collision checks compare the
+      complete records rather than granting the first candidate authority. *)
 
 type credential_index_cache_entry = {
   loaded_at : float;
@@ -1205,8 +1338,8 @@ let build_token_index (creds : agent_credential list)
        in
        Hashtbl.replace idx cred.token (cred :: prev))
     creds;
-  (* Reverse each bucket so callers see [list_credentials] order
-     (first-match semantics match the legacy [List.filter] flow). *)
+  (* Restore the input credential order within each token bucket. The
+     caller supplies current named owners in sorted name order. *)
   Hashtbl.filter_map_inplace
     (fun _ entries -> Some (List.rev entries))
     idx;
@@ -1246,7 +1379,19 @@ let credential_token_index config
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
     with_credential_transaction config (fun _transaction ->
-       let creds = list_credentials config in
+       (* Directory entries discover owners. Only each owner's current named
+          binding supplies the credential indexed for authentication. An old
+          UUID payload must neither resurrect its bearer nor hide a replacement
+          because it happened to be listed before the named file. *)
+       let creds =
+         list_credentials config
+         |> List.map (fun (credential : agent_credential) -> credential.agent_name)
+         |> List.sort_uniq String.compare
+         |> List.filter_map (fun name ->
+           match load_credential config name with
+           | Some credential when String.equal credential.agent_name name -> Some credential
+           | Some _ | None -> None)
+       in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->
          Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });

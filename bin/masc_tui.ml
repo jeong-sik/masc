@@ -1965,6 +1965,8 @@ type async_msg =
       (string * string list * Masc_tui_runtime_config_view.metadata, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
+  | Runtime_param_written of
+      runtime_param_edit option * (string, string) result
   | Prompts_loaded of
       unit Masc_tui_fetched.request * (Tui_decode.prompts_snapshot, string) result
   | Keeper_board_quarantines_loaded of
@@ -2126,6 +2128,35 @@ let fork_workspace_job state ~sw run =
     state.workspace_cancellations <-
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     Printexc.raise_with_backtrace exn backtrace
+
+(* A request owns both its cancellation context and its completion. Recheck the
+   endpoint before dispatch: an unchanged port can now serve another root. *)
+let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+        | Error detail -> Error (boundary_error detail)
+        | Ok () -> read ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (boundary_error (Printexc.to_string exn))
+    in
+    enqueue_async mailbox (deliver result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      (match fork_workspace_job state ~sw run with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+           enqueue_async mailbox (deliver (Error (boundary_error (Printexc.to_string exn)))))
+  | None -> enqueue_async mailbox (deliver (Error (boundary_error "Eio switch is unavailable")))
 
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
@@ -3581,14 +3612,12 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
    Keyed by task id so a stale answer for a request the operator already
    left is discarded, not drawn under another one. *)
 let launch_verification_evidence_load state ~mailbox task_id =
-  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch_with
+  launch_workspace_request state ~mailbox
     ~boundary_error:(fun detail ->
       Masc_tui_types.Verification_evidence_read.Launch_failure detail)
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Verification_evidence_loaded (task_id, result)))
+    ~deliver:(fun result -> Verification_evidence_loaded (task_id, result))
     (fun () -> Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id)
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
@@ -4214,9 +4243,8 @@ let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_params_loaded result))
+  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    ~deliver:(fun result -> Runtime_params_loaded result)
     (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
 
 let launch_prompts_load state ~mailbox =
@@ -5954,10 +5982,8 @@ let launch_verification_load state ~mailbox =
        arrives must be the one that was asked for. *)
     let view = state.verification_view in
     let offset = state.verification_offset in
-    Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.verification_inflight <- false)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Verification_loaded result))
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Verification_loaded result)
       (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
   end
 
@@ -11107,6 +11133,24 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.schedule_wake_history <- None;
   state.schedule_wake_history_error <- None;
   state.schedule_wake_history_inflight <- None;
+  state.verification <- None;
+  state.verification_error <- None;
+  state.verification_inflight <- false;
+  state.verification_refresh_after_inflight <- false;
+  state.verification_cursor <- 0;
+  state.verification_scroll <- 0;
+  state.verification_offset <- 0;
+  state.verification_detail_request_id <- None;
+  state.verification_detail_scroll <- 0;
+  state.verification_evidence <- None;
+  state.verification_verdict_armed <- None;
+  state.verification_verdict_error <- None;
+  state.runtime_params <- [];
+  state.runtime_params_error <- None;
+  state.runtime_params_loading <- false;
+  state.runtime_params_cursor <- 0;
+  state.runtime_param_edit <- None;
+  state.runtime_params_notice <- None;
   state.observer <- Observer_off;
   state.mcp_session <- None;
   state.observer_cursor <- None;
@@ -12848,7 +12892,7 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run_verdict
-  | None -> run_verdict ()
+  | None -> enqueue_async mailbox (Verification_verdict_done (Error "Eio switch is unavailable"))
 
 (* The row under the Verification cursor, if the list has one. *)
 let verification_cursor_row state =
@@ -14951,6 +14995,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* Reported, not swallowed into an empty list: empty means nothing is
              registered, which is a working state. *)
           state.runtime_params_error <- Some detail)
+  | Runtime_param_written (edit, result) ->
+      state.runtime_params_loading <- false;
+      (match result with
+       | Error detail -> state.runtime_params_notice <- Some (false, detail)
+       | Ok notice ->
+           if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
+           state.runtime_params_notice <- Some (true, notice);
+           launch_runtime_params_load state ~mailbox)
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok (path, lines, metadata) ->
@@ -18691,6 +18743,16 @@ let main
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
   in
+  let write_runtime_param ~edit ~failure ~notice write =
+    if not state.runtime_params_loading then begin
+      state.runtime_params_loading <- true;
+      launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id
+        ~deliver:(fun result -> Runtime_param_written (edit, result))
+        (fun () -> write ()
+          |> Result.map (fun _ -> notice)
+          |> Result.map_error (fun detail -> failure ^ detail))
+    end
+  in
   let handle_runtime_param_edit_open ~advanced () =
     match selected_runtime_param () with
     | None ->
@@ -18706,21 +18768,11 @@ let main
     | Some edit -> (
       match Masc_tui_types.runtime_param_edit_value edit with
       | Error detail -> state.runtime_params_notice <- Some (false, detail)
-      | Ok value -> (
-        match
-          Masc_tui_http.post_runtime_param_set ~host:server_peer_host
-            ~port:state.port ~key:edit.rpe_key ~value
-        with
-        | Error detail ->
-          state.runtime_params_notice <- Some (false, "Set failed: " ^ detail)
-        | Ok _ ->
-          state.runtime_param_edit <- None;
-          state.runtime_params_notice <-
-            Some
-              ( true
-              , Printf.sprintf "Set %s = %s" edit.rpe_key
-                  (Yojson.Safe.to_string value) );
-          launch_runtime_params_load state ~mailbox:async_messages))
+      | Ok value ->
+        write_runtime_param ~edit:(Some edit) ~failure:"Set failed: "
+          ~notice:(Printf.sprintf "Set %s = %s" edit.rpe_key (Yojson.Safe.to_string value))
+          (fun () -> Masc_tui_http.post_runtime_param_set ~host:server_peer_host
+            ~port:state.port ~key:edit.rpe_key ~value))
   in
   let handle_runtime_param_clear () =
     match selected_runtime_param () with
@@ -18730,16 +18782,11 @@ let main
       let key = row.Tui_decode.rpr_key in
       if not row.rpr_has_override then
         state.runtime_params_notice <- Some (true, key ^ " already uses its default")
-      else (
-        match
-          Masc_tui_http.post_runtime_param_clear ~host:server_peer_host
-            ~port:state.port ~key
-        with
-        | Error detail ->
-          state.runtime_params_notice <- Some (false, "Reset failed: " ^ detail)
-        | Ok _ ->
-          state.runtime_params_notice <- Some (true, "Reset " ^ key ^ " to its default");
-          launch_runtime_params_load state ~mailbox:async_messages)
+      else
+        write_runtime_param ~edit:None ~failure:"Reset failed: "
+          ~notice:("Reset " ^ key ^ " to its default")
+          (fun () -> Masc_tui_http.post_runtime_param_clear ~host:server_peer_host
+            ~port:state.port ~key)
   in
   let skill_template_placeholder_name = "new-skill" in
   let skill_template ~composition =

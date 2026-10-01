@@ -1319,6 +1319,123 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
         http_requests=requests, refresh=0.5, terminal_cols=300)
 
 
+def task_initialization_workspace_withdrawal(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    started, release, returned = (threading.Event() for _ in range(3))
+    tool_calls = []
+
+    def mcp(body):
+        request = json.loads(body)
+        if request["method"] == "initialize":
+            started.set()
+            assert release.wait(timeout=30), "held task initialize was not released"
+            returned.set()
+            return h.RawHttpResponse(200,
+                json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
+                content_type="application/json", headers=(("Mcp-Session-Id", "old-task-session"),))
+        tool_calls.append(request)
+        return 503, {"error": "unexpected task continuation"}
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+        "/health?full=1": wire.health, "/mcp": h.RequestHttpResponse(mcp)})
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Keepers")
+            h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
+            h.send_and_wait(process, fd, output, b"/task original-A-task", b"original-A-task")
+            os.write(fd, b"\r")
+            assert h.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
+            wire.publish("b")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+            release.set()
+            assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
+            wire.publish("b-after-late")
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
+            assert tool_calls == [], "old initialization continued into a tool call on B"
+            os.write(fd, b"q")
+        finally:
+            release.set()
+    h.run_terminal_scenario(binary,
+        description="Task dispatch initialization cannot continue after workspace withdrawal",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=300)
+
+
+def verification_and_parameter_workspace_withdrawal(binary: str) -> None:
+    for surface in ("verification", "parameters"):
+        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        fixtures.update(h.verification_verdict_fixtures())
+        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        current_read = threading.Event()
+        writes = []
+        queue = fixtures[h.VERIFICATION_QUEUE_PATH]
+
+        def verification():
+            with wire.lock:
+                phase = wire.phase
+            if phase == "a":
+                return queue
+            current_read.set()
+            return 503, {"error": "B verification unavailable"}
+
+        def parameters():
+            with wire.lock:
+                phase = wire.phase
+            if phase != "a":
+                current_read.set()
+                return 503, {"error": "B parameters unavailable"}
+            return 200, {"parameters": [{"key": "original_a_parameter", "current": 7,
+                "default": 1, "has_override": True, "meta": {"value_type": "int"}}]}
+
+        def write(body):
+            writes.append(json.loads(body))
+            return 200, {"ok": True}
+
+        fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+            "/health?full=1": wire.health, h.VERIFICATION_QUEUE_PATH: verification,
+            h.VERIFICATION_VERDICT_PATH: h.RequestHttpResponse(write),
+            "/api/v1/runtime/params": parameters,
+            "/api/v1/runtime/params/set": h.RequestHttpResponse(write),
+            "/api/v1/runtime/params/clear": h.RequestHttpResponse(write)})
+
+        def interact(process, fd, _slave, output, _base):
+            if surface == "verification":
+                h.tab_until(process, fd, output, b"MASC Work")
+                h.send_and_wait(process, fd, output, b"v", b"task-901")
+                h.send_and_wait(process, fd, output, b"a", b"armed: approve task-901")
+            else:
+                h.tab_until(process, fd, output, b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"\r", b"Keepers")
+                h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
+                h.send_and_wait(process, fd, output, b"/settings", b"/settings")
+                h.send_and_wait(process, fd, output, b"\r", b"original_a_parameter")
+                h.send_and_wait(process, fd, output, b"\r", b"editing original_a_parameter")
+            wire.publish("b")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+            before = screen(output)
+            assert b"armed: approve" not in before and b"original_a_parameter" not in before, before
+            os.write(fd, b"a" if surface == "verification" else b"\r")
+            # Re-read B explicitly. Its failure cannot authorize retained A input.
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_event(process, fd, output, current_read, timeout=WAIT_SECONDS)
+            h.drain_until_quiet(process, fd, output)
+            assert writes == [], f"{surface} sent an A-derived write after withdrawal"
+            os.write(fd, b"q")
+        h.run_terminal_scenario(binary,
+            description=f"Workspace withdrawal retires armed {surface} inputs before successor writes",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            refresh=0.5, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1333,6 +1450,8 @@ if __name__ == "__main__":
     task_dispatch_workspace_withdrawal(binary)
     verification_workspace_withdrawal(binary)
     tools_workspace_withdrawal(binary)
+    task_initialization_workspace_withdrawal(binary)
+    verification_and_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)

@@ -365,7 +365,6 @@
 - Move terminal escaping, text previews and timestamp presentation into Tui_terminal_text with direct callers (#40097).
 - Move operator question types and decoding into Tui_decode_asks and isolate the server's pure question projection (#40100).
 - Add PTY coverage for Planning list and detail footer hints while opening and stepping through goals, returning to the list, and changing its filter (#39967).
-- Link the chat queue wiring suite to its Answering renderer so release compilation validates activity rows (#40313).
 - Cover cancellation of a queued vision artifact store with a domain-pool regression test (#40016).
 - Move materialized runtime values, credential admission and frozen dispatch properties into Runtime_instance with direct callers, keeping catalog and durable commit authority in Runtime (#40139).
 - Move runtime reference, lane and capacity validation into a dedicated owner while preserving config transaction authority and validation order (#40213).

@@ -17,6 +17,9 @@ import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
+    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render.ml",
@@ -65,10 +68,11 @@ def accepted_but_pending(executable, *, followed_by_held=False):
     held_item = cards.held("call-after-receipt", "new-held-decision")
 
     def answer_held(body):
-        assert json.loads(body) == {
-            "name": held_item["keeper"],
-            "tool_call_id": "call-after-receipt", "decision": "approve",
-        }
+        payload = json.loads(body)
+        assert payload["name"] == held_item["keeper"]
+        assert payload["tool_call_id"] == "call-after-receipt"
+        assert payload["decision"] == "approve"
+        assert "expected_workspace" in payload
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 

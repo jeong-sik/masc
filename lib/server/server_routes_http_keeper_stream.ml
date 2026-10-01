@@ -316,18 +316,32 @@ let keeper_tool_approval_timeout_sec = 180.0
    as before. *)
 let handle_keeper_tool_approval ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     let parsed =
       try
         match Yojson.Safe.from_string body_str with
-        | `Assoc fields ->
+        | `Assoc fields as json ->
+          let ( let* ) = Result.bind in
+          let* stripped_json =
+            match Workspace.validate_expected_workspace ~config json with
+            | Ok payload -> Ok payload
+            | Error Workspace.Invalid_workspace_precondition ->
+              Error "invalid expected_workspace precondition"
+            | Error Workspace.Workspace_precondition_failed ->
+              Error "workspace precondition failed"
+          in
+          let fields =
+            match stripped_json with
+            | `Assoc f -> f
+            | _ -> fields
+          in
           let field name =
             match List.assoc_opt name fields with
             | Some (`String value) -> Ok (String.trim value)
             | Some _ | None ->
               Error (Printf.sprintf "%s (string) is required" name)
           in
-          let ( let* ) = Result.bind in
           let* keeper_name = field "name" in
           let* tool_call_id = field "tool_call_id" in
           let* decision_raw = field "decision" in

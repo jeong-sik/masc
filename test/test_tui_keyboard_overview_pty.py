@@ -11,6 +11,8 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_config.ml",
     "bin/masc_tui_types.ml",
@@ -18,6 +20,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_overview_goals.ml",
     "bin/masc_tui_overview_providers.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_render_schedule.ml",
     "lib/tui_decode_usage.ml",
     "lib/tui_decode_usage.mli",

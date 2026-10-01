@@ -24,6 +24,7 @@ module U = Yojson.Safe.Util
    in the same library and is reached unqualified through it. *)
 module Keeper_ask = Masc.Keeper_ask
 module Keeper_ask_store = Masc.Keeper_ask_store
+module Workspace = Masc.Workspace
 
 let temp_dir_counter = ref 0
 
@@ -320,6 +321,67 @@ let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state 
   check string "the response echoes the token owner as actor" "probe-operator"
     (U.member "actor" json |> U.to_string)
 
+let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path:_ ~state ~token ~keeper:_ =
+  let config = Mcp_server.workspace_config state in
+  let base = Unix.realpath config.base_path in
+  let root = Unix.realpath (Workspace.masc_root_dir config) in
+  let expected base_path masc_root =
+    `Assoc [ ("base_path", `String base_path); ("masc_root", `String masc_root) ]
+  in
+  let dispatch fields =
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+           ([ ("name", `String "decision-canary")
+            ; ("tool_call_id", `String "call-actor-1")
+            ; ("decision", `String "approve")
+            ] @ fields))
+    in
+    dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/tool-approval" ~body
+  in
+  (* 1. Matching expected_workspace -> 200 OK *)
+  let res_matching = dispatch [ ("expected_workspace", expected base root) ] in
+  check int "matching workspace succeeds" 200 (status_of_response res_matching);
+
+  (* 2. Foreign base_path -> 400 Bad Request ("workspace precondition failed") *)
+  let res_foreign_base = dispatch [ ("expected_workspace", expected (base ^ "-foreign") root) ] in
+  check int "foreign base fails" 400 (status_of_response res_foreign_base);
+  check bool "foreign base error message" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_foreign_base));
+
+  (* 3. Foreign masc_root -> 400 Bad Request ("workspace precondition failed") *)
+  let res_foreign_root = dispatch [ ("expected_workspace", expected base (root ^ "-foreign")) ] in
+  check int "foreign root fails" 400 (status_of_response res_foreign_root);
+  check bool "foreign root body" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_foreign_root));
+
+  (* 4. Duplicate expected_workspace -> 400 Bad Request ("invalid expected_workspace precondition") *)
+  let res_duplicate =
+    dispatch
+      [ ("expected_workspace", expected base root)
+      ; ("expected_workspace", expected base root) ]
+  in
+  check int "duplicate expected_workspace fails" 400 (status_of_response res_duplicate);
+  check bool "duplicate body" true
+    (Astring.String.is_infix ~affix:"invalid expected_workspace precondition" (body_of_response res_duplicate));
+
+  (* 5. Foreign workspace check runs before keeper registry lookup *)
+  let body_unregistered =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("name", `String "not-a-registered-keeper")
+         ; ("tool_call_id", `String "call-actor-1")
+         ; ("decision", `String "approve")
+         ; ("expected_workspace", expected (base ^ "-foreign") root)
+         ])
+  in
+  let res_unregistered =
+    dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/tool-approval" ~body:body_unregistered
+  in
+  check int "foreign workspace fails before keeper lookup" 400 (status_of_response res_unregistered);
+  check bool "foreign workspace error precedes not found" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_unregistered))
+
 let () =
   run "keeper_decision_actor_log"
     [ ( "decision actor"
@@ -328,6 +390,9 @@ let () =
                with_actor_test_setup test_ask_answer_records_the_token_owner)
         ; test_case "tool-approval stamps the token owner" `Quick
             (fun () -> with_actor_test_setup test_tool_approval_stamps_the_token_owner)
+        ; test_case "tool-approval validates expected workspace admission" `Quick
+            (fun () ->
+               with_actor_test_setup test_tool_approval_expected_workspace_admission)
         ; test_case "turn-interrupt stamps the token owner" `Quick
             (fun () -> with_actor_test_setup test_interrupt_stamps_the_token_owner)
         ; test_case "a cancelled turn's response carries the actor" `Quick

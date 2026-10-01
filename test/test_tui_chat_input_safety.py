@@ -109,11 +109,11 @@ def approval_typing(binary: str, decision: str) -> None:
             assert not [body for path, body in requests if path == APPROVAL], requests
             os.write(fd, b"\r")
             body = h.wait_for_http_request(process, fd, output, requests, path=APPROVAL)
-            assert json.loads(body) == {
-                "name": "alpha",
-                "tool_call_id": "typing-call",
-                "decision": decision,
-            }, body
+            payload = json.loads(body)
+            assert payload["name"] == "alpha"
+            assert payload["tool_call_id"] == "typing-call"
+            assert payload["decision"] == decision
+            assert "expected_workspace" in payload
             assert len([body for path, body in requests if path == APPROVAL]) == 1
         finally:
             show_approval.set()

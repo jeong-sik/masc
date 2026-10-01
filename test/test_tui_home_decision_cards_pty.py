@@ -18,6 +18,7 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
+    "bin/masc_tui_loader.ml",
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
@@ -233,7 +234,7 @@ def each_failed_source_keeps_other_cards(executable):
             note = b"Approvals and questions: " + failed_label + b" not fully read"
             # Match the sole-source label through the end of its drawn row,
             # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)")
+            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
             h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),
@@ -253,6 +254,93 @@ def each_failed_source_keeps_other_cards(executable):
 
         run(executable, f"Home retains successful requests beside {failed_label.decode()} failure",
             fixtures, interact, requests)
+
+
+def seed_operator_task(base, *, backup=False):
+    home.seed_goals(base)
+    root = Path(base) / ".masc"
+    task = {
+        "id": "task-777", "title": "Primary task remains visible", "description": "",
+        "priority": 1, "files": [], "created_at": "2026-09-29T00:00:00Z",
+        "status": "claimed", "assignee": "orphan-home-owner",
+        "claimed_at": "2026-09-29T00:00:00Z",
+    }
+    snapshot = {"tasks": [task], "version": 1, "last_updated": "2026-09-29T00:00:00Z"}
+    path = root / "tasks" / "backlog.json"
+    path.write_text(json.dumps(snapshot))
+    if backup:
+        path.with_name(path.name + ".last-good").write_text(json.dumps(snapshot))
+        path.write_text("{broken primary")
+
+
+def operator_task_survives_supplemental_failure(executable):
+    cases = (("tasks-archive.json", None), ("tasks/goal_task_links.json", None),
+             ("tasks/goal_task_links.json", []),
+             ("tasks/goal_task_links.json", [{"goal_id": "goal-recovery", "task_ids": ["task-777"]}]))
+    for relative, recovery_links in cases:
+        fixtures = fixtures_with_held([])
+        fixtures["/api/v1/dashboard/tasks/history?task_id=task-777&limit=50"] = (200, [])
+        requests = []
+
+        def prepare(base):
+            seed_operator_task(base)
+            (Path(base) / ".masc" / relative).write_text("{broken supplemental source")
+            if recovery_links is not None:
+                recovery = Path(base) / ".masc" / (relative + ".last-good")
+                recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
+
+        def interact(process, fd, _slave, output, base):
+            h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
+            visible = frame(process, fd, output, "operator-task-supplemental-failure")
+            assert b"Operator tasks unavailable" not in visible, visible
+            select_home(process, fd, output, b"Operator task", destinations=4)
+            h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
+            drawn = h.screen_text(bytes(output))
+            assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
+            if relative == "tasks/goal_task_links.json":
+                assert b"membership unknown" in drawn, drawn
+                assert b"not linked to a goal" not in drawn, drawn
+                assert b"goal-recovery" not in drawn, drawn
+            path = Path(base) / ".masc" / "tasks" / "backlog.json"
+            snapshot = json.loads(path.read_text())
+            snapshot["tasks"][0]["title"] = "Same primary task after refresh"
+            snapshot["version"] += 1
+            path.write_text(json.dumps(snapshot))
+            h.send_and_wait(process, fd, output, b"r", b"Same primary task after refresh")
+            drawn = h.screen_text(bytes(output))
+            assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
+            if relative == "tasks/goal_task_links.json":
+                assert b"membership unknown" in drawn, drawn
+                assert b"not linked to a goal" not in drawn, drawn
+                assert b"goal-recovery" not in drawn, drawn
+                (Path(base) / ".masc" / relative).write_text(json.dumps({"links": []}))
+                h.send_and_wait(process, fd, output, b"r", b"not linked to a goal")
+                drawn = h.screen_text(bytes(output))
+                assert b"membership unknown" not in drawn, drawn
+            home.assert_no_decision_posts(requests)
+            h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+            assert_selected(output, b"Operator task")
+            os.write(fd, b"q")
+
+        backup_kind = "no-backup" if recovery_links is None else "empty-backup" if not recovery_links else "linked-backup"
+        run(executable, f"Home current task and exact detail survive {relative} failure ({backup_kind})",
+            fixtures, interact, requests, prepare=prepare)
+
+
+def recovered_tasks_are_not_current_cards(executable):
+    fixtures = fixtures_with_held([])
+    requests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Operator tasks unavailable", start=0, timeout=10)
+        visible = frame(process, fd, output, "operator-task-backup-reading")
+        assert "Operator task ·".encode() not in visible, visible
+        assert b"task-777" not in visible, visible
+        home.assert_no_decision_posts(requests)
+        os.write(fd, b"q")
+
+    run(executable, "Home recovery-only task source cannot create a current task card",
+        fixtures, interact, requests, prepare=lambda base: seed_operator_task(base, backup=True))
 
 
 def refresh_identity_and_deletion(executable):
@@ -346,6 +434,11 @@ def goal_opens_exact_detail(executable):
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
+    stored_goals = [
+        {key: value for key, value in row.items()
+         if key not in ("verification", "verifier_unreconciled")}
+        for row in (other, goal)
+    ]
     requests = []
 
     def interact(process, fd, _slave, output, base):
@@ -363,7 +456,7 @@ def goal_opens_exact_detail(executable):
         os.write(fd, b"q")
 
     run(executable, "Home Goal card opens the same Goal detail without mutation",
-        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, [other, goal]))
+        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, stored_goals))
 
 
 def question_identity_and_return(executable):
@@ -419,7 +512,8 @@ if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for scenario in (same_keeper_distinct_and_duplicate, failed_source_keeps_known_cards,
                      each_failed_source_keeps_other_cards, hidden_help_does_not_pin_unseen_request,
+                     operator_task_survives_supplemental_failure, recovered_tasks_are_not_current_cards,
                      refresh_identity_and_deletion, many_cards_keep_continuation,
                      goal_opens_exact_detail, question_identity_and_return):
         scenario(executable)
-    print("Home decision cards PTY: PASS (11 scenarios)")
+    print("Home decision cards PTY: PASS (16 scenarios)")

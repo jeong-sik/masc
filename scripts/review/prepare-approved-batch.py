@@ -21,6 +21,7 @@ class Reason(Enum):
     APPROVAL_UNAVAILABLE = "approval_unavailable"
     MAIN_MOVED = "main_moved"
     APPROVAL_CHANGED = "approval_changed"
+    REVIEW_SCOPE_CHANGED = "review_scope_changed"
     UNSELECTED_BASE = "unselected_base"
     NO_CHANGES = "no_changes"
     MERGE_CONFLICT = "merge_conflict"
@@ -57,17 +58,28 @@ def api(gh, endpoint):
 
 class Trees:
     """Compose actual Git trees without changing a checkout or publishing."""
-    def __init__(self, commands, git_dir):
+    def __init__(self, commands, git_dir, repo, gh):
         self.commands = commands
         self.git = ["git", "-C", git_dir]
+        self.repo = repo
+        self.gh = gh
+        self.remote = None
 
     def ensure(self, commit):
         self.commands.sha(commit)
         present = subprocess.run(self.git + ["cat-file", "-e", commit + "^{commit}"],
                                  capture_output=True)
         if present.returncode:
-            self.commands.command(self.git + ["fetch", "--quiet", "--no-tags", "origin", commit])
+            if self.remote is None:
+                self.remote = self.commands.api(self.gh, f"repos/{self.repo}")["clone_url"]
+                if not isinstance(self.remote, str) or not self.remote:
+                    raise SourceUnavailable("repository_remote_unavailable")
+            self.commands.command(self.git + ["fetch", "--quiet", "--no-tags", "--", self.remote, commit])
         self.commands.command(self.git + ["cat-file", "-e", commit + "^{commit}"])
+
+    def merge_base(self, base, head):
+        return self.commands.sha(self.commands.command(
+            self.git + ["merge-base", base, head]).strip())
 
     def tree(self, commit):
         return self.commands.sha(self.commands.command(
@@ -131,6 +143,45 @@ def source_approval(repo, selected, *, gh):
     return Approval(selected, tuple(sorted(ids)))
 
 
+def stack_scope(pull):
+    stack = pull.get("stack")
+    if stack is None:
+        return None
+    return {"number": stack["number"], "position": stack["position"],
+            "base_ref": stack["base"]["ref"]}
+
+
+def scoped_approval(f, trees, repo, selected, pull, *, gh, approve):
+    approval = approve(repo, selected, gh=gh)
+    accepted = []
+    for review_id in approval.ids:
+        review = f.api(gh, f"repos/{repo}/pulls/{selected.pr}/reviews/{review_id}")
+        lines = [line.removeprefix("review-scope: ") for line in review["body"].splitlines()
+                 if line.startswith("review-scope: ")]
+        if len(lines) != 1:
+            continue
+        try:
+            scope = json.loads(lines[0])
+        except json.JSONDecodeError:
+            continue
+        if (not isinstance(scope, dict)
+                or set(scope) != {"base_ref", "base_sha", "stack"}
+                or scope["base_ref"] != pull["base"]["ref"]
+                or scope["stack"] != stack_scope(pull)):
+            continue
+        reviewed_base = f.sha(scope["base_sha"])
+        trees.ensure(reviewed_base)
+        # Unrelated main advancement does not change the reviewed PR diff.
+        # Retargeting or integrating part of the head changes this boundary.
+        if trees.merge_base(reviewed_base, selected.head) != trees.merge_base(
+                pull["base"]["sha"], selected.head):
+            continue
+        accepted.append(review_id)
+    if not accepted:
+        raise Rejected(Reason.REVIEW_SCOPE_CHANGED)
+    return Approval(selected, tuple(accepted))
+
+
 def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
     if (not selected or len({m.pr for m in selected}) != len(selected)
             or not leader.strip()
@@ -140,10 +191,11 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
         f.sha(m.head)
     prefix = f"repos/{repo}"
     base = f.sha(f.api(gh, prefix + "/commits/main")["sha"])
-    trees = Trees(f, git_dir)
+    trees = Trees(f, git_dir, repo, gh)
     trees.ensure(base)
     pulls = []
     identities = {}
+    snapshots = {}
     for m in selected:
         pull = f.api(gh, prefix + f"/pulls/{m.pr}")
         if (pull["state"] != "open" or pull["draft"] is not False
@@ -159,8 +211,10 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
             raise Rejected(Reason.UNSELECTED_BASE)
         pulls.append(m)
         identities[m.pr] = (pull["base"]["ref"], pull["base"]["sha"],
-                            pull["head"]["ref"], pull["head"]["sha"])
-    approvals = tuple(approve(repo, m, gh=gh) for m in pulls)
+                            pull["head"]["ref"], pull["head"]["sha"], stack_scope(pull))
+        snapshots[m.pr] = pull
+    approvals = tuple(scoped_approval(f, trees, repo, m, snapshots[m.pr],
+                                     gh=gh, approve=approve) for m in pulls)
     combined = base
     for m in pulls:
         combined = trees.merge(combined, m.head)
@@ -169,13 +223,19 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
     # Re-read source authority after constructing the candidate. Old approval
     # evidence must not survive a head push, dismissal or change request.
     for initial in approvals:
-        current = approve(repo, initial.member, gh=gh)
-        if not set(initial.ids).issubset(current.ids):
-            raise Rejected(Reason.APPROVAL_CHANGED)
         pull = f.api(gh, prefix + f"/pulls/{initial.member.pr}")
         if (pull["state"] != "open" or pull["draft"] is not False
                 or (pull["base"]["ref"], pull["base"]["sha"],
-                    pull["head"]["ref"], pull["head"]["sha"]) != identities[initial.member.pr]):
+                    pull["head"]["ref"], pull["head"]["sha"], stack_scope(pull)) != identities[initial.member.pr]):
+            raise Rejected(Reason.SELECTION_CHANGED)
+        current = scoped_approval(f, trees, repo, initial.member, pull, gh=gh, approve=approve)
+        if not set(initial.ids).issubset(current.ids):
+            raise Rejected(Reason.APPROVAL_CHANGED)
+        # The authority reader can yield while the PR is being retargeted.
+        latest = f.api(gh, prefix + f"/pulls/{initial.member.pr}")
+        if (latest["state"] != "open" or latest["draft"] is not False
+                or (latest["base"]["ref"], latest["base"]["sha"],
+                    latest["head"]["ref"], latest["head"]["sha"], stack_scope(latest)) != identities[initial.member.pr]):
             raise Rejected(Reason.SELECTION_CHANGED)
     if f.sha(f.api(gh, prefix + "/commits/main")["sha"]) != base:
         raise Rejected(Reason.MAIN_MOVED)
@@ -207,9 +267,10 @@ def main():
         # candidate ref if writing fails; never delete a concurrently moved ref.
         receipt["branch"] = args.branch
         output = Path(args.output)
-        with output.open("x") as out:
-            created = False
-            try:
+        out = output.open("x")
+        created = False
+        try:
+            with out:
                 f.command(git + ["update-ref", "refs/heads/" + args.branch,
                                  receipt["candidate"], ""])
                 created = True
@@ -217,12 +278,12 @@ def main():
                 out.write("\n")
                 out.flush()
                 os.fsync(out.fileno())
-            except BaseException:
-                if created:
-                    subprocess.run(git + ["update-ref", "-d", "refs/heads/" + args.branch,
-                                          receipt["candidate"]], capture_output=True)
-                output.unlink(missing_ok=True)
-                raise
+        except BaseException:
+            if created:
+                subprocess.run(git + ["update-ref", "-d", "refs/heads/" + args.branch,
+                                      receipt["candidate"]], capture_output=True)
+            output.unlink(missing_ok=True)
+            raise
         print(json.dumps(receipt, sort_keys=True))
         return 0
     except Rejected as error:

@@ -8,7 +8,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
     | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Purchased _ | E.Payout_failed _ -> None) events
+    | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -107,7 +107,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
             |> Result.map_error (fun error -> Invalid_settlement (Candle_balance.error_to_string error)) in
           Candle_balance.credit balance payment |> Result.map (fun _ -> ())
           |> Result.map_error (fun error -> Invalid_settlement (Candle_balance.error_to_string error))
-        | E.Unattributed _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
+        | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
       Ok ([{E.at;body}], Settled waiting.goal_id)
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function

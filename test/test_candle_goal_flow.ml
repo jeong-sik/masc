@@ -97,7 +97,7 @@ let rows config =
        | Candle_event.Payout_failed { goal_id; request_id; _ } ->
          Candle_event.kind event.body, goal_id, request_id
        | Candle_event.Paid p -> Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id
-       | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
     (ledger_events config)
 ;;
 
@@ -679,7 +679,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       | Candle_event.Paid payment -> Some payment
       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
       | Candle_event.Unattributed _ | Candle_event.Purchased _
-      | Candle_event.Payout_failed _ -> None) (ledger_events config)
+      | Candle_event.Equipped _ | Candle_event.Payout_failed _ -> None) (ledger_events config)
     with
     | [payment] -> payment
     | _ -> fail "expected exactly one Paid fact"
@@ -707,9 +707,11 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
   let grade_started, signal_grade_started = Eio.Promise.create () in
   let grade_release, release_grade = Eio.Promise.create () in
   let appraise ~identity request =
+    (* Record entry before assertions: the worker converts callback exceptions
+       to Retry_later, so rejected extra invocations must remain observable. *)
+    calls := A.stage request :: !calls;
     check bool "each model request names the confirmed proof" true (identity = first_identity);
     check int "Candidates are durable before any model request" 1 (count_kind config "candidates");
-    calls := A.stage request :: !calls;
     let decision = match request with
       | A.Grade goal ->
         check string "grade reads the real Goal snapshot" "Ship the ledger" goal.title;

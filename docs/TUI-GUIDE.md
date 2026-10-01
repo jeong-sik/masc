@@ -754,6 +754,18 @@ The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
 `id (name unknown)` when it does not.
 
+The Items tab is one `]` after Info. It lists the 18 portrait accessories by
+slot. `j`/`k`, the page keys, and Home/End select an item; the portrait beside
+the list previews that item over the Keeper's current observed outfit. An
+`equipped` label describes the current picture, while the preview changes no
+equipment or Candle ledger entry. The Item account read shows the Keeper's
+balance, purchased items and configured prices; `Off`, `Disabled`, and an
+unreadable account each have their own message. On a narrower pane the selected
+item's price and ownership sit below the list. If the server cannot report
+equipment, the tab gives the reason and leaves the picture unavailable. The
+catalog remains readable without a picture. Buying and equipping remain
+Keeper-owned tool actions.
+
 | Key | Effect |
 |-----|--------|
 | `j` / `k` | move between transports |
@@ -2003,7 +2015,7 @@ Per surface:
 | `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
-| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
+| `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |

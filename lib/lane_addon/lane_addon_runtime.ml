@@ -236,15 +236,18 @@ let prove_released_shared ~bindings fields =
                else prove (id::visiting) producer
            | [] -> Error "missing retained producer" | _ -> Error "ambiguous retained producer")) (Ok ()) sources
   in prove [] fields
+let normalize_retained_binding ~bindings value =
+  let* fields = object_ value in
+  if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields
+  then let* _ = visibility_of_fields fields in
+    let* _ = match List.assoc_opt "source_access" fields with
+      | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in Ok value
+  else let* () = prove_released_shared ~bindings fields in
+    Ok (`Assoc (("visibility",visibility_to_json Shared)::
+      ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields))
 let normalized_retained_bindings bindings =
-  List.fold_right (fun value result -> let* values = result in let* fields = object_ value in
-    let* value = if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields
-      then let* _ = visibility_of_fields fields in
-        let* _ = match List.assoc_opt "source_access" fields with
-          | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in Ok value
-      else let* () = prove_released_shared ~bindings fields in
-        Ok (`Assoc (("visibility",visibility_to_json Shared)::
-          ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields)) in
+  List.fold_right (fun value result ->
+    let* values = result in let* value = normalize_retained_binding ~bindings value in
     Ok (value::values)) bindings (Ok [])
 let authorize_retained_read ~bindings ~access json =
   let* normalized = normalized_retained_bindings bindings in
@@ -732,12 +735,25 @@ let find m args = let* id = text args "instance_id" in
 let read_retained_bindings m =
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
   normalized_retained_bindings bindings
-let historical m =
-  let* bindings = read_retained_bindings m in
-  Ok (List.filter (function
+let without_live_bindings m bindings =
+  List.filter (function
     | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
         | Some (`String id) -> not (Hashtbl.mem m.entries id) | _ -> true)
-    | _ -> true) bindings)
+    | _ -> true) bindings
+let historical m =
+  let* bindings = read_retained_bindings m in
+  Ok (without_live_bindings m bindings)
+let historical_inventory m =
+  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  (* Omit unreadable inventory entries only after proving each against the
+     complete stored graph. Filtering producers first could grant authority. *)
+  let visible = List.filter_map (fun value ->
+    match normalize_retained_binding ~bindings value with
+    | Ok value -> Some value
+    | Error detail ->
+        Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
+        None) bindings in
+  Ok (without_live_bindings m visible)
 let persisted_binding m id =
   let* bindings = runtime_result (read_retained_bindings m) in
   match List.find_opt (function
@@ -819,7 +835,7 @@ let visible_configuration m ~access =
         :: List.remove_assoc "issues" (List.remove_assoc "declarations" fields))
   | (Keeper _ | Unauthenticated), json -> json
 let snapshot m ~access ?instance_id () =
-  let* past = historical m in
+  let* past = historical_inventory m in
   let live = entries m |> List.filter (fun e ->
     can_read access e.visibility && Option.fold ~none:true ~some:(String.equal e.instance_id) instance_id) in
   let past = List.filter (function `Assoc fields ->

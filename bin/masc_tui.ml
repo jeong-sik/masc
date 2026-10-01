@@ -12841,10 +12841,14 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _, _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
-       | None, Composer.Ready _ when state.voice_capture_withdrawn ->
-           (* The previous workspace's recorder still owns the microphone.
-              Its completion must release it before another mode can probe. *)
-           state.last_action <- Some ("voice: discarding previous capture", Unix.gettimeofday ())
+       | None, Composer.Ready _ when Option.is_some state.voice_capture ->
+           (* A manual or withdrawn capture still owns the microphone. The
+              noise-floor probe must wait for its completion too. *)
+           let notice =
+             if state.voice_capture_withdrawn
+             then "voice: discarding previous capture"
+             else "voice: recording in progress" in
+           state.last_action <- Some (notice, Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            (* The floor is measured once here rather than per capture, which is
               what makes the gap between utterances short enough to speak
@@ -23058,9 +23062,13 @@ and is loaded on demand through keeper_skill.
                          state.voice_floor <- None;
                          state.last_action <-
                            Some ("voice: continuous off", Unix.gettimeofday ())
-                     | None, Some _ when state.voice_capture_withdrawn ->
+                     | None, Some _ when Option.is_some state.voice_capture ->
+                         let notice =
+                           if state.voice_capture_withdrawn
+                           then "voice: discarding previous capture"
+                           else "voice: recording in progress" in
                          state.last_action <-
-                           Some ("voice: discarding previous capture", Unix.gettimeofday ())
+                           Some (notice, Unix.gettimeofday ())
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <-

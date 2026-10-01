@@ -703,11 +703,13 @@ describe('BoardSurface Component', () => {
     vi.mocked(fetchBoardPost).mockReset().mockReturnValueOnce(readA).mockReturnValueOnce(readB)
     boardPosts.value = []
     route.value = { tab: 'board', params: { post: postA.id } } as any
-    render(h(BoardSurface, null))
+    const view = render(h(BoardSurface, null))
     await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postA.id))
     expect(detailLoading.value).toBe(true)
 
     route.value = { tab: 'board', params: { post: postB.id } } as any
+    // The router mock is plain data; update the existing mounted surface.
+    view.rerender(h(BoardSurface, null))
     await waitFor(() => expect(fetchBoardPost).toHaveBeenCalledWith(postB.id))
     expect(detailPostId.value).toBe(postB.id)
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)

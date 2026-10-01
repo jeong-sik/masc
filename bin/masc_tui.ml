@@ -5975,7 +5975,6 @@ let reset_verification_rows state =
   state.verification_verdict_error <- None
 
 let launch_verification_load state ~mailbox =
-  let enqueue_async = workspace_enqueue state in
   if state.verification_inflight then ()
   else begin
     state.verification_inflight <- true;

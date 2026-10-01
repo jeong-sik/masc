@@ -1,5 +1,5 @@
-import { readKeeperPortrait } from './api/schemas/keeper-portrait'
-import { readCandleBalance } from './api/schemas/candle-observation'
+import { readKeeperPortrait } from './lib/keeper-portrait'
+import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import type {
   CtxAttribution,
@@ -700,6 +700,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : [],
         portrait: readKeeperPortrait(row.portrait),
         candle_balance_milli: readCandleBalance(row.candle_balance_milli),
+        candle_account_revision: readCandleAccountRevision(row.candle_account_revision),
         status: normalizeKeeperAgentStatus(statusRaw),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,

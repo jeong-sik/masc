@@ -169,7 +169,7 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-let task_line (task : task) =
+let task_line ~cols (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -195,20 +195,40 @@ let task_line (task : task) =
           (Terminal_text.single_line goal)
           Ansi.reset
   in
-  Printf.sprintf "%s%s%s %s[%s]%s %s %s(%s%s)%s %s%s"
-    status_color
-    (task_status_icon task.status)
-    Ansi.reset
-    Ansi.dim
-    (Terminal_text.single_line task.id)
-    Ansi.reset
-    (Terminal_text.single_line task.title)
-    status_color
-    status
-    assignee
-    Ansi.reset
-    (priority_indicator task.priority)
-    goal_tag
+  let prefix id =
+    Printf.sprintf "%s%s%s %s[%s]%s " status_color
+      (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
+  in
+  let suffix owner =
+    Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
+      (priority_indicator task.priority)
+  in
+  (* State and priority are never shortened. The remaining cells are shared
+     by the identifier, owner and title; each identifier gets at most a third
+     before the title takes the remainder. This bounds long owner names too.
+     Goal links appear only when the full title leaves room; detail keeps all
+     identifiers. The frame and leading space consume five cells. *)
+  let available = max 0 (cols - 5) in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix "") in
+  let share = max 0 (available - fixed_chrome) / 3 in
+  let id = Terminal_text.single_line task.id in
+  let id = fit_width id (min share (Message_layout.display_width id)) in
+  let assignee =
+    fit_width assignee (min share (Message_layout.display_width assignee))
+  in
+  let prefix = prefix id in
+  let suffix = suffix assignee in
+  let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
+  let title = Terminal_text.single_line task.title in
+  let goal_tag =
+    if fixed + Message_layout.display_width title
+       + Message_layout.display_width goal_tag <= available
+    then goal_tag else ""
+  in
+  prefix ^ fit_width title
+    (max 0 (available - fixed - Message_layout.display_width goal_tag))
+  ^ suffix ^ goal_tag
 
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
@@ -298,8 +318,20 @@ let render_overview (state : state) =
       if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let spare = budget - essential_rows in
         let context =
+          let candle = Masc_tui_candle.summary_lines state.candle_observation
+            |> List.concat_map (fun line ->
+              Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                (Terminal_text.single_line line))
+            |> List.map (fun line -> None, " " ^ line) in
+          let notice_rows = if Option.is_some state.opening_notice then 1 else 0 in
+          let candle_fits = spare >= 2 + notice_rows + List.length candle in
+          let health = if candle_fits then health else
+            match Masc_tui_candle.compact_status state.candle_observation with
+            | None -> health
+            | Some status -> " " ^ status ^ " · " ^ health in
           let readings =
             [ (None, health); (Some (Theme.recede ()), work) ]
+            @ if candle_fits then candle else []
           in
           match state.opening_notice with
           | None -> readings
@@ -307,17 +339,6 @@ let render_overview (state : state) =
               let notice = (None, " " ^ Terminal_text.single_line notice) in
               if spare < List.length readings + 1 then notice :: readings
               else readings @ [notice]
-        in
-        let candle =
-          Masc_tui_candle.summary_lines state.candle_observation
-          |> List.concat_map (fun line ->
-               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-                 (Terminal_text.single_line line))
-          |> List.map (fun line -> (None, " " ^ line))
-        in
-        let context =
-          if List.length context + List.length candle <= spare then context @ candle
-          else context
         in
         let shown_context = List.take (min spare (List.length context)) context in
         List.iter
@@ -669,7 +690,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line task in
+             let line = " " ^ task_line ~cols task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
@@ -5957,8 +5978,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       providers
   in
   let started =
-    match state.identity_login with
-    | Some login when String.equal login.ils_keeper k.k_name ->
+    List.concat_map (fun (login : Masc_tui_types.identity_login_started) ->
         (* Wrapped, not truncated. The URL is about nine hundred characters
            and a pane cuts it at its own width; a cut URL cannot be selected
            or copied, so the login stopped there. The TUI opens it as well --
@@ -5978,7 +5998,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ [ Ansi.dim
             ^ "  Nothing is written to this keeper until you come back."
             ^ Ansi.reset ]
-    | Some _ | None -> []
+    ) (Masc_tui_types.identity_logins_for_keeper state k.k_name)
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what
@@ -6079,7 +6099,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
     let account =
       match state.item_account with
-      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some (name, (_, account)) when String.equal name k.k_name -> Some account
       | Some _ | None -> None
     in
     let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
@@ -6921,11 +6941,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          rows first, so a Keeper whose schedules are terminal or further down
          was absent from it and the tab said none existed. The page it asks for
          can still truncate, which is why the absence reading stays. *)
-      match state.keeper_schedules_error, state.keeper_schedules with
-      | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  "
-            ^ Terminal_text.single_line err ^ Ansi.reset ]
-      | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
+      let error_lines =
+        match state.keeper_schedules_error with
+        | Some (keeper_name, err) when String.equal keeper_name k.k_name ->
+            let stale = match state.keeper_schedules with
+              | Some (name, _) when String.equal name k.k_name -> "STALE · "
+              | Some _ | None -> ""
+            in
+            [ (Theme.bad ()) ^ "  " ^ stale ^ Terminal_text.single_line err ^ Ansi.reset ]
+        | Some _ | None -> []
+      in
+      let snapshot_lines = match state.keeper_schedules with
+      | Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
           if not (String.equal snapshot.scs_status "ok") then
             [ (Theme.bad ())
@@ -6989,8 +7016,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
                     } : Layout.automation_schedule_row))
                 rows)
-      | _, _ ->
-          [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
+      | Some _ | None ->
+          if error_lines <> [] then []
+          else [ tab_loading_row "loading this Keeper's schedules" ]
+      in
+      error_lines @ snapshot_lines
     in
     let run_lines () =
       let failure detail =
@@ -12564,8 +12594,18 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  scopes @ [ "" ] @ provider_history_lines state
-  @ [ "" ] @ keepers @ [ "" ] @ transport
+  let lines = scopes @ [ "" ] @ provider_history_lines state
+    @ [ "" ] @ keepers @ [ "" ] @ transport in
+  (* Wrap before the scroll window is counted. Coverage and missing samples
+     are evidence, so a narrow terminal must keep them as reachable rows. *)
+  List.concat_map
+    (fun line ->
+      if String.equal line "" then [ "" ]
+      else
+        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
+        |> List.mapi (fun index text ->
+             if index = 0 then text else "   " ^ text))
+    lines
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -14344,13 +14384,13 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_read _ ->
               List.map (fun (keeper : Tui_decode.keeper) ->
                 let portrait =
-                  match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+                  match (keeper_reading state keeper).Keeper_control.liveness with
                   | Keeper_control.Present runtime -> runtime.kr_portrait
                   | Keeper_control.Unobserved | Keeper_control.Absent
                   | Keeper_control.Invalid _ ->
                       Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
                 in
-                Terminal_text.single_line keeper.k_name, portrait) state.keepers
+                keeper.k_name, portrait) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:

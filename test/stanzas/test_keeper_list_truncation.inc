@@ -1,4 +1,4 @@
 (test
  (name test_keeper_list_truncation)
  (modules test_keeper_list_truncation)
- (libraries masc_test_deps masc.keeper_portrait))
+ (libraries masc_test_deps masc.keeper_portrait masc.masc_candle_runtime))

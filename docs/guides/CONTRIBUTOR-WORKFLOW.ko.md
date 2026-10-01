@@ -218,8 +218,30 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
-`--check`는 리뷰 가능 여부를 검사합니다. 실제 승인을 게시할 때는 판정과 증거가 담긴
-`--body`가 필요합니다. 작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
+`--check`는 리뷰 가능 여부를 검사합니다.
+
+소스 리뷰를 시작하기 **전에** base SHA와 전체 diff 식별자를 캡처하고, 리뷰한 head와
+증거에 함께 보관하세요. 인증된 `gh`, Git, Python 3, `jq`가 있는 저장소 checkout에서
+아래 명령을 실행합니다. diff 도구는 없는 객체를 `gh` 인증으로 가져오며 대화형 입력을
+요구하지 않습니다.
+
+```bash
+# Set repo and pr to the pull request being reviewed.
+snapshot=$(gh api "repos/$repo/pulls/$pr")
+head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
+review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
+review_diff=$(python3 scripts/review/review-diff.py \
+  --repo "$repo" --base "$review_base" --head "$head")
+# Read the complete diff and its source context, then write review-body.md.
+scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
+  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+```
+
+게시에는 `--body`, `--review-base`, `--review-diff`가 모두 필요합니다. guard는 검사 중
+변경된 범위를 거부합니다. 변경 내용이 달라지면 다시 리뷰하고 증거를 캡처하세요.
+읽지 않은 변경을 승인하기 위해 digest만 갱신하지 마세요.
+
+작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
 검증을 가리키는 `run: <full-CI-run-id>`를 추가합니다. 위는 형식이며 판정이 아닙니다.
 선택지와 placeholder를 실제 값으로 바꾸세요.
 

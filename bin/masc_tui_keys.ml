@@ -50,11 +50,8 @@ let config_bindings =
       Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
   ; b Navigate "Home/End" "detail"
-      ~help:"first and last wrapped detail rows of the selected preset",
-      Some [ Config_presets ]
-  ; b Navigate "Home/End" "detail"
-      ~help:"on prompts, the first or last wrapped row of the selected registry or asset document",
-      Some [ Config_prompts ]
+      ~help:"first or last wrapped detail row of a selected preset, or of a prompt registry or asset document",
+      Some [ Config_presets; Config_prompts ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]

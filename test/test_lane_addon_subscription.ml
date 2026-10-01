@@ -152,6 +152,17 @@ let producer_phase_preserves_position () = with_workspace (fun config ->
      `Assoc ["kind",`String "failed";"message",`Int 1];
      `Assoc ["kind",`String "attached";"kind",`String "attached"];
      T.phase_to_json T.Detaching; T.phase_to_json T.Detached];
+  producer ~phase:`Null retained "malformed-peer" 0;
+  producer retained "instance-1" 2;
+  check bool "malformed peer prevents choosing an attached replacement" true
+    (Result.is_error (call config "researcher" (args "read")));
+  check bool "malformed peer prevents acknowledgement" true
+    (Result.is_error (ack config (receipt second)));
+  Store.remove_binding retained ~instance_id:"malformed-peer" |> ok;
+  producer retained "instance-1" 1;
+  let recovered = call config "researcher" (args "read") |> ok in
+  check bool "retained high-water recovers observation beyond stale binding" true
+    (receipt recovered = receipt second);
   List.iter (fun phase ->
     producer ~phase:(T.phase_to_json phase) retained "instance-1" 2;
     let readable = call config "researcher" (args "read") |> ok in

@@ -493,6 +493,30 @@ let test_failed_terminal_and_fallback_keep_hot_uncertainty () = with_fixture (fu
     check int "a repaired receipt never replays the external action" 1 !(fixture.calls);
     detach clock fixture id))
 
+let test_first_action_requires_durable_directory () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
+  let actions = Filename.concat (Store.root store) "actions" in
+  let writer ~store ~instance_id ~request_id json =
+    Store.For_testing.save_action store ~instance_id ~request_id json
+      ~sync_parent:(fun parent ->
+        if parent = actions then raise (Unix.Unix_error (Unix.EIO,"fsync",parent))
+        else
+          let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)) in
+  Runtime.For_testing.with_action_writer writer (fun () ->
+    List.iter (fun () ->
+      rejects "unsynced first action directory refuses dispatch"
+        (act fixture id "first-directory" (`Int 1));
+      check int "directory failure performs no external action" 0 !(fixture.calls);
+      check bool "failed directory publication creates no queued receipt" true
+        (Store.load_action store ~instance_id:id ~request_id:"first-directory" = Ok None)) [(); ()]);
+  ignore (act fixture id "first-directory" (`Int 1) |> unwrap);
+  ignore (await_state clock fixture id "first-directory" "confirmed");
+  ignore (act fixture id "first-directory" (`Int 1) |> unwrap);
+  check int "directory repair permits exactly one action" 1 !(fixture.calls);
+  detach clock fixture id)
+
 let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
   let request_id = "cold-terminal-reconfirmation" in
@@ -542,6 +566,7 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   detach clock fixture id)
 
 let () = run "Lane action workflow" ["optional world actions",[
+  test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;
   test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;
   test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;

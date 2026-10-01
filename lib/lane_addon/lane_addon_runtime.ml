@@ -775,6 +775,15 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let retained_action_unlocked m ~instance_id ~request_id =
+  (* Never durably reconfirm a visible terminal file while the live worker
+     retains a failed-publication outcome. Persist that knowledge first. *)
+  let* () = match Hashtbl.find_opt m.entries instance_id with
+    | Some e -> (match e.current_action with
+        | Some current when current.request_id = request_id
+            && current.state = Lane_addon_action.Outcome_unknown ->
+            save_action_unlocked m current
+        | _ -> Ok ())
+    | None -> Ok () in
   let* json = offload (fun () -> Lane_addon_store.load_action m.store ~instance_id ~request_id) in
   match json with
   | None -> Ok None
@@ -782,21 +791,6 @@ let retained_action_unlocked m ~instance_id ~request_id =
       let* receipt = Lane_addon_action.of_json json in
       let* () = if receipt.instance_id = instance_id && receipt.request_id = request_id then Ok ()
         else Error "retained receipt belongs to a different request" in
-      let* receipt =
-        let failed_publication = match Hashtbl.find_opt m.entries instance_id with
-          | Some e -> (match e.current_action with
-              | Some current when current.request_id = request_id
-                  && current.state = Lane_addon_action.Outcome_unknown
-                  && (receipt.state = Lane_addon_action.Confirmed
-                      || receipt.state = Lane_addon_action.Failed_before_effect) -> Some current
-              | _ -> None)
-          | None -> None in
-        match failed_publication with
-        | None -> Ok receipt
-        | Some current ->
-            (* The terminal file may be visible even though its mandatory fsync
-               failed. Retain the known uncertainty before returning a receipt. *)
-            let* () = save_action_unlocked m current in Ok current in
       let active = match Hashtbl.find_opt m.entries instance_id with
         | Some e when e.running ->
             let owns (queued : Lane_addon_action.receipt) = queued.request_id = request_id in

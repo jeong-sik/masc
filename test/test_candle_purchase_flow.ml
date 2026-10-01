@@ -601,6 +601,13 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
      | Ok equipment -> check bool "portrait retains the purchased equipment" true
          (equipment = Keeper_portrait_item.preview item (Keeper_portrait_look.equipment_of_name "keeper-a"))
      | Error detail -> fail detail);
+    let before_portrait = bytes config in
+    let early () = start -. 60. in
+    (match Candle_equipment.read_persisted ~now:early ~base_path ~keeper:"keeper-a" with
+     | Ok equipment -> check bool "rollback preserves recorded equipment" true
+         (equipment = Item.preview item (Keeper_portrait_look.equipment_of_name "keeper-a"))
+     | Error detail -> fail detail);
+    check string "rollback portrait read preserves ledger bytes" before_portrait (bytes config);
     write_config config shop;
     check int "Off closes the preceding decaying interval" 50 (account ()).balance_milli;
     clock := start +. 28800.;

@@ -139,8 +139,25 @@ let remove_binding t ~instance_id = protect (fun () ->
   Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
-let save_action t ~instance_id ~request_id json =
-  write t (action_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+(* Also sync existing ancestors: they may have been created by a preceding
+   attempt whose parent sync failed. A retry must establish the entire path. *)
+let sync_action_parent parent =
+  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let rec durable_action_directory ~sync_parent directory =
+  let parent = Filename.dirname directory in
+  if parent <> directory then (
+    durable_action_directory ~sync_parent parent;
+    (try Unix.mkdir directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "action receipt parent is not a directory"));
+    sync_parent parent)
+let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
+  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+  durable_action_directory ~sync_parent (Filename.dirname path);
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
+let save_action = save_action_with ~sync_parent:sync_action_parent
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
@@ -157,7 +174,6 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
-let bindings t = read_directory t "bindings"
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -310,6 +326,23 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
+(* A renamed observation can survive a failed binding write. Recover its
+   sequence for every retained reader; reads still verify the exact record. *)
+let bindings t =
+  let* values = read_directory t "bindings" in
+  let rec reconcile = function
+    | [] -> Ok []
+    | `Assoc fields :: rest ->
+        let* instance_id, sequence = match List.assoc_opt "instance_id" fields,
+            List.assoc_opt "observation_seq" fields with
+          | Some (`String id), Some (`Int seq) when seq >= 0 -> Ok (id, seq)
+          | _ -> Error "invalid retained binding sequence" in
+        let* retained = highwater t instance_id in
+        let* rest = reconcile rest in
+        Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
+          List.remove_assoc "observation_seq" fields) :: rest)
+    | _ -> Error "invalid retained binding" in
+  reconcile values
 let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
@@ -564,6 +597,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let save_action = save_action_with
   let load_action = load_action_with
   let append_observation = append_observation_with
   let read_observation = read_observation_with

@@ -3,6 +3,8 @@
 val available : unit -> (unit, string) result
 val run : base_path:string -> Candle_appraisal.runner
 module For_testing : sig
+  val terminal_error : rejected:bool -> retryable:bool
+    -> string Agent_core.Exact_output.flow_execution_error -> Candle_appraisal.error
   val run_declared : base_path:string -> cli_runner:Keeper_lane_cli_oneshot.runner -> Candle_appraisal.runner
   val run : base_path:string
     -> execute:(request:Candle_appraisal.request -> prompt:string -> (Yojson.Safe.t * string, Candle_appraisal.error) result)

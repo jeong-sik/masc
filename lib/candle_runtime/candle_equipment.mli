@@ -13,6 +13,8 @@ val read_persisted :
   (Keeper_portrait_look.equipment, string) result
 (** Reads and replays recorded equipment without checking current payout
     configuration/appraiser availability or appending a policy fact.
+    Observation never precedes a recorded event, so clock rollback does not
+    hide durable equipment. Malformed historical order remains an error.
     Unreadable ledger data is an explicit error. *)
 
 type receipt = {

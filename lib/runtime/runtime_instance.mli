@@ -53,6 +53,10 @@ type max_context_source =
   | Override_clamped_by_capability
       (** an override is configured but exceeds the AGENT_CORE capability catalog
           cap, so the cap wins. *)
+  | Provider_override
+  | Binding_override
+  | Provider_override_clamped_by_capability
+  | Binding_override_clamped_by_capability
 
 val max_context_of_runtime : t -> int
 (** Effective input context window for a materialized runtime.  This applies the
@@ -83,13 +87,13 @@ val is_local_runtime : t -> bool
     when their endpoint is loopback and the provider declares no credential. *)
 
 val max_context_source_to_string : max_context_source -> string
-(** ["override"] / ["capability"] / ["override_clamped_by_capability"] — wire
-    label for the [/api/v1/runtime/resolved] document. *)
+(** Wire label for the [/api/v1/runtime/resolved] document, preserving the
+    declaration scope and any genuine capability clamping. *)
 
 val resolve_max_context_of_runtime : t -> (int * max_context_source) option
 (** Effective input context window and the source that produced it. [None]
-    when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
-    capability catalog declares a positive context window for this binding;
+    when no binding, provider or model declaration and no AGENT_CORE capability
+    catalog declares a positive context window for this binding;
     {!Runtime.load_list} rejects such a runtime at load (fail-closed), so a
     materialized [t] obtained from {!Runtime.get_runtimes}/{!Runtime.get_runtime_by_id} never
     observes [None] here in practice. *)

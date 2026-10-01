@@ -66,6 +66,8 @@ type dashboard_purge_artifact =
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
+  | Keeper_board_attention_candidates_artifact
+  | Keeper_board_attention_partitions_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =
@@ -650,6 +652,13 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        leaves its conversation behind and a later keeper with the same name
        reads it as its own history. *)
   ; Keeper_chat_store_artifact
+    (* Board attention keeps one candidate ledger and one partition ledger
+       per keeper under .masc/board_attention_candidates and
+       .masc/board_attention_partitions. Left behind, a same-name successor
+       inherits the old Ready roots and quarantines and judges another
+       keeper's queue as its own. *)
+  ; Keeper_board_attention_candidates_artifact
+  ; Keeper_board_attention_partitions_artifact
   ; Agent_artifact_bundle agent_aliases
   ]
 ;;

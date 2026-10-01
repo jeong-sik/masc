@@ -316,6 +316,11 @@ val load_candidates_with_rejections
     obligation that the current decoder cannot reconstruct. Compaction resumes
     only after an explicit repair leaves a fully readable ledger. *)
 
+val ledger_path : base_path:string -> keeper_name:string -> string
+(** The Keeper's candidate ledger file. A Keeper purge removes it with the
+    Keeper, so a later Keeper of the same name starts without its candidates
+    or quarantines. *)
+
 val record : base_path:string -> candidate -> record_result
 (** Validate the complete current candidate invariant before changing the
     durable ledger. *)

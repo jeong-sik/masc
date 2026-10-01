@@ -498,6 +498,79 @@ let test_disposition_size_verdict_table () =
     ; "a request that could not be prepared", E.Request_preparation_failed, false
     ]
 
+(* A continuity pass owns nothing but its snapshot. Memory has committed
+   nothing for this range, so the store refuses the snapshot after the model
+   answered. The run must be recorded as failed: recorded as succeeded, 728 live
+   runs hid a refusal that stopped every Codex Keeper's continuity. *)
+let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry () =
+  let module P = Keeper_librarian_continuity in
+  let module B = Keeper_turn_boundaries in
+  let module C = Keeper_checkpoint_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let keeper_id = "continuity-only-refused" and trace_id = "continuity-only-source" in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let source = List.init 4 (fun index -> Agent_core.Types.user_msg
+    (string_of_int index ^ String.make 200 'a')) in
+  let pending = [Agent_core.Types.user_msg "Do not publish before explicit approval."] in
+  let canonical = source @ pending in
+  let checkpoint : Agent_core.Checkpoint.t =
+    {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
+     usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
+     tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
+     top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
+   | Error detail -> Alcotest.fail detail);
+  B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+    {B.recorded_at=1000.; event=B.Turn_ended {
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
+    |> Result.map_error B.append_error_to_string |> get;
+  let resolver = Fixture.resolver_snapshot ~source:"continuity-only-cli-only" [] in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
+  let prepared = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
+  let input : Keeper_librarian.input =
+    {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence."; current=None;
+     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     tool_observations=[];counterpart_observations=[]} in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    Ok (Yojson.Safe.to_string
+          (`Assoc ["working_state", `String "State the refused snapshot must not keep."])) in
+  let committed = ref false and refusals = ref [] in
+  Runtime.run_best_effort ~write_scope:Runtime.Context_only ~continuity:prepared
+    ~cli_runner:runner
+    ~on_continuity_committed:(fun ~served_by:_ _ -> committed := true)
+    ~on_not_committed:(fun refused -> refusals := refused.Runtime.detail :: !refusals)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  let reason = "continuity state not committed: Memory has not committed this continuity source" in
+  Alcotest.(check bool) "no snapshot was committed" false !committed;
+  Alcotest.(check (list string)) "the caller is told once, with the store's reason" [reason] !refusals;
+  Alcotest.(check bool) "no snapshot file exists" true
+    (Option.is_none (P.read ~config ~keeper_name:keeper_id |> get));
+  let runs = Runs.list_runs registry |> List.filter
+    (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
+  match runs with
+  | [{Runs.status = Runs.Completed {outcome = Runs.Failed {code; detail}; _}; _}] ->
+    Alcotest.(check string) "the run names the failure" "continuity_not_committed" code;
+    Alcotest.(check string) "and carries the reason the log line carries" reason detail
+  | [run] -> Alcotest.failf "the run was recorded as %s, not failed" (Runs.status_label run.status)
+  | _ -> Alcotest.fail "expected one recorded Librarian run"
+
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -534,7 +607,9 @@ let () =
        Alcotest.test_case "every pre-dispatch rejection, one row each" `Quick
          test_disposition_size_verdict_table];
      "continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
-       (test_prefit_real_continuity ~base_path)];
+       (test_prefit_real_continuity ~base_path);
+       Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
+         (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
      "actual HTTP outcomes", [
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does

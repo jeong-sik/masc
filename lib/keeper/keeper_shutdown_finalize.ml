@@ -817,18 +817,18 @@ let complete_cleanup
        with
        | Ok _ -> Ok ()
        | Error
-           (Keeper_approval_queue.Summary_owner_retirement_exact_attempt_unsettled
+           (Keeper_approval_queue_result.Summary_owner_retirement_exact_attempt_unsettled
               _ as error) ->
          Error
            (`Draining
-              (Keeper_approval_queue.summary_owner_retirement_error_to_string
+              (Keeper_approval_queue_result.summary_owner_retirement_error_to_string
                  error))
        | Error error ->
          Error
            (`Failed
               (Printf.sprintf
                  "Keeper cleanup cannot prove approval-summary release: %s"
-                 (Keeper_approval_queue.summary_owner_retirement_error_to_string
+                 (Keeper_approval_queue_result.summary_owner_retirement_error_to_string
                     error))))
   in
   let finish registry_unregistered =

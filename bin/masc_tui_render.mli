@@ -44,6 +44,10 @@ val set_table_frame : bool -> unit
     screen, which is this, not from what the next frame would draw. *)
 val acting_pane_drawn_cols : unit -> int
 
+val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
+(** The current Activity pane reservation at this terminal width, usable
+    before a frame is built when reconciling interaction bounds. *)
+
 val acting_pane_suppressed : Masc_tui_types.state -> bool
 (** Whether this frame draws no Activity pane whatever the reader chose: a
     modal covers the whole terminal, and the Activity screen and the Browser
@@ -115,6 +119,8 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val presets_viewport : Masc_tui_types.state -> int * int
+(** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop
@@ -130,7 +136,8 @@ val frame_choice :
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
-  | `Agenda | `Answering | `Patch | `Link | `Surface ]
+  | `Agenda | `Answering | `Patch | `Link
+  | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
 val render :

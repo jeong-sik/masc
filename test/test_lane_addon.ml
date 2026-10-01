@@ -1166,6 +1166,11 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
       |> List.find (fun value -> text "instance_id" value = id)
       |> Yojson.Safe.Util.to_assoc in
     let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
+    (* The published package envelope predates host model declarations. *)
+    let released = List.map (fun (key, value) ->
+      match key, value with
+      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "model_access" fields)
+      | _ -> key, value) released in
     let before = `Assoc released in
     unwrap (Store.save_binding store ~instance_id:id before);
     Runtime.For_testing.reset ();

@@ -247,6 +247,10 @@ val candidate_id_of_signal :
     bodies on distinct comments remain distinct. Exported so test fixtures
     derive ids from this function instead of copying the formula. *)
 
+val board_interests : candidate -> (string list, string) result
+(** The Keeper's normalized Board interests from the validated
+    [keeper_context], the same list [keeper_role] projects. *)
+
 val judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** The judgment request as the run record carries it: the exact current
     [candidate_id] and [signal], plus a [keeper_role] projection containing

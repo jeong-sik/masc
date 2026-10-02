@@ -26,6 +26,7 @@ type memory_librarian_pass_end =
   | Pass_off
   | Pass_lane_unconfigured
   | Pass_drained
+  | Pass_yielded_to_waiting_unit
   | Pass_not_committed
   | Pass_stopped of string
   | Pass_raised of string
@@ -210,10 +211,11 @@ let decode_memory_librarian_pass_end ~state ~detail =
   | Some "off", None -> Ok (Some Pass_off)
   | Some "lane_unconfigured", None -> Ok (Some Pass_lane_unconfigured)
   | Some "drained", None -> Ok (Some Pass_drained)
+  | Some "yielded_to_waiting_unit", None -> Ok (Some Pass_yielded_to_waiting_unit)
   | Some "not_committed", None -> Ok (Some Pass_not_committed)
   | Some "stopped", Some detail -> Ok (Some (Pass_stopped detail))
   | Some "raised", Some detail -> Ok (Some (Pass_raised detail))
-  | Some (("off" | "lane_unconfigured" | "drained" | "not_committed") as state), Some _ ->
+  | Some (("off" | "lane_unconfigured" | "drained" | "yielded_to_waiting_unit" | "not_committed") as state), Some _ ->
     Error ("librarian state carries a detail it has none of: " ^ state)
   | Some (("stopped" | "raised") as state), None ->
     Error ("librarian state is missing its detail: " ^ state)
@@ -237,7 +239,7 @@ let decode_memory_librarian_failure_kind = function
    carry none. *)
 let memory_librarian_pass_end_cause = function
   | Pass_stopped cause | Pass_raised cause -> Some cause
-  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_not_committed -> None
+  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_yielded_to_waiting_unit | Pass_not_committed -> None
 
 let decode_memory_librarian_health keeper_json =
   let* json = required_member keeper_json "librarian" in
@@ -879,7 +881,7 @@ let decode_memory_health_snapshot json =
            match keeper.mkh_librarian.mlh_state with
            | Some (Pass_lane_unconfigured | Pass_not_committed | Pass_stopped _ | Pass_raised _)
              -> 1
-           | Some (Pass_off | Pass_drained) | None -> 0)
+           | Some (Pass_off | Pass_drained | Pass_yielded_to_waiting_unit) | None -> 0)
       && mhs_starving_keepers
          = sum (fun keeper ->
            if keeper.mkh_librarian_failures > 0 && not keeper.mkh_snapshot_present

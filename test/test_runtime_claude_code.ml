@@ -839,7 +839,7 @@ let test_missing_cli_is_not_reported_as_logout () =
         config)
   in
   match outcome with
-  | Error (Runtime_claude_code.Spawn_failed _) -> ()
+  | Error (Runtime_claude_code.Invalid_config _) -> ()
   | Error error -> fail (Runtime_claude_code.error_to_string error)
   | Ok _ -> fail "missing Claude CLI was reported as a valid login"
 ;;
@@ -1736,6 +1736,85 @@ let test_dynamic_tool_callback () =
           "arguments"
           {|{"marker":"from-claude"}|}
           (Yojson.Safe.to_string !observed_input))
+;;
+
+let test_partial_text_streams_before_complete_block () =
+  let partial event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  let complete =
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"id":"msg-partial","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_ OK"}]}}|} in
+  with_fixture
+    [Emit (partial {|{"type":"message_start","message":{"id":"msg-partial","model":"claude-fixture"}}|});
+     Emit (partial {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"MASC_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CLAUDE_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" "}}|});
+     Emit complete;
+     Emit (partial {|{"type":"content_block_stop","index":0}|});
+     Emit (partial {|{"type":"message_delta","delta":{"stop_reason":"end_turn"}}|});
+     Emit (partial {|{"type":"message_stop"}|}); Emit {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_ OK","api_error_status":null}|}]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        match List.rev !events with
+        | [Turn_started {turn_id="msg-partial"; model="claude-fixture"};
+           Text_delta {message_id=Some "msg-partial"; text="MASC_"};
+           Text_delta {message_id=Some "msg-partial"; text="CLAUDE_"};
+           Text_delta {message_id=Some "msg-partial"; text=" "};
+           Text_delta {message_id=Some "msg-partial"; text="OK"};
+           Turn_finished {text="MASC_CLAUDE_ OK"}] -> ()
+        | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
+;;
+
+let test_four_partial_messages_preserve_all_blocks () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+      "session_id", `String "__SESSION__"; "event", event]) in
+  let start message = frame (`Assoc ["type", `String "message_start";
+      "message", `Assoc ["id", `String message; "model", `String "claude-fixture"]]) in
+  let block index = frame (`Assoc ["type", `String "content_block_start";
+      "index", `Int index; "content_block", `Assoc ["type", `String "text"; "text", `String ""]]) in
+  let piece index text = frame (`Assoc ["type", `String "content_block_delta";
+      "index", `Int index; "delta", `Assoc ["type", `String "text_delta"; "text", `String text]]) in
+  let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
+  let complete id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant";
+      "session_id", `String "__SESSION__"; "uuid", `String (id ^ "-complete");
+      "message", `Assoc ["id", `String id; "model", `String "claude-fixture";
+        "content", `List (List.map (fun text -> `Assoc ["type", `String "text"; "text", `String text]) texts)]]) in
+  let citation = frame (`Assoc ["type", `String "content_block_delta"; "index", `Int 0;
+      "delta", `Assoc ["type", `String "citations_delta"; "citation",
+        `Assoc ["type", `String "char_location"; "cited_text", `String "A";
+          "document_index", `Int 0; "start_char_index", `Int 0; "end_char_index", `Int 1]]]) in
+  let tool_start = frame (`Assoc ["type", `String "content_block_start";
+      "index", `Int 1; "content_block", `Assoc ["type", `String "tool_use";
+        "id", `String "tool-boundary"; "name", `String "Read"; "input", `Assoc []]]) in
+  let result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"four-final","result":"CD","api_error_status":null}|} in
+  List.iter (fun aggregate ->
+    let events = ref [] in
+    let n = [start "n"; block 0; piece 0 "A"; citation] in
+    let n = if aggregate then n @ [stop 0; tool_start; complete "n" ["A"]]
+      else n @ [complete "n" ["A"]; stop 0; tool_start] in
+    let n1 = [start "n+1"; block 0; stop 0; block 1; piece 1 "B";
+      complete "n+1" (if aggregate then [""; "B"] else ["B"]); stop 1] in
+    let n2 = [start "n+2"; block 0; piece 0 "C"; stop 0] in
+    let n3 = [start "n+3"; block 0; piece 0 "C"; stop 0; block 1; piece 1 "D"] in
+    let n3 = if aggregate then n3 @ [stop 1; complete "n+3" ["C"; "D"]]
+      else (* n+2 arrives late; its prefix is scoped by message identity. *)
+        [complete "n+2" ["C"]] @ n3 @ [complete "n+3" ["C"];
+          complete "n+3" ["D"]; stop 1] in
+    let late = if aggregate then [complete "n+2" ["C"]] else [] in
+    with_fixture (List.map (fun json -> Emit json) (n @ n1 @ n2 @ n3 @ late @ [result]))
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ ->
+            let pieces = List.rev !events |> List.filter_map (function
+              | Runtime_claude_code.Text_delta {message_id; text} -> Some (message_id, text)
+              | _ -> None) in
+            check (list (pair (option string) string)) "four messages retain each partial block once"
+              [Some "n", "A"; Some "n+1", "B"; Some "n+2", "C";
+               Some "n+3", "C"; Some "n+3", "D"] pieces)) [false; true]
 ;;
 
 let test_stream_events_preserve_text_and_tool_identity () =
@@ -2660,6 +2739,10 @@ let () =
             "stream preserves text and tool identity"
             `Quick
             test_stream_events_preserve_text_and_tool_identity
+        ; test_case "four messages retain partial blocks and citation metadata" `Quick
+            test_four_partial_messages_preserve_all_blocks
+        ; test_case "partial text precedes complete block without duplication" `Quick
+            test_partial_text_streams_before_complete_block
         ; test_case
             "stream preserves native tool origin"
             `Quick

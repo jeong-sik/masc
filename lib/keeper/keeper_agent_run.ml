@@ -1936,6 +1936,12 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_tool_execution:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id ~execution_id ->
+                              observe (Keeper_hooks_agent_core.Official_tool_result
+                                { block_index; tool_call_id; execution_id }))
+                           on_tool_stream_observation)
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:
@@ -2096,6 +2102,7 @@ let run_turn
                                  AfterTurn ordinal")
                          | Ok (turn_outcome, terminal_effect_receipt), Some final_agent_core_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
+                             ~task_context:ctx.task_context
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work
                              ~profile_defaults
@@ -2155,6 +2162,7 @@ let run_turn
        (match turn_result, !last_dispatched_checkpoint_owner with
         | Error _, Some Runtime_execution.Official_client ->
           Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+            ~task_context:ctx.task_context
             ~config
             ~meta
             ~turn_ref

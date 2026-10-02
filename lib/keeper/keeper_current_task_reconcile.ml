@@ -136,9 +136,9 @@ let owned_active_task_id_for_meta ~(config : Workspace.config)
   | Ok task_id -> task_id
   | Error _ -> None
 
-let sync_current_task_id_from_backlog ~(config : Workspace.config)
-    (meta : Keeper_meta_contract.keeper_meta) =
-  match owned_active_task_id_result_for_meta ~config ~meta with
+let sync_observed_task ~(config : Workspace.config)
+    (meta : Keeper_meta_contract.keeper_meta) observed =
+  match observed with
   | Error err ->
     Log.Keeper.warn ~keeper_name:meta.name
       "current task sync skipped because backlog ownership could not be read: %s"
@@ -202,6 +202,15 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
             | None -> "(cleared)")
            (Keeper_owner_registry.command_error_to_string error);
          meta)
+
+let sync_current_task_id_with_observation ~config meta =
+  let observed = owned_active_task_id_result_for_meta ~config ~meta in
+  sync_observed_task ~config meta observed, observed
+;;
+
+let sync_current_task_id_from_backlog ~config meta =
+  fst (sync_current_task_id_with_observation ~config meta)
+;;
 
 let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
   match

@@ -1199,7 +1199,7 @@ let credential_owner_discovery_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists path in
       if not present then discover names orphans rest
       else
-        let* stored = read_stored_credential config name path in
+        let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config name path in
         (match stored with
          | Unresolved_credential -> discover names orphans rest
          | Stored_credential credential -> discover (credential.agent_name :: names) orphans rest
@@ -1207,7 +1207,7 @@ let credential_owner_discovery_in_transaction (Credential_transaction config) =
            let* present = credential_path_exists target in
            if not present then discover names (name :: orphans) rest
            else
-             let* resolved = resolve_stored_credential config name stored in
+             let* resolved = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config name stored in
              (match resolved with
               | None -> discover names orphans rest
               | Some credential -> discover (credential.agent_name :: names) orphans rest))

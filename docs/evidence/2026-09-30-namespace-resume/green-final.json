@@ -1,0 +1,25 @@
+{
+  "command": [
+    "env",
+    "-u",
+    "MASC_CONFIG_DIR",
+    "-u",
+    "MASC_BASE_PATH",
+    "npx",
+    "vitest",
+    "run",
+    "src/components/flow-control/flow-control-state.test.ts",
+    "src/components/flow-control/flow-control-panel.test.ts",
+    "src/components/emergency-stop-control.test.ts",
+    "src/operator-actions.test.ts",
+    "src/namespace-truth-store.test.ts",
+    "src/api/schemas/operator-action.test.ts",
+    "src/components/common/confirm-dialog.test.ts",
+    "src/components/common/confirm-dialog.a11y.test.ts",
+    "--maxWorkers=1"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume/dashboard",
+  "started_at": "2026-09-30T15:06:09.834035+00:00",
+  "finished_at": "2026-09-30T15:06:15.312653+00:00",
+  "exit_code": 0
+}

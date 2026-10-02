@@ -1,4 +1,6 @@
 [@@@warning "-32-69"]
+open Masc_tui_identity_model
+
 module Tui_decode = Masc.Tui_decode
 module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
@@ -2488,43 +2490,6 @@ let keeper_detail_tab_label = function
   | Detail_automation -> "Automation"
   | Detail_runs -> "Runs"
 
-(** One line of the Identity tab. A declaration nobody can read is carried
-    rather than dropped: an operator who came looking for a provider needs to
-    see why it is not on offer, not a shorter list. *)
-type identity_provider =
-  | Identity_declared of
-      { idp_id: string
-      ; idp_label: string
-      ; idp_tools: string list option
-        (** What this service currently offers this Keeper, or [None] when it
-            was never attached. An empty list is a third fact -- attached and
-            offering nothing -- and reading it as "not attached" would tell an
-            operator to consent again for no reason. *)
-      ; idp_also_on: string list
-        (** Which other Keepers hold this one. A Keeper attaches on its own
-            account -- the client is shared, the token is not -- so this is
-            the one question a single Keeper's tab cannot answer for itself,
-            and answering it by opening each Keeper in turn is how an
-            operator loses track of which account went where. *)
-      ; idp_enabled: bool option
-        (** The on/off switch on an attached row. [None] when the row is not
-            attached or the switch store could not be read; the render must
-            not show a guess for either. *)
-      ; idp_switch_problem: string option
-        (** Why the switch state is unknown, when it is. *)
-      }
-  | Identity_unreadable of { idp_id: string; idp_problem: string }
-
-(** Whether a query names this provider.
-
-    Both the label and the id, because they diverge and an operator knows
-    whichever one they know: the screen says "Google Sheets" and the tool
-    names say "googlesheets_". Matching one would make the other a query
-    that finds nothing while the row is right there. *)
-let identity_names ~query (id, label) =
-  Masc_tui_pick_list.lowercase_contains ~needle:query label
-  || Masc_tui_pick_list.lowercase_contains ~needle:query id
-
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
 
@@ -2549,275 +2514,11 @@ let clients_act_for_others rows =
            ~keeper_name:row.Tui_decode.cr_keeper_name))
     rows
 
-(** The providers a key can act on, in the order the screen numbers them.
-    Both the renderer and the key handler read this, so the number an
-    operator sees and the provider a keypress starts cannot drift apart. *)
-let identity_connectable ?(query = "") providers =
-  List.filter_map
-    (function
-      | Identity_declared { idp_id; idp_label; _ } ->
-        if identity_names ~query (idp_id, idp_label)
-        then Some (idp_id, idp_label)
-        else None
-      | Identity_unreadable _ -> None)
-    providers
-
-(** What the Identity pane says about one service.
-
-    The rows and the summary above them read this one function, so the line
-    and the list cannot disagree about what this Keeper holds. *)
-type identity_row_state =
-  | Identity_not_attached
-  | Identity_attached_without_tools
-  | Identity_switch_unreadable
-  | Identity_switched_off
-  | Identity_attached of int  (** how many tools it offers *)
-
-(* The pane's precedence: a service offering nothing says so whatever its
-   switch says, then a switch that cannot be read outranks the switch's
-   value, which outranks the tool count -- a service an operator turned off
-   hands this Keeper nothing, however many tools its catalog names. *)
-let identity_row_state ~providers ~id =
-  let readings =
-    List.find_map
-      (function
-        | Identity_declared { idp_id; idp_tools; idp_enabled; idp_switch_problem; _ }
-          when String.equal idp_id id ->
-          Some (idp_tools, idp_enabled, idp_switch_problem)
-        | Identity_declared _ | Identity_unreadable _ -> None)
-      providers
-  in
-  match readings with
-  | None | Some (None, _, _) -> Identity_not_attached
-  | Some (Some [], _, _) -> Identity_attached_without_tools
-  | Some (Some _, _, Some _) -> Identity_switch_unreadable
-  | Some (Some _, Some false, None) -> Identity_switched_off
-  | Some (Some tools, (Some true | None), None) ->
-    Identity_attached (List.length tools)
-
-(** The line above the provider list: how many services it draws, out of how
-    many this Keeper has, and what the drawn ones report. The states a row
-    already spells one by one are summed here only where one holds: a pane of
-    nothing but unattached services says so by having no tally to print. *)
-let identity_summary ~providers ~query =
-  let shown = identity_connectable ~query providers in
-  let total = List.length (identity_connectable ~query:"" providers) in
-  let states =
-    List.map (fun (id, _) -> identity_row_state ~providers ~id) shown
-  in
-  let count wanted =
-    List.length (List.filter (fun state -> state = wanted) states)
-  in
-  let attached =
-    List.length
-      (List.filter
-         (function Identity_attached _ -> true | _ -> false)
-         states)
-  in
-  let parts =
-    List.filter_map
-      (fun (label, n) ->
-        if n > 0 then Some (Masc_tui_message_layout.count_noun n label) else None)
-      [ ("attached", attached)
-      ; ("switched off", count Identity_switched_off)
-      ; ("attached with no tools", count Identity_attached_without_tools)
-      ; ("with an unreadable switch", count Identity_switch_unreadable)
-      ]
-  in
-  let drawn = List.length shown in
-  let head =
-    if drawn = total then Masc_tui_message_layout.count_noun total "service"
-    else
-      Printf.sprintf "%d of %s" drawn
-        (Masc_tui_message_layout.count_noun total "service")
-  in
-  match parts with
-  | [] -> "  " ^ head
-  | parts -> "  " ^ head ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts
-
-(** The lines the Identity pane prints above the provider rows.
-
-    Here rather than in the renderer because the key handler has to know how
-    far down the pane a provider sits: it moves a cursor over
-    [identity_connectable] and then scrolls the pane's lines so that row
-    stays visible. A header written in the renderer and counted in the key
-    handler is two numbers that drift the first time a line is added. *)
-(** What one attempt answered, as pane rows.
-
-    Built here rather than at each side because two places wrapping the same
-    text at their own idea of the width would draw a different number of
-    lines, and the key handler's idea of where the list starts would stop
-    matching the renderer's.
-
-    Wrapped, because the message that matters most is the long one: a
-    provider that registers no client says what to make and where to put it,
-    and a single truncated line is the half of that sentence an operator
-    cannot act on. *)
-(** Whether the pane's notice reports something that worked.
-
-    One line reports both -- a refusal to start and an app recorded -- and
-    without this they are drawn the same, so a save that succeeded arrives in
-    the colour of a failure. *)
-(** A pasted value flattened to one line, for a field that holds one.
-
-    Control bytes become a space and runs of space collapse, because a scope
-    list copied out of a browser arrives with the newlines that separated
-    it and a secret carries the one that ended it.
-
-    Deliberately not the terminal's own single-line helper. That one is for
-    drawing untrusted text: it makes a newline visible by writing the four
-    characters "\x0A" into the string. Used on input, those four characters
-    were stored, sent to Slack as part of a scope name, and came back as
-    "Invalid permissions requested".
-
-    Bytes at or above 0x80 are left alone -- they are UTF-8, not control
-    characters. *)
-let identity_field_paste text =
-  let out = Buffer.create (String.length text) in
-  String.iter
-    (fun c ->
-      let code = Char.code c in
-      if code < 0x20 || code = 0x7f then Buffer.add_char out ' '
-      else Buffer.add_char out c)
-    text;
-  Buffer.contents out
-  |> String.split_on_char ' '
-  |> List.filter (fun part -> not (String.equal part ""))
-  |> String.concat " "
-
-type identity_notice_kind = Notice_ok | Notice_bad
-
-let identity_notice ~cols detail =
-  match detail with
-  | None -> []
-  | Some (kind, text) ->
-    (* Two for this indent, two for the one the pane adds, four for the box
-       around it. Wrapping wider than that is a line the frame truncates --
-       which is the whole failure this exists to undo. *)
-    List.map
-      (fun line -> "  " ^ line)
-      (Masc_tui_message_layout.wrap_words ~max_cells:(max 20 (cols - 8)) text)
-    @
-    (* Only on a refusal, and pointing at the key on this pane rather than at
-       the dashboard: the form is here now. *)
-    (match kind with
-     | Notice_ok -> [ "" ]
-     | Notice_bad ->
-       [ "  A records an app for the row the cursor is on."; "" ])
-
-(** The filter's own two rows: what was typed, and how much of the set is
-    left. Built here for the same reason the notice is -- the key handler
-    counts these to know where the list starts, and a count that disagreed
-    with what is drawn would scroll the cursor to the wrong row. *)
-let identity_filter_rows ~providers filter =
-  match filter with
-  | None -> []
-  | Some typed ->
-    [ Printf.sprintf "  /%s   %d of %d" typed
-        (List.length (identity_connectable ~query:typed providers))
-        (List.length (identity_connectable providers))
-    ; ""
-    ]
-
-(* Each block above the list brings its own trailing blank, so two of them
-   do not stack two blanks and none of them leaves the list flush against
-   the tally.
-
-   No keys here. The tab's own keys ride the footer, which is where every
-   other surface puts them: at 120 columns it draws all six
-   ([ ]:tab, arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh) and
-   at 80 it gives up /:filter and R:refresh in that order, with [?] naming
-   what it dropped. A sentence spelling them again stood here while the
-   title row carried the hint and cut it, which the footer no longer does. *)
-let identity_preamble ~summary ~notice = summary :: "" :: notice
-
-(** Which pane line the provider at [index] is drawn on.
-
-    [notice] is what the preamble is carrying: a message about the attempt
-    just made belongs where the operator is looking rather than below
-    fifty-odd rows they would have to scroll past. It moves the list down,
-    so the row a keypress scrolls to moves with it. *)
-let identity_provider_line ~summary ~notice ~index =
-  List.length (identity_preamble ~summary ~notice) + index
-
-(** The cursor held inside the list it names. A cursor left behind by a
-    shorter list answers from the last row rather than from one that is no
-    longer there. *)
-let identity_cursor_clamped ~query ~providers cursor =
-  let count = List.length (identity_connectable ~query providers) in
-  if count = 0 then 0 else max 0 (min cursor (count - 1))
-
-(** The provider a keypress on the cursor would start, if any. *)
-let identity_cursor_provider ~query ~providers cursor =
-  List.nth_opt
-    (identity_connectable ~query providers)
-    (identity_cursor_clamped ~query ~providers cursor)
-
-(** A login the operator has started but not finished: they have to open
-    [ils_url] in a browser, and until they come back nothing has been
-    written to the Keeper. *)
-(** Which of the three fields is taking keys. Sequential rather than
-    clickable: a terminal has no pointer, and tab-between-fields is a second
-    idea to explain when enter-to-advance already reads as a form. *)
-type identity_app_field = App_client_id | App_client_secret | App_scopes
-
-type identity_app_form = {
-  iaf_provider: string;
-  iaf_label: string;
-  iaf_field: identity_app_field;
-  iaf_client_id: string;
-  iaf_client_secret: string;
-  iaf_scopes: string;
-}
-
-(** The form's rows. Built here with the notice and the filter rows so the
-    key handler counts the same preamble the renderer draws. The secret is
-    shown as dots: a terminal scrolls back, and a credential on screen is a
-    credential in the scrollback. *)
-let identity_app_form_rows form =
-  match form with
-  | None -> []
-  | Some f ->
-    let mark field = if f.iaf_field = field then ">" else " " in
-    [ Printf.sprintf "  %s \xec\x95\xb1" f.iaf_label
-    ; Printf.sprintf "  %s client id      %s" (mark App_client_id) f.iaf_client_id
-    ; Printf.sprintf "  %s client secret  %s" (mark App_client_secret)
-        (String.concat "" (List.init (String.length f.iaf_client_secret)
-                             (fun _ -> "*")))
-    ; Printf.sprintf "  %s scopes         %s" (mark App_scopes) f.iaf_scopes
-    ; "  enter 다음 칸 · 마지막 칸에서 enter 저장 · esc 취소"
-    ; ""
-    ]
-
-type identity_login_started = {
-  ils_keeper: string;
-  ils_provider: string;
-      (** Which service, by id. The label is for a screen; matching on it
-          would tie "this login landed" to a display string that a
-          declaration is free to change. *)
-  ils_label: string;
-  ils_url: string;
-}
-
 type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
 }
-
-(** Whether the login [login] started has landed: the service it was for now
-    reports tools for this Keeper.
-
-    This is what ends the tick's re-asking. A poll with no end condition is a
-    poll that runs for the life of the process, so the condition is named
-    here and tested rather than being a line inside the message handler. *)
-let identity_login_landed ~providers ~login =
-  List.exists
-    (function
-      | Identity_declared { idp_id; idp_tools = Some _; _ } ->
-        String.equal idp_id login.ils_provider
-      | Identity_declared _ | Identity_unreadable _ -> false)
-    providers
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
     destinations makes a new Keeper sub-view an explicit compiler error
@@ -3057,11 +2758,16 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~about_open surface =
-  if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn ~about_open surface
-
 type full_refresh_intent = Cadence | Revalidate
+
+(* Full and scoped bundles share one authority order. A later dispatch
+   supersedes an earlier result, including failure and booting results. *)
+module Http_refresh_order = struct
+  type ticket = Ticket of int
+  let initial = Ticket 0
+  let dispatch (Ticket generation) = Ticket (generation + 1)
+  let is_current latest ticket = latest = ticket
+end
 
 type scoped_refresh_followup =
   | No_scoped_followup
@@ -5013,6 +4719,10 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type usage_section = Usage_plan | Usage_trend | Usage_keepers
+let next_usage_section = function
+  | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
+
 type keeper_composer_draft = {
   kcd_text : string;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
@@ -5050,6 +4760,14 @@ type home_chat_receipt =
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
+
 type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
 
 (* The server sends each invite's link once and keeps only its hash. Keep the
@@ -5079,10 +4797,13 @@ type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
   mutable home_opened_request : home_request option;
+  mutable home_decision_receipt : (home_request * string) option;
+  mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
+  mutable usage_section: usage_section;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -5355,7 +5076,7 @@ type state = {
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
      [search_last] feeds n/N after Enter. Every surface that answers
-     {!surface_row_texts} searches through the same pair. *)
+     [surface row search] searches through the same pair. *)
   mutable search: string option;
   mutable search_last: string;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
@@ -5545,6 +5266,8 @@ type state = {
   (* A refused creation remains editable, including malformed JSON. The
      editor owns a temporary file, so the declaration must survive here. *)
   mutable keeper_creation_draft: string option;
+  mutable keeper_creation_return: keeper_chat_return option;
+  mutable keeper_creation_awaiting_roster: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -5579,6 +5302,10 @@ type state = {
      has to close its file on the way out: killed outright it would leave a
      header with no length in it. *)
   mutable voice_stop_requested: Masc.Voice_bridge.stop_request option;
+  (* A workspace withdrawal invalidates this capture even if the same
+     workspace becomes current again before its completion reaches the loop.
+     Keep [voice_capture] occupied until that completion releases the device. *)
+  mutable voice_capture_withdrawn: bool;
   (* Continuous mode: the keeper whose row re-arms a capture after each
      transcript, until the operator turns it off. Separate from
      [voice_capture], which is the capture running right now — between two
@@ -5609,6 +5336,7 @@ type state = {
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
+  mutable http_refresh_order: Http_refresh_order.ticket;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   mutable opening_mode: Masc_tui_config.opening;
@@ -6649,24 +6377,36 @@ let request_voice_stop (state : state) request =
   | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
       state.voice_stop_requested <- Some request
 
-let release_composer_for_browser_reader (state : state) =
-  state.composer_focused <- false;
+let withdraw_voice_capture (state : state) =
   state.voice_continuous <- None;
   state.voice_floor <- None;
   state.voice_level_db <- None;
   (* Keep the occupied capture until its callback, so returning to the
      composer cannot start a second microphone while this one shuts down. *)
-  if Option.is_some state.voice_capture then
+  if Option.is_some state.voice_capture then begin
+    state.voice_capture_withdrawn <- true;
     request_voice_stop state Masc.Voice_bridge.Discard
+  end
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  withdraw_voice_capture state
+
+type voice_completion =
+  | Voice_current of Masc.Voice_bridge.stop_request
+  | Voice_withdrawn
 
 (* The transcript may already be in the mailbox when the reader opens.
    Settle ownership before deciding whether its text can reach the draft. *)
-let settle_voice_transcript (state : state) ~keeper =
+let settle_voice_capture (state : state) ~keeper =
   if state.voice_capture <> Some keeper then None
   else begin
-    let disposition = Option.value state.voice_stop_requested
-        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    let disposition =
+      if state.voice_capture_withdrawn then Voice_withdrawn
+      else Voice_current (Option.value state.voice_stop_requested
+          ~default:Masc.Voice_bridge.Keep_what_was_heard) in
     state.voice_capture <- None;
+    state.voice_capture_withdrawn <- false;
     state.voice_level_db <- None;
     Some disposition
   end
@@ -6878,16 +6618,48 @@ let settled_log_for_request state ~keeper_name request_id =
     state.msg_settled_logs
 ;;
 
-let settled_logs_for_keeper state keeper_name =
-  state.msg_settled_logs
+(* Choose one execution source before classifying it as settled or observed.
+   Canonical identity only breaks equal coverage; it cannot discard a sibling
+   that already holds the ending or more of the journal. *)
+let turn_log_preferred ~candidate ~held =
+  let candidate_complete = turn_log_holds_the_turn candidate in
+  let held_complete = turn_log_holds_the_turn held in
+  if candidate_complete <> held_complete then candidate_complete
+  else
+    let coverage =
+      match Masc_tui_keeper_chat_log.resume_position candidate.tl_log,
+            Masc_tui_keeper_chat_log.resume_position held.tl_log with
+      | Masc.Keeper_chat_event_log.After_seq candidate_seq,
+        Masc.Keeper_chat_event_log.After_seq held_seq -> Int.compare candidate_seq held_seq
+      | After_seq _, Whole_turn -> 1
+      | Whole_turn, After_seq _ -> -1
+      | Whole_turn, Whole_turn -> 0
+    in
+    if coverage <> 0 then coverage > 0
+    else
+      turn_log_request_id candidate = turn_log_execution_id candidate
+      && turn_log_request_id held <> turn_log_execution_id held
+;;
+
+let selected_source_logs_for_keeper state keeper_name =
+  (state.msg_settled_logs
+   @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+   @ Option.to_list state.msg_live)
   |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
   |> List.fold_left (fun selected log ->
     let execution_id = turn_log_execution_id log in
     match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
     | None -> selected @ [log]
-    | Some _ when turn_log_request_id log = execution_id ->
+    | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
       List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
     | Some _ -> selected) []
+;;
+
+(* Existing consumers ask for held sources, but selection must also account
+   for every subscription that the renderer can draw. *)
+let settled_logs_for_keeper state keeper_name =
+  selected_source_logs_for_keeper state keeper_name
+  |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
 ;;
 
 (* The requests a history load for [keeper_name] reads no journal for: every
@@ -7110,24 +6882,36 @@ let loaded_turn_has_ended state ~keeper_name request_id =
    the turn's text one line at a time off the footer's turn preview while
    the pane held the whole of it (#36244).
 
-   Observed is: Working, and still able to end. A log a request of this pane
+   A partial journal keeps its observed content until the journal itself
+   records the ending. A final history row can arrive before the last journal
+   read, and an unavailable journal can never supply that read: neither may
+   discard the earlier text, tools or reasoning. The renderer closes a known
+   ending's rail and marks unavailable observation independently.
+
+   A log a request of this pane
    is feeding is the live block, not this ([in_flight]); so is a journal log
-   bound to the same execution as the live one -- a batch member's journal
-   carries [Batch_bound], so the two can share an execution while the pane
-   holds only its own request in flight ([is_live], the test the settled
-   blocks apply). A log whose turn the loaded transcript says is over -- a
-   reply or a failure on record ([loaded_turn_has_ended]) -- or whose
-   journal has nothing more to say ([msg_journal_unavailable]: the
-   settle-time failure that is never journaled (#33108), a restart's
-   interruption, a pruned journal) would be drawn as an open block for the
-   rest of the session, beside the committed rows of the same turn; the
-   committed rows stand for such a turn, as they did before observed blocks
-   were drawn. A stream this pane opened and lost -- settled without hearing
+   bound to an execution whose selected source is a pane-owned subscription.
+   Source selection compares every held and in-flight sibling before this
+   classification. A stream this pane opened and lost -- settled without hearing
    the end, [msg_live] let go of it ([settle_turn_log]) -- is observed from
    then on: the journal reads feed that same log in place
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
    end. Answered per frame from the same list the settled blocks come from,
    so a log that comes to hold its turn leaves here the frame it does. *)
+let observed_log_has_ended state log =
+  loaded_turn_has_ended state ~keeper_name:(turn_log_keeper_name log)
+    (turn_log_execution_id log)
+  || match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+     | Masc_tui_keeper_chat_transcript.Stream_ended
+     | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
+     | Masc_tui_keeper_chat_transcript.Waiting
+     | Masc_tui_keeper_chat_transcript.Working -> false
+;;
+
+let observed_log_is_unavailable state log =
+  List.exists (String.equal (turn_log_request_id log)) state.msg_journal_unavailable
+;;
+
 let observed_logs_for_keeper state keeper_name =
   let in_flight log =
     List.exists
@@ -7135,29 +6919,15 @@ let observed_logs_for_keeper state keeper_name =
         String.equal entry.sent_request.request_id (turn_log_request_id log))
       state.msg_inflight
   in
-  let is_live log =
-    match state.msg_live with
-    | Some live ->
-        String.equal (turn_log_keeper_name live) keeper_name
-        && String.equal (turn_log_execution_id live) (turn_log_execution_id log)
-    | None -> false
-  in
-  let can_still_end log =
-    let request_id = turn_log_request_id log in
-    (not (List.exists (String.equal request_id) state.msg_journal_unavailable))
-    && not (loaded_turn_has_ended state ~keeper_name request_id)
-  in
   settled_logs_for_keeper state keeper_name
   |> List.filter (fun log ->
          (match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
-          | Masc_tui_keeper_chat_transcript.Working -> true
-          | Masc_tui_keeper_chat_transcript.Waiting
+          | Masc_tui_keeper_chat_transcript.Working
           | Masc_tui_keeper_chat_transcript.Stream_ended
-          | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
-              false)
-         && (not (in_flight log))
-         && (not (is_live log))
-         && can_still_end log)
+          | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
+          | Masc_tui_keeper_chat_transcript.Waiting -> false)
+         && not (turn_log_holds_the_turn log)
+         && (not (in_flight log)))
 ;;
 
 (* Whether the pane draws an observed turn's reply text itself. The footer's
@@ -7183,7 +6953,10 @@ let observed_turn_text_drawn state keeper_name =
           | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
               false)
         (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
-    (observed_logs_for_keeper state keeper_name)
+    (observed_logs_for_keeper state keeper_name
+     |> List.filter (fun log ->
+          not (observed_log_has_ended state log)
+          && not (observed_log_is_unavailable state log)))
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -7654,65 +7427,6 @@ let apply_keeper_schedules_read state request result =
     | Error err ->
         state.keeper_schedules_error <- Some (request.drr_keeper, err)
 
-let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
-  List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
-  @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
-      snapshot.fus_historical_evidence
-
-let fusion_runs_view (state : state) =
-  Masc_tui_fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:()
-
-(* The retained runs on screen: the last answer, also when the refresh after
-   it failed -- that failure is drawn beside them, not instead of them. *)
-let fusion_snapshot (state : state) =
-  match fusion_runs_view state with
-  | Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _) -> Some snapshot
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None
-
-let fusion_list_entries (state : state) =
-  match fusion_snapshot state with
-  | None -> []
-  | Some snapshot -> fusion_snapshot_entries snapshot
-
-let fusion_entry_identity = function
-  | Masc.Tui_decode_fusion.Fusion_retained_run run -> "run:" ^ run.fur_run_id
-  | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
-
-let selected_fusion_entry state =
-  List.nth_opt (fusion_list_entries state) state.fusion_cursor
-
-let fusion_detail_entry_index state =
-  fusion_list_entries state
-  |> List.find_index (fun entry ->
-      match state.fusion_mode, entry with
-      | Fusion_detail id, Masc.Tui_decode_fusion.Fusion_retained_run run ->
-          String.equal id run.fur_run_id
-      | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
-          String.equal reference.fhe_post_id candidate.fhe_post_id
-          && String.equal reference.fhe_run_id candidate.fhe_run_id
-      | _ -> false)
-
-let selected_keeper_runs (state : state) =
-  match selected_keeper state, fusion_snapshot state with
-  | Some keeper, Some snapshot ->
-      List.filter (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
-          String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
-  | _ -> []
-
-let selected_keeper_run (state : state) =
-  let runs = selected_keeper_runs state in
-  let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
-  Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
-
-(* What the Keeper Runs tab knows about the retained runs: the Fusion list's
-   own reading, narrowed to the selected Keeper. *)
-let keeper_runs_view (state : state) =
-  match fusion_runs_view state with
-  | Masc_tui_fetched.Ready _ -> Masc_tui_fetched.Ready (selected_keeper_runs state)
-  | Masc_tui_fetched.Stale (_, detail) -> Masc_tui_fetched.Stale (selected_keeper_runs state, detail)
-  | Masc_tui_fetched.Absent -> Masc_tui_fetched.Absent
-  | Masc_tui_fetched.Loading -> Masc_tui_fetched.Loading
-  | Masc_tui_fetched.Failed detail -> Masc_tui_fetched.Failed detail
 
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
@@ -8056,10 +7770,13 @@ let create_state
   home_selected = None;
   home_decision_scroll = 0;
   home_opened_request = None;
+  home_decision_receipt = None;
+  home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
+  usage_section = Usage_plan;
   agents = [];
   tasks = [];
   tasks_domain = [];
@@ -8256,6 +7973,8 @@ let create_state
   keepers = [];
   keepers_error = None;
   keeper_creation_draft = None;
+  keeper_creation_return = None;
+  keeper_creation_awaiting_roster = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   candle_observation = None;
@@ -8267,6 +7986,7 @@ let create_state
   voice_capture = None;
   voice_level_db = None;
   voice_stop_requested = None;
+  voice_capture_withdrawn = false;
   voice_continuous = None;
   voice_floor = None;
   quit_armed = false;
@@ -8275,6 +7995,7 @@ let create_state
   fleet_safety_error = None;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
+  http_refresh_order = Http_refresh_order.initial;
   local_workspace = Local_workspace_unread;
   view = Overview;
   opening_mode = Masc_tui_config.Overview;
@@ -8898,6 +8619,28 @@ let resources_empty_note (list : Masc_tui_mcp.resource list option) =
   | Some [] -> Some " (no resources)"
   | Some (_ :: _) -> None
 
+(* A successful refresh need not contain a turn that just finished. Its GET
+   may have started before that turn persisted, or a row may have failed to
+   decode. Session output stays until the returned page names its replacement.
+   The terminal reply shares request and role authority. Progress blocks and
+   Memory passes can contain several rows, so only their row identity proves
+   replacement; neither text nor a nearby timestamp identifies them. *)
+let transcript_replaces_session_output ~(fresh : msg_entry list)
+    (entry : msg_entry) =
+  List.exists
+    (fun (row : msg_entry) ->
+      String.equal row.me_keeper_name entry.me_keeper_name
+      &&
+      (row.me_identity = entry.me_identity
+      || (entry.me_request_id <> ""
+          && String.equal row.me_request_id entry.me_request_id
+          && match entry.me_role, row.me_role with
+             | Message_keeper, Message_keeper
+             | Message_autonomous, Message_autonomous -> true
+             | _ -> false)))
+    fresh
+;;
+
 let restore_keeper_chat_page (state : state) keeper_name =
   (match state.msg_loaded_keeper with
    | None -> ()
@@ -8956,12 +8699,41 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       state.msg_history
   in
   let held =
-    settled_logs_for_keeper state keeper_name
+    selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
     |> List.map held_turn_of_log
   in
   let loaded = rows_the_logs_do_not_draw ~held loaded in
   let session = rows_the_logs_do_not_draw ~held session in
+  (* Reply_details can reach a selected partial source before RUN_FINISHED.
+     That source already draws the exact final reply, so the durable row must
+     not repeat it. A losing sibling's reply cannot suppress a durable row
+     when the selected source has only progress text. *)
+  let partial_replies =
+    selected_source_logs_for_keeper state keeper_name
+    |> List.filter_map (fun log ->
+         if turn_log_holds_the_turn log then None
+         else if
+           List.exists
+             (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+               match item.drawn with
+               | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
+               | _ -> false)
+             (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
+         then Some (turn_log_execution_id log)
+         else None)
+  in
+  let without_partial_replies rows =
+    List.filter
+      (fun (row : msg_entry) ->
+        match row.me_role with
+        | Message_keeper | Message_autonomous ->
+            not (List.exists (String.equal row.me_request_id) partial_replies)
+        | _ -> true)
+      rows
+  in
+  let loaded = without_partial_replies loaded in
+  let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
 
 (* One conversation's rows, computed once per change of its inputs.
@@ -8973,10 +8745,10 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
    loaded keeper, the session rows, the settled logs (whose held turns leave
    the timeline), and which requests still wait in the queue. The lists are
    replaced rather than mutated in place when the conversation changes, so
-   physical equality on them says whether
-   the last answer still holds; the queue reading is compared by value, so a
-   queue or an inflight turn that changed in a way the rows do not depend on
-   (a live turn streaming, another keeper's line) keeps the answer.
+   physical equality on them says whether the last answer still holds.
+   Selected transcripts also carry their revision: an in-place Reply_details
+   arrival changes durable suppression even without a list replacement.
+   The queue reading is compared by value.
 
    Module state rather than a field on [state], like the renderer's markdown
    cache: a derived reading is not authority, and the input layer that reads
@@ -8987,6 +8759,7 @@ type chat_rows_memo = {
   crm_loaded : msg_entry list;
   crm_history : msg_entry list;
   crm_settled_logs : turn_log list;
+  crm_selected_sources : (turn_log * int) list;
   crm_queued_request_ids : string list;
   crm_rows : msg_entry list;
 }
@@ -8994,6 +8767,8 @@ type chat_rows_memo = {
 let chat_rows_memo : chat_rows_memo option ref = ref None
 
 let chat_rows_for (state : state) keeper_name =
+  let selected_sources = selected_source_logs_for_keeper state keeper_name
+    |> List.map (fun log -> log, Masc_tui_keeper_chat_transcript.revision log.tl_transcript) in
   let queued_request_ids =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
@@ -9006,6 +8781,9 @@ let chat_rows_for (state : state) keeper_name =
          && memo.crm_loaded == state.msg_loaded
          && memo.crm_history == state.msg_history
          && memo.crm_settled_logs == state.msg_settled_logs
+         && List.equal (fun (held, revision) (log, current_revision) ->
+              held == log && revision = current_revision)
+              memo.crm_selected_sources selected_sources
          && List.equal String.equal memo.crm_queued_request_ids
               queued_request_ids ->
       memo.crm_rows
@@ -9020,6 +8798,7 @@ let chat_rows_for (state : state) keeper_name =
             crm_loaded = state.msg_loaded;
             crm_history = state.msg_history;
             crm_settled_logs = state.msg_settled_logs;
+            crm_selected_sources = selected_sources;
             crm_queued_request_ids = queued_request_ids;
             crm_rows = rows;
           };
@@ -11220,6 +10999,7 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
    searchable and [texts] is the same decoded list the row cursor names, in
    the same order -- a match index is a cursor position. [None] keeps "/"
    closed on that surface. *)
+
 let conversation_urls (state : state) : string list =
   let seen = Hashtbl.create 16 in
   let acc = ref [] in
@@ -11239,336 +11019,6 @@ let conversation_urls (state : state) : string list =
 ;;
 
 
-
-let code_file_search_focused (state : state) =
-  not state.repository_changes_open
-  && state.code_focus_file = Right_pane
-  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
-
-(* The Git changes overlay before the surface it is drawn over. It draws over
-   three surfaces -- [scrolled_surface_rows] names them -- and an arm per
-   surface answered for two of them: over the Keepers roster the rows here
-   were keeper names, so a settled query counted the hidden roster and [n]
-   stepped the keeper cursor instead of landing on a matching path.
-   [goto_surface] closes the overlay on any move to another surface, which is
-   what makes the flag alone enough to say it is on screen. Its diff replaces
-   the list with text, and text has no row for a cursor to name. *)
-let surface_row_texts (state : state) : surface -> string list option =
- fun surface ->
-  if state.repository_changes_open then
-    (match state.repository_changes_diff_path with
-     | Some _ -> None
-     | None ->
-         Option.map
-           (fun s ->
-             List.map (fun row -> row.Tui_decode.rc_path)
-               s.Tui_decode.rcs_changes)
-           state.repository_changes)
-  else
-  match surface with
-  | Keepers Keeper_list ->
-      Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
-  | Keepers Keeper_detail when state.context_inspector_open ->
-      (* The request tab's item labels, so the surface search (/) walks the
-         same rows j/k moves. Other tabs keep no searchable list. *)
-      if
-        state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
-      then
-        match state.context_inspector_reading with
-        | Some
-            ( _
-            , Masc_tui_context_inspector.Turn_read
-                { provider_input = Ok input; _ } ) ->
-            let labels =
-              List.map
-                (fun (item : Masc_tui_context_inspector.exact_input_item) ->
-                   Masc_tui_context_inspector.exact_input_label item.kind)
-                (Masc_tui_context_inspector.exact_input_items input)
-            in
-            (match labels with [] -> None | _ -> Some labels)
-        | _ -> None
-      else None
-  | Lanes ->
-      (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
-       | Lanes_overview ->
-           let standalone =
-             match state.standalone_lanes with
-             | None -> []
-             | Some snapshot ->
-                 List.map
-                   (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label)
-                   snapshot.Tui_decode.sls_lanes
-           in
-           (match standalone with [] -> None | _ -> Some standalone))
-  | Clients ->
-      let names =
-        match state.clients_surface with
-        | None -> []
-        | Some snapshot ->
-            List.map
-              (fun (row : Tui_decode.client_row) -> row.Tui_decode.cr_name)
-              snapshot.Tui_decode.cls_clients
-      in
-      (match names with [] -> None | _ -> Some names)
-  | Verification ->
-      if Option.is_some state.verification_detail_request_id then None
-      else
-        Option.map
-          (fun s ->
-            List.map
-              (fun r ->
-                r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
-                ^ r.Tui_decode.vr_submitted_by)
-              s.Tui_decode.vs_requests)
-          state.verification
-  | Harness ->
-      if Option.is_some state.harness_detail then None
-      else Option.map
-        (fun s ->
-          List.map
-            (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
-            s.Tui_decode.hs_verdicts)
-        state.harness
-  | Repositories ->
-      (* Workspace Activity replaces the repository list with one repository's
-         own rows and its own cursor, and its handler takes every key the
-         surface has, "/" and n and N among them. The rows here are the list
-         behind it, which a settled query would then count and report. *)
-      if Option.is_some state.workspace_activity_repo then None
-      else
-        Option.map
-          (fun s ->
-            List.map
-              (fun r ->
-                r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
-              s.Tui_decode.rs_repositories)
-          state.repositories
-  | Memory ->
-      if Option.is_some state.memory_facts_keeper then
-        Option.map
-          (fun _ ->
-             let rows = memory_fact_rows state in
-             (* The exact filter projection, including field order: a phrase
-                crossing a field boundary must remain countable and reachable. *)
-             List.map memory_fact_search_text rows)
-          (memory_facts_snapshot state)
-      else
-        Option.map
-          (* Keeper id and the state label, which is the pair
-             [visible_memory_keepers] keeps a row for. Leaving the label out
-             kept rows on screen that the search could neither count nor
-             reach. *)
-          (fun _ ->
-            List.map
-              (fun k ->
-                k.Masc.Tui_decode_memory_health.mkh_keeper_id ^ " "
-                ^ memory_state_label (memory_state k))
-              (visible_memory_keepers state))
-          state.memory_health
-  | Connectors when Option.is_some (browser_lane_on_screen state) -> None
-  | Connectors ->
-      Option.map
-        (fun s ->
-          List.map
-            (fun c -> c.Masc.Tui_decode_connectors.cn_id ^ " " ^ c.Masc.Tui_decode_connectors.cn_display_name)
-            s.Masc.Tui_decode_connectors.cs_connectors)
-        state.connectors
-  | Runtime ->
-      if Option.is_some state.runtime_detail_target then None
-      else
-      Option.map
-        (fun s ->
-          match state.runtime_mode with
-          | Runtime_lanes ->
-              List.map
-                (fun c ->
-                  c.Tui_decode.rcr_lane_id ^ " "
-                  ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
-                s.Tui_decode.rss_candidates
-          | Runtime_all ->
-              List.map (fun runtime -> runtime.Tui_decode.ro_id)
-                s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-        state.runtime_surface
-  | System_logs ->
-      if Option.is_some state.system_logs_detail_seq then None
-      else Option.map
-        (fun _ ->
-          visible_system_log_entries state
-          |> List.map
-            (fun e ->
-              e.Tui_decode.sl_module ^ " "
-              ^ Option.value ~default:"" e.Tui_decode.sl_keeper
-              ^ " " ^ e.Tui_decode.sl_message))
-        state.system_logs
-  | Code ->
-      (* With a file focused (and no file overlay over it), "/" searches the
-         file's lines; the tree remains the default search list. The Git
-         changes overlay is answered above, before any surface. *)
-      if code_file_search_focused state then
-        (match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready rows) ->
-           Some
-             (Array.to_list
-                (Array.map
-                   (fun segments -> String.concat "" (List.map fst segments))
-                   rows))
-         (* Nothing to search through while the file is still being read, and
-            nothing to search through if it failed. *)
-         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
-         | Some (_, Masc_tui_fetched.Absent)
-         | None -> None)
-      else
-        Some
-          (List.map
-             (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-             (code_entries state))
-  (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
-  (* The list, and only while the list is the pane: reading a post or
-     writing one draws something else, and "/" there would move a cursor
-     nobody can see. The text is what identifies a row -- its id, who wrote
-     it, its title -- which is what a reader has in mind when they reach for
-     the key. *)
-  | Board ->
-      (match state.board_mode with
-       | Board_read _ | Board_compose -> None
-       | Board_list ->
-           (match state.board_posts with
-            | [] -> None
-            | posts ->
-                Some
-                  (List.map
-                     (fun (post : board_post) ->
-                       post.bp_id ^ " " ^ post.bp_author ^ " " ^ post.bp_title)
-                     posts)))
-  (* The goals the filter and sort left on screen, in the order they are
-     drawn: the cursor counts positions in that list, not in the snapshot. *)
-  | Planning ->
-      (match state.planning_mode with
-       | Planning_detail _ -> None
-       | Planning_list
-         when Masc_tui_overview_tasks.is_focused state.task_focus ->
-           (match Masc_tui_overview_tasks.work_rows state.tasks with
-            | [] -> None
-            | rows ->
-                Some
-                  (List.map
-                     (fun (task : Tui_decode.task) -> task.id ^ " " ^ task.title)
-                     rows))
-       | Planning_list ->
-           Option.bind state.planning (fun snapshot ->
-               match
-                 planning_visible_goals ~filter:state.planning_filter
-                   ~sort:state.planning_sort snapshot.pl_goals
-               with
-               | [] -> None
-               | goals ->
-                   Some
-                     (List.map
-                        (fun (goal : planning_goal) ->
-                          goal.pg_id ^ " " ^ goal.pg_title)
-                        goals)))
-  (* Approvals is absent on purpose. Its rows would search well, but [n] on
-     that surface is deny, unarmed and immediate: offering "/" there invites
-     the reflex that follows it, and on this surface that reflex refuses an
-     approval instead of stepping to the next match. Verification met the
-     same collision and moved its rejection to [x]; until Approvals makes
-     that call, the safe answer is no row search. *)
-  (* Two lists that grew a row cursor with the jump keys and had no way to be
-     searched. Each is named by what an operator has in mind reaching for the
-     key: the run and who called it, the file that was written.
-
-     Approvals and Schedules are not here, and the reason is [n]. The key
-     that steps to the next match is the key those two surfaces give to
-     "deny this approval" and "write a new schedule". A search whose own
-     follow-through refuses an approval is worse than no search, so offering
-     it there needs a different step key rather than another arm here
-     (#35306). *)
-  | Fusion -> (
-      match state.fusion_mode with
-      | Fusion_detail _ | Fusion_historical_detail _ -> None
-      | Fusion_list -> (
-          match fusion_list_entries state with
-          | [] -> None
-          | entries ->
-              Some
-                (List.map
-                   (fun entry ->
-                     match entry with
-                     | Masc.Tui_decode_fusion.Fusion_retained_run run ->
-                         run.Masc.Tui_decode_fusion.fur_run_id ^ " "
-                         ^ run.Masc.Tui_decode_fusion.fur_keeper ^ " "
-                         ^ run.Masc.Tui_decode_fusion.fur_preset
-                     | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
-                         evidence.Masc.Tui_decode_fusion.fhe_post_id ^ " "
-                         ^ evidence.Masc.Tui_decode_fusion.fhe_title)
-                   entries)))
-  | Changes when Option.is_some (opened_file_change state) -> None
-  | Changes -> (
-      match state.changes with
-      | None -> None
-      | Some snapshot -> (
-          match snapshot.Tui_decode.fcs_changes with
-          | [] -> None
-          | changes ->
-              (* The address the row is drawn under, read from the one place
-                 that spells it. A second match here would find a row under an
-                 address the pane never shows. *)
-              Some
-                (List.map
-                   (fun change -> Tui_decode.file_change_address change)
-                   changes)))
-  (* The list pane only. With the text focused j/k scrolls the reading and
-     there is no row cursor for a match to land on, so the same condition the
-     cursor arm reads answers here: a search offered on one focus and silent
-     on the other would be the drift this pairing exists to prevent. *)
-  | Resources when state.resource_focus = Left_pane ->
-      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
-  | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
-  | Resources | Config | Tools ->
-      None
-
-(* The fetched file's rows are replaced when content changes, like the lists
-   behind [chat_rows_memo]. Keep one derived reading keyed by that identity
-   and the query, not by the pane or path: a repaint reuses it, while a refresh
-   of the same file must recount. Other surfaces retain their live projection. *)
-type code_search_count_memo =
-  { csc_rows : (string * string) list array
-  ; csc_query : string
-  ; csc_count : int
-  }
-
-let code_search_count_memo : code_search_count_memo option ref = ref None
-
-let code_file_search_count ~query rows =
-  match !code_search_count_memo with
-  | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->
-      memo.csc_count
-  | Some _ | None ->
-      let count =
-        Array.fold_left (fun count segments ->
-          let text = String.concat "" (List.map fst segments) in
-          if Masc_tui_pick_list.lowercase_contains ~needle:query text then count + 1 else count) 0 rows
-      in
-      code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
-      count
-
-let surface_search_count (state : state) surface ~query =
-  let query = surface_search_query surface query in
-  match surface with
-  | Code when code_file_search_focused state ->
-      (match Masc_tui_fetched.current state.code_file with
-       | Some (_, Masc_tui_fetched.Ready rows) ->
-           Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
-       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
-       | None -> None)
-  | _ ->
-      Option.map
-        (fun rows ->
-          if String.equal query "" then 0
-          else List.fold_left (fun count text ->
-            if Masc_tui_pick_list.lowercase_contains ~needle:query text then count + 1 else count) 0 rows)
-        (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
 
@@ -11838,7 +11288,6 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
           ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns
     in
     let waiting_items = keeper_message_waiting_requests state ~keeper_name in

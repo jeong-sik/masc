@@ -4,6 +4,9 @@ type t
 val create : root:string -> t
 val root : t -> string
 val digest : string -> string
+val blob_reference : string -> Lane_addon_types.evidence
+(** Content-addressed reference without writing. It may be used to measure a
+    complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
 val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
@@ -20,8 +23,9 @@ val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) re
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
-(** Publishes every directory ancestor before accepting a durable receipt,
-    including ancestors left visible by earlier failed publication attempts. *)
+(** Requires the configured root parent to exist as the workspace anchor.
+    Publishes the root and action directories, syncing each parent even on
+    retries after failed publication. Never opens ancestors above root.parent. *)
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Missing receipts return [None]. Existing receipts are accepted only after
     strictly syncing the exact opened file and parent directory, verifying the

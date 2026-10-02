@@ -8,15 +8,17 @@
     another Goal. Invalid responses wait for an event wake. A wake that
     arrives while a pass runs is kept, so no pass misses it. *)
 
-val start : sw:Eio.Switch.t -> appraise:Candle_appraisal.runner -> config:Workspace_utils_backend_setup.config -> unit
+val start : ?appraiser_declaration_changed:(unit -> bool) -> sw:Eio.Switch.t -> appraise:Candle_appraisal.runner -> config:Workspace_utils_backend_setup.config -> unit -> unit
 (** Starts the daemon in [sw]. A second start for the same base path is
     refused with a log line, and so is a start for another base path while one
-    runs. The daemon stops with [sw]. *)
+    runs. The daemon stops with [sw]. A changed appraiser declaration releases
+    rejection on the next enabled pass, including a change seen in flight. *)
 
 val wake : unit -> unit
 (** Asks the running worker for one more pass. Does nothing when none runs. *)
 
 val pulse : unit -> unit
-(** Maintenance retry: source/transport failures only. Invalid model output
-    waits for startup, another confirmation or another terminal payout. *)
+(** Maintenance retries source/transport failures, and reconsiders rejection
+    when the supplied probe reports a changed appraiser declaration. Otherwise
+    invalid output waits for startup, confirmation or another terminal payout. *)
 module For_testing : sig val idle : unit -> bool end

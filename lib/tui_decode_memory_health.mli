@@ -31,6 +31,7 @@ type memory_librarian_pass_end =
   | Pass_off
   | Pass_lane_unconfigured
   | Pass_drained
+  | Pass_yielded_to_waiting_unit
   | Pass_not_committed
   | Pass_stopped of string
   | Pass_raised of string
@@ -202,8 +203,6 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
-(** One verdict the harness recorded: which gate ran on which task, what it
-    decided, and which evaluator decided it. *)
 val decode_memory_health_snapshot :
   Yojson.Safe.t -> (memory_health_snapshot, string) result
 (** Decode the fleet memory-health snapshot served at

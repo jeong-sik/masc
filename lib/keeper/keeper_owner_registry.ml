@@ -598,11 +598,11 @@ let run_autonomous_if_idle ~base_path ~keeper_name run =
     |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
-let run_maintenance_if_idle ~base_path ~keeper_name run =
+let run_maintenance_if_idle ?(defer_to_chat = false) ~base_path ~keeper_name run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
-    Keeper_owner.run_maintenance_if_idle owner run
+    Keeper_owner.run_maintenance_if_idle ~defer_to_chat owner run
     |> Result.map_error (fun error -> Command_rejected error)
 ;;
 

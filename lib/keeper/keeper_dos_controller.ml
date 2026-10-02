@@ -88,14 +88,15 @@ let holder_left ~transaction ~(config : Workspace.config) ~now holder =
      | Error _ -> None)
 ;;
 
-let recover_in_transaction ~transaction ~config ~who =
+let recover_in_transaction ?announce ~transaction ~config ~who () =
   let now = Time_compat.now () in
-  Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~transaction ~config ~now) ~who
+  Tool_misc_dos_lane.free_left_controller ?announce ~holder_left:(holder_left ~transaction ~config ~now) ~who ()
 ;;
 
 let before_move ~config ~who =
-  let released = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
-    recover_in_transaction ~transaction ~config ~who)
+  let released = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+    Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      recover_in_transaction ~announce ~transaction ~config ~who ()))
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released
@@ -153,13 +154,14 @@ let execute ~config ~who ~name ~args ~run =
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
   match operation with
   | Some Tool_schemas_misc.Misc_dos_pass ->
-    let result = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+    let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+      Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
       match pass_refusal ~transaction ~config args with
       | Some refusal -> Error refusal
       | None ->
-        recover_in_transaction ~transaction ~config ~who;
-        Ok (Some (Tool_misc_dos_lane.pass_without_announcing ~tool_name:name
-          ~start_time:(Tool_timing.start ()) ~base_path:config.base_path ~agent_name:who args)))
+        recover_in_transaction ~announce ~transaction ~config ~who ();
+        Ok (Some (Tool_misc_dos_lane.pass_without_announcing ~announce ~tool_name:name
+          ~start_time:(Tool_timing.start ()) ~base_path:config.base_path ~agent_name:who args))))
       |> Result.map_error recover_error |> Result.join in
     Tool_misc_dos_lane.after_announcing result
   | Some _ | None ->

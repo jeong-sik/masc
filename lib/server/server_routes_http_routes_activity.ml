@@ -18,6 +18,13 @@ module Keeper_api_types = Server_dashboard_http_keeper_api_types
    and then read the runtime projection.  A missing file stays visible rather
    than being silently omitted; that is the useful signal after a failed sync.
 *)
+let validate_board_workspace state args =
+  match Workspace.validate_expected_workspace
+          ~config:(Mcp_server.workspace_config state) args with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition -> Error "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed -> Error "workspace precondition failed"
+
 let runtime_prompt_assets_json ~prompts_dir ~embedded_files =
   let prefix = "prompts/" in
   let prefix_length = String.length prefix in
@@ -1240,7 +1247,7 @@ let add_routes ~sw ~clock router =
      These routes do not re-read the identity headers. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_vote"
-         (fun _state agent_name _req reqd ->
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1254,6 +1261,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = validate_board_workspace state args in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_vote" args in
@@ -1270,7 +1278,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
        with_tool_actor_auth ~tool_name:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
-         (fun _state agent_name _req reqd ->
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1284,6 +1292,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = validate_board_workspace state args in
              let* args = json_reject_duplicate_meta args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
@@ -1311,7 +1320,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_comment"
-         (fun _state agent_name _req reqd ->
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1325,6 +1334,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = validate_board_workspace state args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment" args in

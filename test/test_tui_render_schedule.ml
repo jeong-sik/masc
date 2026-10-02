@@ -1289,6 +1289,235 @@ let test_a_narrow_schedule_gives_up_columns_in_its_order () =
   check int "even the narrowest summary fits its allocation" 20
     (schedule_header_width narrowest)
 
+(* ── The Keeper detail's Automation tab ──
+
+   The tab's rows draw through the same table the Schedules list does. The
+   widths its renderer measures: the contract's status words (9, its widest),
+   the stamp format's clock (19), and the page's own outcome and actor
+   words. *)
+let kauto_page ~inner_width ~outcome_width ~by_width =
+  Schedule.kauto_layout ~inner_width ~status_width:9 ~clock_width:19
+    ~outcome_width ~by_width
+
+(* A page of one-shot requests and patrol recurrences, with the readings the
+   tab was rewritten to state on every row. *)
+let kauto_probe : Schedule.kauto_row_values =
+  { krow_mark = "\xe2\x97\x8f"
+  ; krow_status = "an-overlong-status-word"
+  ; krow_triggered = "2026-10-02 02:09:54"
+  ; krow_outcome = "turn_finished"
+  ; krow_received = "2026-10-02 02:09:54"
+  ; krow_recurrence = String.concat "" (List.init 6 (fun _ -> "every 300s "))
+  ; krow_by = "a-keeper-name-longer-than-its-column (automated_actor)"
+  ; krow_requested = "2026-09-24 03:55:20"
+  ; krow_what = "#38891 a summary longer than the column holds it"
+  }
+
+let kauto_empty : Schedule.kauto_row_values =
+  { krow_mark = ""
+  ; krow_status = ""
+  ; krow_triggered = ""
+  ; krow_outcome = ""
+  ; krow_received = ""
+  ; krow_recurrence = ""
+  ; krow_by = ""
+  ; krow_requested = ""
+  ; krow_what = ""
+  }
+
+let kauto_header_width layout =
+  Masc_tui_message_layout.display_width (Schedule.kauto_header_row ~layout)
+
+let kauto_shown (layout : Schedule.kauto_layout) =
+  layout.Schedule.k_columns.Masc_tui_table.shown
+
+let kauto_every_column =
+  Schedule.
+    [ Kauto_mark
+    ; Kauto_status
+    ; Kauto_triggered
+    ; Kauto_outcome
+    ; Kauto_received
+    ; Kauto_recurrence
+    ; Kauto_by
+    ; Kauto_requested
+    ; Kauto_what
+    ]
+
+(* An overlong reading, an empty row and a dressed row all sit on the
+   columns the header names -- the same promise every other table on the
+   screen makes, which is the one this tab did not make before. *)
+let test_kauto_rows_stay_on_the_header_columns () =
+  for inner_width = 68 to 240 do
+    let layout = kauto_page ~inner_width ~outcome_width:13 ~by_width:24 in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = kauto_header_width layout in
+    List.iter
+      (fun (what, values) ->
+        check int
+          (Printf.sprintf "inner %d: %s matches the header" inner_width what)
+          header
+          (width (Schedule.kauto_row ~styles:Schedule.kauto_plain_styles
+                     ~layout values)))
+      [ "an overlong row", kauto_probe; "an empty row", kauto_empty ];
+    check int
+      (Printf.sprintf "inner %d: a dressed row matches the header" inner_width)
+      header
+      (width
+         (Schedule.kauto_row ~layout
+            ~styles:
+              { Schedule.kstyle_mark = "\027[33m"
+              ; kstyle_status = "\027[33m"
+              ; kstyle_outcome = "\027[32m"
+              ; kstyle_recurrence = "\027[2m"
+              ; kstyle_by = "\027[2m"
+              }
+            kauto_probe))
+  done
+
+(* What a narrow pane gives up, first to go first: the storage context (BY,
+   then REQUESTED), then the outcome word, then the recurrence. The mark,
+   the state, the two clocks and the summary never go -- they are the four
+   facts the tab exists to state. *)
+let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
+  let at inner_width = kauto_shown (kauto_page ~inner_width ~outcome_width:13 ~by_width:24) in
+  check bool "at 68 only the four facts and the summary remain" true
+    (at 68
+     = Schedule.
+         [ Kauto_mark; Kauto_status; Kauto_triggered; Kauto_received; Kauto_what
+         ]);
+  check bool "at 81 the recurrence returns" true
+    (at 81
+     = Schedule.
+         [ Kauto_mark
+         ; Kauto_status
+         ; Kauto_triggered
+         ; Kauto_received
+         ; Kauto_recurrence
+         ; Kauto_what
+         ]);
+  check bool "at 95 the outcome follows" true
+    (at 95
+     = Schedule.
+         [ Kauto_mark
+         ; Kauto_status
+         ; Kauto_triggered
+         ; Kauto_outcome
+         ; Kauto_received
+         ; Kauto_recurrence
+         ; Kauto_what
+         ]);
+  check bool "at 115 the request clock returns" true
+    (at 115
+     = Schedule.
+         [ Kauto_mark
+         ; Kauto_status
+         ; Kauto_triggered
+         ; Kauto_outcome
+         ; Kauto_received
+         ; Kauto_recurrence
+         ; Kauto_requested
+         ; Kauto_what
+         ]);
+  check bool "at 140 the actor column completes the page" true
+    (at 140 = kauto_every_column);
+  (* Whatever the pane's width, the occurrence's two clocks stay on the row:
+     the columns the tab was rewritten for are the ones it never gives up. *)
+  for inner_width = 20 to 240 do
+    let header =
+      Schedule.kauto_header_row
+        ~layout:(kauto_page ~inner_width ~outcome_width:13 ~by_width:24)
+    in
+    check bool
+      (Printf.sprintf "inner %d: TRIGGERED stays named" inner_width)
+      true (holds "TRIGGERED" header);
+    check bool
+      (Printf.sprintf "inner %d: RECEIVED stays named" inner_width)
+      true (holds "RECEIVED" header)
+  done
+
+(* A valid comma-list cron is much wider than its column. It folds inside
+   that cell the way the Schedules list's recurrence does -- no continuation
+   rows, so a long cron cannot take another row's summary space, and neither
+   row leaves the header's columns. At 88 the recurrence is back on the row
+   (its column returns at 81) while the outcome, actor and request clock are
+   still gone, so the cron's fold is the one reading being fitted. *)
+let test_one_long_cron_folds_inside_its_own_cell () =
+  let cron = "cron 0,5,10,15,20,25,30,35,40,45,50,55 * * * * UTC" in
+  let layout = kauto_page ~inner_width:88 ~outcome_width:13 ~by_width:24 in
+  let width text = Masc_tui_message_layout.display_width text in
+  let header = kauto_header_width layout in
+  check bool "at 88 the recurrence is on the row" true
+    (List.mem Schedule.Kauto_recurrence
+       (layout.Schedule.k_columns.Masc_tui_table.shown));
+  let cron_row =
+    Schedule.kauto_row ~styles:Schedule.kauto_plain_styles ~layout
+      { kauto_probe with
+        krow_recurrence = cron
+      ; krow_what = "#38891 full sweep task"
+      }
+  in
+  let one_shot_row =
+    Schedule.kauto_row ~styles:Schedule.kauto_plain_styles ~layout
+      { kauto_empty with
+        krow_mark = "\xe2\x97\x8b"
+      ; krow_status = "scheduled"
+      ; krow_triggered = "2026-09-24 03:55:20"
+      ; krow_recurrence = "one_shot"
+      ; krow_what = "#36319 review registration"
+      }
+  in
+  check int "the cron row stays on the header's columns" header
+    (width cron_row);
+  check int "the one_shot row stays on the header's columns" header
+    (width one_shot_row);
+  (* The WHAT cell no longer says "cron", so this holds only if the folded
+     recurrence keeps the expression's own head: at twelve cells the middle
+     fold keeps its first three, "cro". *)
+  check bool "the cron row keeps its expression's head" true
+    (holds "cro" cron_row);
+  check bool "the one_shot row keeps its summary's head" true
+    (holds "#36319" one_shot_row)
+
+(* The mark a state draws. A word this build does not name keeps the
+   middot -- the mark says the pane did not classify it, the same promise
+   the word itself makes by rendering as itself. *)
+let test_the_state_mark_spells_the_liveness () =
+  let mark = Schedule.kauto_status_mark in
+  check string "scheduled waits" "\xe2\x97\x8b" (mark "scheduled");
+  check string "due is ripe" "\xe2\x97\x90" (mark "due");
+  check string "running is active" "\xe2\x97\x90" (mark "running");
+  check string "succeeded is done" "\xe2\x97\x8f" (mark "succeeded");
+  check string "failed is failed" "\xc3\x97" (mark "failed");
+  check string "cancelled is inert" "\xe2\x97\x8b" (mark "cancelled");
+  check string "expired is inert" "\xe2\x97\x8b" (mark "expired");
+  check string "an unknown word is unclassified" "\xc2\xb7" (mark "later")
+
+(* The rule that parts the live rows from the closed ones names the closed
+   statuses it holds, in the order they first appear on the page. *)
+let test_the_closed_rule_names_its_parts () =
+  check string "no parts, the title alone" "closed"
+    (Schedule.kauto_group_label ~title:"closed" []);
+  check string "the parts ride after the title"
+    "closed \xc2\xb7 2 succeeded \xc2\xb7 1 failed"
+    (Schedule.kauto_group_label ~title:"closed"
+       [ "2 succeeded"; "1 failed" ])
+
+(* The BY column is measured from the actors on the page, between a floor
+   that holds a short name and a cap that keeps the clocks' room. *)
+let test_the_by_column_is_measured_from_the_page () =
+  check int "an empty page keeps the floor"
+    Schedule.kauto_minimum_by_width (Schedule.kauto_by_width []);
+  check int "a short actor is held whole" 17
+    (Schedule.kauto_by_width [ "won-chik (system)" ]);
+  check int "a wide actor is held whole" 25
+    (Schedule.kauto_by_width
+       [ "won-chik (human_operator)"; "operator (human_operator)" ]);
+  check int "one very long actor stops at the cap"
+    Schedule.kauto_maximum_by_width
+    (Schedule.kauto_by_width
+       [ "e-masc-the-leader-and-its-kind (automated_actor)" ])
+
 (* The reading the probe puts in each column. Every schedule column is
    placed by its left edge. *)
 let schedule_marks : Schedule.schedule_row_values =
@@ -2703,6 +2932,19 @@ let () =
             test_the_schedule_at_the_widths_it_is_read_at
         ; test_case "a narrow schedule gives up columns in its order" `Quick
             test_a_narrow_schedule_gives_up_columns_in_its_order
+        ; test_case "keeper automation rows stay on the header columns" `Quick
+            test_kauto_rows_stay_on_the_header_columns
+        ; test_case "a narrow keeper automation page gives up columns in its order"
+            `Quick
+            test_a_narrow_kauto_page_gives_up_columns_in_its_order
+        ; test_case "one long cron folds inside its own cell" `Quick
+            test_one_long_cron_folds_inside_its_own_cell
+        ; test_case "the state mark spells the liveness" `Quick
+            test_the_state_mark_spells_the_liveness
+        ; test_case "the closed rule names its parts" `Quick
+            test_the_closed_rule_names_its_parts
+        ; test_case "the by column is measured from the page" `Quick
+            test_the_by_column_is_measured_from_the_page
         ; test_case "schedule columns hold their offsets" `Quick
             test_schedule_columns_hold_their_offsets
         ; test_case "system log message takes the remainder" `Quick

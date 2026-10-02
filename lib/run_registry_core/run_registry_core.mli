@@ -138,6 +138,11 @@ module Make (Payload : Payload) : sig
       A replayed running entry gets the subsystem's explicit restart verdict.
       As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
 
+  val replay_with_retained_history : string -> t
+  (** Retains JSONL history without automatic compaction while keeping completed
+      in-memory entries bounded. Only durable exact-terminal consumers need it.
+      Other registry callers retain {!replay}'s existing compaction behavior. *)
+
   val register
     :  t
     -> id:string
@@ -177,6 +182,11 @@ module Make (Payload : Payload) : sig
       hydrate them and report whether that read succeeded. [None] means the
       id is not retained. Unrelated mutations preserve this entry's identity. *)
   val get : t -> id:string -> entry option
+  val completed_from_log : t -> id:string -> (entry option, string) result
+  (** Strict streamed lookup of the latest registration lifecycle for one id.
+      A later register resets an earlier completion. Running/missing ids return
+      [Ok None]; malformed rows, partial tails and I/O failures return [Error].
+      Reads only the durable log, retaining one requested entry in memory. *)
   val cut_replay_log : execute:bool -> string -> cut_report
   (** Rewrites [path] from the state a replay of it produces. A hard-cut field
       leaves rows that can never decode again; [replay] declines to compact

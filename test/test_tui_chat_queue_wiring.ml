@@ -2653,7 +2653,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (40, 100);
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
@@ -2699,6 +2700,13 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     check int "the turn's rail has not closed" 0
       (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
          running_screen);
+    state.msg_tool_visibility <- Tui_types.Tools_compact;
+    let compact_screen = screen () in
+    check bool "compact status still reports the observed running turn" true
+      (Astring.String.is_infix ~affix:"기존 작업 처리 중" compact_screen);
+    check int "compact mode keeps the journal reply once" 1
+      (count "said" compact_screen);
+    state.msg_tool_visibility <- Tui_types.Tools_full;
     (* The next journal read brings the end of the turn: the log now stands
        for it, leaves the observed set, and is drawn as a settled block. *)
     let _ = Tui_types.turn_log_add_journaled running
@@ -2747,14 +2755,10 @@ let test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut () =
        (Tui_types.observed_logs_for_keeper state "alpha"))
 ;;
 
-(* A Working log that can no longer end is not an open block. The journal
-   with nothing more to say -- the settle-time failure the server never
-   journals (#33108), a restart's interruption, a pruned journal -- and the
-   loaded transcript saying the turn is over each take the log out of the
-   observed set, and the committed rows stand for the turn as they did
-   before observed blocks were drawn. Otherwise the block stayed open, its
-   rail never closing, beside the same turn's committed tool rows. *)
-let test_a_working_log_that_cannot_end_is_not_observed () =
+(* A durable final row can arrive before the journal's terminal page, and a
+   pruned journal can never supply that page. Both retain the earlier observed
+   content; completion and observation availability are independent facts. *)
+let test_partial_observation_survives_history_ending_and_unavailable_journal () =
   let observed state =
     List.map Tui_types.turn_log_request_id
       (Tui_types.observed_logs_for_keeper state "alpha")
@@ -2772,18 +2776,89 @@ let test_a_working_log_that_cannot_end_is_not_observed () =
   let state = fresh () in
   check (list string) "running: observed" [ "op-1" ] (observed state);
   Tui_types.remember_journal_unavailable state "op-1";
-  check (list string) "the journal has nothing more to say: not observed" []
+  check (list string) "unavailable journal retains the observed content" ["op-1"]
     (observed state);
+  let log = List.hd state.msg_settled_logs in
+  check bool "unavailability does not claim completion" false
+    (Tui_types.observed_log_has_ended state log);
+  check bool "unavailability is explicit" true
+    (Tui_types.observed_log_is_unavailable state log);
   let state = fresh () in
   state.msg_loaded <-
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_error
         ~text:"provider failed at settle" ~at:130. () ];
-  check (list string) "a failure on record: not observed" [] (observed state);
+  check (list string) "failure retains the earlier observed content" ["op-1"] (observed state);
+  check bool "the durable failure closes this observation" true
+    (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs));
   let state = fresh () in
   state.msg_loaded <-
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper
         ~text:"the recorded reply" ~at:130. () ];
-  check (list string) "a reply on record: not observed" [] (observed state)
+  check (list string) "reply retains the earlier observed content" ["op-1"] (observed state);
+  check bool "the durable reply closes this observation" true
+    (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
+;;
+
+let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (60, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935
+        ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    let occurrence : Live.tool_occurrence =
+      {stream_scope = 0; block_index = 0; provider_message_id = None
+      ; tool_call_id = Some "handoff-tool"} in
+    let log = settled_log ~request_id:"handoff"
+        [Live.Run_started; Live.Text "earlier progress stays visible"
+        ; Live.Tool_started {occurrence; tool_name = "read_handoff_evidence"}
+        ; Live.Tool_ended {occurrence}] in
+    Tui_types.hold_settled_log state log;
+    state.msg_loaded <-
+      [chat_entry ~request_id:"handoff" ~role:Tui_types.Message_keeper
+         ~text:"final answer stays once" ~at:130. ()];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let count needle text =
+      List.length (Astring.String.cuts ~sep:needle text) - 1
+    in
+    let assert_handoff label =
+      let text = screen () in
+      check int (label ^ ": earlier progress survives") 1
+        (count "earlier progress stays visible" text);
+      check int (label ^ ": final reply appears once") 1
+        (count "final answer stays once" text);
+      check bool (label ^ ": tools remain visible") true
+        (Astring.String.is_infix ~affix:"read_handoff_evidence" text);
+      check bool (label ^ ": an old partial block does not hide new progress") false
+        (Tui_types.observed_turn_text_drawn state "alpha")
+    in
+    assert_handoff "durable reply before ending journal";
+    Tui_types.remember_journal_unavailable state "handoff";
+    assert_handoff "unavailable journal";
+    (* The tool round separates earlier progress from the terminal stretch.
+       Reply_details replaces only the latter, even before finish. *)
+    Tui_types.turn_log_add ~now:130. log ~seq:None
+      (Live.Text "terminal stretch");
+    Tui_types.turn_log_add ~now:130. log ~seq:None
+      (visible_reply "final answer stays once");
+    Tui_types.hold_settled_log state log;
+    assert_handoff "reply details before finish";
+    Tui_types.turn_log_add ~now:131. log ~seq:None Live.Run_finished;
+    Tui_types.hold_settled_log state log;
+    assert_handoff "finished journal")
 ;;
 
 (* A journal log bound to the execution the pane's live turn is bound to is
@@ -2819,6 +2894,50 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
   check (list string) "and is not observed beside the live block" []
     (List.map Tui_types.turn_log_request_id
        (Tui_types.observed_logs_for_keeper state "alpha"))
+;;
+
+let test_hidden_partial_reply_cannot_remove_the_durable_reply () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935
+      ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
+      [Live.Run_started; Live.Text "still catching up"] in
+  let execution_id = live.sent_request.request_id in
+  let follower = Tui_types.turn_log_create ~keeper_name:"alpha"
+      ~request_id:"hidden-follower" ~started_at:100. in
+  List.iteri
+    (fun seq delta -> Tui_types.turn_log_add ~now:110. follower
+        ~seq:(Some seq) delta)
+    [Live.Run_started
+    ; Live.Batch_bound {operation_id = "hidden-follower"; execution_id}
+    ; visible_reply "durable final answer"];
+  Log.commit follower.Tui_types.tl_log;
+  Tui_types.hold_settled_log state follower;
+  state.msg_loaded <-
+    [chat_entry ~request_id:execution_id ~role:Tui_types.Message_keeper
+       ~text:"durable final answer" ~at:110. ()];
+  state.msg_live <- Some live.log;
+  state.msg_inflight <- [live];
+  let rows = Tui_types.chat_rows_for state "alpha" in
+  check (list string) "hidden follower cannot suppress the only final reply"
+    ["durable final answer"] (List.map (fun row -> row.Tui_types.me_text) rows);
+  check bool "unchanged ownership reuses the memo" true
+    (rows == Tui_types.chat_rows_for state "alpha");
+  state.msg_live <- None;
+  state.msg_inflight <- [];
+  let observed_rows = Tui_types.chat_rows_for state "alpha" in
+  check bool "observed ownership invalidates the rows memo" false
+    (rows == observed_rows);
+  check int "visible follower now owns the final reply" 0 (List.length observed_rows);
+  state.msg_live <- Some live.log;
+  state.msg_inflight <- [live];
+  let reclaimed_rows = Tui_types.chat_rows_for state "alpha" in
+  check bool "reclaimed ownership invalidates the rows memo" false
+    (observed_rows == reclaimed_rows);
+  check (list string) "durable final reply returns when follower is hidden"
+    ["durable final answer"]
+    (List.map (fun row -> row.Tui_types.me_text) reclaimed_rows)
 ;;
 
 let fresh_state_with_running_log () =
@@ -3973,7 +4092,8 @@ let test_the_sending_rows_show_an_age () =
        ~binding_name:"keeper_message_inflight_rows"
        ~callee:"Masc_tui_message_layout.age_text" > 0);
   List.iter (fun keeper_name ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_inflight <- [inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started]];
     let summary ~now =
@@ -3984,7 +4104,17 @@ let test_the_sending_rows_show_an_age () =
     check bool "three-second request displays its age" true
       (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
     check bool "thirteen-minute request displays its changed age" true
-      (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.)))
+      (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.));
+    state.msg_tool_visibility <- Tui_types.Tools_compact;
+    if keeper_name = "alpha" then begin
+      check (list (pair bool string)) "compact mode has no duplicate own request row" []
+        (Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now:5.);
+      check (list string) "compact status retains the running request" ["기존 작업 처리 중"]
+        (List.map Masc_tui_answering.chat_activity_row_text
+           (Tui_types.keeper_message_activity_rows state))
+    end else
+      check bool "compact mode retains the other Keeper request age" true
+        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.)))
     ["alpha"; "beta"]
 ;;
 
@@ -4537,10 +4667,14 @@ let () =
             test_an_observed_running_turn_is_drawn_from_its_journal
         ; test_case "the pane's own turn is live in flight and observed once cut" `Quick
             test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut
-        ; test_case "a Working log that cannot end is not observed" `Quick
-            test_a_working_log_that_cannot_end_is_not_observed
+        ; test_case "partial observation survives history ending and unavailable journal" `Quick
+            test_partial_observation_survives_history_ending_and_unavailable_journal
+        ; test_case "observed handoff retains progress and one final reply" `Quick
+            test_observed_history_handoff_keeps_progress_and_one_final_reply
         ; test_case "a journal log of the live execution is not observed" `Quick
             test_a_journal_log_of_the_live_execution_is_not_observed
+        ; test_case "hidden partial reply cannot remove durable final reply" `Quick
+            test_hidden_partial_reply_cannot_remove_the_durable_reply
         ; test_case "a stream frame asks for a journal read from where the record ends" `Quick
             test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends
         ; test_case "a wanted journal read is remembered once and taken once" `Quick

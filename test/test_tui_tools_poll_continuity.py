@@ -16,7 +16,16 @@ import test_tui_keyboard_input as h
 # this a change to the drawn text below reaches main with no scenario run.
 # The two surface titles are masc_tui_render.ml's, the broker row
 # ("Async broker") masc_tui_render_tools.ml's.
-SOURCE_MODULES = ('bin/masc_tui_render.ml', 'bin/masc_tui_render_tools.ml', 'lib/tui_decode_skill_evidence.ml', 'lib/tui_decode_skill_evidence.mli', 'lib/tui_decode_tools.ml', 'lib/tui_decode_tools.mli', 'lib/tui_decode_fields.ml', 'lib/tui_decode_fields.mli')
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_tools.ml",
+    "lib/tui_decode_tools.ml",
+    "lib/tui_decode_tools.mli",
+    "lib/tui_decode_fields.ml",
+    "lib/tui_decode_fields.mli",
+    "lib/tui_decode_skill_evidence.ml",
+    "lib/tui_decode_skill_evidence.mli",
+)
 
 
 def inventory(marker):

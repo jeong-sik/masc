@@ -1,0 +1,13 @@
+{
+  "command": [
+    "npx",
+    "tsc",
+    "--noEmit",
+    "--pretty",
+    "false"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume/dashboard",
+  "started_at": "2026-09-30T15:06:15.900137+00:00",
+  "finished_at": "2026-09-30T15:06:35.638080+00:00",
+  "exit_code": 0
+}

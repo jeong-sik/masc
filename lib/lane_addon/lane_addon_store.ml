@@ -345,10 +345,13 @@ let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protec
       let stat = Unix.stat path in
       if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
       else
+        (* No new receipt-size policy: use the observed file size to reject
+           growth between the path read and the exact descriptor verification. *)
         let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
           ~max_bytes:stat.Unix.st_size path in
         Ok (Some (Yojson.Safe.from_string bytes)))
 let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -381,17 +384,6 @@ let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
         | Error detail -> Some detail in
       Error (Publication_failed {failure;verification_error})
 let append_observation = append_observation_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
-let record_path t instance_id seq =
-  Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
-let decode_record bytes =
-  protect (fun () ->
-    match Yojson.Safe.from_string bytes with
-    | `Assoc fields ->
-        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
-         | Some sources, Some json ->
-             let* output = output_of_json json in Ok (sources, output)
-         | _ -> Error "invalid retained observation")
-    | _ -> Error "invalid retained observation")
 let observations t ~instance_id =
   let* values = read_directory t (observation_dir instance_id) in
   let rec loop acc = function
@@ -403,6 +395,31 @@ let observations t ~instance_id =
          | _ -> Error "invalid retained observation")
     | _ -> Error "invalid retained observation"
   in loop [] values
+(* The sequence is part of the row identity issued by the host, so evidence
+   selection can read exactly its files without scanning unrelated history. *)
+let sequence_of_row ~instance_id id =
+  let prefix = instance_id ^ "/" in
+  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
+  else
+    let offset = String.length prefix in
+    match String.index_from_opt id offset '/' with
+    | None -> Error "row identity has no observation sequence"
+    | Some ending ->
+        let digits = String.sub id offset (ending - offset) in
+        (match int_of_string_opt digits with
+         | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
+         | _ -> Error "row identity has an invalid observation sequence")
+let record_path t instance_id seq =
+  Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
+let decode_record bytes =
+  protect (fun () ->
+    match Yojson.Safe.from_string bytes with
+    | `Assoc fields ->
+        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
+         | Some sources, Some json ->
+             let* output = output_of_json json in Ok (sources, output)
+         | _ -> Error "invalid retained observation")
+    | _ -> Error "invalid retained observation")
 let highwater t instance_id = protect (fun () ->
   let directory = Filename.concat t.root (observation_dir instance_id) in
   match Fs_compat.exact_path_kind directory with
@@ -451,18 +468,6 @@ let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t
   let* _,output = decode_record bytes in
   Ok output
 let read_observation = read_observation_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-let sequence_of_row ~instance_id id =
-  let prefix = instance_id ^ "/" in
-  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
-  else
-    let offset = String.length prefix in
-    match String.index_from_opt id offset '/' with
-    | None -> Error "row identity has no observation sequence"
-    | Some ending ->
-        let digits = String.sub id offset (ending - offset) in
-        match int_of_string_opt digits with
-        | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
-        | _ -> Error "row identity has an invalid observation sequence"
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
   let* found = highwater t instance_id in

@@ -158,9 +158,31 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       (request ~mode:"create" ~file_name:"own.toml" bytes) in
     check bool "Keeper can save its own source without granting shared read authority" true
       (Tool_result.is_success own);
-    check bool "operator declaration writer remains available" true
-      (Result.is_ok (Runtime.save_declaration ~config
-        (request ~mode:"create" ~file_name:"operator.toml" bytes))))
+    let duplicate = Runtime.save_declaration ~config
+      (request ~mode:"create" ~file_name:"operator.toml" bytes) in
+    (match duplicate with
+     | Error {Editor.code=Invalid_declaration;message;_} ->
+         check string "duplicate installation is rejected before writing"
+           "another declaration has the same installation id" message
+     | Error error -> fail error.Editor.message
+     | Ok _ -> fail "operator create accepted a duplicate installation");
+    check bool "duplicate rejection creates no operator document" false
+      (Sys.file_exists (Filename.concat directory "operator.toml"));
+    let operator_bytes = Printf.sprintf {|id="operator-fusion"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
+|} run_id in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"another-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let operator = Runtime.save_declaration ~config
+      (request ~mode:"create" ~file_name:"operator.toml" operator_bytes) |> unwrap in
+    check string "operator declaration writer remains available" "created"
+      (member "write" operator |> text "state");
+    check string "operator declaration preserves its source bytes" operator_bytes
+      (read config directory "operator.toml" |> text "source_text"))
 
 let test_operator_reassignment_revokes_old_document_owner () =
   with_fixture (fun _clock config directory _root _started ->

@@ -475,7 +475,7 @@ let test_goal_transition_uses_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"goal-transition-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let goal =
     match
       Goal_store.upsert_goal config
@@ -488,20 +488,33 @@ let test_goal_transition_uses_authenticated_actor () =
     | Ok (_, `updated _) -> fail "goal fixture unexpectedly updated an existing row"
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
-  let status, _ =
+  let workspace base root =
+    `Assoc [ "base_path", `String base; "masc_root", `String root ] in
+  let current = workspace
+      (Unix.realpath config.Masc.Workspace.base_path)
+      (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
+  let foreign_base = Filename.concat base_path "replacement" in
+  let foreign = workspace foreign_base (Filename.concat foreign_base ".masc") in
+  let post expected_workspace =
     dispatch_json ~router ~token
       ~path:"/api/v1/tools/masc_goal_transition"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
       ~body:
         (Yojson.Safe.to_string
            (`Assoc
-              [ "goal_id", `String goal.id
+              [ "expected_workspace", expected_workspace
+              ; "goal_id", `String goal.id
               ; "action", `String "drop"
               ; "note", `String "route actor audit"
               ]))
       ()
   in
-  check int "goal transition accepted" 200 status;
+  List.iter (fun expected_workspace ->
+    let status, _ = post expected_workspace in
+    check int "foreign or invalid workspace cannot transition goal" 400 status)
+    [ foreign; `Null ];
+  let status, _ = post current in
+  check int "goal transition accepted in its own workspace" 200 status;
   let events_path =
     Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
   in

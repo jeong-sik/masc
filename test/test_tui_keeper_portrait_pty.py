@@ -12,6 +12,7 @@ import threading
 import json
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -91,7 +92,7 @@ class ItemWorkspaceFixture:
     The real route's workspace comparison is covered by the router suite.
     """
 
-    def __init__(self, response):
+    def __init__(self, response: h.HttpResponse | Callable[[], h.HttpResponse]):
         self.response = response
         self.base_path: str | None = None
         self.served_base_path: str | None = None
@@ -305,10 +306,10 @@ def portrait_as_pixels(binary: str) -> None:
 def item_roster_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
     roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
-    roster["candle"] = {"status": "ready", "issued_milli": "12500", "burned_milli": "0", "circulating_milli": "12500"}
+    roster.pop("candle", None)
     for row in roster["keepers"]:
-        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
-        row["candle_account_revision"] = "a" * 64
+        row.pop("candle_balance_milli", None)
+        row.pop("candle_account_revision", None)
     return fixtures
 
 
@@ -436,18 +437,12 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         terminal_cols=COLUMNS,
     )
 
-def item_account_follows_roster_revision(binary: str) -> None:
-    # Synthetic authorized currency observations exercise refresh wiring; the
-    # shared production Keeper roster deliberately omits these private fields.
-    fixtures = h.keeper_runtime_http_fixtures()
+def item_account_follows_private_changes(binary: str) -> None:
+    # Public discovery stays unchanged while the private account changes.
+    fixtures = item_roster_fixtures()
     roster_path = "/api/v1/gate/keepers?detailed=true"
     roster = copy.deepcopy(fixtures[roster_path][1])
     roster_polls = []
-    roster["candle"] = {"status": "ready", "issued_milli": "12500",
-                        "burned_milli": "0", "circulating_milli": "12500"}
-    for row in roster["keepers"]:
-        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
-        row["candle_account_revision"] = "a" * 64
     def read_roster():
         roster_polls.append(copy.deepcopy(roster))
         return 200, copy.deepcopy(roster)
@@ -460,10 +455,21 @@ def item_account_follows_roster_revision(binary: str) -> None:
                     **({"price_milli": "0"} if item == "glasses" else {})}
                    for item, slot in ITEM_CATALOG]}
     calls = []
+    hold_next = [False]
+    held, release = threading.Event(), threading.Event()
 
     def read_account():
-        calls.append(copy.deepcopy(account))
-        return 200, copy.deepcopy(account)
+        value = copy.deepcopy(account)
+        calls.append(value)
+        if hold_next[0]:
+            hold_next[0] = False
+            held.set()
+            def chunks():
+                if not release.wait(timeout=30):
+                    raise AssertionError("private account fixture release missing")
+                yield json.dumps(value).encode()
+            return h.StreamingHttpResponse(chunks)
+        return 200, value
 
     items = ItemWorkspaceFixture(read_account)
     fixtures["/api/v1/keepers/alpha/items"] = h.PathHttpResponse(items.read)
@@ -475,9 +481,6 @@ def item_account_follows_roster_revision(binary: str) -> None:
 
     def publish_revision(value):
         account["account_revision"] = value * 64
-        for row in roster["keepers"]:
-            if row["name"] == "alpha":
-                row["candle_account_revision"] = value * 64
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
@@ -493,17 +496,35 @@ def item_account_follows_roster_revision(binary: str) -> None:
         publish_revision("c")
         await_text(process, fd, output, b"0.001 owned")
         capture_item_screen(output, "automatic-price-change")
+        previous_calls = len(calls)
         previous_polls = len(roster_polls)
         assert h.wait_for_fixture_state(process, fd, output,
             lambda: len(roster_polls) > previous_polls, timeout=10.0), \
             "ordinary roster cadence stopped after the price change"
         h.drain_until_quiet(process, fd, output)
-        assert len(calls) == 3, f"unchanged roster revisions reread the account: {len(calls)}"
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: len(calls) > previous_calls, timeout=10.0), \
+            "unchanged public roster stopped refreshing the private account"
+        await_text(process, fd, output, b"0.001 owned")
         assert all(reading["balance_milli"] == "12500" for reading in calls)
+        # A slow private response keeps its ticket across ordinary roster ticks.
+        account["balance_milli"] = "13000"
+        hold_next[0] = True
+        try:
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10.0)
+            pending_calls = len(calls)
+            pending_polls = len(roster_polls)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(roster_polls) >= pending_polls + 2, timeout=10.0)
+            assert len(calls) == pending_calls, "roster refresh superseded a pending private read"
+            release.set()
+            await_text(process, fd, output, b"Balance 13.000 Candle")
+        finally:
+            release.set()
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary,
-        description="an open Item account follows free purchase and price-only roster revisions",
+        description="an open Item account follows private purchases and prices with unchanged public discovery",
         # The harness defaults to a 60-second cadence for keyboard tests;
         # this scenario specifically exercises the synthetic refresh cadence.
         interact=interact, http_fixtures=fixtures, prepare_workspace=items.prepare, terminal_cols=COLUMNS, refresh=0.2)
@@ -575,21 +596,27 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             h.drain_until_quiet(process, fd, output)
             assert b"Balance 90.000" not in output[start:], \
                 "late first-A account became current after A/B/A"
-            # Repeated successful probes for the same canonical workspace do
-            # not invalidate the current account or manufacture another read.
+            # Successful roster observations refresh the private account even
+            # when the canonical workspace and public discovery are unchanged.
+            calls_before_refresh = held.calls
             reads = len(health_reads)
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: len(health_reads) >= reads + 2, timeout=10.0)
             h.drain_until_quiet(process, fd, output)
             assert any(b"Balance 13.000" in row for row in last_frame_rows(output).values())
-            assert held.calls == 2
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: held.calls > calls_before_refresh, timeout=10.0)
             phase[0] = "unread"
             await_frame(process, fd, output, b"MASC Keepers")
             assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
                            for row in last_frame_rows(output).values()), "unread health retained account authority"
+            calls_after_withdrawal = held.calls
+            unread_probes = len(health_reads)
             os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(health_reads) >= unread_probes + 2, timeout=10.0)
             h.drain_until_quiet(process, fd, output)
-            assert held.calls == 2, "unconfirmed workspace launched an Item request"
+            assert held.calls == calls_after_withdrawal, "unconfirmed workspace launched an Item request"
             reads = len(health_reads)
             phase[0] = "a"
             assert h.wait_for_fixture_state(process, fd, output,
@@ -671,7 +698,7 @@ def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
     )
 
 
-def item_account_requires_matching_roster_revision(binary: str) -> None:
+def item_account_refreshes_without_public_currency(binary: str) -> None:
     fixtures = item_roster_fixtures()
     roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
     fixtures["/api/v1/gate/keepers?detailed=true"] = lambda: (200, roster)
@@ -691,49 +718,28 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
         h.resize_and_wait(process, fd, output, rows=40, columns=200, needle=INFO_TAB)
         h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
         await_frame(process, fd, output, b"Balance 12.500 Candle")
-        # The Item account changes first, while the current roster still owns
-        # revision A and its previous equipment. B cannot publish beside A.
+        # The public roster has no private account fields. The next accepted
+        # roster refresh wakes the selected authenticated account reader.
         items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="13000")
-        os.write(fd, b"r")
-        await_frame(process, fd, output, b"Account unavailable:")
-        assert not any(b"Balance 13.000" in line or b"Balance 12.500" in line
-                       for line in last_frame_rows(output).values()), last_frame_rows(output)
-        # A newly observed roster owns B. Its visible runtime ID is a response
-        # barrier, rather than waiting for a timer or a tab header alone.
-        for row in roster["keepers"]:
-            row["candle_account_revision"] = "b" * 64
-            if row["name"] == "alpha":
-                row["runtime_id"] = "revision-b.current"
-                row["candle_balance_milli"] = "13000"
-        # Stay on Items: accepting roster B must launch its replacement read
-        # without a second key press or leaving/re-entering the tab.
         await_frame(process, fd, output, b"Balance 13.000 Candle")
-        assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
-        # Passive decay changes the observed balance without changing the
-        # durable account revision. It must refresh Items while the tab stays open.
+        assert "candle" not in roster
+        assert all("candle_account_revision" not in row for row in roster["keepers"])
+        # Passive decay keeps the revision stable but refreshes the balance.
         items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="12000")
-        for row in roster["keepers"]:
-            if row["name"] == "alpha":
-                row["candle_balance_milli"] = "12000"
         await_frame(process, fd, output, b"Balance 12.000 Candle")
         assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
-        # Turning Candle off cannot leave B's ready Item account alongside an
-        # off roster. The next current reading withdraws it before a new GET.
-        roster["candle"] = {"status": "off"}
-        for row in roster["keepers"]:
-            row["candle_balance_milli"] = None
-            row["candle_account_revision"] = None
-        await_frame(process, fd, output, b"Account unavailable:")
-        assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
+        items.response = 200, {"status": "off", "keeper": "alpha", "account_revision": None}
+        await_frame(process, fd, output, b"Candle off")
+        assert not any(b"Balance 12.000" in line for line in last_frame_rows(output).values())
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary,
-        description="Item account publishes only beside its matching current roster revision",
+        description="Item account refreshes from its authenticated response while public roster omits currency",
         interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=200)
 
 
-def item_account_withdraws_unread_authority(binary: str) -> None:
+def item_account_withdraws_unread_authority(binary: str, boundary="identity") -> None:
     fixtures = item_roster_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
@@ -745,11 +751,12 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
 
     def health():
         identity["probes"] += 1
-        value = ({"error": "identity unread"} if identity["unread"] else
+        unavailable = identity["unread"] and boundary == "identity"
+        value = ({"error": "identity unread"} if unavailable else
                  {"paths": {"effective_base_path": identity["base"],
                             "effective_masc_root": os.path.join(identity["base"], ".masc")},
                   "state_ready": True})
-        return h.RawHttpResponse(503 if identity["unread"] else 200,
+        return h.RawHttpResponse(503 if unavailable else 200,
                                  json.dumps(value).encode(), content_type="application/json")
 
     def items():
@@ -765,7 +772,15 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             served.set()
         return h.StreamingHttpResponse(chunks)
 
+    public_response = fixtures["/api/v1/gate/keepers?detailed=true"]
+    assert isinstance(public_response, tuple)
+    public_roster = public_response[1]
+    def roster():
+        if identity["unread"] and boundary == "roster":
+            return h.RawHttpResponse(503, b'{"error":"roster unread"}', content_type="application/json")
+        return 200, public_roster
     fixtures["/health"] = health
+    fixtures["/api/v1/gate/keepers?detailed=true"] = roster
     fixtures["/api/v1/keepers/alpha/items"] = items
 
     def frame(process, fd, output, predicate):
@@ -786,20 +801,27 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
             h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
-            frame(process, fd, output, lambda text:
-                  b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
-            recover(process, fd, output)
+            if boundary == "identity":
+                frame(process, fd, output, lambda text:
+                      b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
+            else:
+                frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             balance[0] = "13000"
-            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
+            recover(process, fd, output)
+            if boundary == "identity":
+                reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
+            else:
+                frame(process, fd, output, lambda text: b"Balance 13.000 Candle" in text)
             arm[0] = True
             os.write(fd, b"r")
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
-            frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
-            recover(process, fd, output)
-            # Release before any new Item read: otherwise the new read's
-            # generation alone would supersede this response and hide a
-            # missing authority-boundary invalidation.
+            if boundary == "identity":
+                frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
+            else:
+                frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            # Keep authority unread until the late response has settled.
+            # Roster failure leaves health ready and must revoke the detail ticket.
             start = len(output)
             release.set()
             assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
@@ -808,16 +830,23 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                 lambda: identity["probes"] >= probes + 2, timeout=10)
             assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            assert b"MASC Keepers" in text
+            if boundary == "identity":
+                assert b"MASC Keepers" in text
+            else:
+                assert b"Account unavailable:" in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
             balance[0] = "14000"
-            reopen_alpha_items(process, fd, output, b"Balance 14.000 Candle")
+            recover(process, fd, output)
+            if boundary == "identity":
+                reopen_alpha_items(process, fd, output, b"Balance 14.000 Candle")
+            else:
+                frame(process, fd, output, lambda text: b"Balance 14.000 Candle" in text)
             os.write(fd, b"q")
         finally:
             release.set()
 
-    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+    h.run_terminal_scenario(binary, description=f"Item balances and pending reads lose unread {boundary} authority",
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
@@ -838,11 +867,12 @@ if __name__ == "__main__":
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
-    item_account_requires_matching_roster_revision(binary)
+    item_account_refreshes_without_public_currency(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
-    item_account_follows_roster_revision(binary)
+    item_account_follows_private_changes(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
     item_account_withdraws_unread_authority(binary)
-    print("tui keeper portrait: PASS (10 scenarios)")
+    item_account_withdraws_unread_authority(binary, boundary="roster")
+    print("tui keeper portrait: PASS (11 scenarios)")

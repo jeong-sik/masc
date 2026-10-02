@@ -434,8 +434,10 @@ let selected_source_path view =
           if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
           then Some d.source_path else None) config.declarations) in
       let path = match view.focus, view.screen with
-        | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
-        | Instances, Overview ->
+        | Configurations, Overview when view.presentation = Technical ->
+            Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | Configurations, Detail _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | (Configurations | Instances), Overview ->
             (match at_cursor (overview_entries snapshot) view.instance_cursor with
              | Some (`Declaration (_, declaration)) -> Some declaration.source_path
              | Some (`Instance _) | None -> instance_path)

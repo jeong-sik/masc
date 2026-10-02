@@ -954,7 +954,99 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
      && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
 
+let lane_summary_hidden_configurations_focus_aligns_toml_target () =
+  let worker : UI.instance = {
+    id="worker-a"; incarnation="worker-a"; run_id="run-1"; addon_id="addon-a";
+    title="Worker A"; revision="1"; phase=UI.Row.Attached; observation_seq=1;
+    rows_count=1; source_path=Some "/config/A.toml";
+    binding=`Assoc []; outputs=[]; skills_directory=None;
+    action_schema=None; binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty
+  } in
+  let decl_a : UI.declaration = {
+    source_path="/config/A.toml"; installation_id=Some "A";
+    desired=Some "1"; applied=Some "1"; instance_id=Some "worker-a";
+    issues=[]; origin=UI.Parsed_declaration
+  } in
+  let decl_c : UI.declaration = {
+    source_path="/config/C.toml"; installation_id=Some "C";
+    desired=Some "1"; applied=Some "1"; instance_id=None;
+    issues=[]; origin=UI.Parsed_declaration
+  } in
+  let snapshot : UI.snapshot = {
+    instances=[worker];
+    configuration=Some {
+      directory="/config";
+      complete=true;
+      declarations=[decl_a; decl_c];
+    };
+    output={rows=[]; coverage=[]};
+    complete=None;
+  } in
+  let view = { UI.initial with snapshot = Some snapshot } in
+  check int "overview has 2 entries" 2 (UI.overview_count snapshot);
+  let view_c = { view with instance_cursor = 1 } in
+  let opened = UI.open_selected_instance view_c in
+  check bool "opening declaration C enters Technical presentation" true
+    (opened.presentation = UI.Technical);
+  check bool "opening declaration C focuses Configurations" true
+    (opened.focus = UI.Configurations);
+  check int "configuration_cursor is 1 (C)" 1 opened.configuration_cursor;
+  check (option string) "in Technical, selected declaration is C.toml"
+    (Some "/config/C.toml") (UI.selected_source_path opened);
+
+  (* 1. Verify production UI.toggle_flow transitions: focus is normalized to Instances,
+        and Flow selection clamps cursor to active worker A (0) *)
+  let step1 = UI.toggle_flow opened in
+  check bool "toggle_flow enters Flow presentation" true (step1.presentation = UI.Flow);
+  check bool "toggle_flow normalizes focus to Instances" true (step1.focus = UI.Instances);
+  check int "Flow presentation clamps cursor to worker A (0)" 0 step1.instance_cursor;
+
+  let step2 = UI.toggle_flow step1 in
+  check bool "second toggle_flow restores Summary presentation" true (step2.presentation = UI.Summary);
+  check bool "focus remains Instances" true (step2.focus = UI.Instances);
+  check int "cursor remains at 0 in Summary" 0 step2.instance_cursor;
+  check (option string) "Summary at cursor 0 selects A.toml"
+    (Some "/config/A.toml") (UI.selected_source_path step2);
+
+  (* Moving down (j) moves visible selection to C (1) *)
+  let moved_down = UI.move_instance step2 1 in
+  check int "moving down moves visible selection to C (1)" 1 moved_down.instance_cursor;
+  check (option string) "moving down in Summary selects visible C.toml"
+    (Some "/config/C.toml") (UI.selected_source_path moved_down);
+
+  (* 2. Verify Defense in Depth in selected_source_path:
+        Even if stale hidden Configurations focus remained in Summary (e.g. from unnormalized f),
+        selected_source_path in Summary follows visible instance_cursor (C.toml),
+        instead of following hidden configuration_cursor (A.toml) *)
+  let buggy_f (v : UI.t) : UI.t =
+    let presentation = if v.presentation = UI.Flow then UI.Summary else UI.Flow in
+    { v with presentation; document_key = None; scroll = 0 } in
+  let buggy_step1 = buggy_f opened in
+  let buggy_step2 = buggy_f buggy_step1 in
+  check bool "buggy f left focus in Configurations" true (buggy_step2.focus = UI.Configurations);
+  let buggy_k = { buggy_step2 with configuration_cursor = 0 } in
+  check int "visible selection is still C (1)" 1 buggy_k.instance_cursor;
+  check int "hidden configuration cursor changed to 0" 0 buggy_k.configuration_cursor;
+  check (option string) "defense in depth: Summary selects visible C.toml despite stale Configurations focus"
+    (Some "/config/C.toml") (UI.selected_source_path buggy_k);
+
+  (* 3. Verify Technical declaration editing remains preserved *)
+  let tech_c = { opened with configuration_cursor = 1 } in
+  check (option string) "Technical retains explicit declaration C editing"
+    (Some "/config/C.toml") (UI.selected_source_path tech_c);
+  let tech_a = { opened with configuration_cursor = 0 } in
+  check (option string) "Technical retains explicit declaration A editing"
+    (Some "/config/A.toml") (UI.selected_source_path tech_a);
+
+  (* 4. Verify Detail incarnation pinning remains preserved *)
+  let detail_a = UI.open_selected_instance view in
+  check (option string) "Detail retains pinned worker A editing"
+    (Some "/config/A.toml") (UI.selected_source_path detail_a)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "lane summary hidden configurations focus aligns toml target" `Quick
+    lane_summary_hidden_configurations_focus_aligns_toml_target;
   test_case "declared results show body before activity and preserve raw evidence" `Quick
     declared_results_show_body_before_activity_and_keep_raw_evidence;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;

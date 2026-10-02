@@ -8174,8 +8174,11 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") reading_note timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s · %s · %d need memory · read %s  %s"
-          (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper") s.mhs_starving_keepers
+        Printf.sprintf "%s · %s · %s need memory · read %s  %s"
+          (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper")
+          (match current_memory_starving_count s with
+           | Some count -> string_of_int count
+           | None -> "? (unread rows)")
           (let tm = Unix.localtime s.mhs_generated_at in
            Printf.sprintf "%04d-%02d-%02d %02d:%02d"
              (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday

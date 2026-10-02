@@ -7953,3 +7953,13 @@
  (name test_server_keeper_build_maintenance)
  (modules test_server_keeper_build_maintenance)
  (libraries alcotest masc masc_server masc_test_deps unix))
+
+(rule
+ (alias runtest-test_tui_memory_recall_state_pty)
+ (deps test_tui_memory_recall_state_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_recall_state_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_recall_state_pty)))

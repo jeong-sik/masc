@@ -82,7 +82,7 @@ try {
   await verifyPanel(0)
   async function verifyMobileLayout() {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
-    if (overflow > 1) throw new Error(`served dashboard overflows 360px by ${overflow}px`)
+    if (overflow > 1) throw new Error(`served mobile dashboard overflows by ${overflow}px`)
     const widths = await page.locator('.kw-detail-alert-strip').evaluate(strip => ({
       alert: strip.getBoundingClientRect().width,
       body: strip.parentElement.getBoundingClientRect().width,
@@ -104,8 +104,8 @@ try {
     .getByText('보유 1 / 18개', { exact: true }).waitFor()
   await verifyMobileLayout()
   await capture('item-server-mobile')
-  // Reload at the narrow viewport so entry uses the mobile command menu,
-  // with fresh application state rather than a retained desktop detail.
+  // Reload at the narrow viewport and verify the mobile command menu is
+  // visible and unclipped before entering Item from fresh application state.
   const mobileRequestStart = requests.length
   stage = 'fresh-document-mobile-entry'
   await page.reload()
@@ -121,23 +121,98 @@ try {
   await verifyPanel(mobileRequestStart)
   await verifyMobileLayout()
   await capture('item-server-mobile-entry')
-  // Preserve the independently reachable composer command entry as well.
-  const composerRequestStart = requests.length
+  // The composer's command list remains a second visible entry. Exercise it
+  // on a separate fresh document so each path owns its real account request.
   stage = 'fresh-document-mobile-composer-entry'
+  const composerRequestStart = requests.length
   await page.reload()
   await page.getByRole('textbox', { name: '메시지 입력', exact: true }).fill('/detail')
   const commands = page.getByRole('listbox', { name: 'keeper slash commands', exact: true })
   await commands.getByRole('option', { name: /\/detail\b/ }).click()
   await page.getByRole('tab', { name: '아이템', exact: true }).click()
+  stage = 'fresh-document-mobile-composer-item-account'
   await verifyPanel(composerRequestStart)
   await verifyMobileLayout()
   await capture('item-server-mobile-composer-entry')
+  stage = 'fresh-document-landscape-entry'
+  await page.setViewportSize({ width: 740, height: 360 })
+  const landscapeRequestStart = requests.length
+  await page.reload()
+  await page.getByRole('button', { name: 'keeper 명령', exact: true }).click()
+  const menu = page.getByRole('menu')
+  const toggle = page.getByRole('button', { name: 'keeper 명령', exact: true })
+  async function verifyUserMenuScroll() {
+    const before = await menu.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      return { top: element.scrollTop, extent: element.scrollHeight - element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    })
+    if (!['auto', 'scroll'].includes(before.overflowY)) {
+      throw new Error('Landscape menu does not allow user scrolling')
+    }
+    if (before.extent <= 0) throw new Error('Landscape fixture does not exercise menu overflow')
+    await page.mouse.move(before.x, before.y)
+    await page.mouse.wheel(0, before.extent)
+    await page.waitForFunction(({ top }) => {
+      const element = document.querySelector('[role="menu"]')
+      return element && element.scrollTop > top
+    }, { top: before.top })
+    await page.waitForFunction(() => {
+      const button = document.querySelector('[data-testid="kw-chat-command-config"]')
+      if (!button) return false
+      const box = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))
+    })
+    const fits = await menu.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      const chat = element.closest('.kw-chat').getBoundingClientRect()
+      const viewport = window.visualViewport
+      const top = viewport ? viewport.offsetTop : 0
+      const bottom = viewport ? top + viewport.height : innerHeight
+      return box.top >= Math.max(top, chat.top) - 1
+        && box.bottom <= Math.min(bottom, chat.bottom) + 1
+        && element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + 2))
+        && element.contains(document.elementFromPoint(box.left + box.width / 2, box.bottom - 2))
+    })
+    if (!fits) throw new Error('Landscape command menu exceeds its clipping pane')
+    const toggleReachable = await toggle.evaluate(button => {
+      const box = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))
+    })
+    if (!toggleReachable) throw new Error('Landscape menu toggle is clipped')
+  }
+  // A hidden overflow container is programmatically scrollable, but cannot
+  // satisfy this user-input contract. Keep the production geometry unchanged.
+  const originalOverflow = await menu.evaluate(element => ({
+    value: element.style.getPropertyValue('overflow-y'),
+    priority: element.style.getPropertyPriority('overflow-y'),
+  }))
+  await menu.evaluate(element => element.style.setProperty('overflow-y', 'hidden', 'important'))
+  let hiddenRejected = false
+  try { await verifyUserMenuScroll() } catch (error) {
+    if (error.message !== 'Landscape menu does not allow user scrolling') throw error
+    hiddenRejected = true
+  } finally {
+    await menu.evaluate((element, original) => {
+      if (original.value) element.style.setProperty('overflow-y', original.value, original.priority)
+      else element.style.removeProperty('overflow-y')
+    }, originalOverflow)
+  }
+  if (!hiddenRejected) throw new Error('Hidden-overflow negative control was accepted')
+  await verifyUserMenuScroll()
+  await page.getByTestId('kw-chat-command-detail').click()
+  await page.getByRole('tab', { name: '아이템', exact: true }).click()
+  stage = 'fresh-document-landscape-item-account'
+  await verifyPanel(landscapeRequestStart)
+  await verifyMobileLayout()
+  await capture('item-server-landscape-entry')
   stage = 'page-errors-and-receipt'
   if (errors.length) throw new Error(`served dashboard page errors: ${errors.join(' | ')}`)
   successReceipt = {
     scope: 'Production dashboard bundle served by isolated native CI server; authenticated real API and synthetic paused Keeper with real free purchase/equipment ledger; no provider/model decision or rollout',
     source_sha: sourceSha, keeper, owned_item: ownedItem, browser_version: browser.version(),
-    entry_paths: ['desktop-overflow-detail-items', 'retained-detail-360px', 'fresh-document-mobile-menu-detail-items-360px', 'fresh-document-mobile-composer-detail-items-360px'],
+    entry_paths: ['desktop-overflow-detail-items', 'retained-detail-360px', 'fresh-document-mobile-menu-detail-items-360px', 'fresh-document-mobile-composer-detail-items-360px', 'fresh-document-mobile-menu-detail-items-740x360'],
     requests, captures, page_errors: errors, passed: true,
   }
 } catch (error) {

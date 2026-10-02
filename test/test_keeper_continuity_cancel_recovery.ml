@@ -59,7 +59,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   save source;
   B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
     {B.recorded_at=1000.;event=B.Turn_ended
-      {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
        history_at_start=B.Continued_history;position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;
   let prepared=P.prepare ~config ~keeper_name ~trace_id () |> get |> some in

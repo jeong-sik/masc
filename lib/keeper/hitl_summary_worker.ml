@@ -324,7 +324,7 @@ let output_requirement =
 ;;
 
 type prepared_transport =
-  | Http_attempt of Exact_output.flow_attempt
+  | Http_attempt of Exact_output.flow_attempt * Registry.resolved_lane
   | Cli_only
 
 type prepared_flow =
@@ -417,7 +417,7 @@ let prepare_flow
       let* snapshot = snapshot_resolved_lane
         ~messages:(messages_for_summary ~system_prompt ~context_bundle) resolved in
       Exact_output.start_flow snapshot
-      |> Result.map (fun attempt -> Http_attempt attempt)
+      |> Result.map (fun attempt -> Http_attempt (attempt, resolved))
       |> Result.map_error (fun _ -> "HITL exact-output flow attempt allocation failed")
   in
   Ok
@@ -1516,7 +1516,7 @@ let execute_prepared_flow_with_queue_ops_current
            ~reason:"HITL CLI-only lane could not bind a runtime"
            ~cause:Exact_flow_execution_failed);
       Executed
-    | Http_attempt attempt ->
+    | Http_attempt (attempt, resolved) ->
     let flow =
       Exact_output.execute_flow_once
         ~net
@@ -1528,7 +1528,7 @@ let execute_prepared_flow_with_queue_ops_current
         ~validate:(validate_success prepared)
         attempt
     in
-    Runtime_exact_lane_backpressure.observe flow;
+    Runtime_exact_lane_backpressure.observe ~resolved flow;
     match flow with
     | Ok success ->
       handle_validated_success
@@ -2057,7 +2057,7 @@ module For_testing = struct
   let flow_evidence prepared =
     match prepared.transport with
     | Cli_only -> None
-    | Http_attempt attempt -> Some (Exact_output.flow_attempt_evidence attempt)
+    | Http_attempt (attempt, _) -> Some (Exact_output.flow_attempt_evidence attempt)
   let system_prompt = system_prompt
   let lane_id = lane_id
 end

@@ -6,6 +6,7 @@ import base64
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -13,7 +14,10 @@ import threading
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_http.ml",
     "bin/masc_tui_render.ml",
@@ -182,6 +186,33 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
                     raise AssertionError(f"Long measurement hid the active proof binding: {binding!r}")
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
+        # Make the proof reader overflow, so its edges change real rows.
+        h.resize_and_wait(process, master_fd, output, rows=18, columns=80,
+                          needle=b"CONFIRM THIS PROOF", final_cursor=b"\x1b[?25l")
+        def reader_window():
+            end = output.rfind(h.FRAME_END)
+            complete = bytes(output[:end + len(h.FRAME_END)])
+            match = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", h.screen_text(complete))
+            if match is None:
+                raise AssertionError("confirmation reader did not overflow")
+            return tuple(int(value) for value in match.groups())
+        first, last, total = reader_window()
+        if first != 1 or last >= total:
+            raise AssertionError("confirmation reader must start in an overflowing first window")
+        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        end_first, end_last, end_total = reader_window()
+        if end_first <= first or end_last != total or end_total != total:
+            raise AssertionError("End did not reach the same proof document's last row")
+        h.send_and_wait(process, master_fd, output, b"\x1b[H", b"CONFIRM THIS PROOF")
+        if reader_window() != (first, last, total):
+            raise AssertionError("Home did not return to the same inspected proof")
+        if read_count != 1 or posted:
+            raise AssertionError("reader edges must not reread or post the proof")
+        # Submit from the overflowed last window, where metadata remains
+        # scrollable even after the proof is replaced by a Sending row.
+        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        if reader_window()[0] <= 1 or reader_window()[1] != total:
+            raise AssertionError("submission must start from the proof document's end")
         if replace_proof:
             verdict["verification_run_id"] = "run-2"
         needle = (
@@ -191,6 +222,13 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
             submitting_frame = h.send_and_wait(
                 process, master_fd, output, b"a", b"Sending proof confirmation..."
             )
+            if reader_window()[0] != 1:
+                raise AssertionError("Sending state must reset the document to its first row")
+            complete_end = output.rfind(h.FRAME_END)
+            header = next(row for row in h.screen_text(bytes(output[:complete_end + len(h.FRAME_END)])).splitlines()
+                          if b"MASC Work" in row)
+            if goal_id.encode() not in header or b"confirming" not in header:
+                raise AssertionError(f"Sending header lost Goal identity or phase: {header!r}")
             if not h.wait_for_fixture_event(
                 process, master_fd, output, submit_entered, timeout=3.0
             ):
@@ -202,6 +240,10 @@ def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> 
             h.send_and_wait(
                 process, master_fd, output, b"\r", b"Sending proof confirmation..."
             )
+            # Keep the existing result evidence at its original geometry;
+            # the held in-flight assertions above exercised the short reader.
+            h.resize_and_wait(process, master_fd, output, rows=50, columns=160,
+                              needle=b"Sending proof confirmation...", final_cursor=b"\x1b[?25l")
             result_start = len(output)
         finally:
             release_submit.set()

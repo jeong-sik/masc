@@ -2096,6 +2096,7 @@ let run_turn
                                  AfterTurn ordinal")
                          | Ok (turn_outcome, terminal_effect_receipt), Some final_agent_core_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
+                             ~task_context:ctx.task_context
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work
                              ~profile_defaults
@@ -2155,6 +2156,7 @@ let run_turn
        (match turn_result, !last_dispatched_checkpoint_owner with
         | Error _, Some Runtime_execution.Official_client ->
           Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+            ~task_context:ctx.task_context
             ~config
             ~meta
             ~turn_ref

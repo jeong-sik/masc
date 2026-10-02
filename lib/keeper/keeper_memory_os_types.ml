@@ -65,6 +65,7 @@ type wire_reason =
   | Not_a_board_post_id of string
   | Not_a_board_comment_id of string
   | Not_a_turn_ref of string
+  | Invalid_task_context of string
   | Not_finite
   | Negative
   | Not_positive
@@ -115,6 +116,7 @@ let wire_reason_to_string = function
   | Not_a_board_post_id value -> Printf.sprintf "expected a Board post id, got %S" value
   | Not_a_board_comment_id value ->
     Printf.sprintf "expected a Board comment id, got %S" value
+  | Invalid_task_context detail -> "invalid admission task context: " ^ detail
   | Not_a_turn_ref value -> Printf.sprintf "expected a turn reference, got %S" value
   | Not_finite -> "expected a finite number"
   | Negative -> "expected a non-negative value"

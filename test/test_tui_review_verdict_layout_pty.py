@@ -7,7 +7,11 @@ import sys
 import unicodedata
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ('bin/masc_tui_render.ml', 'bin/masc_tui.ml', 'bin/masc_tui_render_prim.ml')
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render_prim.ml",
+)
 TASK = 'task-' + 't' * 90 + '-TASKEND'
 REQUEST = 'request-' + 'r' * 95 + '-REQUESTEND'
 TITLE = 'TITLEHEAD `literal` **/*.ml ' + '한글 task evidence ' * 35 + 'TITLEEND'

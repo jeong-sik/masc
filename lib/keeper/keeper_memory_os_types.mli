@@ -65,6 +65,7 @@ type wire_reason =
   | Not_a_board_post_id of string
   | Not_a_board_comment_id of string
   | Not_a_turn_ref of string
+  | Invalid_task_context of string
   | Not_finite
   | Negative
   | Not_positive

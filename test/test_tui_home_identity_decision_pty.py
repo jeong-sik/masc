@@ -78,7 +78,7 @@ def foreign_decision(executable, kind):
             fixtures[path] = foreign_health
 
     def interact(process, fd, _slave, output, base):
-        h.wait_for_output(process, fd, output, b"[workspace mismatch]", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"MISMATCH local ", start=0, timeout=10)
         h.wait_for_output(process, fd, output, label, start=0, timeout=10)
         assert health and all(path != str(Path(base).resolve()) for path in health)
         h.resize_and_wait(process, fd, output, rows=40, columns=120,

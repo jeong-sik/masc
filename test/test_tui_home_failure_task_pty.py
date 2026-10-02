@@ -179,16 +179,9 @@ def full_http_loss_retains_local_work_and_draft(executable):
             ), fixtures.failed_paths
             h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
-            assert draft in screen and "Keepers ▸ beta ▸ chat".encode() in screen and b"Esc:Dashboard" in screen, screen
+            assert b"MASC Keepers (not loaded)" in screen and draft not in screen, screen
             home.assert_no_decision_posts(requests)
-        h.send_and_wait(process, fd, output, b"\r",
-                        b"Cannot send: workspace identity is unverified")
-        blocked = cards.frame(process, fd, output, "all-http-503-send-blocked")
-        assert b"workspace identity is unverified" in blocked, blocked
-        assert b"draft retained" in blocked and draft in blocked, blocked
-        assert "Keepers ▸ beta ▸ chat".encode() in blocked and b"Esc:Dashboard" in blocked, blocked
         assert_no_chat_delivery()
-        home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Last conversation beta unavailable")
         visible = cards.frame(process, fd, output, "all-http-503-local-work")
         for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode(),
@@ -200,6 +193,12 @@ def full_http_loss_retains_local_work_and_draft(executable):
         # witnessed above before returning to this nonactionable context.
         assert b"read history" not in visible and b"Continue with beta" not in visible, visible
         assert backlog(base).read_bytes() == original
+        assert_no_chat_delivery()
+        fixtures.lost.clear()
+        h.send_and_wait(process, fd, output, b"r", b"Continue with beta")
+        cards.select_home(process, fd, output, b"Continue with beta", destinations=6)
+        h.send_and_wait(process, fd, output, b"\r", draft)
+        assert draft in h.screen_text(bytes(output)), "the original workspace did not restore its draft"
         assert_no_chat_delivery()
         os.write(fd, b"q")
 

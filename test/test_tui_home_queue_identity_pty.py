@@ -33,7 +33,7 @@ def queue_identity_journey(executable):
                                             fixture.first_post_received, timeout=5)
             h.send_and_wait(process, fd, output, b"identity-held-next",
                             h.composer_showing(b"identity-held-next"))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            h.send_and_wait(process, fd, output, b"\r", b"Enter:send (1 local)")
 
             def inspect_local(*, capture_id=False):
                 h.send_and_wait(process, fd, output, b"/queue",

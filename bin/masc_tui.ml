@@ -10091,11 +10091,31 @@ let apply_server_identity_reading state reading =
 
 let apply_http_surfaces state ~mailbox results =
   let previous_items = visible_item_revision state in
+  let previous_authority = state.workspace_authority in
   apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
   refresh_changed_keeper_items state ~mailbox previous_items;
+  (* Navigation can precede the initial workspace reading. Its scoped request
+     was correctly withdrawn, but the selected screen still needs a reading
+     under the newly established authority, without waiting for the next tick.
+     These are reads only; never replay a withdrawn operator action. *)
+  if previous_authority <> state.workspace_authority
+     && Masc_tui_types.server_workspace_matches
+          ~expected:state.server_identity results.http_server_identity then
+    (match state.view with
+     | Lanes -> launch_lanes_load state ~mailbox
+     | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+     | Connectors -> launch_connectors_load state ~mailbox
+     | Verification -> launch_verification_load state ~mailbox
+     | Config ->
+         (match state.config_pane with
+          | Config_params -> launch_runtime_params_load state ~mailbox
+          | Config_runtime | Config_models | Config_themes ->
+              launch_runtime_config_load state ~mailbox
+          | Config_prompts | Config_presets | Config_voice -> ())
+     | _ -> ());
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in

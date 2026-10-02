@@ -4745,7 +4745,7 @@ let test_fusion_workspace_withdrawal () =
   state.fusion_historical_inflight <- Some (generation, reference);
   Tui_types.withdraw_fusion_workspace state;
   check bool "B has no retained A snapshot" true
-    (Tui_types.fusion_snapshot state = None);
+    (Masc_tui_fusion_model.fusion_snapshot state = None);
   check bool "both detail owners are released" true
     (state.fusion_detail_inflight = None && state.fusion_historical_inflight = None);
   check bool "held detail answers lose their generation" true
@@ -4756,7 +4756,7 @@ let test_fusion_workspace_withdrawal () =
     (F.is_current ~equal:Unit.equal state.fusion_runs b);
   state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs b (Error "B failed");
   check bool "failed B refresh cannot retain A data" true
-    (Tui_types.fusion_runs_view state = F.Failed "B failed");
+    (Masc_tui_fusion_model.fusion_runs_view state = F.Failed "B failed");
   Tui_types.withdraw_fusion_workspace state;
   state.fusion_mode <- Tui_types.Fusion_detail "same-run";
   check bool "returning to the same A run does not revive old detail generation" true
@@ -4767,7 +4767,7 @@ let test_fusion_workspace_withdrawal () =
     (F.is_current ~equal:Unit.equal state.fusion_runs current);
   state.fusion_runs <- F.complete ~equal:Unit.equal state.fusion_runs current (Ok snapshot);
   check bool "a new authoritative A read is accepted" true
-    (Tui_types.fusion_snapshot state = Some snapshot)
+    (Masc_tui_fusion_model.fusion_snapshot state = Some snapshot)
 
 let test_status_details_and_fold_counts_reach_the_frame () =
   let cache = Masc_tui_ansi.terminal_size_cache in

@@ -5491,6 +5491,9 @@ type librarian_preflight_status =
   | Preflight_judged of
       Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
 type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_memory_result =
+  | Librarian_memory_unchanged of int * int
+  | Librarian_memory_rewritten of { revision : int; facts : int; added : int; removed : int }
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -5498,6 +5501,7 @@ type librarian_preflight_reading =
   ; lp_elapsed_s : float option
   ; lp_model : string option
   ; lp_domain_rejection : string option
+  ; lp_memory_result : librarian_memory_result option
   }
 
 let decode_librarian_preflight output =
@@ -5552,7 +5556,20 @@ let decode_librarian_preflight output =
     let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
     let* () = if lp_full_llm_skipped && Option.is_some lp_domain_rejection
       then Error "accepted preflight cannot also report domain rejection" else Ok () in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
+    let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
+      | None -> Ok None
+      | Some after ->
+        let* revision = required_nonnegative_int_field after "revision" in
+        let* facts = required_nonnegative_int_field after "fact_count" in
+        let* change = required_member after "change" in
+        let* added = required_nonnegative_int_field change "added_count" in
+        let* removed = required_nonnegative_int_field change "removed_count" in
+        let* commit = required_string_field after "commit" in
+        (match commit with
+         | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
+         | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
+         | _ -> Error "unknown or inconsistent Librarian snapshot result") in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result})
 
 type lane_run_detail =
   { lrd_run_id : string

@@ -1,0 +1,1 @@
+Give Memory facts the full width by default and let d toggle the wide Category rail. Librarian preflight details prioritize the recorded generation path and snapshot result; d expands model/probabilities and original evidence.

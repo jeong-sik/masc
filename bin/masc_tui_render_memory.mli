@@ -100,7 +100,7 @@ val memory_fact_list_floor_rows : int
     few hundred facts showing a single row. *)
 
 val memory_facts_content_height : cols:int -> budget:int -> cursor:int -> state -> int
-val memory_facts_pane_cols : int -> int
+val memory_facts_pane_cols : state -> int -> int
 (** Fact-pane width shared by rendering and cursor/page geometry. *)
 (** The fact list's height after reserving the selected detail, filters and
     errors. [budget] excludes the surrounding surface chrome. *)

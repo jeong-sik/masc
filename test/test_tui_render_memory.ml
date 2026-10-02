@@ -1509,7 +1509,7 @@ let test_rows_and_header_share_one_grid () =
   let styled = ref [] in
   let collect_header line =
     let line = Masc_tui_theme.strip_sgr line in
-    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols cols) in
+    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols state cols) in
     styled := line :: !styled in
   Render_memory.render_memory_facts_body
     ~cols
@@ -1593,6 +1593,9 @@ let three_kinds_state ?(keeper = "alpha") () =
 
 let test_category_rail_keeps_click_targets_and_frame_width () =
   let state = three_kinds_state () in
+  check int "default gives the facts all available width" 140
+    (Render_memory.memory_facts_pane_cols state 140);
+  state.memory_facts_categories_open <- true;
   state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
   let render cols =
     Masc_tui_hit.reset Masc_tui_press.press_marks;
@@ -1617,7 +1620,11 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
       (Masc_tui_hit.to_list zones));
   let narrow, _ = render 80 in
   check bool "narrow frame keeps full fact width" false
-    (List.exists (contains "CATEGORIES") narrow)
+    (List.exists (contains "CATEGORIES") narrow);
+  state.memory_facts_categories_open <- false;
+  let closed, _ = render 140 in
+  check bool "closing Categories restores the fact reading" false
+    (List.exists (contains "CATEGORIES") closed)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
@@ -2092,10 +2099,10 @@ let test_facts_selection_follows_the_rendered_viewport () =
         incr used)
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let row = List.nth (Types.memory_fact_rows state) state.memory_facts_cursor in
-    let fact_cols = Render_memory.memory_facts_pane_cols cols in
+    let fact_cols = Render_memory.memory_facts_pane_cols state cols in
     let expected = Render_memory.memory_fact_row_line ~cols:fact_cols row
       |> Masc_tui_theme.strip_sgr in
-    if cols < Masc_tui_roster_pane.threshold_cols then
+    if fact_cols = cols then
       check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
     else
       let styled = Layout.fit_width
@@ -2118,6 +2125,9 @@ let test_facts_selection_follows_the_rendered_viewport () =
   (* Resizing is a redraw before input, so the renderer also follows a
      selection whose old scroll was computed for a larger body. *)
   move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- true;
+  move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- false;
   assert_visible ~cols:60 ~budget:16 ();
   (* The search banner, retained read error and store error all consume
      actual rows above the list. Filtered End still selects a visible fact. *)

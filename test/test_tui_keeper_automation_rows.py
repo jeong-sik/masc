@@ -4,6 +4,7 @@ import copy
 import os
 import subprocess
 import sys
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_schedule.ml",
     "bin/masc_tui_loader.ml",
+    "lib/tui_decode.ml",
+    "lib/schedule/schedule_domain.ml",
 )
 
 SCHEDULES = h.SCHEDULES_PATH
@@ -68,9 +71,30 @@ def mixed_rows_fixtures() -> h.HttpFixtures:
 
 def checked_frame(output: bytearray) -> dict[int, bytes]:
     rows = h.screen_rows(bytes(output))
-    for header in (b"STATUS", b"TRIGGERED", b"RECEIVED", b"OUTCOME"):
-        if not any(header in line for line in rows.values()):
-            raise AssertionError(f"Automation lost {header!r}: {rows!r}")
+    labels = ("STATUS", "TRIGGERED", "OUTCOME", "RECEIVED", "RECURRENCE")
+    header = next(
+        (
+            line.decode()
+            for line in rows.values()
+            if all(label.encode() in line for label in labels)
+        ),
+        None,
+    )
+    if header is None:
+        raise AssertionError(f"Automation lost its column headers: {rows!r}")
+    bounds = {
+        label: (header.index(label), header.index(following))
+        for label, following in pairwise(labels)
+    }
+
+    def cells(line: bytes) -> dict[str, str]:
+        # These fixture columns contain ASCII and single-cell marks. Decode
+        # UTF-8 before slicing so a mark does not shift byte offsets.
+        text = line.decode()
+        return {
+            label: text[start:end].strip() for label, (start, end) in bounds.items()
+        }
+
     positions = {}
     for name in ("success-proof", "failure-proof", "closed-proof", "held-proof"):
         positions[name] = h.screen_row_of(rows, name.encode())
@@ -82,16 +106,18 @@ def checked_frame(output: bytearray) -> dict[int, bytes]:
         ("closed-proof", b"cancelled", b"consumed_ack", b"13:10", b"13:12"),
     ):
         line = rows[positions[name]]
-        for value in (status, outcome, triggered, received):
-            if value not in line:
-                raise AssertionError(f"{name} lost {value!r}: {line!r}")
-        if b"19:59" in line:
-            raise AssertionError(f"RECEIVED used ack time: {line!r}")
-    held = rows[positions["held-proof"]]
-    if b"due" not in held or held.count("—".encode()) < 3:
-        raise AssertionError(f"Held row lost suppressed occurrence cells: {held!r}")
-    if any(value in held for value in (b"14:10", b"14:12", b"succeeded", b"19:59")):
-        raise AssertionError(f"Held row reused previous occurrence: {held!r}")
+        actual = cells(line)
+        expected = {
+            "STATUS": status.decode(),
+            "OUTCOME": outcome.decode(),
+            "TRIGGERED": f"2026-08-25 {triggered.decode()}:00",
+            "RECEIVED": f"2026-08-25 {received.decode()}:00",
+        }
+        if actual != expected:
+            raise AssertionError(f"{name} column mismatch: {actual!r} != {expected!r}")
+    held = cells(rows[positions["held-proof"]])
+    if held != {"STATUS": "due", "TRIGGERED": "—", "OUTCOME": "—", "RECEIVED": "—"}:
+        raise AssertionError(f"Held row reused previous occurrence cells: {held!r}")
     closed_rule = next(
         (
             index
@@ -107,6 +133,40 @@ def checked_frame(output: bytearray) -> dict[int, bytes]:
     ):
         raise AssertionError(f"Live/closed partition is missing: {rows!r}")
     return rows
+
+
+def reject_swapped_columns(output: bytearray) -> None:
+    controls = []
+    clocks = bytes(output)
+    for triggered, received in (
+        (b"11:10", b"11:12"),
+        (b"12:10", b"12:12"),
+        (b"13:10", b"13:12"),
+    ):
+        clocks = (
+            clocks.replace(triggered, b"CLOCK_SWAP")
+            .replace(received, triggered)
+            .replace(b"CLOCK_SWAP", received)
+        )
+    controls.append(("TRIGGERED/RECEIVED", clocks))
+    # Fixed-width replacements keep column boundaries unchanged.
+    status = (
+        bytes(output)
+        .replace(b"running  ", b"STATE_SWAP")
+        .replace(b"failed   ", b"running  ")
+        .replace(b"STATE_SWAP", b"failed   ")
+    )
+    controls.append(("STATUS/OUTCOME", status))
+    for label, swapped in controls:
+        try:
+            checked_frame(bytearray(swapped))
+        except AssertionError as error:
+            if "column mismatch" not in str(error):
+                raise AssertionError(
+                    f"{label} control failed outside cell semantics"
+                ) from error
+        else:
+            raise AssertionError(f"Automation accepted swapped {label} columns")
 
 
 def run(executable: str, frame_path: str | None = None) -> None:
@@ -139,6 +199,7 @@ def run(executable: str, frame_path: str | None = None) -> None:
             Path(frame_path).write_bytes(h.screen_text(bytes(output)))
             Path(frame_path + ".ansi").write_bytes(bytes(output))
         checked_frame(output)
+        reject_swapped_columns(output)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

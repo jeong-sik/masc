@@ -225,6 +225,7 @@ PY
 # A prefix placed inside the build tree would be removed by Dune's clean.
 if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
     && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
+    && [ ! -L "$repo/_build" ] \
     && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
   installed_prefix=$(cd "$prefix" && pwd -P)
   case "$installed_prefix/" in

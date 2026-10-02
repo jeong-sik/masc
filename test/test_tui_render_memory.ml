@@ -1650,13 +1650,62 @@ let test_category_rail_wrapped_range_and_overflow () =
       first <= Masc_tui_roster_pane.pane_cols &&
       target = Masc_tui_press.Press_memory_category cat_filter)
       (Masc_tui_hit.to_list zones_small));
-  let title =
-    live_title
-      ~filter_label:(Types.memory_category_filter_label state.memory_facts_category)
-      ()
+  state.view <- Types.Memory;
+  check bool "keeper is selected for detail access" true
+    (Option.is_some state.memory_facts_keeper);
+  state.memory_fact_detail_open <- true;
+  state.memory_fact_detail_scroll <- 0;
+  let rows = Types.memory_fact_rows state in
+  check int "category filter isolates long category fact" 1 (List.length rows);
+  let fact_row = List.hd rows in
+  let compact text = String.split_on_char ' ' text |> String.concat "" in
+  List.iter
+    (fun cols ->
+      let lines = Render_memory.memory_fact_detail_lines ~cols fact_row in
+      let body = match lines with [] -> [] | _heading :: body -> body in
+      List.iter
+        (fun line ->
+          check bool "detail body fits inner frame width" true
+            (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+        body;
+      let text =
+        body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+      in
+      check bool "wrapped detail lines preserve full category label" true
+        (contains (compact long_cat_name) text))
+    [ 80; 40; 30; 16 ];
+  let detail_cols = 40 in
+  let detail_lines = Render_memory.memory_fact_detail_lines ~cols:detail_cols fact_row in
+  let count = List.length detail_lines in
+  let small_height = 4 in
+  check bool "detail lines overflow small viewport" true (count > small_height);
+  let cat_line_indices =
+    List.filter_map
+      (fun (idx, line) ->
+        let stripped = Masc_tui_theme.strip_sgr line in
+        if contains "Category:" stripped || contains "custom_architecture" stripped then
+          Some idx
+        else None)
+      (List.mapi (fun i l -> (i, l)) detail_lines)
   in
-  check bool "accessible overflow: facts_title renders full category label unconditionally" true
-    (contains long_cat_name title)
+  check bool "category field lines present in detail lines" true
+    (cat_line_indices <> []);
+  let last_cat_idx = List.fold_left max 0 cat_line_indices in
+  let initial_scroll = state.memory_fact_detail_scroll in
+  check int "initial detail scroll starts at top" 0 initial_scroll;
+  let scrolled =
+    Masc_tui_scroll.ensure_visible ~cursor:last_cat_idx ~height:small_height
+      initial_scroll
+  in
+  state.memory_fact_detail_scroll <- scrolled;
+  check bool "scrolled window reaches final category line" true
+    (scrolled <= last_cat_idx && last_cat_idx < scrolled + small_height);
+  check bool "scroll position indicator reports window" true
+    (Option.is_some
+       (Masc_tui_scroll.position_row ~scroll:scrolled ~height:small_height count));
+  let end_scroll = Masc_tui_scroll.normalize ~count ~height:small_height max_int in
+  check bool "G reaches bottom of detail" true
+    (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed

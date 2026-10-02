@@ -256,9 +256,15 @@ def no_portrait_under_no_color(binary: str) -> None:
 
 def portrait_as_pixels(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    reason = "fixture appraiser unavailable " + "long account headline " * 8
+    revision = hashlib.sha256(("disabled\0" + reason).encode()).hexdigest()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "disabled", "reason": reason}
+    for keeper in roster["keepers"]:
+        keeper["candle_account_revision"] = revision
     fixtures["/api/v1/keepers/alpha/items"] = (200, {
         "status": "disabled", "keeper": "alpha",
-        "reason": "fixture appraiser unavailable " + "long account headline " * 8,
+        "reason": reason, "account_revision": revision,
     })
 
     def interact(process, fd, _slave, output, _base):

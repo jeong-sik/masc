@@ -164,10 +164,11 @@ let validate_released_binding ~package_shape fields =
   let* () = match package_shape with
     | Released_package -> exact_fields package_fields package
     | Current_package ->
-        let* () = exact_fields ("model_access" :: package_fields) package in
         (match List.assoc_opt "model_access" package with
-         | Some (`String ("disabled" | "host_sampling")) -> Ok ()
-         | _ -> Error "invalid current model access") in
+         | None -> exact_fields package_fields package
+         | Some (`String ("disabled" | "host_sampling")) ->
+             exact_fields ("model_access" :: package_fields) package
+         | Some _ -> Error "invalid current model access") in
   let* () = List.fold_left (fun result key -> let* () = result in text package key |> Result.map (fun _ -> ()))
     (Ok ()) ["id";"revision";"title";"image";"directory"] in
   let* () = List.fold_left (fun result (outer,inner) -> let* () = result in

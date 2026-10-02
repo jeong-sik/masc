@@ -1240,8 +1240,24 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
       check bool "released consumer reads current shared producer without rewriting it" true
         (Result.is_ok (authorize [current_producer (`String model_access);consumer] consumer)))
       ["disabled";"host_sampling"];
-    refused "unknown current model access fails closed"
-      [current_producer (`String "unknown");consumer] consumer;
+    let with_producer_package transform = match current_producer (`String "disabled") with
+      | `Assoc f ->
+          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
+          `Assoc (set f "package" (`Assoc (transform package)))
+      | _ -> assert false in
+    let pre_model_producer = with_producer_package (List.remove_assoc "model_access") in
+    check bool "released consumer reads authority-bearing pre-model producer" true
+      (Result.is_ok (authorize [pre_model_producer;consumer] consumer));
+    List.iter (fun model_access ->
+      refused "invalid explicit model access fails closed"
+        [current_producer model_access;consumer] consumer)
+      [`String "unknown"; `Null; `Bool false];
+    let duplicate_model = with_producer_package (fun fields ->
+      ("model_access",`String "disabled")::fields) in
+    refused "duplicate producer model field fails closed" [duplicate_model;consumer] consumer;
+    let unknown_pre_model = with_producer_package (fun fields ->
+      ("unknown",`Bool true)::List.remove_assoc "model_access" fields) in
+    refused "unknown pre-model producer field fails closed" [unknown_pre_model;consumer] consumer;
     let forged_released = match current_producer (`String "disabled") with
       | `Assoc f -> `Assoc (List.remove_assoc "visibility" (List.remove_assoc "source_access" f))
       | _ -> assert false in

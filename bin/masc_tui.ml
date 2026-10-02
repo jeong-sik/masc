@@ -377,7 +377,11 @@ let identity_pane_columns (state : state) =
    measured, and the step key and the jump keys were working that out
    differently -- the step recomputed, the landing did not. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
-  if state.view = Memory && Option.is_some state.memory_facts_keeper then
+  if state.view = Repositories && not state.repository_changes_open then
+    let _, cols = get_terminal_size () in
+    Masc_tui_render.repository_studio_content_height state ~cols
+      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
+  else if state.view = Memory && Option.is_some state.memory_facts_keeper then
     let _, cols = get_terminal_size () in
     Masc_tui_render_memory.memory_facts_content_height ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
@@ -3550,7 +3554,6 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Workspace_identity_match, Some identity ->
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
-  let expected_revision = keeper_item_revision state keeper_name in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -3562,9 +3565,7 @@ let launch_keeper_items state ~mailbox keeper_name =
         ^ Masc_tui_http.percent_encode_query_value identity.Tui_decode.sid_base_path in
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
-      let* reading = Masc_tui_keeper_items.decode ~keeper_name json in
-      let* _ = Masc_tui_keeper_items.match_revision ~expected_revision reading in
-      Ok reading)
+      Masc_tui_keeper_items.decode ~keeper_name json)
 
 let visible_item_revision state =
   match state.view, state.detail_tab, selected_keeper state with
@@ -3579,17 +3580,17 @@ let visible_item_revision state =
            identity.sid_state_ready)) state.server_identity)
   | _ -> None
 
-let refresh_changed_keeper_items state ~mailbox previous =
+let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
-  let retry_settled_failure =
-    Option.is_some state.item_account_error
-    && not (List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads)
+  let read_pending =
+    List.exists (fun request -> request.drr_tab = Detail_items) state.detail_reads
   in
-  if current <> previous || retry_settled_failure then
+  let retry_settled_failure =
+    Option.is_some state.item_account_error && not read_pending
+  in
+  if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
-    | Some (keeper_name, Ok _, _, _) -> launch_keeper_items state ~mailbox keeper_name
-    | Some (_, Error detail, _, _) ->
-        withdraw_keeper_items state; state.item_account_error <- Some detail
+    | Some (keeper_name, _, _, _) -> launch_keeper_items state ~mailbox keeper_name
     | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
@@ -9604,11 +9605,10 @@ let apply_keeper_roster_load state result =
       state.keeper_roster_error <- None;
       (match state.item_account with
        | None -> ()
-       | Some (keeper_name, reading) ->
-         (match Masc_tui_keeper_items.match_revision
-             ~expected_revision:(keeper_item_revision state keeper_name) reading with
-          | Ok _ -> ()
-          | Error detail -> state.item_account <- None; state.item_account_error <- Some detail))
+       | Some (keeper_name, _) ->
+         (match Keeper_control.liveness_of_roster roster keeper_name with
+          | Keeper_control.Present _ -> ()
+          | Unobserved | Invalid _ | Absent -> withdraw_keeper_items state))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,
@@ -9616,8 +9616,8 @@ let apply_keeper_roster_load state result =
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.Roster_unobserved;
-      state.item_account <- None;
-      state.item_account_error <- Some "Keeper account revision is not observed in the current roster";
+      withdraw_keeper_items state;
+      state.item_account_error <- Some "Keeper roster authority is unavailable";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
         ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
       remember_surface_error state ~surface:"keeper roster"
@@ -10350,7 +10350,8 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   in
   let previous_items = visible_item_revision state in
   apply_http_scoped_surfaces state ~currency_authority results;
-  refresh_changed_keeper_items state ~mailbox previous_items;
+  refresh_changed_keeper_items state ~mailbox
+    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
   resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
   end
 
@@ -10375,7 +10376,8 @@ let apply_http_surfaces state ~mailbox results =
       Option.iter (apply_approval_observation state) results.http_approvals;
     apply_http_scoped_data state results.http_scoped
   end;
-  refresh_changed_keeper_items state ~mailbox previous_items;
+  refresh_changed_keeper_items state ~mailbox
+    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_scoped.http_keeper_roster) previous_items;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -13644,10 +13646,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && item_authority_ready state then
-        let result = Result.bind result (fun reading ->
-          Masc_tui_keeper_items.match_revision
-            ~expected_revision:(keeper_item_revision state request.drr_keeper) reading
-          |> Result.map (fun _ -> reading)) in
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
@@ -22823,7 +22821,14 @@ and is loaded on demand through keeper_skill.
        | Some ("home" | "end") when Option.is_some (row_list state) ->
            move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
-           let page = surface_page_rows state in
+           let page =
+             if state.view = Repositories && not state.repository_changes_open then
+               let _, cols = get_terminal_size () in
+               Masc_tui_render.repository_studio_content_height state ~cols
+                 ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+                 ~cursor:state.repositories_cursor
+             else surface_page_rows state
+           in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
             | Planning when state.planning_mode = Planning_list

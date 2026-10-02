@@ -1169,6 +1169,19 @@ let enter_setup_required ~reason () =
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
+let preserve_candidate previous (runtime : t) =
+    match List.find_opt (fun (old : t) ->
+      String.equal old.id runtime.id
+      && Runtime_schema.equal_provider old.provider runtime.provider
+      && Runtime_schema.equal_model_spec old.model runtime.model
+      && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_candidate_backpressure.same_candidate_binding
+           old.candidate_backpressure runtime.candidate_backpressure) previous with
+    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
+    | None -> runtime
+
+;;
+
 let set_loaded
     ?startup_degradation
     ?declared_media_failover
@@ -1187,17 +1200,7 @@ let set_loaded
      credentials/catalog facts after a reload. Removed/rebound rows retain no
      global registry entry; in-flight snapshots alone keep their old cells. *)
   let previous = (Atomic.get loaded_state_ref).runtimes in
-  let preserve_candidate (runtime : t) =
-    match List.find_opt (fun (old : t) ->
-      String.equal old.id runtime.id
-      && Runtime_schema.equal_provider old.provider runtime.provider
-      && Runtime_schema.equal_model_spec old.model runtime.model
-      && Runtime_schema.equal_binding old.binding runtime.binding
-      && Runtime_candidate_backpressure.same_candidate_binding
-           old.candidate_backpressure runtime.candidate_backpressure) previous with
-    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
-    | None -> runtime
-  in
+  let preserve_candidate = preserve_candidate previous in
   let runtimes = List.map preserve_candidate runtimes in
   let rt = preserve_candidate rt in
   let declared_media_failover =
@@ -1356,9 +1359,25 @@ let load_exact_output_resolver_snapshot catalog =
     ()
 ;;
 
-let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
+let exact_output_runtime_observations ~origin runtimes =
+  match origin with
+  | Replacement_catalog_targets _ -> []
+  | Runtime_binding_targets ->
+    let previous = (Atomic.get loaded_state_ref).runtimes in
+    List.filter_map (fun (runtime : t) ->
+      let runtime = preserve_candidate previous runtime in
+      match runtime.execution with
+      | Runtime_execution.Agent_core _ ->
+        Some (runtime.id, Runtime_exact_output_registry.{
+          candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope })
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None) runtimes
+;;
+
+let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
+      ?runtime_observations
       ?required_lane_ids
       ?excused_lane_ids
       ~lanes
@@ -2711,6 +2730,7 @@ type exact_output_commit_plan =
 let prepare_exact_output_replacement ~runtimes ~lanes =
   let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
   Runtime_exact_output_registry.prepare_replacement
+    ~runtime_observations:(exact_output_runtime_observations ~origin:catalog.catalog_origin runtimes)
     ~lanes
     ~excused_lane_ids:catalog.catalog_exact_slots.emptied_lane_ids
     ~load_resolver_snapshot:(fun () ->

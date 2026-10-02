@@ -445,8 +445,7 @@ let run_runtime_evidence ?fixture_dir () =
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
       (if Option.is_some (runtime_skip_reason scenario) then 0 else 1) (List.length !jev_requests);
-    let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
-        (Runs.list_runs registry) with
+    let run = match Fixture.librarian_pass_runs registry ~keeper_id with
       | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
       | _ -> Alcotest.fail "expected one actual Librarian run" in
     Alcotest.(check string) "Memory result remains distinct from JEV result"

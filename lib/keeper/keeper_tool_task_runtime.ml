@@ -426,9 +426,12 @@ let handle_keeper_task_tool_with_outcome
          | order -> order
        in
        let newest =
-         matching
-         |> List.sort newest_first
-         |> List.filteri (fun index _ -> index < new_task_window)
+         match cursor with
+         | Some _ -> []
+         | None ->
+           matching
+           |> List.sort newest_first
+           |> List.filteri (fun index _ -> index < new_task_window)
        in
        (* The order is total -- priority, then created_at, then id -- so a page
           is "the first [limit] rows after the cursor's key" and the same row
@@ -455,9 +458,11 @@ let handle_keeper_task_tool_with_outcome
          | true, [] | false, _ -> None
        in
        let tasks_json = `List (List.map row_to_yojson tasks) in
-       (* A newest row that is already on this page is named once, by the
-          page. The section keeps only the newest rows the page does not
-          carry, matched by task id. *)
+       (* Discovery belongs to the first page. Repeating the newest window
+          on every continuation made a 530-row walk carry 100 extra rows
+          for the same ten tasks. Continuations retain the complete ordered
+          page stream; a fresh first-page read discovers later arrivals.
+          Within the first page, do not repeat a row in both sections. *)
        let new_tasks =
          let module Ids = Set.Make (String) in
          let on_page =

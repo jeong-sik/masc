@@ -327,10 +327,15 @@ let replace_keeper_rows ~preserve_on_error (state : state)
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
   let selected_keeper_name =
-    if state.keeper_cursor < 0 then None
-    else
-      List.nth_opt state.keepers state.keeper_cursor
-      |> Option.map (fun keeper -> keeper.k_name)
+    match state.detail_focus_recovery with
+    | Some (origin, name, _) when state.view = Keepers Keeper_detail
+        && server_workspace_matches ~expected:(Some origin)
+             (match state.server_identity with Some current -> Ok current | None -> Error "unread") ->
+        Some name
+    | _ ->
+        if state.keeper_cursor < 0 then None
+        else List.nth_opt state.keepers state.keeper_cursor
+          |> Option.map (fun keeper -> keeper.k_name)
   in
   let current_keeper_mode =
     match state.view with
@@ -376,6 +381,10 @@ let replace_keeper_rows ~preserve_on_error (state : state)
 
   let keepers =
     match keepers_error, current_keeper_mode with
+    | Some _, _ when state.detail_focus_recovery <> None ->
+        (* A partial remote roster must not make cursor zero name a different
+           Keeper while the withdrawn detail is waiting for its own name. *)
+        []
     | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
                    | Keeper_runtime_pick) when preserve_on_error ->
         (* A partial or failed read cannot prove that the focused Keeper was
@@ -396,11 +405,13 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)
-  (match
+  if state.detail_focus_recovery <> None && keepers_error <> None then ()
+  else (match
      Keeper_selection.reconcile ~current_ids:current_keeper_ids
        ~next_ids:next_keeper_ids ~current:current_navigation
    with
    | Keeper_selection.List_cursor cursor ->
+       state.detail_focus_recovery <- None;
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with
         | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
@@ -1938,7 +1949,7 @@ let load_keeper_board_quarantines ~(host : string) ~(port : int)
    it. One fetch rather than two: a list of providers and a list of
    attachments cannot disagree if they arrive together. *)
 let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string)
-  : (Masc_tui_types.identity_provider list, string) result
+  : (Masc_tui_identity_model.identity_provider list, string) result
   =
   match Masc_tui_http.fetch_attached_tools ~host ~port ~keeper_name with
   | Error err -> Error ("identity providers load failed: " ^ err)
@@ -1969,7 +1980,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
               in
               match string_field "provider", string_field "problem" with
               | Some idp_id, Some idp_problem ->
-                Some (Masc_tui_types.Identity_unreadable { idp_id; idp_problem })
+                Some (Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem })
               | Some idp_id, None ->
                 let idp_label =
                   Option.value ~default:idp_id (string_field "provider_label")
@@ -2001,7 +2012,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                 in
                 let idp_switch_problem = string_field "switch_problem" in
                 Some
-                  (Masc_tui_types.Identity_declared
+                  (Masc_tui_identity_model.Identity_declared
                      { idp_id; idp_label; idp_tools; idp_also_on
                      ; idp_enabled; idp_switch_problem })
               | None, _ -> None)

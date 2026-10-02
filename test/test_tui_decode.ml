@@ -4955,6 +4955,14 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      Alcotest.(check bool) "the failure kind is decoded" true
        (librarian.mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution)
    | Error detail -> Alcotest.fail detail);
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
+           (with_librarian ~stopped_keepers:0
+              [ "state", `String "yielded_to_waiting_unit"; "detail", `Null ]) with
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "a yielded pass is readable without a failure cause" true
+       (librarian.mlh_state = Some Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit)
+   | Error detail -> Alcotest.fail detail);
   (* A row this build cannot read is refused on its own: the other keeper
      still decodes and the refusal names the keeper and the reason, so a newer
      server does not blank the pane. *)

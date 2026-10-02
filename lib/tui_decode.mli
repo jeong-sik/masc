@@ -482,6 +482,8 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+(** One verdict the harness recorded: which gate ran on which task, what it
+    decided, and which evaluator decided it. *)
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;

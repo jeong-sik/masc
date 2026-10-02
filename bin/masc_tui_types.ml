@@ -6542,17 +6542,20 @@ let reconcile_detail_intent_origins (state : state) reading =
   | Error _ -> ()
   | Ok (current : Tui_decode.server_identity) ->
       if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
-        let same =
-          String.equal (canonical_path origin.sid_base_path)
+        let belongs (candidate : Tui_decode.server_identity) =
+          String.equal (canonical_path candidate.sid_base_path)
             (canonical_path current.sid_base_path)
-          && String.equal (canonical_path origin.sid_masc_root)
+          && String.equal (canonical_path candidate.sid_masc_root)
                (canonical_path current.sid_masc_root)
         in
+        (* Expectations survive a workspace change only if they belong to the
+           workspace the read just confirmed. Compared against [current]
+           directly — [state.server_identity] is still the previous identity
+           here, and leaning on that update order would invert the filter. *)
         state.identity_login_expectations <-
           List.filter
             (fun expectation ->
-              same
-              || not (identity_expectation_workspace_matches ~origin:expectation.ile_origin state))
+              belongs expectation.ile_origin)
             state.identity_login_expectations;
         let foreign = function
           | None -> false

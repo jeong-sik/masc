@@ -173,6 +173,26 @@ let test_the_recovery_read_retires_only_the_landed_login () =
   check (Alcotest.list Alcotest.string) "an unreadable read is not completion"
     [ "atlassian" ] (held_expectations state "A")
 
+let test_a_workspace_change_keeps_only_its_own_expectations () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/next"
+    ~masc_root:"/r";
+  (* The server read confirming /w/next runs before [state.server_identity]
+     is updated; a held /w/a expectation must not survive it, the one held
+     for the confirmed workspace must, and the filter must not lean on the
+     stale field. *)
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok (workspace_identity ~base_path:"/w/next" ~masc_root:"/r"));
+  check (Alcotest.list Alcotest.string)
+    "only the confirmed workspace keeps its expectations" [ "atlassian" ]
+    (held_expectations state "A");
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/next" ~masc_root:"/r");
+  check (Alcotest.list Alcotest.string)
+    "the surviving expectation is unaffected by the identity update"
+    [ "atlassian" ] (held_expectations state "A")
+
 let test_restart_and_forget_end_the_waiting_login () =
   let state = identity_state () in
   hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
@@ -738,5 +758,7 @@ let () =
             test_restart_and_forget_end_the_waiting_login;
           Alcotest.test_case "a rework rerun ends every admitted login" `Quick
             test_a_rework_rerun_ends_every_admitted_login;
+          Alcotest.test_case "a workspace change keeps only its own expectations"
+            `Quick test_a_workspace_change_keeps_only_its_own_expectations;
         ] );
     ]

@@ -364,6 +364,10 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             assert post is not None
             status_fields = status_row[0]["fields"]
             result_fields = result_row[0]["fields"]
+            if any(status_fields[key] != result_fields[key] for key in ("source_id", "incarnation")):
+                raise InvalidInput("Fusion status and result belong to different source coordinates")
+            if evidence(status_row[0]["evidence"]) != evidence(result_row[0]["evidence"]):
+                raise InvalidInput("Fusion status and result cite different snapshots")
             if result_row[0]["related_ids"] != [status_row[0]["id"]]:
                 raise InvalidInput("Fusion result relation does not identify its paired status row")
             status_event = string(status_fields.get("source_event_id"), "status.source_event_id")
@@ -374,8 +378,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                     or status_fields["fusion_run"]["keeper"] != post["origin"]["fusion_producer"]):
                 raise InvalidInput("Fusion status and result Board evidence disagree")
         complete = (base_complete and not skipped and status is not RunState.RUNNING
-                    and post is not None
-                    and (status is not RunState.FAILED or status_row is not None)
+                    and post is not None and status_row is not None and result_row is not None
                     and all(item[0]["fields"]["input_complete"] for item in group.values()))
         # A failed run can have complete evidence. Completeness never means success.
         heading = {RunState.RUNNING: "분석 진행 중", RunState.COMPLETED: "분석 완료",
@@ -412,6 +415,9 @@ def reports(source: Source, observation: dict, *, recognized: bool):
 
 
 def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
+    aliases = [source.source_id for source in sources]
+    if len(set(aliases)) != len(aliases):
+        raise InvalidInput("Fusion report source aliases must be distinct")
     rows, statuses = [], []
     if not sources:
         return {"rows": [], "coverage": [{"source_id": "fusion-report/input",

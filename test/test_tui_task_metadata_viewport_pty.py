@@ -5,6 +5,7 @@ import re
 import shlex
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 import test_tui_keyboard_input as h
@@ -34,6 +35,26 @@ def screen(output):
 
 def compact(text):
     return b"".join(h.unwrapped(text).split())
+
+
+def detail_text(output):
+    rows = screen(output).decode().splitlines()
+    title = next(row for row in rows if "title: TITLEHEAD" in row)
+    prefix = title[:title.index("title: TITLEHEAD")]
+    # The detail box indents labels four cells from its pane boundary.
+    start = sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+                for char in prefix) - 4
+    start = max(0, start)
+    # Read each detail row independently of the neighboring roster pane.
+    result = []
+    for row in rows:
+        cell = 0
+        for index, char in enumerate(row):
+            if cell >= start:
+                result.append(row[index:])
+                break
+            cell += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+    return compact("\n".join(result).encode())
 
 
 def window(output):
@@ -107,8 +128,9 @@ def run(executable):
             # Goal lifecycle handler. An empty reason must leave it untouched.
             original = (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes()
             os.write(fd, b"x")
+            assert h.wait_for_fixture_state(process, fd, output, marker.exists, timeout=5), \
+                "Task cancel key never opened its own reason editor"
             h.drain_until_quiet(process, fd, output)
-            assert marker.exists(), "Task cancel key never opened its own reason editor"
             assert not any(b"masc_transition" in body for _, body in requests), requests
             assert (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes() == original
             assert b"MASC Task" in screen(output), screen(output)
@@ -127,7 +149,7 @@ def run(executable):
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
-                    all_text = compact(screen(output))
+                    all_text = detail_text(output)
                     for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
                                   "reclaim policy: block_reclaim",
                                   ("handoff reclaim policy allow_reclaim" if width == 30
@@ -163,7 +185,8 @@ def run(executable):
             h.send_and_wait(process, fd, output, b"\x1b[F", b"HISTORYEND")
             h.drain_until_quiet(process, fd, output)
             assert window(output)[0] > 1, window(output)
-            h.palette_go(process, fd, output, b"go Harness", b"FOLLOWEDHEAD")
+            h.palette_go(process, fd, output, b"go Task Verdicts", b"glm-coding")
+            h.send_and_wait(process, fd, output, b"\r", b"FOLLOWEDHEAD")
             h.send_and_wait(process, fd, output, b"\x1d", b"FOLLOWEDHEAD")
             h.drain_until_quiet(process, fd, output)
             assert b"MASC Task" in screen(output), screen(output)
@@ -176,25 +199,25 @@ def run(executable):
             remaining = [dict(task("todo"), id=f"task-remaining-{index}",
                               title=f"Remaining task {index}") for index in (1, 2)]
             backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
-            h.send_and_wait(process, fd, output, b"r", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"r", b"task-remaining-1")
             os.write(fd, b"x")
             h.drain_until_quiet(process, fd, output)
             assert not marker.exists(), "a hidden task accepted cancellation after removal"
             assert not any(b"masc_transition" in body for _, body in requests), requests
-            assert b"MASC Work" in screen(output) and b"MASC Task" not in screen(output), screen(output)
+            assert b"task-remaining-" in screen(output) and b"MASC Task" not in screen(output), screen(output)
             # Choose the first visible row, then move down while the removed
             # detail ID is still present. Enter must open the selected row.
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"j", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\x1b[H", b"task-remaining-")
+            h.send_and_wait(process, fd, output, b"j", b"task-remaining-")
             h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
             assert b"task-remaining-2" in compact(screen(output)), screen(output)
             # Remove this detail too, retaining two rows to exercise k on
             # the same stale-detail path with the cursor at the last row.
             remaining[1]["id"] = "task-remaining-3"
             backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
-            h.send_and_wait(process, fd, output, b"r", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"\x1b[F", b"MASC Work")
-            h.send_and_wait(process, fd, output, b"k", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"r", b"task-remaining-1")
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"task-remaining-")
+            h.send_and_wait(process, fd, output, b"k", b"task-remaining-")
             h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
             assert b"task-remaining-1" in compact(screen(output)), screen(output)
             os.write(fd, b"q")

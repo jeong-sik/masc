@@ -16,7 +16,7 @@
 
 ## 검증 (Verification)
 - 1차: Three specialist source reviews of TUI flow, runtime structure and implementation counterexamples.
-- 2차: Actual helper interpreter execution passes 51 assertions across 16 four-message tool-boundary masks.
+- 2차: Actual helper interpreter execution passes 70,195 assertions, including 1..128 messages across eight deterministic boundary patterns and the original 16 four-message masks.
 - 3차: Eleven touched source/interface files syntax parse; git diff --check passes.
 - 재현 결과: Old helper loses terminal suffix/new final; repaired helper returns expected output. Native tests are added but not executed.
 

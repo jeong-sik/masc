@@ -49,4 +49,5 @@ PASS n..n+3 already delivered earlier final mask=14
 PASS n..n+3 completed raw mask=15
 PASS n..n+3 remaining suffix mask=15
 PASS n..n+3 already delivered earlier final mask=15
-TOTAL PASS 51
+PASS bounded n+m: 1..128 messages, 8 boundary patterns, 70144 assertions
+TOTAL PASS 70195

@@ -27,3 +27,9 @@ The pinned pre-fix helper loses both the raw multi-step final suffix and a diffe
 Touched OCaml source/interfaces pass syntax parsing; diff whitespace checks pass. Added native runtime/TUI fixtures were not executed in this external coding-agent lane. No integrated PTY, installed binary, live provider, screenshot, or production restart claim is made. Muse and shared conservative remainder callers were source-inspected; provider behavior remains an integration follow-up.
 
 Review used three specialist agents of the inherited model for structural, flow, and implementation counterexamples. This is independent source scrutiny, not cross-model review or author approval. Follow-up issues #40714 and #40735 retain real TUI/provider verification scope. Rollback: revert this child PR while retaining the parent stack.
+
+## Bounded n+m extension
+
+The executable helper sweep additionally varies message count from 1 through 128 over eight deterministic tool-boundary patterns. Each message is split into two deltas. Assertions check exact projected bytes, raw final deduplication, missing suffix, distinct final, and every earlier message as a repeated final. This adds 70,144 passing assertions (70,195 total). The expected display is constructed separately from the helper's paragraph-break function.
+
+This is bounded evidence for the shared text helper, not a proof for arbitrary m or the entire TUI/provider pipeline. TUI and native protocol fixtures still cover four requests and remain unexecuted here. Generalized queue/journal/runtime stress coverage and memory/performance growth are pending under #40714/#40735.

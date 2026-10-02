@@ -8,7 +8,11 @@ import threading
 import test_tui_keyboard_input as h
 
 
-SOURCE_MODULES = ("bin/masc_tui.ml",)
+SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
+)
 
 
 def run(executable: str) -> None:

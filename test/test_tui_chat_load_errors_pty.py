@@ -6,7 +6,10 @@ import sys
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
-    "bin/masc_tui_command.ml", "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
+    "bin/masc_tui_command.ml",
+    "bin/masc_tui.ml",
     "bin/masc_tui_render_chat.ml",
 )
 HISTORY = "history-cause " + "transport diagnostic " * 5 + "history-tail 증거"

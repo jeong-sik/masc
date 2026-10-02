@@ -28,7 +28,7 @@ let with_source f =
   let append event = B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
     ~keeper_id:keeper_name {B.recorded_at=1000.;event} |> Result.map_error B.append_error_to_string |> get in
   let boundary ~fresh number messages =
-    append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:number;
+    append (B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:number;
       history_at_start=(if fresh then B.Fresh_history else B.Continued_history);
       position=B.position_of_messages messages |> get}) in
   f env config save append boundary
@@ -357,7 +357,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
   let input : K.input =
-    {turn_ref=P.turn_ref half; goal_context=K.No_task;
+    {turn_ref=P.turn_ref half; historical_task_contexts = []; goal_context =K.No_task;
      keeper_id=Masc_test_deps.keeper_id_fixture keeper_name; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
      working_context=Masc.Keeper_librarian_context.empty;
@@ -727,7 +727,7 @@ let with_counterpart_turn ~counterpart f =
   save turn;
   B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
     {B.recorded_at = Time_compat.now () +. 60.;
-     event = B.Turn_ended {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+     event = B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
        history_at_start = B.Fresh_history; position = B.position_of_messages turn |> get}}
   |> Result.map_error B.append_error_to_string |> get;
   let continuity runner =

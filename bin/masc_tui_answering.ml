@@ -101,14 +101,9 @@ let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
 
    [frame] steps the running mark the way the live progress row's does
    ([running_glyph]); a surface with no ticker passes none and gets the
-   still mark. [text_tail_drawn]: the pane is drawing the turn's reply text
-   itself (an observed turn read from its journal on every stream frame),
-   so the preview's tail of the same text is left out rather than said
-   twice on one screen. [stop_keys] rides the running turn's row and no
-   other: attached to whichever row came first, it once landed on
-   "Current turn unavailable" when the turns poll carried two rows for one
-   keeper. *)
-let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text_tail_drawn rows =
+   still mark. Reply text belongs to the scrollable conversation; this band
+   carries only activity and the keys that act on it. *)
+let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error rows =
   let plain text = { lead = text; rest = ""; keys = "" } in
   let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
@@ -125,12 +120,6 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text
           preview.Tui_decode.ktp_status_text
           (elapsed_text ~now preview.ktp_updated_at_unix)
     in
-    let text = match preview with
-      | Some _ when text_tail_drawn -> []
-      | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
-        [{ lead = ""; rest = "Latest output: " ^ Masc.Tui_terminal_text.sanitize_terminal_text preview.ktp_text_tail; keys = "" }]
-      | Some _ | None -> []
-    in
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
        is running, and the lane and the age are the facts; "current" and
        "turn" were the sentence around them. A stale reading keeps its word,
@@ -146,7 +135,6 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
-    @ text
 ;;
 
 let is_running (row : Tui_decode.keeper_turn_row) =
@@ -236,7 +224,7 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
   fresh @ kept
 ;;
 
-let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
+let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
     ~(error : string option) ~(observed_at : float option)
     ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
@@ -274,12 +262,35 @@ let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
   let name_width =
     let widest =
       List.fold_left
-        (fun widest (name, _, _) -> max widest (String.length name))
+        (fun widest (name, _, _) -> max widest (Masc_tui_message_layout.display_width name))
         0 running
     in
     List.fold_left
-      (fun widest (name, _) -> max widest (String.length name))
+      (fun widest (name, _) -> max widest (Masc_tui_message_layout.display_width name))
       widest live_finishes
+  in
+  let suffix_width =
+    let running_width = List.fold_left
+      (fun widest (_, lane, started_at) ->
+        max widest (Masc_tui_message_layout.display_width
+          (Printf.sprintf "  %-14s  %s" (lane_word lane)
+            (elapsed_text ~now started_at)))) 0 running
+    in
+    List.fold_left
+      (fun widest (_, finished_at) ->
+        max widest (Masc_tui_message_layout.display_width
+          ("  answered " ^ elapsed_text ~now finished_at ^ " ago")))
+      running_width live_finishes
+  in
+  (* Reserve the lane and age first: one long fleet name must not push every
+     other keeper's status outside the viewport. Widths are terminal cells. *)
+  let name_width = match width with
+    | None -> name_width
+    | Some width -> min name_width (max 0 (width - 2 - suffix_width))
+  in
+  let fitted_name name =
+    Masc_tui_message_layout.fit_width
+      (Masc.Tui_terminal_text.sanitize_terminal_text name) name_width
   in
   (* What the rows below are a reading of. [observed_at] is when a poll last
      answered; without one there are no rows at all, so "showing the last rows
@@ -326,8 +337,8 @@ let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
         List.map
           (fun (name, lane, started_at) ->
             { text =
-                Printf.sprintf "%s %-*s  %-14s  %s" (running_glyph ~frame)
-                  name_width name
+                Printf.sprintf "%s %s  %-14s  %s" (running_glyph ~frame)
+                  (fitted_name name)
                   (lane_word lane)
                   (elapsed_text ~now started_at)
             ; tone = Running
@@ -339,8 +350,8 @@ let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
     List.map
       (fun (name, finished_at) ->
         { text =
-            Printf.sprintf "\xe2\x9c\x93 %-*s  answered %s ago" name_width
-              name
+            Printf.sprintf "\xe2\x9c\x93 %s  answered %s ago"
+              (fitted_name name)
               (elapsed_text ~now finished_at)
         ; tone = Done
         ; target = Some name

@@ -2,6 +2,7 @@ type pass_end =
   | Off
   | Lane_unconfigured
   | Drained
+  | Yielded_to_waiting_unit
   | Not_committed
   | Stopped of Keeper_librarian_durable_consumer.error
   | Raised of string
@@ -30,8 +31,9 @@ val install : unit -> unit
 val submit_durable : base_path:string -> keeper_name:string -> unit
 (** Submit disk-selected catch-up for this Keeper on the server-owned
     Librarian lane. Each stored progress advance continues to the next unread
-    range; an empty backlog, failure, or disabled/invalid setting ends this
-    wake. A launch submits its own Keeper's catch-up;
+    range while no other unit waits. A waiting unit, empty backlog, failure,
+    or disabled/invalid setting ends this wake. A launch submits its own
+    Keeper's catch-up;
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
     did not launch. *)
 
@@ -100,6 +102,15 @@ module For_testing : sig
     ?has_waiting:(unit -> bool) ->
     base_path:string -> keeper_name:string -> unit -> unit
   (** [has_waiting] replaces the lane's "a unit waits" read (RFC-0467). *)
+  val run_with_readers
+    :  durable:(unit -> unit)
+    -> continuity:(unit -> unit)
+    -> base_path:string
+    -> keeper_name:string
+    -> unit
+  (** Production phase dispatch with controlled durable and continuity edges.
+      Queue-context capture and owner/configuration checks remain unchanged. *)
+
   val run_durable_with_commit
     :  config:Workspace.config
     -> keeper_name:string

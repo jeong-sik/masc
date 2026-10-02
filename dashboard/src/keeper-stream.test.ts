@@ -72,6 +72,29 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.delivery).toBe('streaming')
   })
 
+  it.each([
+    ['whole', ['  hello world\n\t다음 줄  ']],
+    ['split', ['  ', 'hello', ' ', 'world', '\n', '\t', '다음', ' ', '줄', '  ']],
+  ])('preserves thinking whitespace for %s SSE payloads', (_label, chunks) => {
+    assistantEntry()
+    for (const delta of chunks) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta },
+      })
+    }
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_STOP',
+      value: { index: 0 },
+    })
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      { kind: 'think', text: '  hello world\n\t다음 줄  ', ts: expect.any(String), agentCoreBlockIndex: 0 },
+    ])
+  })
+
   it('resets unfinished narrative at a runtime attempt boundary and keeps tool evidence', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

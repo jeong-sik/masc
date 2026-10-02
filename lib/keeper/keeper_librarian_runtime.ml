@@ -1285,6 +1285,79 @@ let run_best_effort
            existing failure classification. *)
         let observed_absorb_gate = ref None in
         let committed_memory = ref None in
+        let register_absorb_evaluation
+            ~direction
+            ~destinations
+            ~state
+            ~questions =
+          let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
+          Exact_lane_run_registry.register_running
+            registry
+            ~run_id:evaluation_id
+            ~lane:Exact_lane_run_registry.Librarian
+            ~actor:keeper_id
+            ~started_at:(Time_compat.now ())
+            ~input:
+              (Exact_lane_run_registry.Exact_input
+                 (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
+                    ~direction ~destinations ~state ~questions));
+          evaluation_id
+        in
+        let complete_absorb_evaluation ~evaluation_id evaluation =
+          let outcome =
+            match evaluation.Keeper_librarian_absorb_gate.result with
+            | Ok _ -> Exact_lane_run_registry.Succeeded
+            | Error failure ->
+              Exact_lane_run_registry.Failed
+                { code = "absorb_gate_provider_failure"
+                ; detail = Typesafeai_client.failure_to_string failure
+                }
+          in
+          (match
+             Exact_lane_run_registry.mark_completed
+               registry
+               ~run_id:evaluation_id
+               ~outcome
+               ~elapsed_s:0.0
+               ~selected_slot:None
+               ~output:
+                 (Keeper_librarian_absorb_gate.observation_to_yojson
+                    (Keeper_librarian_absorb_gate.Incomplete [ evaluation ]))
+           with
+           | Ok () -> ()
+           | Error error ->
+             Log.Keeper.warn
+               ~keeper_name:keeper_id
+               "absorb gate evaluation completion persistence failed id=%s: %s"
+               evaluation_id
+               (Exact_lane_run_registry.completion_error_to_string error))
+        in
+        let abort_absorb_evaluation ~evaluation_id result =
+          let outcome, output =
+            match result with
+            | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
+            | `Failed detail ->
+              ( Exact_lane_run_registry.Failed
+                  { code = "absorb_gate_dispatch_failed"; detail }
+              , `Assoc [ "status", `String "aborted"; "detail", `String detail ] )
+          in
+          (match
+             Exact_lane_run_registry.mark_completed
+               registry
+               ~run_id:evaluation_id
+               ~outcome
+               ~elapsed_s:0.0
+               ~selected_slot:None
+               ~output
+           with
+           | Ok () -> ()
+           | Error error ->
+             Log.Keeper.warn
+               ~keeper_name:keeper_id
+               "absorb gate evaluation abort persistence failed id=%s: %s"
+               evaluation_id
+               (Exact_lane_run_registry.completion_error_to_string error))
+        in
         (try
            let result =
              let open Result.Syntax in
@@ -1448,6 +1521,9 @@ let run_best_effort
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
+                 ~before_evaluate:register_absorb_evaluation
+                 ~after_evaluate:complete_absorb_evaluation
+                 ~on_evaluation_aborted:abort_absorb_evaluation
                  ~clock
                  ~keeper_id
                  ~facts:(match prompt_input.current with

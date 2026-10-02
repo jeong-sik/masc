@@ -6,6 +6,9 @@ type source_error =
   | Linked_goal_missing of string
 type t =
   | No_task
+  | Admission_not_recorded
+      (** The turn boundary records no admission observation. This is neither
+          evidence of no Task nor an invitation to read the current Task. *)
   | Task_source_unavailable of string
   | Task of { task_id : Keeper_id.Task_id.t; goals : (goal list, source_error) result }
 val capture : config:Workspace.config -> (Keeper_id.Task_id.t option, string) result -> t

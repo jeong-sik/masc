@@ -437,6 +437,7 @@ function runtimeParameterDetailRows(
     detailRow('declared provider', 'context', countText(spec?.provider?.max_context)),
     detailRow('declared provider', 'display name', spec?.provider?.display_name),
     detailRow('declared provider', 'protocol', spec?.provider?.protocol),
+    detailRow('declared provider', 'context', countText(spec?.provider?.max_context)),
     detailRow('declared provider', 'api format', spec?.provider?.api_format),
     detailRow('declared provider', 'transport', spec?.provider?.transport),
     detailRow('declared provider', 'auth kind', spec?.provider?.auth_kind),

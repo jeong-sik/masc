@@ -2,7 +2,8 @@
 //
 // Uses local state while typing so large texts do not re-render the parent
 // panel on every keystroke. Changes are committed to the parent on blur and
-// when the full-screen modal is confirmed.
+// when the full-screen modal is confirmed. A caller saving while editing can
+// observe the current draft through onInput without waiting for blur.
 
 import { html } from 'htm/preact'
 import { useLayoutEffect, useState } from 'preact/hooks'
@@ -17,6 +18,7 @@ function byteLength(s: string): number {
 export function ExpandableTextarea({
   value,
   onChange,
+  onInput,
   label,
   rows = 6,
   placeholder = '',
@@ -26,6 +28,7 @@ export function ExpandableTextarea({
 }: {
   value: string
   onChange: (value: string) => void
+  onInput?: (value: string) => void
   label: string
   rows?: number
   placeholder?: string
@@ -45,6 +48,11 @@ export function ExpandableTextarea({
   function commit(next: string) {
     setLocal(next)
     onChange(next)
+  }
+
+  function input(next: string) {
+    setLocal(next)
+    onInput?.(next)
   }
 
   const borderClass = dirty
@@ -87,7 +95,7 @@ export function ExpandableTextarea({
         value=${local}
         placeholder=${placeholder}
         onInput=${(e: Event) =>
-          setLocal((e.target as HTMLTextAreaElement).value)}
+          input((e.target as HTMLTextAreaElement).value)}
         onBlur=${(e: Event) =>
           commit((e.target as HTMLTextAreaElement).value)}
       />
@@ -129,7 +137,7 @@ export function ExpandableTextarea({
                   value=${local}
                   placeholder=${placeholder}
                   onInput=${(e: Event) =>
-                    setLocal((e.target as HTMLTextAreaElement).value)}
+                    input((e.target as HTMLTextAreaElement).value)}
                 />
                 <div class="flex items-center justify-between gap-2 mt-3">
                   <${CountHint} />

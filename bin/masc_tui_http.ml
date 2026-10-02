@@ -755,7 +755,7 @@ let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
   let payload = Masc_tui_keeper_chat_projection.request_to_yojson
       ~admission_intent ~since_seq request in
   let payload = match expected_workspace, payload with
-    | Some (expected : Tui_decode.server_identity), `Assoc fields ->
+    | Some (expected : Masc.Tui_decode.server_identity), `Assoc fields ->
         `Assoc (("expected_workspace", `Assoc
           [ "base_path", `String expected.sid_base_path
           ; "masc_root", `String expected.sid_masc_root ]) :: fields)
@@ -1575,7 +1575,7 @@ type tool_approval_answer =
    [?expected_workspace]: this signature has no positional argument, so an
    optional here can never be erased (warning 16). Both TUI callers
    always supply the verified server identity. *)
-let post_keeper_tool_approval ~(expected_workspace : Tui_decode.server_identity)
+let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int) ~(keeper_name : string)
     ~(tool_call_id : string) ~(allow : bool) :
     (tool_approval_answer, string) result =
@@ -2056,7 +2056,7 @@ let expect_ok_true ~(what : string) json =
    follows it, so an optional argument here is unerasable (warning 16). *)
 let post_dashboard_gate_resolve ~(host : string) ~(port : int)
     ~(approval_id : string) ~(approve : bool) ~(reason : string option)
-    ~(expected_workspace : Tui_decode.server_identity) :
+    ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (unit, string) result =
   let body =
     Yojson.Safe.to_string
@@ -2080,7 +2080,7 @@ let post_dashboard_gate_resolve ~(host : string) ~(port : int)
     every field again, so this never turns a refresh race into a retry of a
     different external effect. *)
 let post_dashboard_gate_retry ~(host : string) ~(port : int)
-    ~(request : Yojson.Safe.t) ~(expected_workspace : Tui_decode.server_identity)
+    ~(request : Yojson.Safe.t) ~(expected_workspace : Masc.Tui_decode.server_identity)
     : (unit, string) result =
   let ( let* ) = Result.bind in
   let* fields = match request with
@@ -2236,7 +2236,7 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let board_workspace_field (identity : Tui_decode.server_identity) =
+let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
     [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
     ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
@@ -2533,7 +2533,7 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
     the same lane swap as a config save, so this call carries the same
     extended budget. *)
 let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(expected_workspace : Tui_decode.server_identity option)
+    ~(expected_workspace : Masc.Tui_decode.server_identity option)
     ~(declaration_json : string) : (Yojson.Safe.t, string) result =
   match expected_workspace with
   | None -> Error "Cannot create: workspace identity is unverified"

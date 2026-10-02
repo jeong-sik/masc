@@ -45,6 +45,8 @@
 
 - Browser-login completion polling resumes after same-workspace identity outages even while the TUI returns to the Keeper list; withdrawn consent URLs and foreign-workspace intent remain retired (#40804).
 
+- Preserve the Librarian runtime binding through answer completion and validate retired Lane reads against joined workers and current declaration identities. (#40776, #40800)
+
 ### Complete change record
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.

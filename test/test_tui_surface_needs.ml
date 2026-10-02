@@ -91,14 +91,12 @@ let test_about_refreshes_observed_outfits_over_another_surface () =
     true opening.Types.needs_keeper_roster;
   check bool "closing About requests no additional read" false
     (Types.surface_needs_any (Types.surface_needs_delta ~previous:opened ~next:closed));
-  let cadence = Types.full_refresh_needs ~scoped_refresh_inflight:false
+  (* A newer full bundle supersedes an in-flight scoped ticket, so it reads
+     every currently visible dataset, including About outfit observations. *)
+  let cadence = Types.surface_needs
     ~keeper_pane_drawn:false ~about_open:true Types.Config in
-  check bool "a settled About gallery keeps observing outfit changes"
-    true cadence.Types.needs_keeper_roster;
-  let concurrent = Types.full_refresh_needs ~scoped_refresh_inflight:true
-    ~keeper_pane_drawn:false ~about_open:true Types.Config in
-  check bool "the full refresh does not duplicate an in-flight scoped read"
-    false (Types.surface_needs_any concurrent)
+  check bool "a newer full bundle keeps observing the visible About gallery"
+    true cadence.Types.needs_keeper_roster
 ;;
 
 let test_forward_navigation_fetches_only_new_surface_datasets () =
@@ -154,21 +152,6 @@ let test_equal_needs_have_no_delta () =
   check bool "keeper modes share an already loaded dataset set" false
     (Types.surface_needs_any
        (Types.surface_needs_delta ~previous ~next))
-;;
-
-let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
-  let concurrent =
-    Types.full_refresh_needs ~about_open:false ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true Types.Board
-  in
-  let alone =
-    Types.full_refresh_needs ~about_open:false ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true Types.Board
-  in
-  check bool "concurrent full refresh is global-only" false
-    (Types.surface_needs_any concurrent);
-  check bool "an unopposed full refresh still updates the visible board" true
-    alone.Types.needs_board
 ;;
 
 let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
@@ -230,10 +213,6 @@ let test_usage_asks_for_keeper_usage () =
 let test_only_usage_asks_for_account_emails () =
   check bool "Usage asks for them" true
     (needs Types.Metrics).Types.needs_account_emails;
-  check bool "and so does its full refresh" true
-    (Types.full_refresh_needs ~about_open:false ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false Types.Metrics)
-      .Types.needs_account_emails;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
@@ -266,8 +245,6 @@ let () =
             test_forward_navigation_fetches_only_new_surface_datasets
         ; test_case "equal needs have no delta" `Quick
             test_equal_needs_have_no_delta
-        ; test_case "full refresh does not race a scoped owner" `Quick
-            test_full_refresh_omits_scoped_datasets_while_their_owner_is_running
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
         ] )

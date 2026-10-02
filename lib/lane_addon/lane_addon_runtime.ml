@@ -1135,7 +1135,9 @@ let retained_action_unlocked m ~instance_id ~request_id =
     | Some e -> (match e.current_action with
         | Some current when current.request_id = request_id
             && current.state = Lane_addon_action.Outcome_unknown ->
-            save_action_unlocked m current
+            let* () = save_action_unlocked m current in
+            if not e.running then e.current_action <- None;
+            Ok ()
         | _ -> Ok ())
     | None -> Ok () in
   let* json = offload (fun () -> Lane_addon_store.load_action m.store ~instance_id ~request_id) in

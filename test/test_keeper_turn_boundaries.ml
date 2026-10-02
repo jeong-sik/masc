@@ -784,7 +784,8 @@ let test_the_line_that_states_a_position () =
       (Boundaries.witness_line ?through ~trace_id ~end_atom:2 ~last_atom_digest:digest lines)
   in
   check (option int) "the latest line that states it" (Some 6) (found ());
-  check (option int) "only among the lines counted" (Some 1) (found ~through:5 ());
+  check (option int) "a restart invalidates the earlier end witness" None (found ~through:5 ());
+  check (option int) "before the restart the end witness is live" (Some 1) (found ~through:2 ());
   check (option int) "none counted, none found" None (found ~through:0 ());
   check (option int) "another digest is another position" None (found ~digest:"other" ());
   check (option int) "another trace has its own lines" (Some 2) (found ~trace_id:"other" ());
@@ -836,6 +837,14 @@ let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
   in
   check (option int) "a start state before a restart names a history that is gone" None
     (witness restarted_after ~end_atom:5 ~digest:"d5");
+  let repeated_after_restart =
+    [ 1, Ok (record ~turn:1 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" }))
+    ; 2, Ok (history_restarted ())
+    ; 3, Ok (record ~turn:3 ~history_at_start:from_five Boundaries.No_atom_history)
+    ]
+  in
+  check (option int) "only the new history can witness a repeated position" (Some 3)
+    (witness repeated_after_restart ~end_atom:5 ~digest:"d5");
   let later_turn_ended_there =
     official_after_a_failed_save
     @ [ 4, Ok (record ~turn:4 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" })) ]

@@ -489,7 +489,14 @@ let test_failed_terminal_and_fallback_keep_hot_uncertainty () = with_fixture (fu
     check int "repair keeps the received package result" 1 (number "calls" (member "result" recovered));
     check string "repaired uncertainty is durable" "outcome_unknown"
       (text "state" (Yojson.Safe.from_string (Fs_compat.load_file path)));
+    Atomic.set armed true;
+    let writes_before = Atomic.get fallback_failures in
+    let retained = status fixture id request_id in
+    check string "repaired stopped-worker receipt remains readable with writes failing"
+      "outcome_unknown" (text "state" retained);
     ignore (act fixture id request_id (`Int 1) |> unwrap);
+    check int "repaired reads and duplicates never rewrite the receipt"
+      writes_before (Atomic.get fallback_failures);
     check int "a repaired receipt never replays the external action" 1 !(fixture.calls);
     detach clock fixture id))
 
@@ -497,9 +504,12 @@ let test_first_action_requires_durable_directory () = with_fixture (fun clock fi
   let id = attach clock fixture ~acting:true in
   let store = Store.create ~root:(Filename.concat (Workspace.masc_dir fixture.config) "lane-addons") in
   let actions = Filename.concat (Store.root store) "actions" in
+  let allowed_parents = [Filename.dirname (Store.root store); Store.root store; actions] in
   let writer ~store ~instance_id ~request_id json =
     Store.For_testing.save_action store ~instance_id ~request_id json
       ~sync_parent:(fun parent ->
+        if not (List.mem parent allowed_parents) then
+          fail "action receipt tried to open an external workspace ancestor";
         if parent = actions then raise (Unix.Unix_error (Unix.EIO,"fsync",parent))
         else
           let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
@@ -516,6 +526,35 @@ let test_first_action_requires_durable_directory () = with_fixture (fun clock fi
   ignore (act fixture id "first-directory" (`Int 1) |> unwrap);
   check int "directory repair permits exactly one action" 1 !(fixture.calls);
   detach clock fixture id)
+
+let test_action_creates_only_owned_hierarchy () =
+  let anchor = Filename.temp_dir "lane-action-anchor" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree anchor) (fun () ->
+    let root = Filename.concat anchor "lane-addons" in
+    let store = Store.create ~root in
+    let synced = ref [] in
+    let sync_parent parent =
+      if not (List.mem parent [anchor;root;Filename.concat root "actions"]) then
+        fail "store creation reached an external ancestor";
+      synced := parent :: !synced;
+      let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+    let fail_root_parent parent =
+      if parent = anchor then raise (Unix.Unix_error (Unix.EIO,"fsync",parent))
+      else fail "root publication failure must stop before child creation" in
+    List.iter (fun () ->
+      let reopened = Store.create ~root in
+      check bool "root parent failure rejects receipt across store handles" true
+        (Result.is_error (Store.For_testing.save_action ~sync_parent:fail_root_parent
+          reopened ~instance_id:"instance" ~request_id:"request" (`Assoc [])));
+      check bool "failed root publication leaves no accepted receipt" true
+        (Store.load_action reopened ~instance_id:"instance" ~request_id:"request" = Ok None)) [(); ()];
+    Store.For_testing.save_action ~sync_parent store ~instance_id:"instance"
+      ~request_id:"request" (`Assoc []) |> unwrap;
+    check (list string) "only workspace anchor and owned directories are synced"
+      [anchor;root;Filename.concat root "actions"] (List.rev !synced);
+    check bool "receipt is retained" true
+      (Store.load_action store ~instance_id:"instance" ~request_id:"request" = Ok (Some (`Assoc []))))
 
 let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
@@ -566,6 +605,7 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   detach clock fixture id)
 
 let () = run "Lane action workflow" ["optional world actions",[
+  test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;
   test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;

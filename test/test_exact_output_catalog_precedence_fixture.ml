@@ -371,7 +371,7 @@ let test_closed_registry_transaction () =
   in
   let prepare lane_id =
     match
-      Registry.prepare_replacement
+      Registry.prepare_replacement ~runtime_observations:[]
         ~lanes:(transaction_lanes lane_id)
         ~excused_lane_ids:[]
         ~load_resolver_snapshot:(fun () -> Ok snapshot)

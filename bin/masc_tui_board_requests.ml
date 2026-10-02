@@ -34,10 +34,15 @@ let start_board_post state ~host ~launch ~report ~(title : string) ~(body : stri
      these, not against whatever the operator typed while it was out. *)
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
+  let expected_workspace = state.server_identity in
   launch
     ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; result })
     (fun () ->
-      match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
+      let ( let* ) = Result.bind in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      match Masc_tui_http.post_board_new ~expected_workspace ~host ~port ~title ~body ?hearth () with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
@@ -55,10 +60,15 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
   report "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
+  let expected_workspace = state.server_identity in
   launch
     ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; result })
     (fun () ->
-      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
+      let ( let* ) = Result.bind in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
@@ -74,10 +84,15 @@ let start_board_vote state ~host ~launch ~report ~(post_id : string) ~(up : bool
   report "system"
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let port = state.port in
+  let expected_workspace = state.server_identity in
   launch
     ~deliver:(fun result -> Board_vote_done result)
     (fun () ->
-      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
+      let ( let* ) = Result.bind in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      match Masc_tui_http.post_board_vote ~expected_workspace ~host ~port ~post_id ~up with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end

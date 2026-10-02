@@ -3,7 +3,7 @@ rfc: "tui-operator-ia"
 title: "TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로"
 status: Draft
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-10-01
 author: claude
 supersedes: []
 superseded_by: null
@@ -291,3 +291,98 @@ keeper 칩 ④ 도구 활동의 단계적 공개(함대 1줄 → 상세 tool 행
   어떤 화면이 살아남는지를 정한다.
 - 문자열 접두사 kind 분류의 확대. 상시 kind 표시는 생산자 typed kind 가 wire
   에 실린 뒤에 한다 (§3.2).
+
+## 8. 현재 소스 대조와 남은 작업 (2026-10-01, task-1203)
+
+이 절은 앞 절의 2026-09-01 조사와 구현 계획을 현재 상태로 오해하지 않도록
+추가한다. 최상위 메뉴는 Accepted
+[RFC-tui-measured-operator-home](RFC-tui-measured-operator-home.md)의 일곱
+목적지를 따른다. §3.1의 열 개 탭을 다시 구현하지 않는다.
+[RFC-tui-operator-workbench](RFC-tui-operator-workbench.md)의 공통 조작
+계획도 유지한다. 아래 제안은 그 결정 안에서 남은 발견성과 증거 연결을 다룬다.
+
+### 8.1 기준과 확인 범위
+
+검토한 main은 `59d7be7de2dea19e8461c78f3f516e911bd5e025`이다.
+이 절은 저장소 소스와 공식 문서를 읽은 조사이며 실제 TUI 실행·화면 캡처,
+사용성 개선·릴리스 성공을 측정한 결과가 아니다. 9월의 줄 번호와
+경쟁 제품 설명을 현재 코드의 사실로 재사용하지 않는다.
+
+| 질문 | 현재 소스에서 확인한 자리 | 남은 검증 |
+|---|---|---|
+| 어디로 가야 하나 | `bin/masc_tui_types.ml`의 `surface_ring`: Dashboard, Work, Keepers, Usage, Board, Workspace, System | 같은 목적지에 키·팔레트·클릭으로 도착하는 실제 행동 |
+| 이 Keeper의 무엇을 보고 있나 | 같은 파일의 `keeper_detail_tabs`: Info, Items, Sandbox, Settings, Secrets, GitHub, Identity, Channels, Automation, Runs | 목록 커서·열린 대화·상세의 대상 일치 |
+| 부모 화면으로 돌아갈 수 있나 | `bin/masc_tui_surface_navigation.ml`의 `surface_ring_family`: Changes/Memory 등은 Keepers, Resources/Tools는 System, Code는 Workspace | 직접 진입과 Esc 복귀에서 선택·스크롤 보존 |
+| Skill과 Tool은 구분되나 | `bin/masc_tui_keeper_chat_transcript.ml`의 `skill_rows`와 typed 활동 처리 | 진행 중·전달만 됨·실제 사용·실패를 기본 밀도에서 읽는지 |
+| 기억의 분류는 어디 있나 | `bin/masc_tui_render_memory.ml`의 `memory_fact_categories` 사용 및 선택 목록 | 사실 선택·분류 필터·원문/출처를 작은 화면에서 읽는지 |
+| 어떤 컨텍스트를 관측했나 | `bin/masc_tui_context_state.ml`은 Keeper별 observation/error를 보관하고 trace identity로 디코드 | 관측한 입력과 아직 조립하지 않은 다음 입력의 구분 |
+
+이 표의 확인은 심볼과 소스 흐름의 존재까지다. async 요청과 턴·호출의
+완전한 조인, diff 커버리지 표시, 다음 입력 미리보기의 실행 가능한 계약은
+이 조사만으로 완료라고 판정하지 않는다. Memory 분류나 Skill 표시가
+없는 기능이라고 가정해 다시 만드는 일도 하지 않는다.
+
+### 8.2 현재 공식 경쟁 TUI 조사
+
+확인일: 2026-10-01 UTC. 아래 두 항목은 공식 문서의 설명을 읽은 것이며
+경쟁 앱을 설치하거나 실제 키 동작을 측정하지 않았다.
+
+| 제품·공식 출처 | 문서에서 확인한 동작 | MASC에 적용할 판단 |
+|---|---|---|
+| [OpenCode TUI](https://opencode.ai/v2/docs/cli/tui/) | 현재 view의 command palette, slash commands, 파일 문맥 첨부, 진행 중 입력의 steering과 queue 제스처 구분 | Keeper를 고른 뒤 행동을 찾는 단일 진입점을 제공하되 대상과 전송 상태를 함께 표시 |
+| [Crush README](https://github.com/charmbracelet/crush/blob/main/README.md#user-invocable-skills) | user-invocable Skill을 palette에서 선택하고 해당 지침을 대화 문맥에 로드; 모델 호출 비활성 옵션을 별도로 설명 | “지침을 읽음”과 “도구 실행”을 같은 성공 표식으로 합치지 않고 실제 Skill identity와 사용 단계 표시 |
+| [Crush 도구 허가](https://github.com/charmbracelet/crush/blob/main/README.md#allowing-tools) | 도구 허가와 Skill 발견/호출을 별도 설정으로 설명 | 실행 권한은 기존 Gate에 맡기고 선택 UI가 권한을 부여했다고 표현하지 않음 |
+
+문서 패턴을 옮기는 것은 설계 추론이다. MASC는 여러 자율 Keeper의 원장과
+완료 판정을 감독하므로, 단일 세션의 조작 키나 세션 수를 그대로 복제하지
+않는다. 특히 작업 중 Enter의 의미는 현재 MASC 입력 계약을 유지한다.
+
+### 8.3 선택된 Keeper에서 근거까지 한 흐름
+
+Keepers 목록에서 Keeper를 열면 이름과 관측 상태를 고정한 채 대화·호출·
+Changes·Context·Memory로 이동한다. 항목의 수를 늘리는 대신 같은 대상의
+질문을 연결한다. 사용자에게 execution ID를 먼저 외우게 하지 않는다.
+
+- **대화와 호출:** 기존 Skill/Tool 표식과 Ctrl-D 펼침을 사용한다.
+  실패·진행 중·미반환은 기본 화면에서 남긴다. 원문은 펼침에서 읽되 결과
+  수신과 실행 성공을 구분한다. 권한 대기는 기존 승인 화면으로 연결한다.
+- **async:** 요청 수락은 실행 완료가 아니다. 요청 ID, Keeper, 호출/턴 귀속과
+  실제 상태를 생산자 계약으로 연결한다. 아직 없는 귀속은 미확인으로 표시한다.
+  과거 실패는 남기고 현재 대기 수에는 실제 미종결 요청만 포함한다.
+- **Changes:** 파일 변경에서 그 변경을 만든 턴·Task·호출 근거로 이동한다.
+  일부 결과만 수집됐으면 부분 커버리지를 표시한다. 펼침과 복사는 같은 원문을 쓴다.
+- **Memory:** 서버의 분류·출처를 그대로 사용한다. 선택한 Keeper의 사실을
+  범주로 좁히고 상세에서 유효한 근거와 무효화 이유를 확인한다.
+- **Context:** “마지막 관측 입력”에는 trace/turn·관측 시각·포함 근거·바이트
+  의미를 표시한다. “다음 입력”은 생산자가 실제 조립한 대상과 revision을 제공할
+  때만 별도 관측으로 연다. 아직 만들지 않았다면 준비 전으로 표시한다.
+  현재 facts 합계로 다음 턴 토큰 수나 포함 여부를 예측하지 않는다.
+
+짧은 화면에서도 선택된 Keeper와 현재 질문이 남는다. 메뉴를 먼저 숨기고
+본문 최소 높이를 보존한다. 다른 Keeper로 커서만 옮겼다고 열린 대화나
+Context의 대상이 바뀌지 않게 한다. Esc는 열린 선택 메뉴/상세부터 닫고,
+불러오기 실패는 빈 목록이나 완료 상태로 바꾸지 않는다.
+
+### 8.4 후속 구현 작업 분할안
+
+아래는 후속 Task를 만들 때 쓸 계약 초안이다. 신규 배정이나 구현 완료를
+뜻하지 않는다. 담당자가 기존 Task·PR과 대조해 남은 범위만 배정한다.
+task-1908의 실제 TUI·첫 실행 통합, task-1866의 Queue 연속성, task-1389/1385의
+Mermaid·Figma 표면 조사는 별도 기존 범위로 유지하며 복제하지 않는다.
+
+| 작업 | 소스 시작점·선행조건 | 성공 조건과 증거 | 기존 작업과 경계 |
+|---|---|---|---|
+| IA-1 목적지와 복귀 일치 | `surface_ring`, `surface_ring_family`, 기존 키·팔레트 처리 | 7목적지와 Keeper의 주요 근거 화면에 키/팔레트로 도착하고 Esc가 같은 대상·선택으로 돌아옴. 실제 PTY 입력·캡처·binary SHA | 새 탭 체계 대신 현재 7곳의 경로 검증; task-1908 실행을 재사용 |
+| IA-2 Skill·async 호출 근거 | `skill_rows`, 기존 호출 원장 및 async 상태 생산자 | 지침 전달만/도구 실행/수락/진행/실패/완료를 서로 구분. 다른 Keeper 요청은 섞이지 않으며 terminal 전이가 대기 수에서 빠짐. 생산자 receipt와 같은 실행의 화면 대조 | Queue 미전송/POST/Queued 연속성은 task-1866에 남김 |
+| IA-3 변경의 출처와 커버리지 | Changes·기존 chat diff, 턴/Task/호출 identity | 파일에서 정확한 근거로 이동, 부분 수집과 읽기 실패 표시, 복사 원문 동일. 좁은 화면의 실제 이동·diff 입력/출력 | Mermaid/Figma 렌더링을 추가하지 않음 |
+| IA-4 Memory·Context 관측 경계 | `memory_fact_categories`, `Masc_tui_context_state`, 서버의 context observation | 범주 필터·사실 출처·선택 대상 일치. 과거 입력/준비 전/실제 다음 입력을 구분하고 revision 변화 시 옛 값을 재사용하지 않음. frozen source/receipt와 화면 대조 | Recall 줄이기·답 품질·permit 측정은 task-618 범위 |
+
+공통 완료 기준은 소스 변경의 독립 검토와 실제 행동 증거다. 문법 검사,
+화면 문구 snapshot, 임의 시간 상한으로 위 동작을 증명하지 않는다.
+실행이 불가하면 소스 완료/실행 미측정을 분리한다. task-1203은 이 RFC와
+분할안을 제공하는 작업이며 IA-1~4 구현이나 task-1908의 실측을 완료했다고
+주장하지 않는다.
+
+[근거] main59d7be7de2dea19e8461c78f3f516e911bd5e025의 위 심볼·Accepted
+measured-home RFC 및 workbench RFC 직접 읽기, OpenCode/Crush 공식 문서 조회,
+2026-10-01 UTC. High: 소스·문서에 적힌 범위; 실제 화면 동작과 개선 효과는 미측정.

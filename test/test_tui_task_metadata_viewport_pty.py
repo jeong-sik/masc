@@ -41,8 +41,10 @@ def detail_text(output):
     rows = screen(output).decode().splitlines()
     title = next(row for row in rows if "title: TITLEHEAD" in row)
     prefix = title[:title.index("title: TITLEHEAD")]
+    # The detail box indents labels four cells from its pane boundary.
     start = sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
-                for char in prefix)
+                for char in prefix) - 4
+    start = max(0, start)
     # Read each detail row independently of the neighboring roster pane.
     result = []
     for row in rows:
@@ -126,8 +128,9 @@ def run(executable):
             # Goal lifecycle handler. An empty reason must leave it untouched.
             original = (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes()
             os.write(fd, b"x")
+            assert h.wait_for_fixture_state(process, fd, output, marker.exists, timeout=5), \
+                "Task cancel key never opened its own reason editor"
             h.drain_until_quiet(process, fd, output)
-            assert marker.exists(), "Task cancel key never opened its own reason editor"
             assert not any(b"masc_transition" in body for _, body in requests), requests
             assert (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes() == original
             assert b"MASC Task" in screen(output), screen(output)
@@ -182,7 +185,7 @@ def run(executable):
             h.send_and_wait(process, fd, output, b"\x1b[F", b"HISTORYEND")
             h.drain_until_quiet(process, fd, output)
             assert window(output)[0] > 1, window(output)
-            h.palette_go(process, fd, output, b"go Harness", b"FOLLOWEDHEAD")
+            h.palette_go(process, fd, output, b"go Task Verdicts", b"FOLLOWEDHEAD")
             h.send_and_wait(process, fd, output, b"\x1d", b"FOLLOWEDHEAD")
             h.drain_until_quiet(process, fd, output)
             assert b"MASC Task" in screen(output), screen(output)

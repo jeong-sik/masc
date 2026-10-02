@@ -98,7 +98,9 @@ def output_handoff_scenario(executable):
             h.wait_for_output(process, fd, output, "마지막 관측, 갱신 실패".encode(), start=len(output), timeout=12)
             phase["failed"] = False
             phase["tail"] = ""
-            h.wait_for_output(process, fd, output, b"EMPTY_PREVIEW_OBSERVED", start=len(output), timeout=12)
+            if not h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"SECOND_PROGRESS_LINE" not in h.screen_text(bytes(output)), timeout=12):
+                raise AssertionError("empty preview retained previous output")
             rows = screen(process, fd, output)
             if b"SECOND_PROGRESS_LINE" in b"\n".join(rows.values()):
                 raise AssertionError(f"empty preview retained previous output: {rows!r}")

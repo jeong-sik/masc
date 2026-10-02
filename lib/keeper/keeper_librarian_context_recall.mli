@@ -22,7 +22,7 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
     availability of [keeper_artifact_read]. When false, no store is read and
     the unavailable notice retires previous pointers until capability returns. No
     source revalidation or queue traversal occurs here. The IO worker validates
-    the blob and retains its structured reference before publication. Missing or
+    the blob and retains its structured reference before returning recall. Missing or
     damaged bytes are republished from the matching authoritative snapshot;
     failed repair emits unavailable. Historical pins use dated Keeper retention. *)
 

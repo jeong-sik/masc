@@ -1459,11 +1459,16 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
       run { io with receive })
 ;;
 
+type streamed_texts =
+  { buffers : (string option, Buffer.t) Hashtbl.t
+  ; mutable current_item : string option
+  }
+
 let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
-    ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
+    ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event =
   let continue () = await_turn_terminal io ~handoff ~terminal_tools_closed ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id
-      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event in
+      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event in
   let* message = io.receive () in
   match message with
   | Response { id = 6; result } when !handoff = Handoff_pending ->
@@ -1510,19 +1515,31 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
-      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    emit_stream_event
-      on_stream_event
-      (Text_delta { item_id = agent_message_item_id params; delta });
+    let item_id = agent_message_item_id params in
+    let key = match item_id with
+      | Some _ -> item_id
+      | None -> streamed_texts.current_item in
+    let buffer = match Hashtbl.find_opt streamed_texts.buffers key with
+      | Some buffer -> buffer
+      | None ->
+          let buffer = match key, Hashtbl.find_opt streamed_texts.buffers None with
+            | Some _, Some unnamed ->
+                Hashtbl.remove streamed_texts.buffers None; unnamed
+            | _ -> Buffer.create 256 in
+          Hashtbl.add streamed_texts.buffers key buffer; buffer in
+    streamed_texts.current_item <- key;
+    Buffer.add_string buffer delta;
+    emit_stream_event on_stream_event (Text_delta {item_id; delta});
     let seen_fallback =
       match seen_fallback with
       | None -> Some delta
@@ -1542,7 +1559,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids:[]
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/plan/delta" as method_; params } ->
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     io.set_receive_phase Model_turn;
@@ -1557,7 +1574,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids:[]
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification
       { method_ =
           (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
@@ -1577,7 +1594,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -1604,7 +1621,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     in
     await_turn_terminal
       io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
-      ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -1634,6 +1651,34 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         still_open
     in
     let* message = agent_message_of_item ~stage item in
+    let* () = match message with
+      | None -> Ok ()
+      | Some (_, text) ->
+          let* item_fields = assoc_at stage item in
+          let* item_id = optional_string stage "id" item_fields in
+          let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
+          let prefix = match Hashtbl.find_opt streamed_texts.buffers key with
+            | Some buffer -> Buffer.contents buffer
+            | None ->
+                (* A wire delta may omit itemId; the completed item supplies
+                   it. Consume that unnamed prefix once at this boundary. *)
+                (match Hashtbl.find_opt streamed_texts.buffers None with
+                 | Some buffer -> Hashtbl.remove streamed_texts.buffers None; Buffer.contents buffer
+                 | None -> "") in
+          if String.starts_with ~prefix text then begin
+            let delta = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            if delta <> "" then emit_stream_event on_stream_event (Text_delta {item_id; delta});
+            if streamed_texts.current_item = key then streamed_texts.current_item <- None;
+            (match key with
+             | None -> Hashtbl.remove streamed_texts.buffers None
+             | Some _ ->
+                 let buffer = Buffer.create (String.length text) in
+                 Buffer.add_string buffer text;
+                 Hashtbl.replace streamed_texts.buffers key buffer);
+            Ok ()
+          end else protocol_error stage "completed agent message conflicts with streamed text"
+    in
     let seen_final, seen_fallback =
       match message with
       | Some (Some "final_answer", text) -> Some text, seen_fallback
@@ -1651,7 +1696,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
        upstream, so the turn is alive. Counting these and failing the turn at a
@@ -1676,7 +1721,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         ~seen_fallback
         ~seen_usage
         ~open_tool_call_ids
-        ~on_stream_event
+        ~streamed_texts ~on_stream_event
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -1741,7 +1786,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   (* Account-wide usage windows, for the operator projection only. An update
      this client cannot read is logged and does not fail the turn. *)
   | Notification { method_ = "account/rateLimits/updated"; params } ->
@@ -1763,7 +1808,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   (* App-server progress and account notifications are observational. Protocol
      evolution must not turn them into a computation failure; each valid wire
      message resets the stream-idle liveness boundary. *)
@@ -1779,7 +1824,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
 ;;
 
 (* Media types the app-server image item accepts, mirroring the closed set the
@@ -2059,6 +2104,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
+      ~streamed_texts:{buffers=Hashtbl.create 8; current_item=None}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });

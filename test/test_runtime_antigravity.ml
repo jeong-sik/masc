@@ -433,6 +433,20 @@ let test_answer_pieces_name_their_step () =
    surface. The projection completes a paragraph break in front of the second
    step: agy already ended the first with "\n", so one more. Nothing repeats,
    and the result adds nothing because the steps carried the text. *)
+let test_keeper_preserves_final_suffix_after_partial_steps () =
+  let events = ref [] in
+  with_fixture [init (); step ~state:"ACTIVE" ~text_delta:"PO" ();
+      result ~response:"PONG\n" ()] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ ->
+      let texts = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+        |> List.filter_map (function
+          | Agent_core.Types.ContentBlockDelta {index=0; delta=TextDelta text} -> Some text
+          | _ -> None) in
+      check (list string) "final reply contributes only its unstreamed suffix" ["PO"; "NG\n"] texts)
+;;
+
 let test_keeper_streams_two_response_steps_apart () =
   let events = ref [] in
   with_fixture two_response_steps (fun path ->
@@ -1551,7 +1565,9 @@ let () =
   run
     "runtime_antigravity"
     [ ( "stream-json"
-      , [ test_case
+      , [ test_case "partial steps retain final reply suffix" `Quick
+            test_keeper_preserves_final_suffix_after_partial_steps
+        ; test_case
             "successful official-client turn"
             `Quick
             test_successful_official_client_turn

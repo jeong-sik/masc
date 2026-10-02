@@ -692,7 +692,7 @@ let test_memory_surface_keeps_the_starvation_axes () =
          > 0))
     [ "mkh_snapshot_present"
     ; "mkh_source_snapshot_present"
-    ; "mkh_librarian_failures"
+    ; "mkh_librarian"
     ];
   Alcotest.(check bool) "the title names the starving count" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);

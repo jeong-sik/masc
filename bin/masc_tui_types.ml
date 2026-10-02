@@ -3358,23 +3358,35 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        match alert.Masc.Tui_decode_memory_health.ma_code with
+        | Masc.Tui_decode_memory_health.Librarian_failures -> false
+        | code -> match Masc.Tui_decode_memory_health.memory_alert_severity code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts

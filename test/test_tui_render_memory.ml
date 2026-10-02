@@ -2207,6 +2207,25 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
        (joined (render ~detail:false unreadable)))
 ;;
 
+let test_memory_state_tracks_current_pass_not_history () =
+  let module H = Masc.Tui_decode_memory_health in
+  let base = make_keeper_health ~keeper_id:"recovered" ~facts:10 ~snapshot_bytes:262144 in
+  let recovered = { base with H.mkh_librarian_failures = 3 } in
+  check bool "history does not keep a recovered snapshot degraded" true
+    (Types.memory_state recovered = Types.Memory_ordinary);
+  let stopped = { base with H.mkh_librarian =
+      { base.mkh_librarian with H.mlh_state = Some (H.Pass_stopped "model unavailable") } } in
+  check bool "current error is visible before a counter update" true
+    (Types.memory_state stopped = Types.Memory_degraded);
+  check bool "empty current failure is starving" true
+    (Types.memory_state { stopped with H.mkh_snapshot_present = false } = Types.Memory_starving);
+  check bool "empty recovered memory is not starving from historical failures" true
+    (Types.memory_state { recovered with H.mkh_snapshot_present = false } = Types.Memory_no_current);
+  check bool "store read error overrides a recovered pass" true
+    (Types.memory_state { recovered with H.mkh_read_error = Some "EACCES" } = Types.Memory_read_error);
+  check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -2248,6 +2267,8 @@ let () =
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "the default block folds the ledger behind detail" `Quick
             test_the_default_memory_block_keeps_state_save_and_actions
+        ; test_case "memory recovery does not inherit historical failure state" `Quick
+            test_memory_state_tracks_current_pass_not_history
         ; test_case "the row classifier keeps unread readings as actions" `Quick
             test_memory_row_visibility
         ; test_case "the librarian line names a stalled gap" `Quick

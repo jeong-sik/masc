@@ -268,23 +268,3 @@ def print_measured(measured: dict[tuple[str, int], dict[str, object]]) -> None:
     for key, value in measured.items():
         print(f"    {key!r}: {value!r},")
     print("}")
-
-
-def check_all(
-    measured: dict[tuple[str, int], dict[str, object]],
-    expected: dict[tuple[str, int], dict[str, object]],
-) -> None:
-    """Fail on any measurement that differs from [expected], and on any
-    expected one that was not measured."""
-    moved = {
-        key: (expected.get(key), value)
-        for key, value in measured.items()
-        if expected.get(key) != value
-    }
-    unmeasured = sorted(set(expected) - set(measured))
-    if moved or unmeasured:
-        raise AssertionError(
-            "rows moved (expected, measured): "
-            + ", ".join(f"{key}: {pair}" for key, pair in moved.items())
-            + (f"; expected but not measured: {unmeasured}" if unmeasured else "")
-        )

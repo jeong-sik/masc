@@ -5075,10 +5075,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Keeper_portrait_item.id item) account_facts
         (if worn then "  equipped" else "")
     in
+    let item_headline cursor count =
+      [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+      ; account_line
+      ]
+    in
     let portrait =
       match state.detail_tab, portrait with
       | Detail_items, Some band ->
-          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          let count = List.length Keeper_portrait_item.all in
+          let cursor = max 0 (min (count - 1) state.item_cursor) in
+          let labels = item_headline cursor count
+            @ List.mapi (item_row cursor) Keeper_portrait_item.all in
           if List.exists (fun line -> Message_layout.display_width line > inner)
                (Masc_tui_keeper_portrait.beside band labels)
           then None else Some band
@@ -5088,10 +5096,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let headline =
-        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; account_line
-        ] in
+      let headline = item_headline cursor count in
       let observation =
         match portrait_reading with
         | Tui_decode.Ready _ -> []

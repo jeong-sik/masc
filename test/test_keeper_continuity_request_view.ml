@@ -18,7 +18,7 @@ let capture_source source =
   let position = match Boundary.position_of_messages source with
     | Ok position -> position | Error detail -> fail detail in
   let lines = [1, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-    { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+    { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start = Boundary.Fresh_history; position } }] in
   match Snapshot.capture ~trace_id ~lines ~messages:source ~working_state with
   | Ok snapshot -> snapshot, lines | Error error -> fail (Snapshot.error_to_string error)
@@ -318,7 +318,7 @@ let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
   mkdir_p (Filename.concat keepers_dir keeper_name);
   (match Boundary.append ~keepers_dir ~keeper_id:keeper_name
      { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-         { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+         { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
            history_at_start = Boundary.Fresh_history; position } } with
    | Ok () -> () | Error error -> fail (Boundary.append_error_to_string error));
   let rewritten = [pinned; text T.User "Rebuild the patch."; text T.Assistant "The rebuild passed."] in
@@ -813,7 +813,7 @@ let test_a_rewriting_snapshot_waits_for_its_target () =
     let position = match Boundary.position_of_messages history with
       | Ok position -> position | Error detail -> fail detail in
     line, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn;
+      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn;
         history_at_start = (if line = 1 then Boundary.Fresh_history else Boundary.Continued_history);
         position } } in
   let lines = [turn_line 1 1 source; turn_line 2 2 messages] in

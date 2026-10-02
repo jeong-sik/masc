@@ -17,10 +17,13 @@ let write t relative bytes = protect (fun () ->
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
+let blob_reference bytes =
+  let hash = digest bytes in
+  { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
 let write_blob t bytes =
   let hash = digest bytes in
   let* () = write t (blob_path hash) bytes in
-  Ok { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
+  Ok (blob_reference bytes)
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with
@@ -347,6 +350,7 @@ let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
   then Error "invalid retained record byte envelope"
+  (* Ingress sources and namespaced output each have the declared bound. *)
   else Ok (2 * max_bytes + envelope_bytes)
 let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t =
   if seq <= 0 then Error "observation sequence must be positive" else

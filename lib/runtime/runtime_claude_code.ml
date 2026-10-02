@@ -577,7 +577,7 @@ let read_subscription ~mgr ~cwd config =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
-    Error (Spawn_failed (Printf.sprintf "executable %S was not found" executable))
+    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable))
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
@@ -1818,6 +1818,8 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       with
       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Exn.Io (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+        raise (Runtime_error (Invalid_config (Printf.sprintf "executable %S was not found" executable)))
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
     Option.iter (fun callback -> callback ()) on_spawned;

@@ -583,26 +583,23 @@ let test_historical_never_started_leaves_no_binding () =
     let manifest = package packages "ready" in
     let path = Filename.concat directory "observer.toml" in
     let bytes = declaration ~id:"observer" ~manifest () in
+    state.startup_available := false;
     write path bytes;
     ignore (reconcile config directory);
-    let started_id = declared_instance config "observer" |> text "instance_id" in
-    await_ready clock config started_id;
-    let captured = instance config started_id in
-    detach clock config started_id;
+    let old_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config old_id) = "failed");
+    let never_started = instance config old_id in
+    check int "failed startup has no observation history" 0
+      (number "observation_seq" never_started);
+    check bool "failed startup owns no container" true
+      (member "container_id" never_started = `Null);
+    check int "the backend never observed" 0 (List.length !(state.observations));
+    ignore (dispatch config Runtime.Detach ["instance_id", `String old_id]);
+    await clock (fun () ->
+      not (List.exists (fun value -> text "instance_id" value = old_id) (instances config)));
     Runtime.For_testing.reset ();
-    (* Retained observations restore their high-water sequence on read. A
-       never-started fixture needs its own identity, without that history. *)
-    let old_id = started_id ^ "-never-started" in
-    let fields = Yojson.Safe.Util.to_assoc captured
-      |> List.filter (fun (key, _) ->
-        not (List.mem key ["instance_id"; "incarnation"; "container_id";
-                           "observation_seq"; "rows_count"])) in
-    let never_started =
-      `Assoc
-        (("instance_id", `String old_id) :: ("incarnation", `String old_id)
-         :: ("container_id", `Null) :: ("observation_seq", `Int 0)
-         :: ("rows_count", `Int 0) :: fields)
-    in
+    state.events := [];
+    state.startup_available := true;
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id never_started);
     let retained = unwrap (Store.bindings store)

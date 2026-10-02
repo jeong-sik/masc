@@ -146,6 +146,27 @@ let test_every_slot_resting_keeps_declared_order () =
     declared
     (slot_ids (Lane.order_at ~now:(noted_at +. 1.0) resolved))
 
+let test_unchanged_save_shares_pressure_cell () =
+  with_lane_config @@ fun ~path _resolved ->
+  let original = candidate primary in
+  Runtime.save_config_text ~runtime_config_path:path runtime_toml
+    |> require_ok "save unchanged binding" |> ignore;
+  let current = candidate primary in
+  let registry = Registry.current () |> require_ok "replacement registry" in
+  let resolved = Registry.resolve_lane registry ~lane_id:"board_attention_exact"
+    |> require_ok "replacement lane" in
+  let slot = List.hd resolved.Registry.selected_slots in
+  let observation = match slot.runtime_observation with
+    | Some observation -> observation
+    | None -> fail "runtime binding must carry an observation" in
+  check bool "unchanged binding keeps original pressure" true (original == current);
+  check bool "replacement registry shares live Keeper pressure" true
+    (observation.candidate == current);
+  check int "full replacement catalog cannot inherit runtime cells" 0
+    (List.length (Runtime.exact_output_runtime_observations
+      ~origin:(Runtime.Replacement_catalog_targets { path = "fixture" })
+      (fst (Runtime.runtimes_and_media_failover ()))))
+
 let test_rebound_account_observation env ~rate_limited () =
   let module Exact = Agent_core.Exact_output in
   let module Fixture = Exact_output_fixture in
@@ -212,6 +233,8 @@ let () =
         test_case "every slot resting keeps the declared order" `Quick
           test_every_slot_resting_keeps_declared_order ];
       "account rebind", [
+        test_case "unchanged save preserves shared registry pressure" `Quick
+          test_unchanged_save_shares_pressure_cell;
         test_case "old refusal does not rate-limit new account" `Quick
           (test_rebound_account_observation env ~rate_limited:true);
         test_case "old success does not clear new account rest" `Quick

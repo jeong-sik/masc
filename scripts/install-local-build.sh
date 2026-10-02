@@ -22,6 +22,7 @@
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
+#                                       [--keep-build]
 #   --prefix        where masc, masc-tui, masc-browser-host and the deployment
 #                   preflight pair go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
@@ -31,12 +32,15 @@
 #   --base-path     workspace whose runtime.toml the new build must accept
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
+#   --keep-build    retain build artifacts after a successful default build/install
 set -euo pipefail
 
-repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
+keep_build=false
+custom_build_dir=false
 base_path=""
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -48,7 +52,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --manifest-dir) manifest_dir=${2:?--manifest-dir needs a directory}; shift 2 ;;
-    --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
+    --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
+    --keep-build) keep_build=true; shift ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '21,30p' "$0"; exit 0 ;;
@@ -165,7 +170,7 @@ else
   echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
 fi
 
-exec python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -214,3 +219,22 @@ for name, base in registered:
     restart = f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy" if stopped else "no host running"
     print(f"refreshed browser lane host {name} for {base} ({restart})")
 PY
+
+# Installed binaries and browser hosts now hold their own copies. Clean only
+# the default output this invocation built, never externally supplied input.
+# A prefix placed inside the build tree would be removed by Dune's clean.
+if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
+    && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
+    && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
+  installed_prefix=$(cd "$prefix" && pwd -P)
+  case "$installed_prefix/" in
+    "$repo/_build/"*)
+      echo "install-local-build: retaining build output because the install prefix is inside _build" ;;
+    *)
+      if (cd "$repo" && scripts/dune-local.sh clean --root "$repo"); then
+        echo "install-local-build: removed default build artifacts after successful installation"
+      else
+        echo "install-local-build: WARN installation succeeded, but build cleanup failed" >&2
+      fi ;;
+  esac
+fi

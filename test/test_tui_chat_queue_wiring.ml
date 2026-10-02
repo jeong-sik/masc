@@ -1917,15 +1917,23 @@ let test_live_gutter_clock_matches_its_causal_frontier () =
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
     let clock = Masc_tui_render_chat.keeper_message_clock frontier in
+    (* The live heading has an empty speaker. Locate its clock between the
+       progress body and output body rather than guessing a keeper label. *)
+    let rec between active selected = function
+      | [] -> fail "CLOCK_OUTPUT was not rendered"
+      | line :: _ when Astring.String.is_infix ~affix:"CLOCK_OUTPUT" line ->
+          List.rev selected
+      | line :: rest when Astring.String.is_infix ~affix:"CLOCK_FRONTIER" line ->
+          between true [] rest
+      | line :: rest -> between active (if active then line :: selected else selected) rest in
+    let output_heading = between false [] plain in
     check bool "keeper heading uses frontier clock" true
       (List.exists (fun line ->
-        Astring.String.is_infix ~affix:"alpha" line
-        && Astring.String.is_suffix ~affix:clock (String.trim line)) plain);
+        Astring.String.is_suffix ~affix:clock (String.trim line)) output_heading);
     let old_clock = Masc_tui_render_chat.keeper_message_clock start in
     check bool "keeper heading does not revert to dispatch clock" false
       (List.exists (fun line ->
-        Astring.String.is_infix ~affix:"alpha" line
-        && Astring.String.is_suffix ~affix:old_clock (String.trim line)) plain);
+        Astring.String.is_suffix ~affix:old_clock (String.trim line)) output_heading);
     check bool "dispatch time remains in running span" true
       (List.exists (Astring.String.is_infix ~affix:(old_clock ^ "→")) plain))
 ;;

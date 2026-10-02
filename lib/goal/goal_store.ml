@@ -776,21 +776,30 @@ let append_audit_event config json =
   try
     let expected = try (Unix.stat path).Unix.st_size with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> 0 in
+    (* The transaction carries the new end offset on success and the append
+       error on failure; the offset mismatch is a failure, the same reading
+       world_constitution_store gives it. The append did not commit on a
+       mismatch, so the retry cannot write the event twice. *)
     let rec append expected_end_offset =
       match Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
           path ~expected_end_offset (Yojson.Safe.to_string json ^ "\n") with
-      | Fs_compat.Private_file_succeeded (Error (Fs_compat.End_offset_mismatch {actual;_})) -> append actual
+      | Fs_compat.Private_file_failed (Fs_compat.End_offset_mismatch {actual;_})
+      | Fs_compat.Private_file_failed_with_cleanup_failure
+          { error = Fs_compat.End_offset_mismatch {actual;_}; _ } -> append actual
       | outcome -> outcome in
-    let outcome = append expected in
-    match outcome with
-    | Fs_compat.Private_file_succeeded result -> Result.map (fun _ -> ()) result |> Result.map_error Fs_compat.private_jsonl_append_error_to_string
-    | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    match append expected with
+    | Fs_compat.Private_file_succeeded _ -> Ok ()
+    | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+        (* The durable effect committed; the cleanup failure is descriptor
+           settlement, and reporting it as an append failure would invite a
+           retry that writes the event twice. *)
         Log.Misc.warn "goal event transaction cleanup failed: %s"
           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-        Result.map (fun _ -> ()) value |> Result.map_error Fs_compat.private_jsonl_append_error_to_string
-    | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
+        Ok ()
+    | Private_file_failed error ->
+        Error (Fs_compat.private_jsonl_append_error_to_string error)
     | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-        Error (Fs_compat.durable_append_error_to_string error ^ "; "
+        Error (Fs_compat.private_jsonl_append_error_to_string error ^ "; "
                ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

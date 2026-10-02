@@ -332,8 +332,8 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         # Unavailable retains its diagnostic in Help without restoring amounts.
         assert no_currency(help_frame), help_frame
         assert help_candle_diagnostic(help_frame,
-            "Candle unavailable: live keeper status unreadable: "
-            "Server workspace identity is unavailable"), help_frame
+            "Candle unavailable: Workspace identity changed or unavailable "
+            "during surface collection; bundle discarded"), help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")

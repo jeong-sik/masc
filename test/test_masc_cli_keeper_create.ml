@@ -239,6 +239,31 @@ let created_body =
         ])
 ;;
 
+let test_creation_receipt_checks_envelope_and_target () =
+  let receipt = Yojson.Safe.from_string created_body in
+  (match C.creation_receipt ~keeper_name:"scout" receipt with
+   | C.Created { name; _ } -> check string "exact target admitted" "scout" name
+   | _ -> fail "producer-created receipt was refused");
+  let fields = match receipt with `Assoc fields -> fields | _ -> assert false in
+  let replace key value = `Assoc ((key, value) :: List.remove_assoc key fields) in
+  let rejected =
+    [ replace "ok" (`Bool false); replace "ok" (`String "true")
+    ; replace "action" (`String "boot"); replace "name" (`String "another")
+    ; replace "detail" `Null
+    ; replace "detail" (`Assoc ["name", `String "another"])
+    ; `Assoc (("name", `String "scout") :: fields)
+    ; `Assoc (List.remove_assoc "name" fields) ]
+  in
+  List.iter (fun json -> match C.creation_receipt ~keeper_name:"scout" json with
+    | C.Refused _ -> ()
+    | _ -> fail "malformed/wrong-target receipt admitted") rejected;
+  match C.creation_receipt ~keeper_name:"scout"
+    (replace "detail" (`Assoc ["name", `String "scout"])) with
+  | C.Reconfigured { name } -> check string "metadata receipt stays reconfigured" "scout" name
+  | _ -> fail "reconfiguration receipt misclassified"
+;;
+
+
 (* Printing an isolation this command did not read is reporting an unmeasured
    value. Only the create branch answers with the pair: the update branch
    returns the keeper meta, which carries neither because both are TOML-owned,
@@ -402,7 +427,9 @@ let () =
             test_declaration_passes_an_unrecognised_sandbox_profile_through
         ] )
     ; ( "response"
-      , [ test_case
+      , [ test_case "creation receipt checks envelope and exact target" `Quick
+            test_creation_receipt_checks_envelope_and_target
+        ; test_case
             "the landed isolation is read, not echoed"
             `Quick
             test_outcome_reads_the_landed_isolation

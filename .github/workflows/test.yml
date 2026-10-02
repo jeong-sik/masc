@@ -388,6 +388,52 @@ jobs:
           done
           exit "${status}"
 
+      - name: Capture Surface fixture PTY screenshots
+        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_surface_studio_pty') }}
+        env:
+          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_RUN_ID: ${{ github.run_id }}
+          STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
+          STUDIO_OUT: ${{ runner.temp }}/surface-studio
+          STUDIO_LOG: ${{ runner.temp }}/ci-run-tests.log
+        run: |
+          set -euo pipefail
+          if ! rg -q 'STUDIO_CAPTURE=' "$STUDIO_LOG"; then
+            echo "No Surface PTY frames were produced; capture remains unproven."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y ttyd fonts-noto-cjk
+          python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
+          "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
+          "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium
+          python3 - <<'PYINFO'
+          import json, os
+          from pathlib import Path
+          info = {
+              "headSha": os.environ["STUDIO_SOURCE_SHA"],
+              "databaseId": os.environ["STUDIO_RUN_ID"],
+              "url": "https://github.com/jeong-sik/masc/actions/runs/" + os.environ["STUDIO_RUN_ID"],
+              "status": "in_progress_at_capture",
+              "test_step_outcome": os.environ["STUDIO_TEST_OUTCOME"],
+          }
+          Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
+          PYINFO
+          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+            --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
+            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite test_tui_surface_studio_pty \
+            --suite-pass-marker "tui surface studio PTY: PASS"
+
+      - name: Upload Surface fixture PTY screenshots
+        if: ${{ always() && contains(inputs.suite, 'test_tui_surface_studio_pty') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: surface-studio-${{ github.sha }}
+          path: ${{ runner.temp }}/surface-studio/
+          if-no-files-found: warn
+          retention-days: 14
+
       # Only an explicitly targeted Usage visual run installs browser
       # tooling. Other manually selected suites keep their existing path.
       - name: Capture Usage fixture PTY screenshots

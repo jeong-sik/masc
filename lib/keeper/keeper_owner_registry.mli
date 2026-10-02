@@ -67,11 +67,14 @@ val run_autonomous_if_idle
 (** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
 
 val run_maintenance_if_idle
-  :  base_path:string
+  :  ?defer_to_chat:bool
+  -> base_path:string
   -> keeper_name:string
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block ], command_error) result
-(** Submit one exclusive maintenance attempt to the Keeper's Owner mailbox. *)
+(** Submit one exclusive maintenance attempt to the Keeper's Owner mailbox.
+    [defer_to_chat] reserves priority for queued/running chat; default false
+    preserves explicit maintenance transactions. *)
 
 val shutdown_operation_id
   :  base_path:string

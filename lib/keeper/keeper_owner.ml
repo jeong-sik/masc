@@ -260,6 +260,7 @@ type _ command =
   | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
       { lane : turn_lane
+      ; defer_to_chat : bool
       ; run : unit -> 'a
       }
       -> ('a autonomous_response, error) result command
@@ -1976,7 +1977,7 @@ let start
           else (
             Eio.Promise.resolve resolve (Ok ());
             loop state shutdown_operation_id)
-        | Command (Run_if_idle { lane; run }, resolve) ->
+        | Command (Run_if_idle { lane; defer_to_chat; run }, resolve) ->
           (match shutdown_operation_id with
            | Some operation_id ->
              Eio.Promise.resolve
@@ -2066,6 +2067,13 @@ let start
                             (Autonomous_child_finished { outcome; resolve })))
                    in
                    (match lane with
+                    | Maintenance when defer_to_chat ->
+                      ignore (recover_operation_availability t : (unit, error) result);
+                      let inventory = Atomic.get t.operation_projection in
+                      if inventory.store_unavailable || inventory.queued_count > 0
+                         || Option.is_some inventory.running_operation_id then
+                        Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
+                      else run_admitted_turn ()
                     | Chat_operation | Maintenance -> run_admitted_turn ()
                     | Autonomous ->
                       (* Do not take a free slot ahead of a queued chat. No
@@ -2247,7 +2255,7 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
 ;;
 
 let run_autonomous_if_idle t run =
-  match request t (Run_if_idle { lane = Autonomous; run }) with
+  match request t (Run_if_idle { lane = Autonomous; defer_to_chat = false; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
@@ -2280,8 +2288,8 @@ let run_autonomous_if_idle t run =
 
 (* Maintenance is not interruptible ([Interrupt_maintenance_running]), so an
    operator interrupt reaching this lane is not a translated outcome. *)
-let run_maintenance_if_idle t run =
-  match request t (Run_if_idle { lane = Maintenance; run }) with
+let run_maintenance_if_idle ?(defer_to_chat = false) t run =
+  match request t (Run_if_idle { lane = Maintenance; defer_to_chat; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)

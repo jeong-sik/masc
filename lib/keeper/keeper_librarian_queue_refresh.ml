@@ -225,18 +225,31 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
      same atoms: their messages, the tool calls in them, and the counterpart
      observations of the turn they finish (none for a unit that stops inside
      its turn; the unit that finishes it carries the turn's). *)
+  let source_input ~include_observations (base : Keeper_librarian.input) unit =
+    let module H = Keeper_librarian_task_context in
+    let _, _, messages, observations, contexts = List.fold_left
+      (fun (message_count, tool_count, messages, observations, contexts) (scope, slice) ->
+        let tools = if include_observations then
+          Keeper_librarian_durable_consumer.tool_observations slice else [] in
+        let after_message = message_count + List.length slice in
+        let after_tool_observation = tool_count + List.length tools in
+        let context : H.t = {scope;first_message=message_count;after_message;
+          first_tool_observation=tool_count;after_tool_observation} in
+        after_message, after_tool_observation, List.rev_append slice messages,
+        List.rev_append tools observations, context :: contexts)
+      (0, 0, [], [], []) (P.source_spans unit) in
+    {base with messages=List.rev messages; tool_observations=List.rev observations;
+      historical_task_contexts=List.rev contexts} in
   let memory_input (base : Keeper_librarian.input) unit =
     let ( let* ) = Result.bind in
-    let messages = P.messages unit in
+    let input = source_input ~include_observations:true base unit in
     let* counterpart_observations = match P.turn_window unit with
       | None -> Ok []
       | Some { P.after; through } ->
         Keeper_librarian_input_sources.counterpart_observations_between
           ~base_dir:base_path ~keeper_name ~after ~before:through
         |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
-    Ok { base with messages;
-         tool_observations = Keeper_librarian_durable_consumer.tool_observations messages;
-         counterpart_observations } in
+    Ok { input with counterpart_observations } in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -330,7 +343,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
          carries what the durable pass would have. A pass whose Memory is
          already saved needs neither observation. *)
       let* input =
-        if memory_committed then Ok {input with messages = P.messages selected}
+        if memory_committed then Ok (source_input ~include_observations:false input selected)
         else memory_input input selected in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with

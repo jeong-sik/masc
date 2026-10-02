@@ -1942,7 +1942,9 @@ let test_jev_event_fanout_settles_and_defers () =
     let missing = make_keeper "missing" in
     let answer choice confidence =
       `Assoc [ "type", `String "choice"; "choice", `String choice
-             ; "probabilities", `Assoc ["relevant", `Float 0.1; "not_relevant", `Float 0.8; "uncertain", `Float 0.1]
+             ; "probabilities", `Assoc
+                 (List.map (fun label -> label, `Float (if String.equal label choice then 0.8 else 0.1))
+                    ["relevant"; "not_relevant"; "uncertain"])
              ; "confidence", `Float confidence ]
     in
     let response = Yojson.Safe.to_string (`Assoc

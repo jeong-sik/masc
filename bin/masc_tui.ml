@@ -377,7 +377,11 @@ let identity_pane_columns (state : state) =
    measured, and the step key and the jump keys were working that out
    differently -- the step recomputed, the landing did not. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
-  if state.view = Memory && Option.is_some state.memory_facts_keeper then
+  if state.view = Repositories && not state.repository_changes_open then
+    let _, cols = get_terminal_size () in
+    Masc_tui_render.repository_studio_content_height state ~cols
+      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
+  else if state.view = Memory && Option.is_some state.memory_facts_keeper then
     let _, cols = get_terminal_size () in
     Masc_tui_render_memory.memory_facts_content_height ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
@@ -22772,7 +22776,14 @@ and is loaded on demand through keeper_skill.
        | Some ("home" | "end") when Option.is_some (row_list state) ->
            move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
-           let page = surface_page_rows state in
+           let page =
+             if state.view = Repositories && not state.repository_changes_open then
+               let _, cols = get_terminal_size () in
+               Masc_tui_render.repository_studio_content_height state ~cols
+                 ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+                 ~cursor:state.repositories_cursor
+             else surface_page_rows state
+           in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
             | Planning when state.planning_mode = Planning_list

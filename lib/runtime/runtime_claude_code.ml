@@ -1393,8 +1393,10 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
              (match partial.message_id, partial.text_block with
               | Some _, Some (active, buffer) when active = index ->
                   Buffer.add_string buffer text;
-                  if text <> "" then response_emitted := true;
-                  emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text});
+                  if text <> "" then begin
+                    response_emitted := true;
+                    emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
+                  end;
                   Ok ()
               | _ -> protocol_error stage "text delta has no matching message/text block")
          | "input_json_delta" | "thinking_delta" | "signature_delta" -> Ok ()

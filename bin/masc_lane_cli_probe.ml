@@ -67,14 +67,15 @@ let () =
   if String.equal !lane "" || String.equal !runtime "" then (
     prerr_endline Masc_lane_cli_probe_args.usage;
     exit 2);
-  (* The lane resolves this from the approval entry it is serving; a probe has
-     no entry, so it takes the install root the same way the server is started
-     with it. *)
+  (* A probe has no approval entry, so resolve the same workspace identity as a
+     normal command. Do not guess $HOME/me: that can silently measure a
+     different workspace from the one selected by the server. *)
   let base_dir =
-    match Sys.getenv_opt "MASC_BASE_PATH" with
-    | Some path when String.trim path <> "" -> String.trim path
-    | Some _ | None ->
-      Filename.concat (Option.value (Sys.getenv_opt "HOME") ~default:".") "me"
+    match Workspace_root.resolve_current ~flag:None with
+    | Ok { root; _ } -> root
+    | Error error ->
+      prerr_endline (Workspace_root.error_message error);
+      exit 2
   in
   Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:base_dir;
   Server_runtime_bootstrap.bootstrap_prompt_registry_from_binary ~base_path:base_dir;

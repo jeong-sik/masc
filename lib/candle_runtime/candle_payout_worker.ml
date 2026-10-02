@@ -49,9 +49,10 @@ let launch ~sw runtime owner =
          the call cannot turn a later rejection into an immediate retry loop. *)
       if owner.event_queued then request_pass runtime Event);
     `Stop_daemon)
+type pass_result = Scanned | Deferred of wake_reason
 let pass ~sw runtime reason =
   match Candle_status.current ~base_path:runtime.config.base_path with
-  | Candle_config.Off | Candle_config.Disabled _ -> ()
+  | Candle_config.Off | Candle_config.Disabled _ -> Deferred reason
   | Candle_config.Enabled _ ->
     (* Retain recovery on each existing owner before fallible ledger reads.
        An in-flight refusal must not consume a changed declaration's event. *)
@@ -66,7 +67,9 @@ let pass ~sw runtime reason =
           | Candle_candidates.Superseded _ | Candle_candidates.Retry_later _ -> false) outcomes
         then Event else reason in
     match Candle_appraise.pending ~base_path:runtime.config.base_path with
-    | Error detail -> Log.Misc.warn "candle: payout pass could not read ledger: %s" detail
+    | Error detail ->
+      Log.Misc.warn "candle: payout pass could not read ledger: %s" detail;
+      Deferred reason
     | Ok waiting ->
       let ids = List.map (fun (w : Candle_payout.waiting) -> w.goal_id) waiting in
       Hashtbl.filter_map_inplace (fun goal_id owner ->
@@ -80,16 +83,27 @@ let pass ~sw runtime reason =
         if owner.in_flight then (match reason with Event -> owner.event_queued <- true | Pulse -> ())
         else (
           (match reason with Event -> owner.rejected <- false | Pulse -> ());
-          if not owner.rejected then launch ~sw runtime owner)) waiting
+          if not owner.rejected then launch ~sw runtime owner)) waiting;
+      Scanned
 let run ~sw runtime : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
     if Atomic.exchange runtime.pending false then (
       let reason = if Atomic.exchange runtime.event false then Event else Pulse in
       runtime.scanning <- true;
       Fun.protect ~finally:(fun () -> runtime.scanning <- false) (fun () ->
-        try pass ~sw runtime reason with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Log.Misc.error "candle: payout scheduling failed: %s" (Printexc.to_string exn)));
+        let outcome =
+          try pass ~sw runtime reason with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Misc.error "candle: payout scheduling failed: %s" (Printexc.to_string exn);
+            Deferred reason in
+        match outcome with
+        | Deferred Event ->
+          (* Retain the event without scheduling another immediate pass. A later
+             pulse can resume it once availability or the authoritative read
+             recovers; a rejected owner must not lose its explicit retry. *)
+          Atomic.set runtime.event true
+        | Scanned | Deferred Pulse -> ()));
     None)
 let start ?(appraiser_declaration_changed = fun () -> false)
     ~sw ~appraise ~(config : Workspace_utils_backend_setup.config) () =

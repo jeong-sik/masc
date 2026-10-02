@@ -754,7 +754,7 @@ let task_compact_to_yojson t =
     ("created_at", `String t.created_at);
   ] in
   match task_status_to_yojson t.task_status with
-  | `Assoc status_fields -> `Assoc (base @ status_fields)
+  | `Assoc status_fields -> `Assoc (base @ List.remove_assoc "notes" status_fields)
   | _ -> `Assoc base
 
 (** Outcome of decoding one optional nested field. The pre-#27499 decoder

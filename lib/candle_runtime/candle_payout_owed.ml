@@ -36,7 +36,7 @@ let write ~now (config : Workspace_utils_backend_setup.config) goal verdict conf
 ;;
 
 let record ~now (config : Workspace_utils_backend_setup.config) goal verdict confirmation =
-  match Candle_status.current ~base_path:config.base_path with
+  match Candle_status.for_recording ~base_path:config.base_path with
   | Candle_config.Off -> Ok ()
   | Candle_config.Disabled { reason } ->
     Log.Misc.warn

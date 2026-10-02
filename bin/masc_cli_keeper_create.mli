@@ -97,6 +97,16 @@ type outcome =
   | Refused of string
   | Unreachable of string
 
+val successful_outcome : Yojson.Safe.t -> outcome
+(** Decode an accepted lifecycle receipt. [Created] requires the create
+    branch's isolation fields in [detail]; metadata-only receipts are
+    [Reconfigured]. Transport callers must validate their envelope first. *)
+
+val creation_receipt : keeper_name:string -> Yojson.Safe.t -> outcome
+(** Strict creation admission: require one successful Up envelope, an exact
+    outer/detail Keeper name, and an object detail before decoding the closed
+    outcome. Malformed, duplicate or wrong-target fields return [Refused]. *)
+
 val outcome_of_response : status:int -> body:string -> outcome
 (** Classify one [/up] response. [Unreachable] is never produced here — it is
     the transport's own failure, which the command constructs.

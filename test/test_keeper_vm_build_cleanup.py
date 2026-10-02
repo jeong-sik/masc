@@ -52,6 +52,16 @@ class GuestCleanup(unittest.TestCase):
         self.assertTrue((self.build / ".lock").is_file())
         self.assertTrue((self.repo / "source.ml").is_file())
 
+    def test_live_checkout_process_preserves_output(self) -> None:
+        process = subprocess.Popen(["sleep", "30"], cwd=self.repo)
+        try:
+            report = cleaner.guest_sweep(self.root, 0, True)
+            self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
+            self.assertTrue((self.build / "artifact").exists())
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
     def test_native_dune_lock_preserves_output(self) -> None:
         with (self.build / ".lock").open("w") as lease:
             lease.write(str(os.getpid()))
@@ -84,7 +94,7 @@ class GuestCleanup(unittest.TestCase):
 
     def test_unreadable_process_ownership_fails_closed(self) -> None:
         with patch.object(
-            cleaner, "process_paths", side_effect=PermissionError("denied")
+            cleaner.GUEST, "process_paths", side_effect=PermissionError("denied")
         ):
             with self.assertRaises(PermissionError):
                 cleaner.guest_sweep(self.root, 0, True)

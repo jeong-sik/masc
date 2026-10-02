@@ -136,3 +136,7 @@ val ensure_init : unit -> unit
 val surfaces_json : unit -> Yojson.Safe.t
 (** [surfaces_json ()] renders {!surfaces} as a JSON array for
     the dashboard surfaces endpoint. *)
+
+val keeper_build_cleanup_enabled : bool Runtime_params.param
+val keeper_build_cleanup_interval_sec : float Runtime_params.param
+val keeper_build_cleanup_retention_sec : float Runtime_params.param

@@ -25,7 +25,42 @@ does not authorize cleanup. Dune's native nonblocking lock protects cleanup
 against newly starting builds; targeted cleaning retains the lock inode and
 avoids whole-project clean's removal of promoted source files.
 
-## Automatic sweeps
+## Product-owned automatic sweeps
+
+`Server_bootstrap_maintenance.start_background_maintenance` starts
+`Server_keeper_build_maintenance` under the server root switch. It waits one
+interval before its first scan and stops with that switch. The existing
+`Runtime_params` store controls `keeper_build_cleanup_enabled` (default true),
+`keeper_build_cleanup_interval_sec` (one hour), and
+`keeper_build_cleanup_retention_sec` (one day).
+
+For each registered Keeper, `Keeper_owner.run_maintenance_if_idle` atomically
+admits cleanup only when no turn holds the slot, shutdown has not begun, and
+`defer_to_chat` sees no queued/running chat or unavailable operation store.
+Busy Keepers wait for the next sweep. A paused Keeper may be cleaned without
+resuming it. Requests arriving after admission wait for that bounded maintenance
+attempt; cleanup does not promise zero latency for those requests.
+
+Before dispatch, `read_cleanup_meta` applies the Keeper's TOML profile and
+requires the resolved and payload names to match the Owner holding the slot.
+Invalid profiles or identity mismatches refuse cleanup.
+
+`Keeper_turn_sandbox_runtime.cleanup_attached_builds` attaches only to an
+already running Apple guest selected by that effective profile. It never boots, stops, pauses, repairs,
+or refreshes credentials. The binary embeds the shared guest payload from
+`config/scripts/keeper-build-cleanup.py`; no checkout or daemon installation is
+needed. Inside the guest, process inspection, wrapper/native Dune locks,
+retention, and operator markers remain necessary because external builds are
+outside the Owner mailbox. Execution uses the existing framed `exec-shim` runner. Its guest timer and
+transport EOF terminate the payload process group; a successful report requires
+payload exit zero and that call's execution receipt. Scan/execution failure
+reports an error; server cancellation propagates rather than being swallowed.
+
+Install the binary containing this change before treating this as active
+product behavior. Stop a separately started legacy script service after that
+installation to avoid duplicate scans.
+
+## Optional operator script service
 
 ```bash
 python3 scripts/keeper-vm-cleaner.py start --base-path /path/to/workspace
@@ -45,9 +80,11 @@ running script and policy. `last-sweep.json` reports each cleaned/skipped build
 and **guest** free-space changes. `status` reports process existence, not whether
 the last sweep succeeded; inspect both report files for failures.
 
-Keep the checkout containing both scripts available while the service runs. To
+Keep the checkout containing the scripts and shared payload available while the service runs. To
 run independently of a temporary PR worktree, copy both reviewed scripts into
-the maintenance directory's `bin/` and invoke that copy. This is a background
+the maintenance directory's `bin/`, and copy the shared payload to
+`<maintenance-directory>/config/scripts/keeper-build-cleanup.py`. Invoke the
+`bin/` copy. This is a background
 process, not an OS startup service; restart it explicitly after a host reboot.
 
 ## Guest space versus host disk space
@@ -82,3 +119,10 @@ by trimming.
 stop and restart using a fake container inventory. In a Linux guest with Dune,
 the same suite additionally checks native/wrapper locks, recent output retention,
 symlink/operator retention, source preservation and fail-closed inspection.
+
+The native metadata regressions are in
+`test/test_server_keeper_build_maintenance.ml`: effective TOML settings,
+Owner/payload identity mismatch, and invalid profile refusal. The guest framing
+checks run with `python3 test/test_keeper_build_cleanup_transport.py <Linux-shim>`:
+real cleanup/receipt, guest timeout, and transport EOF terminating cleanup and
+its ordinary descendants. These are distinct from an installed-server proof.

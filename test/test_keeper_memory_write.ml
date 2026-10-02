@@ -134,7 +134,10 @@ let match_texts json =
   match json_field "matches" json with
   | `List matches ->
     List.map
-      (fun match_json -> string_field "text" match_json)
+      (function
+        | `String text when string_field "source" json = "history" -> text
+        | `Assoc _ as match_json -> string_field "text" match_json
+        | _ -> Alcotest.fail "expected history string or durable match object")
       matches
   | _ -> Alcotest.fail "expected matches array"
 ;;

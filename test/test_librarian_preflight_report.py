@@ -29,8 +29,12 @@ def fixture() -> dict[str, Any]:
                 },
                 "input": {
                     "payload": {
-                        "prompt": {"rendered_sha256": "a" * 64},
-                        "source": "frozen source",
+                        "actual_input": {
+                            "prompt": {"rendered_sha256": "a" * 64},
+                            "rendered_prompt_variables": {"source": "frozen source"},
+                        },
+                        "message_count": 1,
+                        "current_fact_count": 1,
                     }
                 },
                 "output": {
@@ -109,19 +113,40 @@ class ReportCliTest(unittest.TestCase):
         self.assertAlmostEqual(json.loads(result.stdout)["paired_median_delta_s"], 1.05)
 
     def test_mismatched_or_contradictory_evidence_is_refused(self) -> None:
-        for mode in ("input", "slot", "reused_run", "unavailable", "missing_skip"):
+        for mode in (
+            "input",
+            "slot",
+            "reused_run",
+            "unavailable",
+            "missing_skip",
+            "boolean_count",
+            "awaiting",
+            "missing_rejection",
+        ):
             with self.subTest(mode=mode):
                 manifest = fixture()
                 pair = manifest["pairs"][0]
                 run = pair["preflight"]["run"]
                 if mode == "input":
-                    run["input"]["payload"]["source"] = "changed source"
+                    run["input"]["payload"]["actual_input"][
+                        "rendered_prompt_variables"
+                    ]["source"] = "changed source"
                 elif mode == "slot":
                     run["selected_slot"] = "invented-cli"
                 elif mode == "reused_run":
                     run["run_id"] = pair["baseline"]["run"]["run_id"]
                 elif mode == "unavailable":
                     run["payload_availability"]["output"]["state"] = "unavailable"
+                elif mode == "boolean_count":
+                    run["input"]["payload"]["current_fact_count"] = True
+                elif mode == "awaiting":
+                    run["output"].update(
+                        jev_preflight={"status": "awaiting_answer"},
+                        generation_path="full_lane",
+                        full_llm_skipped=False,
+                    )
+                elif mode == "missing_rejection":
+                    del run["output"]["preflight_domain_rejection"]
                 else:
                     del run["output"]["full_llm_skipped"]
                 result = self.execute(manifest)

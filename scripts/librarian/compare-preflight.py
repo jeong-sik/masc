@@ -69,7 +69,10 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if not math.isfinite(elapsed) or elapsed < 0:
         raise ValueError("elapsed_s must be finite and nonnegative")
     payload = obj(run.get("input"), "input").get("payload")
-    prompt = obj(obj(payload, "input payload").get("prompt"), "prompt")
+    actual_input = obj(
+        obj(payload, "input payload").get("actual_input"), "actual_input"
+    )
+    prompt = obj(actual_input.get("prompt"), "prompt")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
     return run, payload, obj(run.get("output"), "output"), float(elapsed)
 
@@ -105,7 +108,7 @@ def compare(manifest: Json) -> dict[str, Json]:
             if run_id in run_ids:
                 raise ValueError("run reused across pairs or arms")
             run_ids.add(run_id)
-        if before != after:
+        if digest(before) != digest(after):
             raise ValueError(
                 f"{sample_id}: input payloads differ; freeze the same input"
             )
@@ -123,6 +126,29 @@ def compare(manifest: Json) -> dict[str, Json]:
         )
         path = preflight_output.get("generation_path")
         skipped = preflight_output.get("full_llm_skipped")
+        status = observation.get("status")
+        if status not in (
+            "awaiting_answer",
+            "skipped",
+            "ineligible",
+            "question_unavailable",
+            "failed",
+            "invalid_answer",
+            "judged",
+        ):
+            raise ValueError("unknown preflight observation status")
+        if status == "awaiting_answer" and path != "not_entered":
+            raise ValueError("awaiting preflight cannot enter generation")
+        if status == "judged" and observation.get("decision") not in (
+            "keep_current",
+            "needs_generation",
+            "uncertain",
+        ):
+            raise ValueError("unknown preflight decision")
+        if "preflight_domain_rejection" not in preflight_output:
+            raise ValueError(
+                "preflight must explicitly record domain rejection or null"
+            )
         if not isinstance(skipped, bool) or path not in (
             "not_entered",
             "full_lane",

@@ -606,7 +606,7 @@ let test_librarian_rebase_leaves_nothing_to_read () =
       { Boundaries.recorded_at = 100.0
       ; event =
           Boundaries.Turn_ended
-            { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:1
+            { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:1
             ; history_at_start = Boundaries.Continued_history
             ; position
             }
@@ -906,7 +906,7 @@ let turn_ended_line ~line ~absolute_turn messages ~end_atom : Purge.boundary_lin
       { Boundaries.recorded_at = 100.0
       ; event =
           Boundaries.Turn_ended
-            { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn
+            { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn
             ; history_at_start = Boundaries.Continued_history
             ; position = Boundaries.Atom_history { end_atom; last_atom_digest }
             }
@@ -1238,7 +1238,7 @@ let test_recovery_needs_the_digest_as_well_as_the_count () =
         { Boundaries.recorded_at = 100.0
         ; event =
             Boundaries.Turn_ended
-              { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:2
+              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:2
               ; history_at_start = Boundaries.Continued_history
               ; position =
                   Boundaries.Atom_history

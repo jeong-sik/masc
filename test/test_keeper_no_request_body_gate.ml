@@ -276,7 +276,7 @@ streaming = false
       | Ok position -> position | Error detail -> fail detail in
     let record : Keeper_turn_boundaries.record =
       { recorded_at = 1.; event = Keeper_turn_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
           ; history_at_start = Keeper_turn_boundaries.Fresh_history
           ; position } } in
     let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in

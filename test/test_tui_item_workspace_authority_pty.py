@@ -248,14 +248,14 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
             wire.set_missing_revision(True)
-            wait(lambda text: b"Item account revision" in text,
+            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
                  "missing revision retained Item monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             wire.set_missing_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
-            wait(lambda text: b"Item account revision" in text,
+            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
                  "malformed revision retained Item monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-malformed")

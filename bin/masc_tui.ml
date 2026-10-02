@@ -10150,6 +10150,7 @@ let apply_server_booting state ~identity ~approval_ticket =
 
 let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   apply_server_identity_reading state (Error detail);
+  state.candle_observation <- Some (Error detail);
   Option.iter (fun ao_ticket ->
     apply_approval_observation state {ao_ticket; ao_result = Error detail}) approval_ticket;
   state.connection_status <-

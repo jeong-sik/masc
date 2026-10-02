@@ -16,6 +16,13 @@ def screen(output):
     return h.screen_text(raw[:end + len(h.FRAME_END)]).decode("utf-8", errors="strict")
 
 
+def represents_label(shown, label):
+    if shown == label:
+        return True
+    prefix, ellipsis, suffix = shown.partition("…")
+    return bool(prefix and ellipsis) and label.startswith(prefix) and label.endswith(suffix)
+
+
 def run(executable, no_color):
     fixtures = h.keeper_runtime_http_fixtures()
     _, resolved = h.runtime_resolved_response()
@@ -54,10 +61,15 @@ def run(executable, no_color):
                     start=h.end_of_needle(output, b"ROUTE / PROBE", clear), timeout=3)
                 visible = screen(output)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                status = "us…nown / reacha…" if columns == 30 else "usa…nknown / reachable"
                 candidate_rows = [row for row in visible.splitlines()
-                                  if suffix in row and status in row]
+                                  if suffix in row and " / " in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
+                # Clipping budgets change with the frame width. Both facts must
+                # still identify their source labels on this candidate row.
+                status = candidate_rows[0].split(suffix, 1)[1].strip()
+                route, probe = status.split(" / ", 1)
+                assert represents_label(route, "usage unknown"), (columns, route)
+                assert represents_label(probe, "reachable"), (columns, probe)
                 cells = sum(0 if unicodedata.combining(char) else
                             2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
                             for char in candidate_rows[0])

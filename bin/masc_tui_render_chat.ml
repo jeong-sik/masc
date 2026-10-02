@@ -2248,6 +2248,7 @@ type log_block = {
   lb_log : Masc_tui_types.turn_log;
   lb_request_id : string;
   lb_insertion : int;
+  lb_timeline_at : float option;
   lb_entries : Message_layout.entry list;
 }
 
@@ -2737,7 +2738,7 @@ let render_keeper_message (state : state) =
                     entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)
       in
-      { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
+      { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion; lb_timeline_at = timeline_at;
         lb_entries = entries }
     in
     (* One projection per held log per change of its inputs, settled or
@@ -2850,7 +2851,17 @@ let render_keeper_message (state : state) =
       |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    let blocks = settled_blocks @ observed_blocks @ other_live_blocks in
+    let blocks =
+      settled_blocks @ observed_blocks @ other_live_blocks
+      |> List.stable_sort (fun left right ->
+          let by_position = Int.compare left.lb_insertion right.lb_insertion in
+          if by_position <> 0 then by_position
+          else match left.lb_timeline_at, right.lb_timeline_at with
+            | Some left_at, Some right_at -> Float.compare left_at right_at
+            | Some _, None -> -1
+            | None, Some _ -> 1
+            | None, None -> 0)
+    in
     let open_blocks =
       List.filter (fun block ->
         not (Masc_tui_types.observed_log_has_ended state block.lb_log)
@@ -2860,10 +2871,8 @@ let render_keeper_message (state : state) =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
     in
-    (* Each block at its own place in the committed timeline. Blocks that
-       land on the same index keep their order -- settled turns in the order
-       they settled, the live one last -- and a block placed past the end
-       follows everything. *)
+    (* Blocks sharing an insertion slot follow their causal timeline clocks.
+       Equal clocks preserve source order; unknown clocks follow known ones. *)
     let merge_blocks () =
       let placed =
         List.map

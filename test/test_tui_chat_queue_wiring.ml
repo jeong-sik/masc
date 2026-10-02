@@ -1886,6 +1886,37 @@ let test_promoted_queue_request_keeps_its_user_in_transcript () =
 
 (* Exercise the actual frame, not only the delta fold: a promoted request
    used to collect every delta correctly while the renderer hid its block. *)
+let test_parallel_blocks_share_a_chronological_insertion_slot () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> () in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (70, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let entries = List.init 4 (fun i ->
+      inflight_with_log ~keeper_name:"alpha"
+        ~started_at:(1_790_053_724. +. 60. *. float_of_int i)
+        [Live.Run_started; Live.Text (Printf.sprintf "ORDER_%d" i)]) in
+    List.iter (fun order ->
+      (* No durable rows: all blocks share insertion slot zero. *)
+      state.msg_inflight <- List.map (List.nth entries) order;
+      state.msg_live <- Some (List.nth entries 3).log;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+      let shown = List.filter_map (fun line ->
+        List.find_opt (fun i -> Astring.String.is_infix
+          ~affix:(Printf.sprintf "ORDER_%d" i) line) [0;1;2;3]) plain in
+      check (list int) "four parallel blocks follow time, not subscription order"
+        [0;1;2;3] shown)
+      [[0;1;2;3]; [3;2;1;0]; [2;0;3;1]])
+;;
+
 let test_live_gutter_clock_matches_its_causal_frontier () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5011,6 +5042,8 @@ let () =
             test_absolute_turn_sequence_breaks_equal_clock_ties
         ; test_case "running turn shares displayed time" `Quick
             test_running_turn_does_not_escape_the_displayed_time_axis
+        ; test_case "parallel blocks order a shared insertion slot" `Quick
+            test_parallel_blocks_share_a_chronological_insertion_slot
         ; test_case "live gutter follows causal frontier" `Quick
             test_live_gutter_clock_matches_its_causal_frontier
         ; test_case "uncommitted live shares visible clock" `Quick

@@ -214,6 +214,12 @@ for an appropriate run. Continue useful work instead of watching or polling CI.
 At a work boundary, read actual results and distinguish failures in the diff,
 base or environment. Keep unrelated repairs in their own stack.
 
+Choose focused checks by tracing changed files through the changed interface and
+its direct consumers. Record `file → changed interface → direct consumer → actual
+verification target → command and result`. A passing check that does not exercise
+that consumer is not a substitute. This helps risk-based check selection; it does
+not add a Core build or full CI admission requirement to every ordinary PR.
+
 ## 5. Review and integrate
 
 Review the contract and current-head diff from independent function, logic and
@@ -275,6 +281,11 @@ Verify the merged commit and PR state before cleanup. Remove only the finished
 worktree and branch after confirming they contain no unsubmitted work. Never push
 a follow-up to a branch whose PR has merged; use a new branch and PR.
 
+Reuse review only within its recorded head, base, complete diff identity and scope.
+Unchanged source files do not establish unchanged behavior when the base's
+interfaces or consumers have changed. Keep ordinary and Release assessments under
+the existing policy and do not extend execution evidence to unobserved scope.
+
 ## 6. Submit evidence and resume later
 
 For a MASC Task, use `submit_for_verification` with a handoff summary and evidence;
@@ -293,6 +304,20 @@ A handoff records the Goal/Task/Issue/PR IDs, branch/worktree, current SHA, chec
 already run, unresolved findings, blockers and next action. On resume, reread live
 state before repeating mutations. Interrupted commands may already have applied.
 Restore progress from saved records instead of changing runtime-owned files by hand.
+
+When a contract conflicts with current policy, record the original contract,
+policy clause, prior verdict and authorized change decision together before
+deciding to retain, amend or retire it. Until that decision, do not submit evidence
+for the new policy as satisfaction of the old contract.
+
+Record execution completion, receipt acknowledgement and the current ledger
+summary update separately, with timestamps and original evidence references.
+Mark absent records unverified. Keep historical failures and decisions, but list
+only remaining work as current pending state. On resume, read the actual Task, PR
+and run before relying on a schedule or handoff. Measure ready-to-review,
+fix-to-re-review, candidate-freeze-to-verification and completion-to-ledger-update
+separately; before/after comparisons use the same definitions, sample scope and
+count of unfinished samples.
 
 ## Maintaining these instructions
 

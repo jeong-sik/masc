@@ -62,7 +62,7 @@ let selection_output =
 
 let input () : Librarian.input =
   { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-librarian-preference" ~absolute_turn:1
-  ; goal_context = Masc.Keeper_librarian.No_task
+  ; historical_task_contexts = []; goal_context = Masc.Keeper_librarian.No_task
   ; keeper_id = Masc_test_deps.keeper_id_fixture "preference-keeper"
   ; keeper_instructions = "Curate current memory."
   ; current = None
@@ -403,6 +403,12 @@ let test_memory_commits_when_working_contexts_slip slip () =
   in
   let inp =
     { (input ()) with
+      historical_task_contexts =
+        [{Keeper_librarian_task_context.scope=
+            {source=Official_turn;attribution=Observed
+              {turn_ref=(input ()).turn_ref;
+               task_context=Keeper_turn_task_context.Task_source_unavailable "admission source unavailable"}};
+          first_message=0;after_message=1;first_tool_observation=0;after_tool_observation=0}];
       working_context =
         { Keeper_librarian_context.empty with sources = [ source ] }
     }
@@ -436,7 +442,20 @@ let test_memory_commits_when_working_contexts_slip slip () =
     | runs -> failf "expected one Librarian run, found %d" (List.length runs)
   in
   match run with
-  | Some { status = Exact_lane_run_registry.Completed { output; _ }; _ } ->
+  | Some { input=Exact_lane_run_registry.Exact_input receipt;
+      status = Exact_lane_run_registry.Completed { output; _ }; _ } ->
+    let actual = Yojson.Safe.Util.member "actual_input" receipt in
+    let expected = Keeper_librarian_task_context.to_json inp.historical_task_contexts in
+    check string "receipt retains exact historical message association"
+      (Yojson.Safe.to_string expected)
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "historical_task_contexts" actual));
+    let variables = Yojson.Safe.Util.member "rendered_prompt_variables" actual in
+    check string "rendered context matches receipt association"
+      (Yojson.Safe.to_string expected)
+      Yojson.Safe.Util.(member "historical_task_contexts" variables |> to_string);
+    check bool "associated message is in rendered history" true
+      (contains ~needle:"[turn=0 role=user speaker=unknown] remember the preferred result"
+        Yojson.Safe.Util.(member "conversation_history" variables |> to_string));
     let write = Yojson.Safe.Util.member "context_write" output in
     let status = Yojson.Safe.Util.(member "status" write |> to_string) in
     (match slip with

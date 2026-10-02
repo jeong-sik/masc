@@ -16,7 +16,7 @@ let contains needle text =
   n = 0 || seek 0
 
 let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
-  Masc_tui_types.Identity_declared
+  Masc_tui_identity_model.Identity_declared
     { idp_id = id
     ; idp_label = label
     ; idp_tools = tools
@@ -26,10 +26,10 @@ let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
     }
 
 let unreadable id problem =
-  Masc_tui_types.Identity_unreadable { idp_id = id; idp_problem = problem }
+  Masc_tui_identity_model.Identity_unreadable { idp_id = id; idp_problem = problem }
 
 let ids providers =
-  List.map fst (Masc_tui_types.identity_connectable providers)
+  List.map fst (Masc_tui_identity_model.identity_connectable providers)
 
 let test_a_broken_declaration_does_not_take_a_number () =
   (* It is still shown -- an operator has to see why the provider they came
@@ -56,7 +56,7 @@ let test_nothing_connectable_is_not_an_error () =
 
 let login ~provider =
   {
-    Masc_tui_types.ils_keeper = "attaching-fixture";
+    Masc_tui_identity_model.ils_keeper = "attaching-fixture";
     ils_provider = provider;
     ils_label = "Whatever The Screen Calls It";
     ils_url = "https://auth.example.com/authorize?x=1";
@@ -65,7 +65,7 @@ let login ~provider =
 let test_a_login_lands_when_its_service_reports_tools () =
   let providers = [ declared ~tools:[ "getJiraIssue" ] "atlassian" "Atlassian" ] in
   check Alcotest.bool "landed" true
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_attached_with_no_tools_still_counts_as_landed () =
@@ -73,13 +73,13 @@ let test_attached_with_no_tools_still_counts_as_landed () =
      a tick that kept asking would ask forever. *)
   let providers = [ declared ~tools:[] "atlassian" "Atlassian" ] in
   check Alcotest.bool "landed" true
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_not_attached_has_not_landed () =
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.bool "still waiting" false
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_another_service_landing_does_not_end_this_login () =
@@ -89,7 +89,7 @@ let test_another_service_landing_does_not_end_this_login () =
     [ declared ~tools:[ "sendMessage" ] "slack" "Whatever The Screen Calls It" ]
   in
   check Alcotest.bool "this login is still outstanding" false
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let pending_login ~keeper ~provider ~url =
@@ -97,7 +97,7 @@ let pending_login ~keeper ~provider ~url =
 
 let pending_urls state keeper =
   Masc_tui_types.identity_logins_for_keeper state keeper
-  |> List.map (fun login -> login.Masc_tui_types.ils_url)
+  |> List.map (fun login -> login.Masc_tui_identity_model.ils_url)
 
 let identity_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935
@@ -354,25 +354,25 @@ let test_the_cursor_names_a_provider () =
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "the second connectable one"
     (Some ("slack", "Slack"))
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 1)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 1)
 
 let test_a_cursor_past_the_end_names_the_last_row () =
   (* A list that shrank under a cursor -- a declaration stopped reading, say
      -- answers from a row that is there rather than from none at all. *)
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.int "clamped" 0
-    (Masc_tui_types.identity_cursor_clamped ~query:"" ~providers 7);
+    (Masc_tui_identity_model.identity_cursor_clamped ~query:"" ~providers 7);
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "still names something" (Some ("atlassian", "Atlassian"))
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 7)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 7)
 
 let test_nothing_connectable_names_nothing () =
   let providers = [ unreadable "jira" "unreadable" ] in
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "no row to start" None
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 0)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 0)
 
 (* The pane lists every declared service alphabetically, and a live Keeper
    declares over a hundred. The question it opens with -- what does this
@@ -389,17 +389,17 @@ let test_the_tally_counts_what_the_rows_say () =
   check Alcotest.string "the tally reads the rows"
     "  5 services · 1 attached · 1 switched off · 1 attached with no tools · 1 \
      with an unreadable switch"
-    (Masc_tui_types.identity_summary ~providers ~query:"");
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"");
   check Alcotest.string "a filtered pane says how much of the set it draws"
     "  1 of 5 services · 1 attached"
-    (Masc_tui_types.identity_summary ~providers ~query:"atlas")
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"atlas")
 
 (* A Keeper that holds nothing has nothing to tally: every row already says
    "not attached", and repeating that above them adds no reading. *)
 let test_a_keeper_that_holds_nothing_tallies_nothing () =
   let providers = [ declared "atlassian" "Atlassian"; declared "box" "Box" ] in
   check Alcotest.string "the count of services, and no more" "  2 services"
-    (Masc_tui_types.identity_summary ~providers ~query:"")
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"")
 
 (* The row and the tally are one reading. *)
 let test_a_row_state_is_what_the_tally_counts () =
@@ -411,31 +411,31 @@ let test_a_row_state_is_what_the_tally_counts () =
     ; declared "calendly" "Calendly"
     ]
   in
-  let state id = Masc_tui_types.identity_row_state ~providers ~id in
-  check Alcotest.bool "two tools" true (state "atlassian" = Masc_tui_types.Identity_attached 2);
-  check Alcotest.bool "switched off" true (state "airtable" = Masc_tui_types.Identity_switched_off);
+  let state id = Masc_tui_identity_model.identity_row_state ~providers ~id in
+  check Alcotest.bool "two tools" true (state "atlassian" = Masc_tui_identity_model.Identity_attached 2);
+  check Alcotest.bool "switched off" true (state "airtable" = Masc_tui_identity_model.Identity_switched_off);
   check Alcotest.bool "attached with nothing to offer" true
-    (state "asana" = Masc_tui_types.Identity_attached_without_tools);
+    (state "asana" = Masc_tui_identity_model.Identity_attached_without_tools);
   check Alcotest.bool "an unreadable switch is not an off switch" true
-    (state "box" = Masc_tui_types.Identity_switch_unreadable);
+    (state "box" = Masc_tui_identity_model.Identity_switch_unreadable);
   check Alcotest.bool "never attached" true
-    (state "calendly" = Masc_tui_types.Identity_not_attached);
+    (state "calendly" = Masc_tui_identity_model.Identity_not_attached);
   check Alcotest.bool "a service the list does not declare" true
-    (state "unknown" = Masc_tui_types.Identity_not_attached)
+    (state "unknown" = Masc_tui_identity_model.Identity_not_attached)
 
 let test_the_provider_row_sits_below_the_preamble () =
   (* The key handler scrolls the pane to the line a provider is drawn on.
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
   let preamble =
-    List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
+    List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
        ~notice:[])
   in
   check Alcotest.int "first provider" preamble
-    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:0);
   check Alcotest.int "fourth provider" (preamble + 3)
-    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:3)
 
 let test_a_notice_pushes_the_list_down () =
@@ -444,9 +444,9 @@ let test_a_notice_pushes_the_list_down () =
      it or the cursor lands on the wrong line by however tall the message
      is -- and the messages worth showing are the long ones. *)
   let notice = [ "first line"; "second line" ] in
-  let bare = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+  let bare = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:0 in
-  let with_notice = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice
+  let with_notice = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice
        ~index:0 in
   check Alcotest.bool "the list starts lower" true (with_notice > bare);
   check Alcotest.int "by exactly the notice it was given"
@@ -460,7 +460,7 @@ let test_no_notice_reserves_no_room () =
      The tally is what stands above the list: what this Keeper holds, before
      the list that spells it service by service. *)
   check Alcotest.int "the tally and one blank, and that is all" 2
-    (List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
+    (List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
        ~notice:[]));
   (* And no key of its own. The footer draws the tab's keys, the way every
      other surface does; a sentence here would be a second copy of the key
@@ -469,7 +469,7 @@ let test_no_notice_reserves_no_room () =
     (List.exists
        (fun line -> List.exists (fun word -> contains word line)
            [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_types.identity_preamble ~summary:"  2 services" ~notice:[]));
+       (Masc_tui_identity_model.identity_preamble ~summary:"  2 services" ~notice:[]));
   (* The footer is where they are. Not the hint string alone: the row the
      operator reads is what the fitter left of it, so the widths are measured
      through the fitter. At 120 every key survives; at 80 the fitter gives up
@@ -507,7 +507,7 @@ let sample =
     unreadable "broken" "unreadable" ]
 
 let matched query =
-  List.map fst (Masc_tui_types.identity_connectable ~query sample)
+  List.map fst (Masc_tui_identity_model.identity_connectable ~query sample)
 
 let test_a_query_narrows_to_what_it_names () =
   check (Alcotest.list Alcotest.string) "both Google rows"
@@ -539,7 +539,7 @@ let test_the_cursor_indexes_what_is_left () =
      second overall. *)
   let at ~query index =
     Option.map fst
-      (Masc_tui_types.identity_cursor_provider ~query ~providers:sample index)
+      (Masc_tui_identity_model.identity_cursor_provider ~query ~providers:sample index)
   in
   (* Row three is Linear with no filter, and does not exist under "g" -- so
      the same index has to answer differently, and the filtered one clamps
@@ -551,7 +551,7 @@ let test_the_cursor_indexes_what_is_left () =
 
 let test_the_filter_rows_say_how_much_is_left () =
   match
-    Masc_tui_types.identity_filter_rows ~providers:sample (Some "g")
+    Masc_tui_identity_model.identity_filter_rows ~providers:sample (Some "g")
   with
   | [ line; "" ] ->
     let contains needle =
@@ -565,7 +565,7 @@ let test_the_filter_rows_say_how_much_is_left () =
 
 let test_no_filter_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_types.identity_filter_rows ~providers:sample None))
+    (List.length (Masc_tui_identity_model.identity_filter_rows ~providers:sample None))
 
 (* ── which other Keepers hold a service ─────────────────────────────── *)
 
@@ -580,10 +580,10 @@ let test_coverage_is_carried_per_provider () =
   let coverage id =
     List.find_map
       (function
-        | Masc_tui_types.Identity_declared { idp_id; idp_also_on; _ }
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_also_on; _ }
           when String.equal idp_id id -> Some idp_also_on
-        | Masc_tui_types.Identity_declared _
-        | Masc_tui_types.Identity_unreadable _ -> None)
+        | Masc_tui_identity_model.Identity_declared _
+        | Masc_tui_identity_model.Identity_unreadable _ -> None)
       providers
   in
   check
@@ -598,7 +598,7 @@ let test_coverage_is_carried_per_provider () =
 (* ── the app form ───────────────────────────────────────────────────── *)
 
 let form field secret =
-  { Masc_tui_types.iaf_provider = "slack"
+  { Masc_tui_identity_model.iaf_provider = "slack"
   ; iaf_label = "Slack"
   ; iaf_field = field
   ; iaf_client_id = "an-app"
@@ -610,8 +610,8 @@ let test_the_secret_is_never_drawn () =
   (* A terminal scrolls back. A credential on screen is a credential in the
      scrollback, and in whatever recorded the session. *)
   let rows =
-    Masc_tui_types.identity_app_form_rows
-      (Some (form Masc_tui_types.App_client_secret "hunter2"))
+    Masc_tui_identity_model.identity_app_form_rows
+      (Some (form Masc_tui_identity_model.App_client_secret "hunter2"))
   in
   let joined = String.concat "\n" rows in
   check Alcotest.bool "the value is nowhere" false
@@ -621,18 +621,18 @@ let test_the_secret_is_never_drawn () =
 
 let test_the_marker_is_on_the_field_taking_keys () =
   let marked field =
-    Masc_tui_types.identity_app_form_rows (Some (form field ""))
+    Masc_tui_identity_model.identity_app_form_rows (Some (form field ""))
     |> List.filter (fun row -> String.length row > 2 && row.[2] = '>')
     |> List.length
   in
   check Alcotest.int "exactly one row is marked" 1
-    (marked Masc_tui_types.App_client_id);
+    (marked Masc_tui_identity_model.App_client_id);
   check Alcotest.int "and only one, whichever it is" 1
-    (marked Masc_tui_types.App_scopes)
+    (marked Masc_tui_identity_model.App_scopes)
 
 let test_a_closed_form_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_types.identity_app_form_rows None))
+    (List.length (Masc_tui_identity_model.identity_app_form_rows None))
 
 (* ── what a paste carries into a field ──────────────────────────────── *)
 
@@ -643,17 +643,17 @@ let test_a_pasted_list_loses_its_newlines () =
      inside a scope name, and came back as "Invalid permissions requested". *)
   check Alcotest.string "one line, single spaces"
     "chat:write files:read users:read"
-    (Masc_tui_types.identity_field_paste
+    (Masc_tui_identity_model.identity_field_paste
        "chat:write\nfiles:read\r\n  users:read\n")
 
 let test_a_pasted_secret_loses_its_trailing_newline () =
   check Alcotest.string "nothing around it" "xoxp-abc123"
-    (Masc_tui_types.identity_field_paste "  xoxp-abc123\n")
+    (Masc_tui_identity_model.identity_field_paste "  xoxp-abc123\n")
 
 let test_a_paste_keeps_what_is_not_a_control_character () =
   (* Bytes at or above 0x80 are UTF-8, not control characters. *)
   check Alcotest.string "unharmed" "\xed\x95\x9c\xea\xb8\x80"
-    (Masc_tui_types.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
+    (Masc_tui_identity_model.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
 
 let () =
   Alcotest.run "tui_identity_tab"

@@ -56,7 +56,7 @@ let turn_ended
   { Boundaries.recorded_at = 100.0
   ; event =
       Boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
         ; history_at_start =
             (match history_at_start with
              | Some history_at_start -> history_at_start
@@ -133,7 +133,7 @@ let official_turn ?(turn = 1) ~started_from messages : Boundaries.record =
   { Boundaries.recorded_at = 100.0
   ; event =
       Boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
         ; history_at_start =
             Boundaries.Continued_history_from
               { start_atom = started_from
@@ -627,7 +627,7 @@ let test_unread_official_counts_the_lines_beyond_the_cursor () =
     { Boundaries.recorded_at = 100.0
     ; event =
         Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
           ; history_at_start = Boundaries.Continued_history
           ; position = Boundaries.No_atom_history
           }

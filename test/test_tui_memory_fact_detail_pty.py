@@ -70,7 +70,12 @@ def detail_window(output: bytearray) -> tuple[int, int, int]:
 
 def run(executable: str) -> None:
     fixtures = h.memory_facts_http_fixtures()
-    status, payload = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    response = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    if not isinstance(response, tuple):
+        raise AssertionError("memory fixture must be a status/payload response")
+    status, payload = response
+    if not isinstance(payload, dict):
+        raise AssertionError("memory fixture payload must be an object")
     for fact in payload["ordinary"]["facts"]:
         fact["claim"] = CLAIM
     for fact in payload["source_bound"]["facts"]:

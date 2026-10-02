@@ -277,6 +277,169 @@ try:
   vector_scene=observe();vector=control(vector_scene,'Vector link')
   receipt=act(vector_scene,vector,action='follow_link')
   check('SVG '+target+' in top document follows same tab',js('return location.href;')==receipt['destinationUrl'])
+ # Native labels remain activation targets even when a radio has no geometry.
+ js("document.body.innerHTML=arguments[0];",[(root/'test/fixtures/browser-form-controls.html').read_text()])
+ forms=observe()
+ card=control(forms,'Card B')
+ check('hidden radio is exposed through its associated label',card['tag']=='label' and card['checked'] is False)
+ act(forms,card,action='click')
+ selected=observe()
+ check('observed label activates the correct hidden radio',control(selected,'Card B')['checked'] is True and control(selected,'Card A')['checked'] is False)
+ check('textarea inside ordinary label remains editable',control(selected,'Notes')['editable'])
+ check('onclick container retains independently editable input',control(selected,'Amount')['editable'])
+ check('onclick container retains nested button once',len([n for n in selected['nodes'] if n['kind']=='control' and n['tag']=='button' and n['text']=='Submit amount'])==1)
+ check('combobox retains nested editable input',control(selected,'Search card')['editable'])
+ act(selected,control(selected,'Amount'),action='fill',text='42')
+ check('nested input can be filled through its observed reference',js("return document.querySelector('[aria-label=Amount]').value;")=='42')
+ check('unassociated label remains text',not any(n['kind']=='control' and n['text']=='Unassociated text' for n in selected['nodes']))
+ check('ARIA radio and mixed checkbox are observed controls',control(selected,'Custom card')['ariaChecked']=='false' and control(selected,'Mixed selection')['ariaChecked']=='mixed')
+ act(selected,control(selected,'Custom card'),action='click')
+ check('ARIA radio click updates the observed selection',control(observe(),'Custom card')['ariaChecked']=='true')
+ for name in ['Locked card','Locked action','Locked external label']:
+  locked=control(observe(),name)
+  check(name+' is visibly disabled',locked['disabled'] and not locked['clickable'])
+  try:
+   act(observe(),locked,action='click')
+   raise AssertionError('disabled activation accepted')
+  except RuntimeError as e:
+   check(name+' rejects before activation','element_disabled' in str(e))
+ check('disabled controls do not run handlers',js("return document.querySelector('#result').textContent;")=='No action')
+ menu=observe()
+ act(menu,control(menu,'Expense menu'),action='click')
+ check('declared menuitem activates from its observed reference',js("return document.querySelector('#result').textContent;")=='Menu opened')
+ menu=observe()
+ act(menu,control(menu,'Inline menu'),action='click')
+ check('explicit inline handler is an observed control',js("return document.querySelector('#result').textContent;")=='Inline opened')
+ menu=observe()
+ act(menu,control(menu,'More'),action='click')
+ check('native summary activates its details',js("return document.querySelector('details').open;") is True)
+ elements_script=(root/'lib/browser_page_script.ml').read_text().split('let elements = {|',1)[1].split('|}',1)[0]
+ form_elements=js(elements_script)
+ check('elements exposes selected native label and ARIA state',any(n['tag']=='label' and n['text']=='Card B' and n.get('checked') is True for n in form_elements['elements']) and any(n['text']=='Custom card' and n.get('ariaChecked')=='true' for n in form_elements['elements']))
+ # Review regressions: references preserve activation targets and declared semantics.
+ js("""document.body.innerHTML=`<style>body{font:16px sans-serif;margin:8px}label{display:inline-block}input[type=radio]{display:none}</style>\n <input id="card-a" type="radio" name="review-card"><label for="card-a">Card A</label>\n <input id="card-b" type="radio" name="review-card"><label for="card-b">Card B</label>\n <button id="separated">Save<br>draft<span style="display:none">HIDDEN_LABEL</span></button>
+ <button id="blocks"><span style="display:block">Store</span><span style="display:block">draft</span></button>
+ <div role="button" id="cells"><span style="display:table-cell">Left</span><span style="display:table-cell">Right</span></div>
+ <label><input id="visible-check" type="checkbox">Visible agree</label>
+ <label><input id="visible-radio" type="radio" style="display:inline-block">Visible choice</label>
+ <main id="delegated" onclick="this.dataset.clicked='yes'"><h2>Delegated heading</h2><p>Delegated paragraph</p><img alt="Delegated raster" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main>
+ <label id="explicit-label" onclick="this.dataset.clicked='yes'">Explicit label action</label>
+ <input id="visible-explicit" type="checkbox"><label id="associated-action" for="visible-explicit" onclick="this.dataset.clicked='yes'">Associated label action</label>
+ <button id="collapsed">Save   the
+ draft</button><button id="transformed" style="text-transform:uppercase">Save draft</button>
+ <button id="preserved" style="white-space:pre">Save   the
+ draft</button>
+ <button id="transparent">Visible opacity<span style="opacity:0">OPACITY_SECRET</span></button>
+ <button id="clipped" style="overflow:hidden;width:180px">Visible clipped<span style="display:block;margin-left:10000px">CLIPPED_SECRET</span></button>
+ <div role="checkbox" aria-checked="mixed">Mixed checkbox</div>
+ <div role="menuitemcheckbox" aria-checked="mixed">Mixed menu checkbox</div>
+ <div role="radio" aria-checked="mixed">Mixed radio</div>
+ <div role="menuitemradio" aria-checked="mixed">Mixed menu radio</div>
+ <div role="switch" aria-checked="mixed">Mixed switch</div>
+ <button aria-checked="mixed">Unsupported checked button</button>
+ <input id="native-mixed" type="checkbox" style="display:none"><label for="native-mixed">Native mixed</label>
+ <div role="tab" aria-selected="false" onclick="this.setAttribute('aria-selected','true')">Selectable tab</div>
+ <div role="option" aria-selected="true">Selected option</div>
+ <div role="heading button" aria-level="2">First role heading</div>
+ <div role="future-role button">Fallback button</div>`;
+ document.querySelector('#native-mixed').indeterminate=true;""")
+ semantics=observe()
+ for element_id in ['collapsed','transformed','preserved']:
+  expected=js("return document.getElementById(arguments[0]).innerText.trim();",[element_id])
+  check('scene uses browser rendered whitespace/transform: '+element_id,control(semantics,expected)['text']==expected)
+ check('opacity-zero control descendants remain excluded','OPACITY_SECRET' not in json.dumps(semantics))
+ check('clipped control descendants remain excluded','CLIPPED_SECRET' not in json.dumps(semantics))
+ for label in ['Mixed checkbox','Mixed menu checkbox']:
+  check('mixed checkbox role retained: '+label,control(semantics,label)['ariaChecked']=='mixed')
+ for label in ['Mixed radio','Mixed menu radio','Mixed switch']:
+  check('binary role mixed normalizes false: '+label,control(semantics,label)['ariaChecked']=='false')
+ check('unsupported role does not report checked','ariaChecked' not in control(semantics,'Unsupported checked button'))
+ for label,element_id in [('Explicit label action','explicit-label'),('Associated label action','associated-action')]:
+  targets=[node for node in semantics['nodes'] if node['kind']=='control' and node['tag']=='label' and node['text']==label]
+  check('explicit label has one observed activation target: '+label,len(targets)==1)
+  act(semantics,targets[0],action='click')
+  check('explicit label onclick remains actionable: '+label,js("return document.getElementById(arguments[0]).dataset.clicked;",[element_id])=='yes')
+ check('control labels preserve br separators and filter hidden descendants',control(semantics,'Save\ndraft')['text']=='Save\ndraft')
+ check('adjacent blocks insert one rendered newline',control(semantics,'Store\ndraft')['text']==js("return document.querySelector('#blocks').innerText;"))
+ check('adjacent table cells insert one rendered tab',control(semantics,'Left\tRight')['text']==js("return document.querySelector('#cells').innerText;"))
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in semantics['nodes'] if n['kind']=='control' and n['text']==label]
+  check('visible native choice has exactly one scene target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+ act(semantics,control(semantics,'Visible agree'),action='click')
+ check('visible checkbox remains selectable through its input',control(observe(),'Visible agree')['checked'] is True)
+ check('delegated onclick retains heading geometry',any(n['kind']=='text' and n['text']=='Delegated heading' and n['headingLevel']==2 and n['rects'] for n in semantics['nodes']))
+ check('delegated onclick retains paragraphs',any(n['kind']=='text' and n['text']=='Delegated paragraph' for n in semantics['nodes']))
+ check('delegated onclick retains raster descendants',any(n['kind']=='raster' and n['text']=='Delegated raster' for n in semantics['nodes']))
+ check('hidden native checkbox mixed state survives label projection',control(semantics,'Native mixed')['indeterminate'] is True and control(semantics,'Native mixed')['checked'] is False)
+ check('selected tab and option state are observed',control(semantics,'Selectable tab')['ariaSelected']=='false' and control(semantics,'Selected option')['ariaSelected']=='true')
+ act(semantics,control(semantics,'Selectable tab'),action='click')
+ check('tab selection can be verified after activation',control(observe(),'Selectable tab')['ariaSelected']=='true')
+ check('effective heading role is not a fallback button',any(n['kind']=='text' and n['text']=='First role heading' and n['headingLevel']==2 for n in semantics['nodes']) and not any(n['kind']=='control' and n['text']=='First role heading' for n in semantics['nodes']))
+ check('unknown leading role permits supported button fallback',control(semantics,'Fallback button')['role']=='button')
+ form_elements=js(elements_script)
+ for label in ['Explicit label action','Associated label action']:
+  check('elements preserves explicit label action: '+label,any(n['tag']=='label' and n['text']==label for n in form_elements['elements']))
+ for label,expected in [('Mixed checkbox','mixed'),('Mixed menu checkbox','mixed'),('Mixed radio','false'),('Mixed menu radio','false'),('Mixed switch','false')]:
+  check('elements role-specific checked state: '+label,next(n for n in form_elements['elements'] if n['text']==label)['ariaChecked']==expected)
+ check('elements omits unsupported checked state','ariaChecked' not in next(n for n in form_elements['elements'] if n['text']=='Unsupported checked button'))
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in form_elements['elements'] if n.get('tag')=='input' and n.get('name')==label]
+  check('visible native choice has exactly one elements target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+  check('elements omits duplicate visible input label: '+label,not any(n.get('tag')=='label' and n.get('text')==label for n in form_elements['elements']))
+ check('elements and scene agree on block separators',any(n['text']=='Store\ndraft' for n in form_elements['elements']))
+ check('elements and scene agree on table separators',any(n['text']=='Left\tRight' for n in form_elements['elements']))
+ check('elements and scene agree on separators',next(n for n in form_elements['elements'] if n['text']=='Save\ndraft')['text']==control(semantics,'Save\ndraft')['text'])
+ check('elements exposes mixed labels and selected controls',any(n['text']=='Native mixed' and n.get('indeterminate') is True for n in form_elements['elements']) and any(n['text']=='Selectable tab' and n.get('ariaSelected')=='true' for n in form_elements['elements']))
+ check('elements omits a non-actionable first role',not any(n['text']=='First role heading' for n in form_elements['elements']))
+ js("document.querySelector('[role=option]').setAttribute('aria-selected','mixed');")
+ check('invalid aria-selected is not advertised as a boolean state','ariaSelected' not in control(observe(),'Selected option') and not any(n['text']=='Selected option' and 'ariaSelected' in n for n in js(elements_script)['elements']))
+ before_retarget=observe();old_label=control(before_retarget,'Card B')
+ js("document.querySelector('label[for=card-b]').htmlFor='card-a'; document.querySelector('#card-b').checked=true;")
+ try:act(before_retarget,old_label,action='click');raise AssertionError('changed label association accepted')
+ except RuntimeError as e:check('label association mutation rejects before activation','scene_label_control_changed' in str(e))
+ check('refused old label did not select its new input',js("return document.querySelector('#card-b').checked;") is True)
+ after_retarget=observe();new_label=control(after_retarget,'Card B')
+ check('reread assigns a fresh label identity',new_label['nodeId']!=old_label['nodeId'])
+ try:act(before_retarget,old_label,action='click');raise AssertionError('retired label reference accepted')
+ except RuntimeError as e:check('reread retires previous label references','scene_node_detached' in str(e))
+ act(after_retarget,new_label,action='click')
+ check('fresh label observation activates the newly observed input',js("return document.querySelector('#card-a').checked;") is True)
+ # All native label associations, including null and non-choice controls,
+ # belong to the exact observed reference before any inline/native effect.
+ js("""document.body.innerHTML=`<label id="none-label" onclick="this.dataset.clicked='yes'">Initially unassociated</label>
+ <label id="button-label" for="button-a" onclick="this.dataset.clicked='yes'">Button association</label>
+ <button id="button-a" onclick="this.dataset.clicked='yes'">Button A</button>
+ <button id="button-b" onclick="this.dataset.clicked='yes'">Button B</button>
+ <label id="boxless-native" style="display:contents"><input id="boxless-check" type="checkbox" style="display:none">Boxless agree</label>
+ <label id="boxless-aria" role="checkbox" aria-checked="false" style="display:contents" onclick="this.setAttribute('aria-checked','true')">Boxless ARIA agree</label>
+ <label role="checkbox" style="display:contents"><span style="visibility:hidden">BOXLESS_HIDDEN</span></label>`;""")
+ pinned=observe()
+ for label,element_id in [('Initially unassociated','none-label'),('Button association','button-label')]:
+  old=control(pinned,label)
+  js("document.getElementById(arguments[0]).htmlFor='button-b';",[element_id])
+  args={'documentId':pinned['documentId'],'nodeId':old['nodeId'],'expectedUrl':pinned['url'],'action':'click'}
+  result=js(scene+interaction.replace('return interactInPage(arguments[0]);','return {outcome:interactInPage(arguments[0])};'),[args])['outcome']
+  check('complete label association rejects before effects: '+label,result.get('interactionFailure')=={'message':'scene_label_control_changed','effectStarted':False},result)
+  check('refused association has no label or button effects: '+label,js("return ['none-label','button-label','button-a','button-b'].every(id=>!document.getElementById(id).dataset.clicked);"))
+  fresh=observe();new=control(fresh,label)
+  check('nullable/button association change gets a fresh reference: '+label,new['nodeId']!=old['nodeId'])
+ # Native and ARIA labels with no principal box use their painted text geometry.
+ boxless=observe()
+ native=control(boxless,'Boxless agree');aria=control(boxless,'Boxless ARIA agree')
+ check('boxless native and ARIA labels retain admitted rectangles',bool(native['rects']) and bool(aria['rects']))
+ check('boxless hidden text remains excluded','BOXLESS_HIDDEN' not in json.dumps(boxless))
+ inventory=js(elements_script)['elements']
+ check('elements retains both boxless label targets',all(any(n['tag']=='label' and n['text']==label for n in inventory) for label in ['Boxless agree','Boxless ARIA agree']))
+ act(boxless,native,action='click')
+ check('boxless native label activates its hidden checkbox',js("return document.querySelector('#boxless-check').checked;") is True)
+ act(boxless,aria,action='click')
+ check('boxless ARIA label activates and reports its checked state',control(observe(),'Boxless ARIA agree')['ariaChecked']=='true')
+ check('boxless checkbox state is re-observed after activation',control(observe(),'Boxless agree')['checked'] is True)
+ # End review regressions.
+ (a.out/'form-controls.json').write_text(json.dumps({'scene':observe(),'elements':form_elements},ensure_ascii=False,indent=2))
+ form_png=call('GET','/session/'+sid+'/screenshot')
+ assert isinstance(form_png,str)
+ (a.out/'form-controls.png').write_bytes(base64.b64decode(form_png,validate=True))
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

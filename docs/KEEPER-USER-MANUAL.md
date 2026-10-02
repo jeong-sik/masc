@@ -186,6 +186,9 @@ boundaries as they land. See [`docs/TUI-GUIDE.md`](TUI-GUIDE.md).
 
 ## The daily loop
 
+For targeted task lookup and compact census reads, see
+[Reading tasks without scanning the backlog](guides/KEEPER-TASK-QUERIES.md).
+
 A task moves through `todo`, `in_progress`, `awaiting_verification`, and then
 `done`, `dropped`, or `blocked`.
 
@@ -233,6 +236,32 @@ boundary. A `local` sandbox profile runs on your host with your permissions.
 Runtime-owned files outside `.masc/config/` are not inputs. Keeper snapshots,
 task stores, board logs, receipts, and approval history are written by the
 server; editing them by hand is how you get a state nothing agrees on.
+
+## Waiting messages during Codex work
+
+When newer original input arrives during a direct Codex operation, MASC asks
+the current turn to preserve its progress and finish. It waits for the vendor
+turn to complete and the conversation to settle, then records a durable
+continuation and moves the original operation behind waiting input. A scheduling
+reply does not mark the original request successful. Its operation ID, input
+and completed work remain attached to the continuation.
+
+After the waiting input runs, the original operation resumes the latest settled
+turn of the same conversation with an instruction to continue remaining work.
+Queued continuations do not trigger another handoff, so two paused operations
+do not repeatedly yield to one another. Active tools must finish before the
+scheduling notice can be sent; provider cooperation determines the delay.
+
+If a terminal posting tool publishes progress during handoff, its delivery
+receipt remains evidence rather than completing the original operation. MASC
+returns that result, refuses further host tools in the closing turn, and waits
+for vendor completion before retaining the continuation.
+
+The retained continuation survives restart while queued or claimed before
+resume admission. A crash after resume authority has been consumed remains an
+interrupted execution; MASC does not silently replay potentially completed
+effects. A changed conversation or tool surface also requires recovery instead
+of replaying the original input into a new session.
 
 ## Where the numbers here came from
 

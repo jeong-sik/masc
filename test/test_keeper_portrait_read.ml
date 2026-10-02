@@ -41,6 +41,7 @@ let field key = function
 
 let call ~name ~args =
   Read.handle
+    ~base_path:(Sys.getenv "MASC_BASE_PATH")
     ~keeper_name:name
     ~tool_name:"keeper_portrait_read"
     ~start_time:(Tool_timing.start ())
@@ -93,7 +94,7 @@ let test_browse_and_preview_without_equipping () =
   let args = `Assoc [ "size", `Int 48 ] in
   let starting = call ~name ~args |> completed_data in
   output_validator args starting;
-  Alcotest.(check string) "default view is explicitly starting" "starting"
+  Alcotest.(check string) "default view is explicitly current" "current"
     (string_field "mode" starting);
   Alcotest.(check bool) "default view has no preview item" true
     (field "preview_item" starting = `Null);
@@ -315,11 +316,40 @@ let test_declared_size_matches_the_handler () =
   Alcotest.(check int) "size default" Read.default_size (field "default")
 ;;
 
+let test_payout_unavailability_does_not_remove_portrait_browsing () =
+  with_temp_base @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let config = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname config);
+  Out_channel.with_open_bin config (fun channel -> output_string channel "invalid = [");
+  let ledger = Candle_ledger.path ~base_path in
+  let args = `Assoc ["size", `Int 48; "preview_item", `String "crown"] in
+  let data = call ~name:"portrait-offline" ~args |> completed_data in
+  output_validator args data;
+  Alcotest.(check string) "bad payout config does not block recorded equipment"
+    "available" (string_field "status" (field "equipment_observation" data));
+  Alcotest.(check bool) "portrait never initializes a policy ledger" false (Sys.file_exists ledger);
+  Fs_compat.mkdir_p (Filename.dirname ledger);
+  Out_channel.with_open_bin ledger (fun channel -> output_string channel "broken-row\n");
+  let before = In_channel.with_open_bin ledger In_channel.input_all in
+  let fallback = call ~name:"portrait-offline" ~args |> completed_data in
+  output_validator args fallback;
+  Alcotest.(check string) "corrupt ledger is explicit" "unavailable"
+    (string_field "status" (field "equipment_observation" fallback));
+  Alcotest.(check bool) "fallback does not fabricate current gear" true
+    (field "current_equipment" fallback = `Null);
+  Alcotest.(check string) "preview remains available" "crown" (string_field "preview_item" fallback);
+  Alcotest.(check string) "corrupt ledger remains byte-identical" before
+    (In_channel.with_open_bin ledger In_channel.input_all)
+;;
+
 let () =
   Alcotest.run
     "keeper_portrait_read"
     [ ( "read-only portrait"
-      , [ Alcotest.test_case "equipment matches the name hash" `Quick
+      , [ Alcotest.test_case "payout failure preserves explicit portrait browsing" `Quick
+            test_payout_unavailability_does_not_remove_portrait_browsing
+        ; Alcotest.test_case "equipment matches the name hash" `Quick
             test_equipment_matches_the_name_hash
         ; Alcotest.test_case "browse and preview without equipping" `Quick
             test_browse_and_preview_without_equipping

@@ -1033,9 +1033,11 @@ let token_credentials base_path =
   (base_path, Auth.list_credentials base_path)
 
 let token_list_cmd_exit base_path =
-  let base_path, creds = token_credentials base_path in
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let creds, failures = Auth.list_credential_results base_path |> List.partition_map
+      (function Ok credential -> Either.Left credential | Error error -> Either.Right error) in
   let now = Unix.gettimeofday () in
-  if creds = []
+  if creds = [] && failures = []
   then print_endline "no credentials in this workspace"
   else begin
     List.iter
@@ -1045,69 +1047,77 @@ let token_list_cmd_exit base_path =
          in
          print_endline (Auth_token_inventory.row ~now ~raw_present c))
       (Auth_token_inventory.ordered ~now creds);
+    List.iter (fun error -> print_endline (Auth_token_inventory.error_row error)) failures;
     let expired = List.length (Auth_token_inventory.expired ~now creds) in
     Printf.printf
-      "\n%d credential(s), %d expired.%s\n"
+      "\n%d credential(s), %d expired, %d unreadable.%s\n"
       (List.length creds)
       expired
+      (List.length failures)
       (if expired > 0 then " `masc token prune` removes the expired ones." else "")
   end;
   Cmd.Exit.ok
 
 let token_revoke_cmd_exit base_path agent =
-  let base_path, creds = token_credentials base_path in
-  let known =
-    List.exists (fun (c : Types_auth.agent_credential) -> c.agent_name = agent) creds
-  in
-  if not known
-  then (
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let retired = Auth.with_credential_transaction base_path (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* present = Auth.credential_exists_in_transaction transaction agent in
+    if not present then Ok false
+    else Auth.delete_credential_in_transaction transaction agent |> Result.map (fun () -> true))
+    |> Result.join in
+  match retired with
+  | Error error ->
+    Printf.eprintf "cannot retire %S: %s\n" agent (Masc_domain.masc_error_to_string error);
+    Cmd.Exit.some_error
+  | Ok false ->
     Printf.eprintf
-      "no credential named %S; `masc token list` shows what this workspace holds\n"
-      agent;
-    Cmd.Exit.some_error)
-  else (
-    Auth.delete_credential base_path agent;
+      "no credential named %S; `masc token list` shows what this workspace holds\n" agent;
+    Cmd.Exit.some_error
+  | Ok true ->
     Printf.printf
       "retired %s. Its bearer stops validating from the next request; anything \
        still exporting it needs a new one from `masc login --agent %s`.\n"
-      agent
-      agent;
-    Cmd.Exit.ok)
+      agent agent;
+    Cmd.Exit.ok
 
 (* Only expired credentials. Removing one that already authenticates nothing is
    garbage collection rather than a security decision, which is why this needs
    no confirmation while [revoke] names its target. *)
 let token_prune_cmd_exit base_path dry_run =
-  let base_path, creds = token_credentials base_path in
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
   let now = Unix.gettimeofday () in
-  let expired =
-    Auth_token_inventory.expired ~now creds
-    |> List.map (fun (c : Types_auth.agent_credential) -> (c.agent_name, "expired"))
-  in
-  (* A stub whose target is gone is invisible to a listing and authenticates
-     nothing, so it belongs in the same sweep rather than living forever. *)
-  let orphaned =
-    Auth.orphaned_credential_stubs base_path
-    |> List.map (fun name -> (name, "orphaned redirect"))
-  in
-  match expired @ orphaned with
-  | [] ->
+  let mode = if dry_run then Auth_token_prune.Preview else Auth_token_prune.Retire in
+  match Auth_token_prune.run ~base_path ~now ~mode with
+  | Error error ->
+    Printf.eprintf "could not prune credentials: %s\n" (Masc_domain.masc_error_to_string error);
+    Cmd.Exit.some_error
+  | Ok [] ->
     print_endline "nothing to prune: no expired credentials, no orphaned stubs";
     Cmd.Exit.ok
-  | doomed ->
+  | Ok entries ->
+    let retired = ref 0 and previewed = ref 0 and failed = ref 0 in
     List.iter
-      (fun (name, why) ->
-         if dry_run
-         then Printf.printf "would retire %s (%s)\n" name why
-         else (
-           Auth.delete_credential base_path name;
-           Printf.printf "retired %s (%s)\n" name why))
-      doomed;
-    Printf.printf
-      "%d credential(s)%s\n"
-      (List.length doomed)
-      (if dry_run then " would be retired (--dry-run)" else " retired");
-    Cmd.Exit.ok
+      (fun { Auth_token_prune.agent_name; reason; outcome } ->
+         let why = match reason with
+           | Auth_token_prune.Expired -> "expired"
+           | Auth_token_prune.Orphaned_redirect -> "orphaned redirect" in
+         match outcome with
+         | Auth_token_prune.Would_retire ->
+           incr previewed;
+           Printf.printf "would retire %s (%s)\n" agent_name why
+         | Auth_token_prune.Retired ->
+           incr retired;
+           Printf.printf "retired %s (%s)\n" agent_name why
+         | Auth_token_prune.Failed error ->
+           incr failed;
+           Printf.eprintf "could not fully retire %s (%s; some files may already be removed): %s\n"
+             agent_name why (Masc_domain.masc_error_to_string error))
+      entries;
+    (match mode with
+     | Auth_token_prune.Preview -> Printf.printf "%d credential(s) would be retired (--dry-run)\n" !previewed
+     | Auth_token_prune.Retire -> Printf.printf "%d credential(s) retired, %d failed\n" !retired !failed);
+    if !failed = 0 then Cmd.Exit.ok else Cmd.Exit.some_error
 
 let token_cmd =
   let list_cmd =
@@ -1851,7 +1861,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     let loaded = try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
       with Env_config_core.Config_error message -> Error message in
     match loaded with
     | Error message ->
@@ -1860,7 +1870,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
         "invalid_configuration"
         "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
-      match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
+      match List.find_opt (fun (runtime : Runtime_instance.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
       | Some runtime ->
         (try
@@ -2253,18 +2263,18 @@ let runtime_probe_cmd_exit base_path runtime_id =
   match Runtime.load_list ~config_path:runtime_config_path with
   | Error failure ->
       Printf.eprintf "runtime-probe failed: %s\n"
-        (Runtime.to_diagnostic_text ~config_path:runtime_config_path failure);
+        (Runtime_config_error.to_diagnostic_text ~config_path:runtime_config_path failure);
       1
   | Ok (runtimes, _default, _, _, _) -> (
       match
         List.find_opt
-          (fun (rt : Runtime.t) -> String.equal rt.id runtime_id)
+          (fun (rt : Runtime_instance.t) -> String.equal rt.id runtime_id)
           runtimes
       with
       | None ->
           Printf.eprintf "runtime-probe: runtime %S is not configured\n" runtime_id;
           4
-      | Some (runtime : Runtime.t) -> (
+      | Some (runtime : Runtime_instance.t) -> (
           match runtime.execution with
           | Runtime_execution.Agent_core _ ->
               print_string "not-a-subscription\n";
@@ -3626,6 +3636,10 @@ let runtime_model_list_cmd =
          | Error message -> Error message
          | Ok catalog ->
            let entries = wizard_model_entries client catalog in
+           let entries = match client with
+             | Wizard_codex -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+                 Option.is_none entry.provider_name) entries
+             | Wizard_claude_code -> entries in
            Ok
              (`List
                (entries
@@ -3829,7 +3843,7 @@ let setup_validate_runtime base_path =
     try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
     with Env_config_core.Config_error message -> Error message
   in
   match loaded with
@@ -3841,7 +3855,7 @@ let setup_validate_runtime base_path =
       Option.bind
         (Runtime_verification.initial_runtime_id ~default_runtime_id:default.id
           ~assignments ~lanes ~keeper_name:"imp")
-        (fun id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
+        (fun id -> List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes) in
     match selected with
     | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
     | Some runtime ->

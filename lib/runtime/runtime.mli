@@ -3,25 +3,11 @@
     runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
-    타입은 자립 모듈 {!Runtime_schema} 소유. *)
+    선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance} 소유. *)
 
+open Runtime_config_error
 open Runtime_schema
-
-type t =
-  { id : string
-  ; provider : provider
-  ; model : model_spec
-  ; binding : binding
-  ; execution : Runtime_execution.t
-  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
-    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
-  ; quota_scope : Runtime_quota_window.scope
-    (** Quota ownership key frozen at materialization, from the same
-        credential-alias selection that resolved the dispatched API key. A
-        later environment change must not re-select the alias at
-        window-recording time, or the window is charged to an account the
-        dispatch never used (PR #28219 review). *)
-  }
+open Runtime_instance
 
 val exact_slot_list_key_of_api_format : api_format -> string option
 (** The declaration key used when an exact-output lane appends a binding with
@@ -29,34 +15,6 @@ val exact_slot_list_key_of_api_format : api_format -> string option
     protocol has no output-schema channel and cannot enter an exact lane.
     The runtime writer and the
     resolved picker projection use the same decision. *)
-
-type dispatch_credential_error =
-  | Required_env_credential_missing of
-      { provider_id : string
-      ; env_key : string
-      }
-  | Declared_credential_unavailable of
-      { provider_id : string
-      ; carrier : Agent_core.Error.credential_carrier
-      }
-
-val dispatch_credential_error_to_string : dispatch_credential_error -> string
-
-val dispatch_credential_error_to_core_error :
-  dispatch_credential_error -> Agent_core.Error.t
-(** Preserve a missing environment credential as the existing typed
-    [MissingEnvVar] configuration error. Other unavailable credential carriers
-    use the closed [CredentialUnavailable] variant, so consumers never infer
-    terminal configuration state from broad [InvalidConfig] text. *)
-
-val validate_dispatch_credential :
-  provider_config:Llm_provider.Provider_config.t ->
-  t ->
-  (unit, dispatch_credential_error) result
-(** Fail closed immediately before an Agent Core dispatch when the runtime
-    declares a credential but the final provider config has no secret. A
-    credential-free provider remains valid. This check intentionally happens
-    after materialization so dashboard missing-auth projection stays intact. *)
 
 type config_source_revision = private Config_source_revision of string
 type config_commit_order = private Config_commit_order of int64
@@ -247,123 +205,6 @@ module Assignment_for_testing : sig
      keeper_assignment_cas_error) result
 end
 
-val id_of_binding : binding -> string
-
-type drop_reason =
-  | Binding_disabled
-  | Provider_disabled of string
-  | Provider_not_declared of string
-  | Model_not_declared of string
-  | Execution_unbuildable of string
-      (** Why a binding did not become a runtime. Closed so consumers decide per
-          case instead of matching the rendered text: the [*_not_declared] pair
-          is a dangling reference (an operator typo, fatal at
-          {!load_list}), while a disabled binding or provider is a choice the
-          operator wrote down and [Execution_unbuildable] is an adapter
-          capability limit — both non-fatal, per RFC-0206 §2.1. *)
-
-val string_of_drop_reason : drop_reason -> string
-(** Operator-facing rendering. Single source for the wording, so a reason read
-    from a runtime message and one read from a load error cannot drift. *)
-
-type reference_shape =
-  | Scalar
-  | List_entry
-      (** How a reference names its id. A list entry reads as [field entry "id"]
-          and a scalar as [field = "id"]; keeping both apart stops a message
-          from telling an operator a list field equals one id. *)
-
-type resolution_failure =
-  { unresolved_id : string
-  ; declared_drop : drop_reason option
-  ; runtime_count : int
-  }
-(** Why an id did not resolve to a runtime. [reason] is the binding's own drop
-    reason when one was declared under that id, [None] when nothing declared
-    it. *)
-
-type exact_slot_body_deadline_gap =
-  { lane_id : string
-  ; slot_id : string
-  ; provider_id : string
-  }
-(** One [\[runtime.exact_output_lanes.<lane>\]] [slots] entry that names an
-    HTTP runtime whose provider declares no [exact-body-timeout-s] (rule 3,
-    #38779). Not collected under {!Replacement_catalog_targets}. *)
-
-type exact_slot_degradation =
-  { gaps : exact_slot_body_deadline_gap list
-  ; emptied_lane_ids : string list
-        (** Lanes whose every slot is a gap and that declare no cli_slots.
-            Each is unavailable on its own; the other lanes still publish. *)
-  }
-
-val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
-(** One line naming the lane table, the slot, the provider and the key to add. *)
-
-type exact_lane_cli_slot_unservable_reason =
-  | Not_an_official_client
-      (** The runtime is dispatched over HTTP ([Agent_core]). *)
-  | Client_without_output_schema
-      (** An official client that cannot hold an answer to a JSON Schema
-          ({!Runtime_schema.api_format_output_schema_channel}). *)
-
-type exact_lane_cli_slot_unservable =
-  { lane_id : string
-  ; slot_id : string
-  ; provider_id : string
-  ; reason : exact_lane_cli_slot_unservable_reason
-  }
-(** One [\[runtime.exact_output_lanes.<lane>\]] [cli_slots] entry that names a
-    configured runtime the CLI tail cannot call. Every lane's [cli_slots]
-    dispatches through {!Keeper_lane_cli_oneshot.run} alone, which requires
-    {!Runtime_execution.Official_client} and hands the client an output
-    schema on every call; an id that resolves to nothing instead is
-    {!Reference_unresolved}, not this. An official client with no schema
-    channel is also refused when its runtime id appears in [slots];
-    catalog-only [slots] ids remain catalog-owned. *)
-
-type load_failure =
-  | Toml_unparsable of Runtime_toml.parse_error list
-  | Undeclared_bindings of (string * drop_reason) list
-  | Default_runtime_absent
-  | Default_runtime_unresolved of resolution_failure
-  | Reference_unresolved of
-      { site : string
-      ; shape : reference_shape
-      ; resolution : resolution_failure
-      }
-  | Lane_candidate_unresolved of
-      { lane_id : string
-      ; resolution : resolution_failure
-      }
-  | Max_context_absent of
-      { runtime_id : string
-      ; execution_model : string
-      ; declared_model : string
-      }
-  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
-      (** The exact-output slots a save would add on an HTTP provider that
-          declares no [exact-body-timeout-s], compared with the file on disk.
-          A gap the file already has does not refuse the save; a load keeps
-          every gap as degraded state ({!exact_slot_degradation}) and the
-          exact-output registry leaves those slots out. *)
-  | Context_marks_exceed_max_context of
-      { runtime_id : string
-      ; high_water_tokens : int
-      ; max_context : int
-      }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
-      ; max_context : int
-      }
-  | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
-      (** Why {!load_list} refused a configuration. Closed, so a consumer
-          decides per case instead of matching rendered text — the contract
-          {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
-          whose text comes from the parser and can quote operator input; the
-          rest name ids and config keys this repository authored. *)
-
 val agent_core_model_catalog_env_var_name : string
 
 val exact_output_target_source :
@@ -372,28 +213,6 @@ val exact_output_target_source :
     (exact slot body deadline) applies, and {!exact_output_resolver_catalog}
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
-
-val to_diagnostic_text : config_path:string -> load_failure -> string
-(** The operator-facing account of a refused configuration, and the wording the
-    CLI has always printed. A consumer that shows a failure to a person on a
-    surface where parser text is unwelcome should match on the case instead. *)
-
-val to_operator_text : config_path:string -> load_failure -> string
-(** The same account with the parser's own text withheld: {!Toml_unparsable}
-    renders as a count and a pointer at [masc runtime-probe], every other case
-    identically to {!to_diagnostic_text}. *)
-
-val of_binding : config -> binding -> (t, drop_reason) result
-(** Materialize one binding while preserving failure information. [Error reason]
-    when the binding is disabled, its provider/model id is unresolved, or the
-    provider transport/protocol cannot be materialized into a
-    {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
-    provider the runtime adapter has no provider_config path for). The binding is
-    still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
-    surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
-    validation can report a dropped target's materialize failure instead of a
-    bare "not found among N runtimes" that points at a non-existent typo. *)
-
 
 type missing_catalog_model =
   { runtime_id : string
@@ -540,7 +359,14 @@ val load_exact_output_resolver_snapshot :
 (** Build a resolver snapshot from [catalog], excluding targets whose provider
     or model has no catalog row. *)
 
+val exact_output_runtime_observations :
+  origin:exact_output_target_source -> t list ->
+  (string * Runtime_exact_output_registry.runtime_observation) list
+(** Observation cells for targets built from these same runtimes. Binding
+    equality preserves existing cells; replacement catalog targets get none. *)
+
 val publish_exact_output_registry :
+  ?runtime_observations:(string * Runtime_exact_output_registry.runtime_observation) list ->
   ?required_lane_ids:string list ->
   ?excused_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->
@@ -816,14 +642,14 @@ val entry_runtime_id_of_route : string -> string option
     answers [None] for a lane name. *)
 
 val smallest_max_prompt_bytes_of_route : string -> int option
-(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of any
+(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of any
     candidate the route may walk: every candidate of a declared lane, or the
     runtime itself when the route names one. A candidate without one adds no
     ceiling and does not erase one a sibling has. [None] when no candidate
     has a ceiling, or when the route names neither a lane nor a runtime. *)
 
 val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
-(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of the
+(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of the
     named runtimes, for a walk whose candidate list is already fixed (a
     deferred lane suffix). An id without one, or that the loaded catalog does
     not hold, adds no ceiling and does not erase one another id has. [None]
@@ -837,45 +663,12 @@ val get_runtime_by_id : string -> t option
     keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
-val is_local_runtime : t -> bool
-(** [is_local_runtime rt] classifies runtime locality from the materialized
-    provider schema: CLI transports are local; HTTP transports are local only
-    when their endpoint is loopback and the provider declares no credential. *)
-
 val is_local_runtime_id : string -> bool option
 (** Locality classification for a configured runtime id, or [None] when the
     runtime id is not currently materialized. *)
 
-type max_context_source =
-  | Override (** runtime.toml [model.max-context] override applies as-is. *)
-  | Capability (** no override configured; the AGENT_CORE capability catalog cap applies. *)
-  | Override_clamped_by_capability
-      (** an override is configured but exceeds the AGENT_CORE capability catalog
-          cap, so the cap wins. *)
-
-val max_context_source_to_string : max_context_source -> string
-(** ["override"] / ["capability"] / ["override_clamped_by_capability"] — wire
-    label for the [/api/v1/runtime/resolved] document. *)
-
-val resolve_max_context_of_runtime : t -> (int * max_context_source) option
-(** Effective input context window and the source that produced it. [None]
-    when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
-    capability catalog declares a positive context window for this binding;
-    [materialize_config] rejects such a runtime at load (fail-closed), so a
-    materialized [t] obtained from {!get_runtimes}/{!get_runtime_by_id} never
-    observes [None] here in practice. *)
-
-val max_context_of_runtime : t -> int
-(** Effective input context window for a materialized runtime.  This applies the
-    same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
-    the runtime id. Derived from {!resolve_max_context_of_runtime}.
-    @raise Failure if that resolves to [None] — unreachable for any [t]
-    produced by {!materialize_config}, which rejects a runtime whose max
-    context cannot be resolved at load time (no silent default —
-    RFC-0206 §2.1). *)
-
 val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
-(** {!resolve_max_context_of_runtime} looked up by runtime id: the effective
+(** {!Runtime_instance.resolve_max_context_of_runtime} looked up by runtime id: the effective
     input context window together with the source that produced it, or [None]
     when the id is not configured. Budget surfaces must carry the source —
     dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
@@ -889,14 +682,6 @@ val max_context_of_runtime_id : string -> int option
     When the AGENT_CORE provider capability catalog declares a context cap, the value
     is clamped to [min runtime.toml max-context provider cap] so MASC cannot
     admit a prompt larger than the provider-owned window. *)
-
-val max_output_tokens_of_runtime : t -> int option
-(** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
-    [rt]. [None] for an official-client runtime (Codex app-server, Claude Code,
-    Antigravity CLI, Muse serve), which the catalog does not describe, for a
-    model with no catalog row, and for a row that leaves it unset. This is an
-    observable capability ceiling only; AGENT_CORE owns request validation and
-    clamp policy, and MASC never turns it into a request default. *)
 
 val thinking_support_of_runtime_id : string -> bool option
 (** Explicit [thinking-support] policy for the runtime's model. [None] means
@@ -923,11 +708,6 @@ val turn_timeout_s_of_runtime_id : string -> float option
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
 
-val quota_scope_of_runtime : t -> Runtime_quota_window.scope
-(** Non-secret quota-scope identity derived from this resolved runtime
-    snapshot.  Use this form across a provider call so a concurrent catalog
-    reload cannot rebind the response to a different credential account. *)
-
 val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
 (** Non-secret quota-scope identity of the runtime's provider
     ({!Runtime_quota_window.scope_of_credential}): rows sharing one
@@ -936,34 +716,13 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
-val muse_prompt_capacity : t -> (int, Runtime_muse_prompt_capacity.error) result
-(** The start-prompt ceiling of a Muse runtime: derived from its resolved
-    window ({!resolve_max_context_of_runtime}) and narrowed by a declared
-    [max-prompt-bytes] ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
-    A Muse turn applies this and refuses with the error's cause. *)
-
-val prompt_capacity_bytes : t -> int option
-(** The start-prompt ceiling a turn on this runtime applies: the model's
-    declared [max-prompt-bytes], or for a Muse model {!muse_prompt_capacity}.
-    [None] when no ceiling applies, which for Muse means the ceiling cannot
-    be derived and the turn itself refuses. *)
-
 val max_prompt_bytes_of_runtime_id : string -> int option
-(** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the
+(** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
     id is unknown or no ceiling applies. *)
 
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)
-
-val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
-(** Refuses a Muse runtime whose resolved window cannot hold the host's own
-    overhead, so no start-prompt ceiling exists ({!muse_prompt_capacity})
-    whatever [max-prompt-bytes] it declares. *)
-
-val validate_runtime_context_marks : t list -> (unit, load_failure) result
-(** Refuses a runtime whose high-water mark exceeds its resolved max-context;
-    such a request is refused by the provider before the mark is reached. *)
 
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
@@ -1023,28 +782,6 @@ val load_config_observation :
   ?runtime_config_path:string -> unit -> (config_observation, string) result
 (** Load one immutable runtime.toml observation, including its exact source
     revision. *)
-
-val update_runtime_assignment_text :
-  string -> keeper_name:string -> runtime_id:string -> string
-(** runtime.toml text with [keeper_name] assigned to [runtime_id] in
-    [\[runtime.assignments\]]: the row is replaced or appended, the section
-    is created when absent, every other line is kept. Keys are quoted, so a
-    dotted keeper name stays one key. Pure; the commit is the caller's. *)
-
-val remove_runtime_assignment_text : string -> keeper_name:string -> string
-(** runtime.toml text without [keeper_name]'s row. Pure. *)
-
-val update_egress_allow_text : string -> keeper_name:string -> allow:string list -> string
-(** runtime.toml text with [keeper_name]'s [\[egress.keepers.<name>\]] table
-    holding exactly [allow] (RFC-0415). The table is replaced or appended,
-    every other line is kept, and the replacement is wholesale rather than a
-    merge: an allowlist is the complete statement of what a keeper may reach,
-    so a write that kept unnamed entries would leave an operator unable to
-    remove one. Pure; the commit is the caller's. *)
-
-val remove_egress_allow_text : string -> keeper_name:string -> string
-(** runtime.toml text without [keeper_name]'s egress table. The keeper then
-    has no allowlist, which admits nothing rather than everything. Pure. *)
 
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
@@ -1194,28 +931,6 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
-(** A place in runtime.toml that can name a lane. [\[runtime\].media_failover]
-    and [verifier_exact] slots name runtimes only and are not here. *)
-type route_reference =
-  | Keeper_assignment of string  (** [\[runtime.assignments\].<keeper>] *)
-  | Default_runtime  (** [\[runtime\].default] *)
-  | Fusion_seat of
-      { preset : string
-      ; seat : Fusion_policy.seat_kind
-      }  (** a seat of [\[fusion.presets.<preset>\]] *)
-
-val route_reference_to_string : route_reference -> string
-(** The operator's name for the place, e.g. [\[fusion.presets.trio\].judge]. *)
-
-val route_references :
-  Runtime_schema.config ->
-  (string * Fusion_policy.seat_kind * string) list ->
-  (route_reference * string) list
-(** Every place the config can name a lane, with the route it names. Keeper
-    assignments, then the default, then the Fusion seats as given, which are
-    {!Fusion_config.seat_routes_of_toml}'s (preset, seat, route). Seat routes
-    are trimmed, as a Fusion run trims them before it resolves them. The lane
-    rename and remove writers read references from here. *)
 
 val rename_runtime_lane :
   ?runtime_config_path:string ->

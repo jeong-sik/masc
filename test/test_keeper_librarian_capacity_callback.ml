@@ -10,7 +10,7 @@ let served_slot =
        | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
     ( = )
 
-let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -53,7 +53,7 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
-     goal_context = Keeper_librarian.No_task;
+     historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
      keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions = "Preserve evidence.";
      current = None; working_context = Keeper_librarian_context.empty;
@@ -63,11 +63,13 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
   let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
-  let refused = ref 0 and committed = ref false in
+  let refused = ref 0 and committed = ref false and observed_limit = ref None in
   let verdict = ref None in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
-    ~on_cli_input_limit:(fun _ -> incr refused)
+    ~on_cli_input_limit:(fun limit ->
+      incr refused;
+      observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
     ~on_not_committed:(fun outcome ->
       (* Folded as the continuity pass folds it: any report's size verdict
          stands. *)
@@ -76,6 +78,8 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
+  Option.iter (fun expected -> Alcotest.(check (option (pair string int)))
+    "limit retains the actual refusing runtime" (Some expected) !observed_limit) expected_limit;
   (* The verdict the continuity pass reads to decide whether to read less. It
      is taken from every failure of the walk, so the same set of causes
      answers the same way in either order. *)
@@ -152,7 +156,7 @@ let test_prefit_real_continuity ~base_path () =
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-    {B.recorded_at=1000.; event=B.Turn_ended {
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
       turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;
@@ -162,7 +166,7 @@ let test_prefit_real_continuity ~base_path () =
   let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
   let input prepared : Keeper_librarian.input =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
-    {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
      keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions="Preserve evidence.";
      current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
@@ -457,11 +461,8 @@ let test_size_verdict_table () =
     ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
     ]
 
-(* The official-client table. Execution_failed is pinned false on purpose:
-   the client's quota and its input limit arrive in that one constructor, so
-   this process cannot tell them apart, and reading less on a quota storm
-   would walk the width down to one atom. When #37877 gives it typed kinds,
-   this row is the one that has to change. *)
+(* Unclassified execution failures still cannot narrow input. Typed Codex
+   character-capacity evidence is tested through the actual fallback walk. *)
 let test_cli_size_verdict_table () =
   let module L = Keeper_lane_cli_oneshot in
   let runtime_id = Fixture.cli_primary_runtime in
@@ -498,6 +499,79 @@ let test_disposition_size_verdict_table () =
     ; "a request that could not be prepared", E.Request_preparation_failed, false
     ]
 
+(* A continuity pass owns nothing but its snapshot. Memory has committed
+   nothing for this range, so the store refuses the snapshot after the model
+   answered. The run must be recorded as failed: recorded as succeeded, 728 live
+   runs hid a refusal that stopped every Codex Keeper's continuity. *)
+let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry () =
+  let module P = Keeper_librarian_continuity in
+  let module B = Keeper_turn_boundaries in
+  let module C = Keeper_checkpoint_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let keeper_id = "continuity-only-refused" and trace_id = "continuity-only-source" in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let source = List.init 4 (fun index -> Agent_core.Types.user_msg
+    (string_of_int index ^ String.make 200 'a')) in
+  let pending = [Agent_core.Types.user_msg "Do not publish before explicit approval."] in
+  let canonical = source @ pending in
+  let checkpoint : Agent_core.Checkpoint.t =
+    {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
+     usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
+     tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
+     top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
+   | Error detail -> Alcotest.fail detail);
+  B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
+    |> Result.map_error B.append_error_to_string |> get;
+  let resolver = Fixture.resolver_snapshot ~source:"continuity-only-cli-only" [] in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
+  let prepared = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
+  let input : Keeper_librarian.input =
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence."; current=None;
+     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     tool_observations=[];counterpart_observations=[]} in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    Ok (Yojson.Safe.to_string
+          (`Assoc ["working_state", `String "State the refused snapshot must not keep."])) in
+  let committed = ref false and refusals = ref [] in
+  Runtime.run_best_effort ~write_scope:Runtime.Context_only ~continuity:prepared
+    ~cli_runner:runner
+    ~on_continuity_committed:(fun ~served_by:_ _ -> committed := true)
+    ~on_not_committed:(fun refused -> refusals := refused.Runtime.detail :: !refusals)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  let reason = "continuity state not committed: Memory has not committed this continuity source" in
+  Alcotest.(check bool) "no snapshot was committed" false !committed;
+  Alcotest.(check (list string)) "the caller is told once, with the store's reason" [reason] !refusals;
+  Alcotest.(check bool) "no snapshot file exists" true
+    (Option.is_none (P.read ~config ~keeper_name:keeper_id |> get));
+  let runs = Runs.list_runs registry |> List.filter
+    (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
+  match runs with
+  | [{Runs.status = Runs.Completed {outcome = Runs.Failed {code; detail}; _}; _}] ->
+    Alcotest.(check string) "the run names the failure" "continuity_not_committed" code;
+    Alcotest.(check string) "and carries the reason the log line carries" reason detail
+  | [run] -> Alcotest.failf "the run was recorded as %s, not failed" (Runs.status_label run.status)
+  | _ -> Alcotest.fail "expected one recorded Librarian run"
+
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -519,12 +593,15 @@ let () =
   let capacity = codex_error (Some (`Assoc [
     "input_error_code", `String "input_too_large";
     "actual_chars", `Int 23; "max_chars", `Int 17])) in
+  let larger_capacity = codex_error (Some (`Assoc [
+    "input_error_code", `String "input_too_large";
+    "actual_chars", `Int 23; "max_chars", `Int 21])) in
   let generic = codex_error None in
   let quota = Fusion_official_client.Setup_failure "quota" in
-  let cli_case ?(first_overflow = false) name cli_errors expected shows_size =
+  let cli_case ?(first_overflow = false) ?expected_limit name cli_errors expected shows_size =
     Alcotest.test_case name `Quick (fun () ->
       Fixture.with_official_client_runtimes @@ fun () ->
-      test_callback ~cli_errors ~shows_size ~base_path ~registry ~keeper_id:name
+      test_callback ~cli_errors ?expected_limit ~shows_size ~base_path ~registry ~keeper_id:name
         ~first_overflow ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
     ["size verdict", [Alcotest.test_case "every provider cause, one row each" `Quick
@@ -534,7 +611,9 @@ let () =
        Alcotest.test_case "every pre-dispatch rejection, one row each" `Quick
          test_disposition_size_verdict_table];
      "continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
-       (test_prefit_real_continuity ~base_path)];
+       (test_prefit_real_continuity ~base_path);
+       Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
+         (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
      "actual HTTP outcomes", [
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does
@@ -551,14 +630,17 @@ let () =
          smaller range meets the same provider (#37899). *)
       case "empty-completion-final" false `OK 0 false];
     "HTTP to CLI outcomes", [
-      (* An official client's failure arrives untyped, so it is no evidence
-         either way (#37877). A measured limit is handed over separately. *)
-      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 false;
+      (* Typed capacity survives later quota failures in either walk order. *)
+      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 true;
       cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
-      cli_case "cli-capacity-then-quota"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 0 false;
-      cli_case "cli-quota-then-capacity"
-        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 false;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-quota"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-quota-then-capacity"
+        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 21) "cli-two-capacities"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, larger_capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 21) "cli-two-capacities-reversed"
+        [Fixture.cli_primary_runtime, larger_capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
       (* The API walk that sent the pass to the official client met a size
          refusal. The client's own failure says nothing, and the verdict
          still comes from the walk before it. *)

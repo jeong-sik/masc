@@ -104,18 +104,18 @@ let render_path = "bin/masc_tui_render.ml"
    this list with its two renderers, and until it does its footer is the bug
    again. *)
 let renderers =
-  [ "render_board_list"
-  ; "render_fusion_list"
-  ; "render_system_logs"
-  ; "render_system_log_detail"
-  ; "render_planning_list"
-  ; "render_planning_detail"
-  ; "render_schedule_list"
-  ; "render_schedule_detail"
-  ; "render_verification_list"
-  ; "render_verification_detail"
-  ; "render_harness_list"
-  ; "render_harness_detail"
+  [ ("bin/masc_tui_render_board.ml", "render_board_list")
+  ; ("bin/masc_tui_render_fusion.ml", "render_fusion_list")
+  ; (render_path, "render_system_logs")
+  ; (render_path, "render_system_log_detail")
+  ; (render_path, "render_planning_list")
+  ; (render_path, "render_planning_detail")
+  ; (render_path, "render_schedule_list")
+  ; (render_path, "render_schedule_detail")
+  ; (render_path, "render_verification_list")
+  ; (render_path, "render_verification_detail")
+  ; (render_path, "render_harness_list")
+  ; (render_path, "render_harness_detail")
   ]
 
 (* Harness came to this through a different door: its verdict pane already had
@@ -222,10 +222,10 @@ let test_every_scoped_surface_is_named () =
 
 let test_every_renderer_says_which_state_it_draws () =
   List.iter
-    (fun binding_name ->
+    (fun (module_path, binding_name) ->
       check int (binding_name ^ " passes ~detail_open to footer_hints") 1
         (Ast_grep.count_applications_with_labelled_argument_in_value_binding
-           ~module_path:render_path ~binding_name
+           ~module_path ~binding_name
            ~callee:"Masc_tui_keys.footer_hints" ~label:"detail_open"))
     renderers
 

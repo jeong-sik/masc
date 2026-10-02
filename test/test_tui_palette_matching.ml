@@ -7,19 +7,20 @@
    pin the fold so it cannot move back to the callers one at a time. *)
 
 open Masc_tui_types
+open Masc_tui_palette
 
 let check_bool = Alcotest.(check bool)
 
 let test_contains_is_a_substring_over_a_lowercased_haystack () =
-  check_bool "plain substring" true (palette_contains ~needle:"adm" "keeper adm-race");
+  check_bool "plain substring" true (Masc_tui_pick_list.lowercase_contains ~needle:"adm" "keeper adm-race");
   check_bool "haystack case is ignored" true
-    (palette_contains ~needle:"adm" "Keeper ADM-race");
-  check_bool "absent substring" false (palette_contains ~needle:"zzz" "keeper adm-race");
-  check_bool "empty needle matches anything" true (palette_contains ~needle:"" "anything");
-  check_bool "needle longer than haystack" false (palette_contains ~needle:"keeper" "kee")
+    (Masc_tui_pick_list.lowercase_contains ~needle:"adm" "Keeper ADM-race");
+  check_bool "absent substring" false (Masc_tui_pick_list.lowercase_contains ~needle:"zzz" "keeper adm-race");
+  check_bool "empty needle matches anything" true (Masc_tui_pick_list.lowercase_contains ~needle:"" "anything");
+  check_bool "needle longer than haystack" false (Masc_tui_pick_list.lowercase_contains ~needle:"keeper" "kee")
 ;;
 
-(* [palette_contains] stopped taking a lowercase copy of the haystack and a
+(* [Masc_tui_pick_list.lowercase_contains] stopped taking a lowercase copy of the haystack and a
    [String.sub] of it per position, and folds case a byte at a time instead.
    The row search calls it once per row per keystroke, so on a large file the
    copies were the cost. These pin the answers the copies used to give --
@@ -27,19 +28,19 @@ let test_contains_is_a_substring_over_a_lowercased_haystack () =
    a UTF-8 sequence is made of. *)
 let test_the_fold_is_ascii_only_and_leaves_other_bytes_alone () =
   check_bool "a Hangul needle finds itself" true
-    (palette_contains ~needle:"\xed\x95\x9c" "\xed\x95\x9c\xea\xb5\xad");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"\xed\x95\x9c" "\xed\x95\x9c\xea\xb5\xad");
   check_bool "a Hangul needle the row lacks" false
-    (palette_contains ~needle:"\xea\xb0\x9c" "\xed\x95\x9c\xea\xb5\xad");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"\xea\xb0\x9c" "\xed\x95\x9c\xea\xb5\xad");
   check_bool "mixed script, ASCII folded" true
-    (palette_contains ~needle:"KEEPER-\xed\x95\x9c" "keeper-\xed\x95\x9c 3");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"KEEPER-\xed\x95\x9c" "keeper-\xed\x95\x9c 3");
   (* The boundary characters either side of A-Z in ASCII. A fold written as
      an arithmetic shift catches these if its range is off by one. *)
   check_bool "the byte below A is not folded into a letter" false
-    (palette_contains ~needle:"@" "`");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"@" "`");
   check_bool "the byte above Z is not folded into a letter" false
-    (palette_contains ~needle:"[" "{");
-  check_bool "A folds to a" true (palette_contains ~needle:"A" "a");
-  check_bool "Z folds to z" true (palette_contains ~needle:"Z" "z")
+    (Masc_tui_pick_list.lowercase_contains ~needle:"[" "{");
+  check_bool "A folds to a" true (Masc_tui_pick_list.lowercase_contains ~needle:"A" "a");
+  check_bool "Z folds to z" true (Masc_tui_pick_list.lowercase_contains ~needle:"Z" "z")
 ;;
 
 (* A scan that walks forward one position at a time has to keep trying after a
@@ -47,13 +48,13 @@ let test_the_fold_is_ascii_only_and_leaves_other_bytes_alone () =
    resume from the next position rather than past the whole attempt. *)
 let test_a_partial_match_does_not_consume_the_row () =
   check_bool "the match begins inside a failed attempt" true
-    (palette_contains ~needle:"aab" "aaab");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"aab" "aaab");
   check_bool "repeated prefixes do not hide the match" true
-    (palette_contains ~needle:"abab" "ababab");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"abab" "ababab");
   check_bool "a prefix that never completes" false
-    (palette_contains ~needle:"aab" "aaa");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"aab" "aaa");
   check_bool "the match sits at the very end" true
-    (palette_contains ~needle:"race" "keeper adm-race")
+    (Masc_tui_pick_list.lowercase_contains ~needle:"race" "keeper adm-race")
 ;;
 
 let test_subsequence_takes_the_characters_in_order () =
@@ -76,7 +77,7 @@ let test_the_matcher_owns_the_needle_case () =
   check_bool "uppercase needle finds in starts_with" true
     (palette_starts_with ~needle:"KEE" "keeper adm-race");
   check_bool "uppercase needle finds in contains" true
-    (palette_contains ~needle:"ADM" "keeper adm-race");
+    (Masc_tui_pick_list.lowercase_contains ~needle:"ADM" "keeper adm-race");
   check_bool "uppercase needle finds in subsequence" true
     (palette_subsequence ~needle:"KADM" "keeper adm-race")
 ;;
@@ -128,11 +129,11 @@ let test_the_palette_lists_tasks_and_posts () =
        (palette_entries state));
   check_bool "a task is an entry" true
     (List.exists
-       (fun l -> palette_contains ~needle:"task-532" l)
+       (fun l -> Masc_tui_pick_list.lowercase_contains ~needle:"task-532" l)
        labels);
   check_bool "a post is an entry" true
     (List.exists
-       (fun l -> palette_contains ~needle:"release evidence" l)
+       (fun l -> Masc_tui_pick_list.lowercase_contains ~needle:"release evidence" l)
        labels);
   (* The actions carry the ids the executor needs, not list positions that a
      refresh can move. *)
@@ -245,6 +246,34 @@ let test_a_choice_lists_the_names_and_nothing_else () =
     (List.exists (fun label -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
 ;;
 
+let test_typed_code_questions_offer_only_executable_candidates () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.palette_query <- "def";
+  check_names "a reserved Code command offers no unrelated destination" []
+    (List.map fst (palette_matches state));
+  state.code_file <- landed ~path:"lib/a.ml"
+    [ [ ("Foo.bar", Masc_tui_code_lexer.kind_code) ] ];
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.code_file_cursor <- 0;
+  check_names "bare def offers definition candidates only" [ "def Foo"; "def bar" ]
+    (List.map fst (palette_matches state));
+  check_bool "all highlighted entries execute the reserved question" true
+    (List.for_all (function
+       | _, Palette_lsp ("definition", _) -> true
+       | _ -> false) (palette_matches state));
+  state.palette_query <- "def explicit_symbol";
+  check_names "an explicit symbol has a direct preview, no competing selection" []
+    (List.map fst (palette_matches state));
+  Alcotest.(check (option (pair string (option string)))) "same canonical question and symbol"
+    (Some ("definition", Some "explicit_symbol"))
+    (palette_typed_question state.palette_query);
+  state.palette_query <- "go Code";
+  check_bool "ordinary destination filtering still works" true
+    (List.exists (function _, Palette_goto Code -> true | _ -> false)
+      (palette_matches state))
+;;
+
 let test_the_cursor_lines_names_are_the_candidates () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -316,13 +345,12 @@ let test_a_label_starting_with_the_query_leads () =
   state.view <- Code;
   state.code_focus_file <- Right_pane;
   state.palette_query <- "def ";
+  check_names "reserved definition command excludes unrelated posts"
+    [ "def Hook_common" ] (List.map fst (palette_matches state));
+  (* A partial word is still an ordinary search: it finds posts without
+     pretending that Enter would ask the reserved definition question. *)
+  state.palette_query <- "de";
   let matches = palette_matches state in
-  (* This is the full operator palette, so independent commands may also
-     match "def" as a subsequence. They must not displace the exact prefix
-     candidate or reorder the two authored post matches. *)
-  (match matches with
-   | ("def Hook_common", Palette_lsp ("definition", "Hook_common")) :: _ -> ()
-   | _ -> Alcotest.fail "the definition prefix must lead the entire palette");
   let posts = List.filter_map (function
     | label, Palette_board_post id -> Some (label, id)
     | _ -> None) matches in
@@ -499,7 +527,9 @@ let () =
             test_a_partial_match_does_not_consume_the_row
         ] )
     ; ( "sources"
-      , [ Alcotest.test_case "the palette lists tasks and posts" `Quick
+      , [ Alcotest.test_case "typed Code questions have only executable candidates" `Quick
+            test_typed_code_questions_offer_only_executable_candidates
+        ; Alcotest.test_case "the palette lists tasks and posts" `Quick
             test_the_palette_lists_tasks_and_posts
         ; Alcotest.test_case "the cursor line's names are the candidates"
             `Quick test_the_cursor_lines_names_are_the_candidates

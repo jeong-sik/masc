@@ -1,5 +1,7 @@
+open Masc.Tui_decode_memory_facts
 open Masc_tui_types
 open Masc.Tui_decode
+open Masc.Tui_decode_memory_health
 open Masc_tui_ansi
 
 module Render_schedule = Masc_tui_render_schedule
@@ -19,24 +21,25 @@ let keeper_lane_idle_text seconds =
 (* What the operator reads for how the last Librarian pass ended. The wire
    words name code paths ("not_committed"); these say what happened. *)
 let librarian_pass_end_words = function
-  | Pass_off -> "switched off"
-  | Pass_lane_unconfigured -> "no model lane set up"
-  | Pass_drained -> "caught up"
-  | Pass_not_committed -> "last pass saved nothing"
-  | Pass_stopped _ -> "stopped on an error"
-  | Pass_raised _ -> "crashed"
+  | Masc.Tui_decode_memory_health.Pass_off -> "switched off"
+  | Masc.Tui_decode_memory_health.Pass_lane_unconfigured -> "no model lane set up"
+  | Masc.Tui_decode_memory_health.Pass_drained -> "caught up"
+  | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded to waiting work"
+  | Masc.Tui_decode_memory_health.Pass_not_committed -> "last pass saved nothing"
+  | Masc.Tui_decode_memory_health.Pass_stopped _ -> "stopped on an error"
+  | Masc.Tui_decode_memory_health.Pass_raised _ -> "crashed"
 
 let librarian_failure_words = function
-  | Failure_prompt_render -> "prompt could not be built"
-  | Failure_execution_clock_unavailable -> "no clock to run on"
-  | Failure_exact_setup -> "model call could not be set up"
-  | Failure_exact_execution -> "model call failed"
-  | Failure_domain_output_invalid -> "model answer was not usable"
-  | Failure_absorb_judgment -> "copy check failed; nothing saved"
-  | Failure_memory_snapshot_write -> "Memory could not be saved"
-  | Failure_runtime_context_unavailable -> "no runtime context"
-  | Failure_lane_cancelled -> "cancelled before saving"
-  | Failure_unhandled_exception -> "unexpected crash"
+  | Masc.Tui_decode_memory_health.Failure_prompt_render -> "prompt could not be built"
+  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> "no clock to run on"
+  | Masc.Tui_decode_memory_health.Failure_exact_setup -> "model call could not be set up"
+  | Masc.Tui_decode_memory_health.Failure_exact_execution -> "model call failed"
+  | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> "model answer was not usable"
+  | Masc.Tui_decode_memory_health.Failure_absorb_judgment -> "copy check failed; nothing saved"
+  | Masc.Tui_decode_memory_health.Failure_memory_snapshot_write -> "Memory could not be saved"
+  | Masc.Tui_decode_memory_health.Failure_runtime_context_unavailable -> "no runtime context"
+  | Masc.Tui_decode_memory_health.Failure_lane_cancelled -> "cancelled before saving"
+  | Masc.Tui_decode_memory_health.Failure_unhandled_exception -> "unexpected crash"
 
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
@@ -109,18 +112,9 @@ let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
-(* Every size on this screen is the recall block the keeper injects, not the
-   snapshot file: the file's first_seen, origin, basis and JSON punctuation
-   never reach a request.
-
-   Read in tokens, because that is the unit the window is declared in and the
-   only unit an operator can hold a keeper's memory against. No provider this
-   fleet runs counts a block inside a request, and this screen carries no turn
-   record to take a ratio from, so the figure is the fleet scale and wears the
-   "≈" every estimated token figure in this TUI wears. The exact count is
-   derivable -- a first round carries the pinned blocks and the post-tool round
-   in the same turn does not, so their (total - carried) difference is the
-   pinned bundle -- and wants the ledger to expose carried tokens per record. *)
+(* Snapshot sizes describe the stored knowledge available through search and
+   paged artifacts. They are not the much smaller recall index injected into
+   a turn; the prompt inspector carries that turn's actual block bytes. *)
 let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
@@ -208,9 +202,9 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
+let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · stored %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
       (recall_tokens k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
@@ -272,21 +266,21 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
      which file: it is neither "no gap" nor a gap. *)
   let librarian_stalled_lines =
     match k.mkh_librarian.mlh_stalled with
-    | Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+    | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
       let atoms =
         if mls_gap_end_atom - mls_gap_start_atom = 1
         then Printf.sprintf "atom %d is" mls_gap_start_atom
         else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
       in
       [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
-    | Some (Stalled_unmeasured { mls_cause; mls_detail }) ->
+    | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
       let cause =
         match mls_cause with
-        | Stall_meta_unreadable -> "keeper meta unreadable"
-        | Stall_turn_records_unreadable -> "turn records unreadable"
-        | Stall_turn_boundary_refused -> "turn boundaries unreadable"
-        | Stall_snapshot_unreadable -> "continuity snapshot unreadable"
-        | Stall_read_position_unreadable -> "read position unreadable"
+        | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> "keeper meta unreadable"
+        | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> "turn records unreadable"
+        | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> "turn boundaries unreadable"
+        | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+        | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> "read position unreadable"
       in
       [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
           (Terminal_text.preview_line mls_detail) ]
@@ -295,7 +289,7 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
        Librarian row an operator acts on. *)
-    match Option.bind k.mkh_librarian.mlh_state memory_librarian_pass_end_cause with
+    match Option.bind k.mkh_librarian.mlh_state Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause with
     | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
     | None -> []
   in
@@ -330,12 +324,12 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
       | None -> "not observed since server start", "not observed"
       | Some value ->
         let input = match value.mcp_input with
-          | Context_summarized value -> "summary " ^ frontier value
-          | Context_absorbed value ->
+          | Masc.Tui_decode_memory_health.Context_summarized value -> "summary " ^ frontier value
+          | Masc.Tui_decode_memory_health.Context_absorbed value ->
             Printf.sprintf "absorbed to atom %d · trace %s · no summary"
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
-          | Context_without_snapshot -> "no snapshot: this turn only"
-          | Context_not_applied -> "saved context not applied" in
+          | Masc.Tui_decode_memory_health.Context_without_snapshot -> "no snapshot: this turn only"
+          | Masc.Tui_decode_memory_health.Context_not_applied -> "saved context not applied" in
         (* The size as a size. The row drew the digit count -- one live block
            read "446558 request bytes" -- while every other size on this TUI
            goes through the shared ladder and reads "436.1 KB". The heading a
@@ -364,7 +358,7 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · recall %s tok · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s tok · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
       (recall_tokens k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
@@ -384,9 +378,9 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   in
   let alert_lines =
     List.map
-      (fun (a : memory_alert) ->
+      (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
-          (match Masc.Tui_decode.memory_alert_severity a.ma_code with
+          (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
            | `Warn -> "warn"
            | `Error -> "error")
           a.ma_label
@@ -469,11 +463,11 @@ type memory_state = Masc_tui_types.memory_state =
    [?] sheet cannot spell the same state two ways. *)
 let memory_state_cell = Masc_tui_memory_mark.glyph
 
-let memory_deviation_style (k : memory_keeper_health) =
+let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let server_error =
     List.exists
       (fun alert ->
-        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Error -> true
         | `Warn -> false)
       k.mkh_alerts
@@ -490,7 +484,7 @@ let memory_deviation_style (k : memory_keeper_health) =
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line columns (k : memory_keeper_health) =
+let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
@@ -701,7 +695,23 @@ let detail_label label =
        (max 1 (detail_label_cells - Message_layout.display_width label))
        ' ')
 
-let detail_field label value = "    " ^ detail_label label ^ value
+let detail_field ~width label value =
+  let indent = String.make (min 4 (max 0 (width - 1))) ' ' in
+  let prefix = indent ^ detail_label label in
+  let prefix_cells = Message_layout.display_width prefix in
+  if prefix_cells < width then
+    Message_layout.wrap_words ~max_cells:(width - prefix_cells) value
+    |> List.mapi (fun index line ->
+         (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
+  else
+    (* When the label leaves no value cell, it owns a row and the value
+       uses the whole remaining width under the indentation. *)
+    (Message_layout.wrap_words
+       ~max_cells:(max 1 (width - Message_layout.display_width indent)) label
+     |> List.map (fun line -> indent ^ Theme.recede () ^ line ^ Ansi.reset))
+    @ (Message_layout.wrap_words
+         ~max_cells:(max 1 (width - Message_layout.display_width indent)) value
+       |> List.map (fun line -> indent ^ line))
 
 (* A claim is prose a Keeper wrote, often paragraphs and a numbered list. The
    list rows fold it to one line because a row has one line to give it; the
@@ -713,9 +723,11 @@ let detail_field label value = "    " ^ detail_label label ^ value
 let detail_claim_lines ?state ~inner_width claim =
   let wrap () =
     let lines =
-      Message_layout.wrap_body ~max_cells:inner_width
+      let indent = String.make (min 4 (max 0 (inner_width - 1))) ' ' in
+      Message_layout.wrap_body
+        ~max_cells:(max 1 (inner_width - Message_layout.display_width indent))
         ~sanitize:Terminal_text.single_line claim
-      |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+      |> List.map (fun line -> if String.equal line "" then "" else indent ^ line)
     in
     let count = List.length lines in
     Option.iter
@@ -740,11 +752,12 @@ type fact_detail_parts = {
 }
 
 let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
-  let inner_width = max 30 (cols - 6) in
+  let width = max 1 (framed_inner_width cols) in
+  let field = detail_field ~width in
   match row with
   | Memory_row_fact fact ->
       let claim_lines, claim_line_count =
-        detail_claim_lines ?state ~inner_width fact.mf_claim
+        detail_claim_lines ?state ~inner_width:width fact.mf_claim
       in
       let history =
         (* The retrieval count, its day count and its last clock are one
@@ -767,23 +780,16 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in
-      let history_prefix = detail_field "History:" "" in
-      let prefix_width = Message_layout.display_width history_prefix in
-      let history_lines =
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - prefix_width)) history
-        |> List.mapi (fun index line ->
-             (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
-      in
+      let history_lines = field "History:" history in
       { heading =
           Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        [ (* The word comes from [Keeper_memory_os_types.category], a closed
+        (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
-          detail_field "Category:"
-            (Memory_category.category_to_string fact.mf_category)
+        field "Category:" (Memory_category.category_to_string fact.mf_category)
           (* Two labelled readings used to share this row, the first in a
              hand-sized slot of fifteen cells. Every other field in this pane
              owns a row, and the slot was a guess: in the fleet reading the
@@ -791,18 +797,17 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
              fleet already makes it seventeen bytes, so "Timeline:" lost the
              space before it on every row. Printf's width counts bytes as
              well, which the middle dot in that reading is three of. *)
-        ; detail_field "Origin:" (Terminal_text.single_line fact.mf_origin)
-        ; detail_field "Timeline:"
+        @ field "Origin:" (Terminal_text.single_line fact.mf_origin)
+        @ field "Timeline:"
             (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
-        ]
         @ history_lines
-        @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+        @ field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id)
       }
   | Memory_row_source_fact fact ->
       let claim_lines, claim_line_count =
-        detail_claim_lines ?state ~inner_width fact.msf_claim
+        detail_claim_lines ?state ~inner_width:width fact.msf_claim
       in
       { heading =
           Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold
@@ -810,13 +815,12 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
-        ; detail_field "File SHA:"
+        field "Bound Path:" (Terminal_text.single_line fact.msf_path)
+        @ field "File SHA:"
             (Printf.sprintf "%s · %sFirst Seen:%s %s" 
                (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
-        ]
       }
   | Memory_row_invalidation row ->
       { heading =
@@ -825,11 +829,10 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines = []
       ; claim_line_count = 0
       ; other_lines =
-        [ detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
-        ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
-        ; detail_field "Dropped At:"
+        field "Reason:" (Terminal_text.single_line row.mi_reason)
+        @ field "Source Path:" (Terminal_text.single_line row.mi_source_path)
+        @ field "Dropped At:"
             (memory_fact_age_label row.mi_invalidated_at ^ " ago")
-        ]
       }
 
 let fact_detail_line_count parts =
@@ -898,7 +901,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
          ; Printf.sprintf "%d ordinary + %d source"
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf "recall %s tok"
+         ; Printf.sprintf "stored %s tok"
              (recall_tokens
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"

@@ -20,12 +20,15 @@
   masc.keeper_portrait
   masc_candle_store
   masc_candle_config
+  masc_keeper_identity
   masc_goal
   masc_workspace
   masc_types
   masc_keeper_registry
   masc_config_dir_resolver
   masc_log
+  digestif
+  yojson
   time_compat
   eio
   ptime))

@@ -16,6 +16,7 @@ type saved_history =
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
   { meta : keeper_meta
+  ; task_context : Keeper_turn_task_context.t
   ; temperature : float
   ; context_injector : Agent_core.Hooks.context_injector
   ; shared_context : Agent_core.Context.t

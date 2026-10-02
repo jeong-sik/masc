@@ -207,6 +207,7 @@ let drawn_rows () =
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
       ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
+      ; ("Code / diff", Code_diff)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -662,7 +663,7 @@ let test_resources_footer_steps_through_detail () =
     ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
-     the same answer [surface_row_texts] gives for that focus. Both ends
+     the same answer [Masc_tui_surface_search.surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
   check str "the text names scrolling and the step it answers"
     ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
@@ -711,20 +712,20 @@ let test_memory_facts_footer_names_filter_and_way_back () =
     "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
-let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
-  { Tui_decode.mf_claim = claim
+let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { Masc.Tui_decode_memory_facts.mf_claim = claim
   ; mf_category = category
   ; mf_origin = "authored"
   ; mf_first_seen = 0.
   ; mf_last_seen = 0.
   ; mf_memory_id = claim
-  ; mf_events = Tui_decode.no_memory_fact_events
+  ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
   }
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Tui_decode.memory_fact_snapshot) =
-  let keeper = snapshot.Tui_decode.mfs_keeper in
+let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Masc_tui_types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Masc_tui_types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
@@ -737,10 +738,10 @@ let memory_state_with_facts () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.memory_facts_keeper <- Some "alpha";
   answer_memory_facts state
-      { Tui_decode.mfs_keeper = "alpha"
+      { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
       ; mfs_ordinary =
-          Tui_decode.Memory_store_present
-            { Tui_decode.mos_revision = 1
+          Masc.Tui_decode_memory_facts.Memory_store_present
+            { Masc.Tui_decode_memory_facts.mos_revision = 1
             ; mos_updated_at = 0.
             ; mos_facts =
                 [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
@@ -748,18 +749,18 @@ let memory_state_with_facts () =
                 ]
             }
       ; mfs_source =
-          Tui_decode.Memory_store_present
-            { Tui_decode.mss_revision = 1
+          Masc.Tui_decode_memory_facts.Memory_store_present
+            { Masc.Tui_decode_memory_facts.mss_revision = 1
             ; mss_updated_at = 0.
             ; mss_facts =
-                [ { Tui_decode.msf_claim = "bound"
+                [ { Masc.Tui_decode_memory_facts.msf_claim = "bound"
                   ; msf_first_seen = 0.
                   ; msf_path = "docs/a.md"
                   ; msf_sha256 = "cafe"
                   }
                 ]
             ; mss_invalidations =
-                [ { Tui_decode.mi_source_path = "docs/old.md"
+                [ { Masc.Tui_decode_memory_facts.mi_source_path = "docs/old.md"
                   ; mi_invalidated_at = 0.
                   ; mi_reason = "source_changed"
                   }
@@ -788,7 +789,7 @@ let test_memory_fact_rows_follow_the_category_filter () =
   (match memory_fact_rows state with
    | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
-         fact.Tui_decode.mf_claim
+         fact.Masc.Tui_decode_memory_facts.mf_claim
    | rows ->
        Alcotest.fail
          (Printf.sprintf "unexpected filtered shape (%d rows)"
@@ -821,7 +822,7 @@ let test_git_changes_footer_names_only_changed_file_actions () =
 
 let test_git_diff_footer_names_scroll_code_and_files () =
   check str "Git diff has diff navigation footer"
-    "j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
+    "Shift-Left / Shift-Right:pan  j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_diff
 
 (* The Board draft's footers were literals in the renderer, so the pane above
@@ -982,23 +983,24 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
    | Error detail -> Alcotest.fail detail
    | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
-    1 (List.length (fusion_list_entries state));
-  (match selected_fusion_entry state with
+    1 (List.length (Masc_tui_fusion_model.fusion_list_entries state));
+  (match Masc_tui_fusion_model.selected_fusion_entry state with
    | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
        check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
    | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
        Alcotest.fail "historical evidence disappeared or became an invented run");
   check Alcotest.int "historical evidence does not inflate Keeper run count"
-    0 (List.length (selected_keeper_runs state))
+    0 (List.length (Masc_tui_fusion_model.selected_keeper_runs state))
 
 let test_keeper_runs_selection_survives_a_shorter_list () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let keeper name : Tui_decode.keeper =
-    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
-    ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
-    ; k_last_turn_ts = ""; k_last_proactive_outcome = None
-    ; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z"
-    }
+    { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = false
+  ; k_identity = Ok { k_trace_id = name; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  }
   in
   let run id keeper = `Assoc
     [ "run_id", `String id; "keeper", `String keeper; "preset", `String "trio"
@@ -1017,7 +1019,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   in
   let selected () =
     Option.map (fun (index, run) -> index, run.Masc.Tui_decode_fusion.fur_run_id)
-      (selected_keeper_run state)
+      (Masc_tui_fusion_model.selected_keeper_run state)
   in
   state.keepers <- [keeper "alpha"; keeper "beta"];
   load [run "alpha-1" "alpha"; run "alpha-2" "alpha"; run "beta-1" "beta"];
@@ -1136,7 +1138,7 @@ let test_board_and_planning_explain_their_order () =
    that nothing on screen called. The Browser Lane arm lived only in the drawn
    one, so the two could disagree and the tests would not see it. *)
 let ring_stop surface =
-  visible_surface_ring_index
+  Masc_tui_surface_navigation.visible_surface_ring_index
     (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
     surface
 
@@ -1149,7 +1151,7 @@ let test_every_view_has_a_ring_stop () =
     (fun surface ->
       Alcotest.(check bool) "the view's family is a ring stop" true
         (List.exists
-           (fun (stop, _) -> stop = surface_ring_family state surface)
+           (fun (stop, _) -> stop = Masc_tui_surface_navigation.surface_ring_family state surface)
            surface_ring))
     every_surface
 
@@ -1201,7 +1203,7 @@ let test_keeper_operations_are_not_top_level_tabs () =
           match tab with
           | Detail_channels | Detail_automation | Detail_runs ->
               Some (keeper_detail_tab_label tab)
-          | Detail_info | Detail_sandbox | Detail_instructions | Detail_secrets
+          | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
           | Detail_github | Detail_identity -> None)
        keeper_detail_tabs)
 
@@ -1672,38 +1674,38 @@ let approvals_reading_is_current state =
   state.asks_error <- None
 
 let approvals_home_in_ring state =
-  let home = surface_ring_family state Approvals in
-  List.exists (fun (surface, _) -> surface = home) (visible_surface_ring state)
+  let home = Masc_tui_surface_navigation.surface_ring_family state Approvals in
+  List.exists (fun (surface, _) -> surface = home) (Masc_tui_surface_navigation.visible_surface_ring state)
 
 let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
   Alcotest.(check bool) "Approvals is reached through Work" true
-    (surface_ring_family state Approvals = Planning);
+    (Masc_tui_surface_navigation.surface_ring_family state Approvals = Planning);
   Alcotest.(check bool) "before any reading Work stands" true
     (approvals_home_in_ring state);
   Alcotest.(check bool) "before any reading nothing reads as settled" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   approvals_reading_is_current state;
   Alcotest.(check bool) "a reading with nothing in it is current" true
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "and Work still stands" true
     (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- Some "held calls poll failed";
   Alcotest.(check bool) "a failed held-calls poll is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "a failed held-calls poll keeps Work" true
     (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- None;
   state.asks_error <- Some "questions poll failed";
   Alcotest.(check bool) "a failed questions poll is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "a failed questions poll keeps Work" true
     (approvals_home_in_ring state);
   state.asks_error <- None;
   state.approval_snapshot <- None;
   Alcotest.(check bool) "an unread confirm queue is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "an unread confirm queue keeps Work" true
     (approvals_home_in_ring state);
   (* The durable Gate queue is the fourth list the count walks. Its rows are
@@ -1712,30 +1714,30 @@ let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   approvals_reading_is_current state;
   state.gate_error <- Some "gate poll failed";
   Alcotest.(check bool) "a failed Gate poll is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "a failed Gate poll keeps Work" true
     (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store unreadable";
   Alcotest.(check bool) "a Gate queue the server could not read is not current"
-    false (approvals_reading_current state);
+    false (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "a Gate queue the server could not read keeps Work"
     true (approvals_home_in_ring state);
   state.gate_queue_unavailable <- None;
   state.gate_snapshot_observed <- false;
   Alcotest.(check bool) "a Gate queue not read yet is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "a Gate queue not read yet keeps Work" true
     (approvals_home_in_ring state);
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- false;
   Alcotest.(check bool) "held calls not read yet are not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "held calls not read yet keep Work" true
     (approvals_home_in_ring state);
   state.keeper_tool_approvals_observed <- true;
   Alcotest.(check bool) "every list read and empty is current again" true
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "and Work still stands" true
     (approvals_home_in_ring state)
 
@@ -1750,57 +1752,57 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   state.view <- Overview;
   approvals_reading_is_current state;
   Alcotest.(check bool) "every list read and empty: nothing pending" true
-    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+    (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending);
   Alcotest.(check string) "and the Dashboard count stands" "0"
-    (approvals_count_label state);
+    (Masc_tui_approvals_model.approvals_count_label state);
   let cause = "gate load failed: HTTP 503" in
   state.gate_error <- Some cause;
-  let reading = approvals_reading state in
+  let reading = Masc_tui_approvals_model.approvals_reading state in
   Alcotest.(check bool) "the empty queue names the Gate queue as stale" true
-    (approvals_empty_queue reading
-     = Lists_not_read [ ("Gate queue", Approval_stale cause) ]);
+    (Masc_tui_approvals_model.approvals_empty_queue reading
+     = Masc_tui_approvals_model.Lists_not_read [ ("Gate queue", Masc_tui_approvals_model.Approval_stale cause) ]);
   Alcotest.(check string) "the title says the Gate queue is stale"
-    ", Gate queue stale" (approvals_title_notes reading);
+    ", Gate queue stale" (Masc_tui_approvals_model.approvals_title_notes reading);
   Alcotest.(check string) "the Dashboard count carries the ?" "0?"
-    (approvals_count_label state);
+    (Masc_tui_approvals_model.approvals_count_label state);
   Alcotest.(check bool) "and the reading is not current" false
-    (approvals_reading_current state);
+    (Masc_tui_approvals_model.approvals_reading_current state);
   Alcotest.(check bool) "while Work still leads to it" true
     (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store is unreadable";
-  let reading = approvals_reading state in
+  let reading = Masc_tui_approvals_model.approvals_reading state in
   Alcotest.(check bool) "an unreadable Gate store is named, not emptied" true
-    (approvals_empty_queue reading
-     = Lists_not_read
-         [ ("Gate queue", Approval_unavailable "approval queue store is unreadable") ]);
+    (Masc_tui_approvals_model.approvals_empty_queue reading
+     = Masc_tui_approvals_model.Lists_not_read
+         [ ("Gate queue", Masc_tui_approvals_model.Approval_unavailable "approval queue store is unreadable") ]);
   Alcotest.(check string) "and the title says so"
-    ", Gate queue unavailable" (approvals_title_notes reading);
+    ", Gate queue unavailable" (Masc_tui_approvals_model.approvals_title_notes reading);
   state.gate_queue_unavailable <- None;
   Alcotest.(check bool) "the next answered poll empties it again" true
-    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
-  Alcotest.(check string) "with no note" "" (approvals_title_notes (approvals_reading state))
+    (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending);
+  Alcotest.(check string) "with no note" "" (Masc_tui_approvals_model.approvals_title_notes (Masc_tui_approvals_model.approvals_reading state))
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Connectors;
   check Alcotest.int "channel bindings remain under Keepers"
-    (visible_surface_ring_index state (Keepers Keeper_list))
-    (visible_surface_ring_index state Connectors);
+    (Masc_tui_surface_navigation.visible_surface_ring_index state (Keepers Keeper_list))
+    (Masc_tui_surface_navigation.visible_surface_ring_index state Connectors);
   List.iter (fun source ->
       show_browser_lane state;
       state.browser_lane <- Some
         (Browser_lane_view.switch_source source (Browser_lane_view.create ()));
-      let index = visible_surface_ring_index state Connectors in
+      let index = Masc_tui_surface_navigation.visible_surface_ring_index state Connectors in
       check Alcotest.int "Browser reader highlights Config"
-        (visible_surface_ring_index state Config) index;
+        (Masc_tui_surface_navigation.visible_surface_ring_index state Config) index;
       check Alcotest.bool "the selected ring entry is Config, not the fallback"
-        true (fst (List.nth (visible_surface_ring state) index) = Config))
+        true (fst (List.nth (Masc_tui_surface_navigation.visible_surface_ring state) index) = Config))
     [Browser_lane_view.Live; Browser_lane_view.Automation];
   state.browser_lane <- None;
   check Alcotest.int "closing the reader restores the Keeper parent"
-    (visible_surface_ring_index state (Keepers Keeper_list))
-    (visible_surface_ring_index state Connectors)
+    (Masc_tui_surface_navigation.visible_surface_ring_index state (Keepers Keeper_list))
+    (Masc_tui_surface_navigation.visible_surface_ring_index state Connectors)
 
 let test_visible_surface_ring_declutter () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1808,11 +1810,11 @@ let test_visible_surface_ring_declutter () =
   (* Empty, not unread: a fresh state has taken no reading, and a reading
      nobody took is not a queue with nothing in it. *)
   approvals_reading_is_current state;
-  let ring_empty = visible_surface_ring state in
+  let ring_empty = Masc_tui_surface_navigation.visible_surface_ring state in
   Alcotest.(check bool) "Approvals hidden when empty and not active" false
     (List.exists (fun (s, _) -> s = Approvals) ring_empty);
   state.view <- Approvals;
-  let ring_active = visible_surface_ring state in
+  let ring_active = Masc_tui_surface_navigation.visible_surface_ring state in
   Alcotest.(check bool) "Approvals stay inside Work when active" false
     (List.exists (fun (s, _) -> s = Approvals) ring_active);
   state.view <- Overview;
@@ -1827,13 +1829,13 @@ let test_visible_surface_ring_declutter () =
       ; kta_timeout_sec = 60.0
       }
     ];
-  let ring_with_pending = visible_surface_ring state in
+  let ring_with_pending = Masc_tui_surface_navigation.visible_surface_ring state in
   Alcotest.(check bool) "Approvals stay inside Work when pending" false
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
 (* One ask can carry several questions, and the surface counts them under the
    word "question": its title, the block header above the rows, and the tab
-   badge all read from [approvals_open_question_count]. It counted the asks,
+   badge all read from [Masc_tui_approvals_model.approvals_open_question_count]. It counted the asks,
    so a fleet holding one ask of two questions said "1 question" while the
    line three rows below it said "+2 more questions". *)
 let test_the_question_count_counts_questions () =
@@ -1862,11 +1864,11 @@ let test_the_question_count_counts_questions () =
       ; asn_rows = [ ask "a1" 2; ask "a2" 1 ]
       };
   Alcotest.(check int) "two asks holding three questions" 3
-    (approvals_open_question_count state);
+    (Masc_tui_approvals_model.approvals_open_question_count state);
   (* The surface's own pending reading is the approvals plus these, and it
      answers the tab badge as well as the title. *)
   Alcotest.(check int) "and the surface counts them the same way" 3
-    (approvals_surface_pending state);
+    (Masc_tui_approvals_model.approvals_surface_pending state);
   (* A resolved ask is not waiting on anyone, so its questions are not
      counted either. *)
   state.asks_snapshot <-
@@ -1882,26 +1884,26 @@ let test_the_question_count_counts_questions () =
           ]
       };
   Alcotest.(check int) "only the open ask's questions" 2
-    (approvals_open_question_count state)
+    (Masc_tui_approvals_model.approvals_open_question_count state)
 
 (* The question count reads 0 both when no question is open and when the
    questions were never read, so the title needs to know which. *)
 let test_the_questions_reading_tells_unread_from_none_open () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let reading () =
-    match approvals_questions_reading state with
-    | List_read -> "current"
-    | List_not_read Approval_unread -> "unread"
-    | List_not_read (Approval_failed _) -> "failed"
-    | List_not_read (Approval_stale _) -> "stale"
-    | List_not_read (Approval_unavailable _) -> "unavailable"
+    match Masc_tui_approvals_model.approvals_questions_reading state with
+    | Masc_tui_approvals_model.List_read -> "current"
+    | Masc_tui_approvals_model.List_not_read Masc_tui_approvals_model.Approval_unread -> "unread"
+    | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_failed _) -> "failed"
+    | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_stale _) -> "stale"
+    | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_unavailable _) -> "unavailable"
   in
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
   Alcotest.(check string) "a first poll that failed" "failed" (reading ());
   Alcotest.(check string) "which the title calls unread: nothing was read"
     ", questions unread"
-    (approval_list_note ~name:"questions" (approvals_questions_reading state));
+    (Masc_tui_approvals_model.approval_list_note ~name:"questions" (Masc_tui_approvals_model.approvals_questions_reading state));
   state.asks_snapshot <-
     Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
@@ -1910,7 +1912,7 @@ let test_the_questions_reading_tells_unread_from_none_open () =
   Alcotest.(check string) "an answered poll with no question" "current"
     (reading ());
   Alcotest.(check int) "which counts the same 0 as unread" 0
-    (approvals_open_question_count state)
+    (Masc_tui_approvals_model.approvals_open_question_count state)
 
 let test_visible_surface_ring_open_ask () =
   (* A keeper's question is an approval of a different kind: it waits on the
@@ -1946,7 +1948,7 @@ let test_visible_surface_ring_open_ask () =
             }
           ]
       };
-  let ring = visible_surface_ring state in
+  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
   Alcotest.(check bool) "Ask keeps the top-level ring compact"
     false (List.exists (fun (s, _) -> s = Approvals) ring)
 
@@ -2042,7 +2044,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail edges  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2178,8 +2180,8 @@ let test_config_pane_footer_actions () =
     in
     enabled "PgUp/PgDn"
       (List.mem pane
-         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes
-         ; Config_voice ]);
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
+         ; Config_themes; Config_voice ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
@@ -2615,7 +2617,7 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
     (Some
        [ "Board Attention"; "HITL Auto Judge"; "Librarian"
        ; "Verifier" ])
-    (surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts state Lanes)
 
 (* Resources draws a list beside a reading, and j/k means one thing in each.
    The search follows the same split: a match lands the list cursor, and with
@@ -2648,33 +2650,33 @@ let test_resources_searches_the_names_the_list_draws () =
     "the title when there is one, the name otherwise, and a blank title is \
      not one"
     (Some [ "Board posts"; "keepers"; "lanes" ])
-    (surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts state Resources)
 
 let test_the_resource_reading_offers_no_row_search () =
   let state = resources_state () in
   state.resource_focus <- Right_pane;
   Alcotest.(check (option (list string)))
     "with the text focused there is no cursor to land a match on" None
-    (surface_row_texts state Resources);
+    (Masc_tui_surface_search.surface_row_texts state Resources);
   state.resource_focus <- Left_pane;
   Alcotest.(check Alcotest.bool) "and the list has one again" true
-    (Option.is_some (surface_row_texts state Resources))
+    (Option.is_some (Masc_tui_surface_search.surface_row_texts state Resources))
 
 let test_resources_without_a_list_answers_nothing () =
   let state = resources_state () in
   state.resources_list <- None;
   Alcotest.(check (option (list string)))
     "before the catalog arrives there are no rows" None
-    (surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts state Resources)
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
   state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
-    (surface_row_texts state Lanes);
+    (Masc_tui_surface_search.surface_row_texts state Lanes);
   state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
-    (surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts state Lanes)
 
 (* Board and Planning answer "/" over the list they draw. Both panes window
    themselves around the cursor, so a landing is on screen without a scroll
@@ -2711,23 +2713,23 @@ let test_board_searches_the_post_list () =
     "id, author and title -- what the list draws"
     (Some
        [ "p-1 alpha release evidence sweep"; "p-2 beta frame budget" ])
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let test_board_reading_and_writing_keep_the_key_closed () =
   let state = board_state () in
   state.board_mode <- Board_read "p-1";
   Alcotest.(check (option (list string))) "reading a post" None
-    (surface_row_texts state Board);
+    (Masc_tui_surface_search.surface_row_texts state Board);
   state.board_mode <- Board_compose;
   (* Writing is the stronger case: "/" there is draft text. *)
   Alcotest.(check (option (list string))) "writing a post" None
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let test_board_without_posts_offers_nothing_to_search () =
   let state = board_state () in
   state.board_posts <- [];
   Alcotest.(check (option (list string))) "no rows" None
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let planning_goal_row id title =
   { pg_id = id
@@ -2777,7 +2779,7 @@ let test_planning_searches_the_goals_the_list_shows () =
   Alcotest.(check (option (list string)))
     "id and title"
     (Some [ "g-1 cut the frame budget"; "g-2 paste follows the field" ])
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let test_planning_searches_what_the_filter_left () =
   (* The cursor counts positions in the filtered, sorted list, so the search
@@ -2787,13 +2789,13 @@ let test_planning_searches_what_the_filter_left () =
   state.planning_filter <- Planning_filter_completed;
   Alcotest.(check (option (list string)))
     "nothing active survives the completed filter" None
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let test_planning_detail_keeps_the_key_closed () =
   let state = planning_state () in
   state.planning_mode <- Planning_detail "g-1";
   Alcotest.(check (option (list string))) "a goal is open" None
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let hit_to_string = function
   | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
@@ -2879,6 +2881,7 @@ let test_detail_tab_hint_projects_the_table () =
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, [ "b"; "B" ]
+  ; Detail_items, [ "j/k"; "PgUp/PgDn"; "Home/End" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
@@ -2994,7 +2997,7 @@ let surface_keys surface =
     (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
     (Masc_tui_keys.for_surface surface)
 
-(* Every surface [Masc_tui_types.surface_row_texts] can answer with rows.
+(* Every surface [Masc_tui_surface_search.surface_row_texts] can answer with rows.
    Read off that function's arms, which is where the row search comes from:
    the arm that opens [/] asks it, and so does the arm that steps [n] / [N].
    Keeper detail is absent on purpose -- its rows exist only while the
@@ -3031,7 +3034,7 @@ let test_code_search_count_tracks_fetched_source () =
     | Masc_tui_fetched.Started (next, request) ->
         state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
   in
-  let count query = surface_search_count state Code ~query in
+  let count query = Masc_tui_surface_search.surface_search_count state Code ~query in
   load "large.ml" (Array.init 20_000 (fun index ->
     [((if index mod 2 = 0 then "needle" else "other"), "")]));
   Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
@@ -3073,14 +3076,14 @@ let test_detail_search_counts_follow_the_active_pane () =
       sys_total = 1; sys_latest_seq = 1 };
   let check_pane label surface set_detail =
     state.view <- surface;
-    let count () = surface_search_count state surface ~query:state.search_last in
+    let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
     Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " list has a cursor") true
       (Option.is_some (scrolled_surface_rows state surface));
     set_detail true;
     Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
     Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
-      None (surface_row_texts state surface);
+      None (Masc_tui_surface_search.surface_row_texts state surface);
     Alcotest.(check bool) (label ^ " detail has no cursor") false
       (Option.is_some (scrolled_surface_rows state surface));
     set_detail false;
@@ -3110,15 +3113,15 @@ let test_changes_diff_uses_visible_search_rows () =
   state.search_last <- "needle";
   let check_list label =
     Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
-      (surface_search_count state Changes ~query:state.search_last);
+      (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
     Alcotest.(check bool) (label ^ " cursor available") true
       (Option.is_some (scrolled_surface_rows state Changes)) in
   check_list "list";
   state.changes_diff_row <- Some 0;
   Alcotest.(check (option (list string))) "diff has no hidden search rows" None
-    (surface_row_texts state Changes);
+    (Masc_tui_surface_search.surface_row_texts state Changes);
   Alcotest.(check (option int)) "diff has no hidden list count" None
-    (surface_search_count state Changes ~query:state.search_last);
+    (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
   Alcotest.(check bool) "diff cannot move a hidden list cursor" false
     (Option.is_some (scrolled_surface_rows state Changes));
   state.changes_diff_row <- None;
@@ -3148,10 +3151,10 @@ let test_workspace_activity_offers_no_row_search () =
   state.repositories <-
     Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
   Alcotest.(check (option int)) "the repository list answers the search"
-    (Some 1) (surface_search_count state Repositories ~query:"masc");
+    (Some 1) (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc");
   state.workspace_activity_repo <- Some "masc";
   Alcotest.(check (option int)) "Workspace Activity answers no search"
-    None (surface_search_count state Repositories ~query:"masc")
+    None (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc")
 
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
@@ -3194,7 +3197,7 @@ let test_a_surface_without_rows_offers_no_row_search () =
          presented approval, unarmed and immediate, and on Schedules it opens
          the form for a new one. A search whose own follow-through refuses an
          approval is worse than no search, so these wait on a different step
-         key rather than on another arm in [surface_row_texts] (#35306). *)
+         key rather than on another arm in [Masc_tui_surface_search.surface_row_texts] (#35306). *)
     ; "Approvals", Approvals
     ; "Schedules", Schedules
     ; "Config", Config
@@ -3243,6 +3246,7 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let diff = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_diff in
   let history =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
   in
@@ -3283,7 +3287,11 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file); ("diff or notes", overlay) ]
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("diff or notes", overlay) ];
+  check Alcotest.bool "diff prioritizes its visible pan keys" true
+    (String.starts_with ~prefix:"Shift-←/→:pan" diff);
+  check Alcotest.bool "overlay does not offer hidden file panning" false
+    (holds "Shift-Left" overlay)
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

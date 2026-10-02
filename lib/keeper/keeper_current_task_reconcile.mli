@@ -57,3 +57,9 @@ val sync_current_task_id_for_agent_name :
   config:Workspace.config ->
   agent_name:string ->
   unit
+
+(** Reconcile and return the same authoritative selection, including read failure.
+    No second backlog read is performed. *)
+val sync_current_task_id_with_observation :
+  config:Workspace.config -> Keeper_meta_contract.keeper_meta ->
+  Keeper_meta_contract.keeper_meta * (Keeper_id.Task_id.t option, string) result

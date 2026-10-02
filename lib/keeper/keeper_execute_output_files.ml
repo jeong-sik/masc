@@ -105,10 +105,19 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
           copy_chunks stdout (output_string channel);
           copy_chunks stderr (output_string channel));
         let total_bytes = (Unix.stat combined).st_size in
-        let fields =
+        (* A process writes bytes, whereas a JSON string carries Unicode.
+           Preserve malformed text/binary output in the same durable artifacts
+           as oversized output instead of corrupting the tool result and trace. *)
+        let inline_output =
           if total_bytes <= inline_ceiling_bytes then
-            [ "output", `String (In_channel.with_open_bin combined In_channel.input_all) ]
-          else
+            let bytes = In_channel.with_open_bin combined In_channel.input_all in
+            if String_util.is_valid_utf8 bytes then Some bytes else None
+          else None
+        in
+        let fields =
+          match inline_output with
+          | Some output -> [ "output", `String output ]
+          | None ->
             let store = Tool_blob_store.create ~base_path in
             let store_file path =
               Tool_blob_store.put_file_durable store ~path ~mime:"text/plain"

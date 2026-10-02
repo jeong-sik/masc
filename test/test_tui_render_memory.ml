@@ -11,8 +11,8 @@ let make_state () =
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Types.state) (snapshot : Decode.memory_fact_snapshot) =
-  let keeper = snapshot.Decode.mfs_keeper in
+let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
@@ -56,14 +56,14 @@ let test_age_label () =
 ;;
 
 let test_fact_row_line () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -73,7 +73,7 @@ let test_fact_row_line () =
 ;;
 
 let test_source_fact_row_line () =
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config points to runtime.toml"
     ; msf_first_seen = 150.0
     ; msf_path = "config/runtime.toml"
@@ -86,7 +86,7 @@ let test_source_fact_row_line () =
 ;;
 
 let test_invalidation_row_line () =
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "legacy_docs.md"
     ; mi_invalidated_at = 300.0
     ; mi_reason = "superseded by new spec"
@@ -100,7 +100,7 @@ let test_invalidation_row_line () =
 (* RFC-0418: the detail names what the keeper did with the fact, straight
    from the record; nothing is scored. *)
 let test_detail_names_the_use_record () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
@@ -109,7 +109,7 @@ let test_detail_names_the_use_record () =
     ; mf_memory_id = "mem-1"
     ; mf_events =
         { mfe_retrieval =
-            Decode.Retrieved
+            Masc.Tui_decode_memory_facts.Retrieved
               { count = 4
               ; distinct_days = 2
               ; last_at = Unix.gettimeofday () -. 7200.0
@@ -139,7 +139,7 @@ let test_detail_names_the_use_record () =
    The two counts after it keep their zeros: they are measured, and a hidden
    measured zero reads as "not measured". *)
 let test_a_fact_nobody_read_says_so_once () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
@@ -147,7 +147,7 @@ let test_a_fact_nobody_read_says_so_once () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-2"
     ; mf_events =
-        { mfe_retrieval = Decode.Never_retrieved
+        { mfe_retrieval = Masc.Tui_decode_memory_facts.Never_retrieved
         ; mfe_retracted_count = 0
         ; mfe_revised_from = []
         }
@@ -170,14 +170,14 @@ let test_a_fact_nobody_read_says_so_once () =
 ;;
 
 let test_detail_lines () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "Constitution requires evidence for claims"
     ; mf_category = Cat.Constraint
     ; mf_origin = "docs/constitution.xml"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-rule-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -200,10 +200,8 @@ let multi_line_claim =
   "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
    2. second reason\x07 rings"
 
-(* The claim's rows are the ones between the block heading and the first
-   labelled field. The fixed-format rows under it (Origin and Timeline, File
-   SHA) are not wrapped by this change, so a 40-cell bound on them would be a
-   claim about something else. *)
+(* The claim's rows are those before the first labeled provenance field;
+   detail wraps both prose and provenance to the frame width. *)
 let claim_rows lines =
   let plain = List.map Masc_tui_theme.strip_sgr lines in
   let is_field line =
@@ -239,19 +237,19 @@ let check_claim_rows ~what lines =
     [ "verbatim."; "reply"; "second" ]
 
 let test_detail_keeps_the_claim_line_breaks () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = multi_line_claim
     ; mf_category = Cat.Constraint
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-lines-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   check_claim_rows ~what:"fact"
     (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = multi_line_claim
     ; msf_first_seen = 100.0
     ; msf_path = "config/runtime.toml"
@@ -263,8 +261,60 @@ let test_detail_keeps_the_claim_line_breaks () =
        (Types.Memory_row_source_fact sfact))
 ;;
 
+let test_narrow_detail_preserves_provenance () =
+  let origin = "keeper:" ^ String.concat "/" (List.init 12 (fun _ -> "긴출처")) in
+  let memory_id = "memory-" ^ String.make 96 'x' in
+  let path = "docs/" ^ String.concat "/" (List.init 12 (fun _ -> "long-directory")) in
+  let sha = String.make 64 'a' in
+  let reason = "source_changed:" ^ String.make 80 'r' in
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
+    { mf_claim = "This fact retains its complete provenance."
+    ; mf_category = Cat.Constraint
+    ; mf_origin = origin
+    ; mf_first_seen = 100.
+    ; mf_last_seen = 200.
+    ; mf_memory_id = memory_id
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
+    }
+  in
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
+    { msf_claim = fact.mf_claim; msf_first_seen = 100.; msf_path = path; msf_sha256 = sha }
+  in
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
+    { mi_source_path = path; mi_invalidated_at = 200.; mi_reason = reason }
+  in
+  let compact text =
+    String.split_on_char ' ' text |> String.concat ""
+  in
+  List.iter
+    (fun cols ->
+      List.iter
+        (fun (row, values) ->
+          let lines = Render_memory.memory_fact_detail_lines ~cols row in
+          (* The block title is chrome; prose and provenance own scrollable
+             rows that must fit before the frame can clip them. *)
+          let body = match lines with [] -> [] | _heading :: body -> body in
+          List.iter
+            (fun line ->
+              check bool "body fits the frame, including indentation" true
+                (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+            body;
+          let text =
+            body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+          in
+          List.iter
+            (fun value -> check bool "exact provenance survives wrapping" true
+                (contains (compact value) text))
+            values)
+        [ Types.Memory_row_fact fact, [ origin; memory_id ]
+        ; Types.Memory_row_source_fact source, [ path; sha ]
+        ; Types.Memory_row_invalidation dropped, [ path; reason ]
+        ])
+    [ 80; 40; 30; 16 ]
+;;
+
 let test_detail_lines_source_and_invalidation () =
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config specifies runtime ports"
     ; msf_first_seen = 100.0
     ; msf_path = "config/runtime.toml"
@@ -278,7 +328,7 @@ let test_detail_lines_source_and_invalidation () =
     (fun line ->
       check bool "source detail line bounded" true (Layout.display_width line <= 80))
     lines_src;
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "config/old.toml"
     ; mi_invalidated_at = 200.0
     ; mi_reason = "deprecated"
@@ -300,24 +350,24 @@ let test_detail_lines_source_and_invalidation () =
    block, starts at the one column. Read as the cell after the label's
    padding: the first non-space after the colon that ends the label. *)
 let test_every_detail_block_starts_its_values_in_one_column () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let source : Decode.memory_source_fact =
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "the config floor is masc.core"
     ; msf_first_seen = 100.0
     ; msf_path = "docs/config.md"
     ; msf_sha256 = "abc123"
     }
   in
-  let dropped : Decode.memory_invalidation =
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "docs/old.md"
     ; mi_invalidated_at = 200.0
     ; mi_reason = "source_changed"
@@ -363,7 +413,7 @@ let test_every_detail_block_starts_its_values_in_one_column () =
       columns
 ;;
 
-let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
+let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
   ; mkh_updated_at = Some 1700000000.
@@ -380,7 +430,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some Decode.Pass_drained
+      { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -446,7 +496,7 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "the body leaves the fleet key to the footer" false
     (contains "Fleet Memory Search" (lines unread))
 ;;
-let make_fleet_health keeper : Decode.memory_health_snapshot =
+let make_fleet_health keeper : Masc.Tui_decode_memory_health.memory_health_snapshot =
   { mhs_generated_at = 1000.0
   ; mhs_keepers = [ keeper ]
   ; mhs_refused_keepers = []
@@ -505,7 +555,7 @@ let body_lines ~cols ~budget state =
 let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
   let keeper =
     { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
-      Decode.mkh_librarian_failures = 3
+      Masc.Tui_decode_memory_health.mkh_librarian_failures = 3
     }
   in
   let state = make_state () in
@@ -589,13 +639,13 @@ let test_refused_keeper_rows_stay_inside_the_memory_budget () =
   in
   let refused =
     List.init 40 (fun index ->
-      { Decode.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
+      { Masc.Tui_decode_memory_health.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
       ; mkr_reason = "unsupported snapshot state"
       })
   in
   state.memory_health <- Some
     { (make_fleet_health (List.hd keepers)) with
-      Decode.mhs_keepers = keepers
+      Masc.Tui_decode_memory_health.mhs_keepers = keepers
     ; mhs_refused_keepers = refused
     };
   state.memory_health_cursor <- 2;
@@ -644,7 +694,7 @@ let test_the_memory_filter_bar_names_the_query_it_counted () =
             ~snapshot_bytes:1024 in
          let other = make_keeper_health ~keeper_id:"beta" ~facts:4
              ~snapshot_bytes:512 in
-         { Decode.mhs_generated_at = 1000.0
+         { Masc.Tui_decode_memory_health.mhs_generated_at = 1000.0
          ; mhs_keepers = [ keeper; other ]
          ; mhs_total_facts = 14
          ; mhs_total_observed_facts = 14
@@ -716,9 +766,9 @@ let test_render_memory_body_with_keepers () =
        trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
        range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
      mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
-       mcp_input = Decode.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
+       mcp_input = Masc.Tui_decode_memory_health.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
        mcp_request_bytes = 2048}}} in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -779,14 +829,14 @@ let test_render_memory_body_with_keepers () =
 (* A populated fleet: one keeper whose continuity lag the server could not
    take, one that is three atoms behind. Every count in it is a single digit,
    which is what makes the header's width the header's own doing. *)
-let fleet_health : Decode.memory_health_snapshot =
-  let with_lag (keeper : Decode.memory_keeper_health) lag =
+let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
+  let with_lag (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) lag =
     { keeper with
-      mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
+      mkh_librarian = { keeper.mkh_librarian with Masc.Tui_decode_memory_health.mlh_continuity_unread_atoms = lag } }
   in
   let unmeasured = with_lag (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) None in
   let behind = with_lag (make_keeper_health ~keeper_id:"beta" ~facts:4 ~snapshot_bytes:512) (Some 3) in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ unmeasured; behind ]
     ; mhs_refused_keepers = []
@@ -852,17 +902,17 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
 let test_the_librarian_line_names_a_stalled_gap () =
   let with_beta stalled =
     { fleet_health with
-      Decode.mhs_keepers =
+      Masc.Tui_decode_memory_health.mhs_keepers =
         List.map
-          (fun (keeper : Decode.memory_keeper_health) ->
+          (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
              if String.equal keeper.mkh_keeper_id "beta"
              then
                { keeper with
-                 mkh_librarian = { keeper.mkh_librarian with Decode.mlh_stalled = Some stalled } }
+                 mkh_librarian = { keeper.mkh_librarian with Masc.Tui_decode_memory_health.mlh_stalled = Some stalled } }
              else keeper)
           fleet_health.mhs_keepers }
   in
-  let render ?(stalled = Decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
+  let render ?(stalled = Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
       cursor =
     let state = make_state () in
     state.memory_health <- Some (with_beta stalled);
@@ -889,14 +939,14 @@ let test_the_librarian_line_names_a_stalled_gap () =
        (String.split_on_char '\n' (render 1)));
   check bool "a gap of one atom names that atom, not a range" true
     (contains "Librarian stalled · atom 5 is in neither the request nor memory"
-       (render ~stalled:(Decode.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
+       (render ~stalled:(Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
   (* A file the gap is read from that did not read is drawn, and drawn as
      not measured: a silent row would read as no gap. *)
   let unmeasured =
     render
       ~stalled:
-        (Decode.Stalled_unmeasured
-           { mls_cause = Decode.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
+        (Masc.Tui_decode_memory_health.Stalled_unmeasured
+           { mls_cause = Masc.Tui_decode_memory_health.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
       1
   in
   check bool "an unreadable read position is drawn as not measured" true
@@ -972,11 +1022,11 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
     { base with
       mkh_librarian =
         { base.mkh_librarian with
-          Decode.mlh_state = Some librarian_state
-        ; mlh_last_failure_kind = Some Decode.Failure_exact_execution
+          Masc.Tui_decode_memory_health.mlh_state = Some librarian_state
+        ; mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution
         } }
   in
-  let health keeper : Decode.memory_health_snapshot =
+  let health keeper : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -1015,14 +1065,14 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
     String.concat "\n" !lines
   in
   let render keeper = render_health (health keeper) in
-  let stopped = render (keeper (Decode.Pass_stopped "the range could not be read")) in
+  let stopped = render (keeper (Masc.Tui_decode_memory_health.Pass_stopped "the range could not be read")) in
   check bool "a stopped pass reads as words" true (contains "Librarian · stopped on an error" stopped);
   check bool "the stopped pass draws its cause" true
     (contains "Librarian cause · the range could not be read" stopped);
   check bool "the failure kind reads as words" true
     (contains "last failure model call failed" stopped);
   check bool "no wire word reaches the row" false (contains "exact_execution_failure" stopped);
-  let uncommitted = render (keeper Decode.Pass_not_committed) in
+  let uncommitted = render (keeper Masc.Tui_decode_memory_health.Pass_not_committed) in
   check bool "an uncommitted pass reads as words" true
     (contains "Librarian · last pass saved nothing" uncommitted);
   check bool "an ending without a cause draws no cause row" false
@@ -1031,9 +1081,9 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
      keeper that decoded is still drawn. *)
   let with_refused =
     render_health
-      { (health (keeper Decode.Pass_drained)) with
-        Decode.mhs_refused_keepers =
-          [ { Decode.mkr_keeper_id = Some "ghost"
+      { (health (keeper Masc.Tui_decode_memory_health.Pass_drained)) with
+        Masc.Tui_decode_memory_health.mhs_refused_keepers =
+          [ { Masc.Tui_decode_memory_health.mkr_keeper_id = Some "ghost"
             ; mkr_reason = "keepers[1]: unsupported librarian state: paused"
             } ] }
   in
@@ -1047,7 +1097,7 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
 let test_render_memory_body_cursor_clamping () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:5 ~snapshot_bytes:512 in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
     ; mhs_refused_keepers = []
@@ -1095,19 +1145,19 @@ let test_render_memory_body_cursor_clamping () =
    table showed never appeared here, because the old word was still there to
    draw -- which is why this one needs a filter applied first. *)
 let test_the_fact_filter_bar_names_the_query_it_counted () =
-  let claim_fact claim id : Decode.memory_fact =
+  let claim_fact claim id : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = claim
     ; mf_category = Cat.Fact
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = id
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let state_of ~applied ~typing =
     let state = make_state () in
-    let store : Decode.memory_ordinary_store =
+    let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
       { mos_revision = 1
       ; mos_updated_at = 1000.0
       ; mos_facts =
@@ -1117,9 +1167,9 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
       }
     in
     answer_memory_facts state
-        { Decode.mfs_keeper = "alpha"
-        ; mfs_ordinary = Decode.Memory_store_present store
-        ; mfs_source = Decode.Memory_store_absent
+        { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+        ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+        ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
         ; mfs_events_read_error = None
         };
     state.memory_facts_cursor <- 0;
@@ -1184,13 +1234,13 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
 let test_the_row_badge_says_what_the_store_says () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let line row = Render_memory.memory_fact_row_line ~cols:120 row in
@@ -1223,18 +1273,18 @@ let test_the_row_badge_says_what_the_store_says () =
 let test_every_badge_this_cell_draws_is_its_own () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let source_row : Types.memory_fact_row =
     Types.Memory_row_source_fact
-      { Decode.msf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.msf_claim = "a claim of a fixed length"
       ; msf_first_seen = 100.0
       ; msf_path = "docs/x.md"
       ; msf_sha256 = "abc"
@@ -1242,7 +1292,7 @@ let test_every_badge_this_cell_draws_is_its_own () =
   in
   let dropped_row : Types.memory_fact_row =
     Types.Memory_row_invalidation
-      { Decode.mi_source_path = "docs/x.md"
+      { Masc.Tui_decode_memory_facts.mi_source_path = "docs/x.md"
       ; mi_invalidated_at = 100.0
       ; mi_reason = "gone"
       }
@@ -1297,13 +1347,13 @@ let test_every_badge_this_cell_draws_is_its_own () =
 let test_only_the_alarm_category_is_dressed () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let blank word line =
@@ -1339,7 +1389,7 @@ let test_only_the_alarm_category_is_dressed () =
 let test_the_panes_own_two_words_survive () =
   let source_row : Types.memory_fact_row =
     Types.Memory_row_source_fact
-      { Decode.msf_claim = "the config floor is masc.core"
+      { Masc.Tui_decode_memory_facts.msf_claim = "the config floor is masc.core"
       ; msf_first_seen = 100.0
       ; msf_path = "docs/config.md"
       ; msf_sha256 = "cafe0123beef4567cafe0123beef4567"
@@ -1347,7 +1397,7 @@ let test_the_panes_own_two_words_survive () =
   in
   let dropped_row : Types.memory_fact_row =
     Types.Memory_row_invalidation
-      { Decode.mi_source_path = "docs/config.md"
+      { Masc.Tui_decode_memory_facts.mi_source_path = "docs/config.md"
       ; mi_invalidated_at = 200.0
       ; mi_reason = "the file moved"
       }
@@ -1362,26 +1412,26 @@ let test_the_panes_own_two_words_survive () =
 
 let test_render_memory_facts_body () =
   let state = make_state () in
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "Architecture uses modular TUI components"
     ; mf_category = Cat.Fact
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-fact-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let store : Decode.memory_ordinary_store =
+  let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts = [ fact ]
     }
   in
-  let snapshot : Decode.memory_fact_snapshot =
+  let snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot =
     { mfs_keeper = "alpha"
-    ; mfs_ordinary = Decode.Memory_store_present store
-    ; mfs_source = Decode.Memory_store_absent
+    ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+    ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
     ; mfs_events_read_error = None
     }
   in
@@ -1410,24 +1460,24 @@ let test_render_memory_facts_body () =
    that; this one reads the cells. *)
 let test_rows_and_header_share_one_grid () =
   let cols = 120 in
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config points to runtime.toml"
     ; msf_first_seen = 150.0
     ; msf_path = "config/rt.toml" (* 16 cells or fewer: longer paths are shortened *)
     ; msf_sha256 = "abc123sha"
     }
   in
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "legacy_docs.md"; mi_invalidated_at = 300.0; mi_reason = "superseded" }
   in
   let cells row = Masc_tui_theme.strip_sgr (Render_memory.memory_fact_row_line ~cols row) in
@@ -1446,13 +1496,13 @@ let test_rows_and_header_share_one_grid () =
   grid "source row" (cells (Types.Memory_row_source_fact sfact)) sfact.msf_path;
   grid "dropped row" (cells (Types.Memory_row_invalidation inv)) inv.mi_source_path;
   let state = make_state () in
-  let store : Decode.memory_ordinary_store =
+  let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1; mos_updated_at = 1000.0; mos_facts = [ fact ] }
   in
   answer_memory_facts state
        { mfs_keeper = "alpha"
-       ; mfs_ordinary = Decode.Memory_store_present store
-       ; mfs_source = Decode.Memory_store_absent
+       ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+       ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
        ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
@@ -1491,17 +1541,17 @@ let facts_body_lines ?(cols = 120) ?(budget = 30) state =
 
 let three_kinds_state ?(keeper = "alpha") () =
   let state = make_state () in
-  let fact category claim : Decode.memory_fact =
+  let fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = claim
     ; mf_category = category
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-" ^ claim
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let ordinary : Decode.memory_ordinary_store =
+  let ordinary : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts =
@@ -1510,7 +1560,7 @@ let three_kinds_state ?(keeper = "alpha") () =
         ]
     }
   in
-  let source : Decode.memory_source_store =
+  let source : Masc.Tui_decode_memory_facts.memory_source_store =
     { mss_revision = 1
     ; mss_updated_at = 1000.0
     ; mss_facts =
@@ -1530,8 +1580,8 @@ let three_kinds_state ?(keeper = "alpha") () =
   in
   answer_memory_facts state
        { mfs_keeper = keeper
-       ; mfs_ordinary = Decode.Memory_store_present ordinary
-       ; mfs_source = Decode.Memory_store_present source
+       ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present ordinary
+       ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_present source
        ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
@@ -1567,24 +1617,24 @@ let test_memory_search_uses_the_filter_text_and_query () =
   state.memory_facts_keeper <- Some "alpha";
   let snapshot = Option.get (Types.memory_facts_snapshot state) in
   let ordinary = match snapshot.mfs_ordinary with
-    | Decode.Memory_store_present store -> store
+    | Masc.Tui_decode_memory_facts.Memory_store_present store -> store
     | _ -> fail "fixture ordinary store missing" in
   let original = List.hd ordinary.mos_facts in
   let fact = { original with mf_claim = "deploy"; mf_category = Cat.Fact;
                             mf_origin = "authored" } in
   answer_memory_facts state { snapshot with mfs_ordinary =
-    Decode.Memory_store_present { ordinary with mos_facts = [fact] } };
+    Masc.Tui_decode_memory_facts.Memory_store_present { ordinary with mos_facts = [fact] } };
   let verify ~typing query expected =
     state.search <- if typing then Some query else None;
     state.search_last <- if typing then "unrelated committed query" else query;
     let rows = Types.memory_fact_rows state in
     check int "filter row count" expected (List.length rows);
     check (option int) "marker agrees with filter" (Some expected)
-      (Types.surface_search_count state Types.Memory ~query);
-    let texts = Option.get (Types.surface_row_texts state Types.Memory) in
+      (Masc_tui_surface_search.surface_search_count state Types.Memory ~query);
+    let texts = Option.get (Masc_tui_surface_search.surface_row_texts state Types.Memory) in
     let effective = Types.surface_search_query Types.Memory query in
     check int "cursor matcher reaches every filtered row" expected
-      (List.length (List.filter (Types.palette_contains ~needle:effective) texts))
+      (List.length (List.filter (Masc_tui_pick_list.lowercase_contains ~needle:effective) texts))
   in
   List.iter (fun typing ->
     List.iter (fun query -> verify ~typing query 1)
@@ -1598,7 +1648,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
   check int "blank Memory query still shows all rows" 3
     (List.length (Types.memory_fact_rows state));
   check (option int) "blank query has no matches to jump" (Some 0)
-    (Types.surface_search_count state Types.Memory ~query:"   ");
+    (Masc_tui_surface_search.surface_search_count state Types.Memory ~query:"   ");
   check string "other surfaces retain literal whitespace" "  deploy fact  "
     (Types.surface_search_query Types.Board "  deploy fact  ")
 ;;
@@ -1759,14 +1809,14 @@ let test_the_narrowest_body_spends_its_row_on_the_sort () =
     (stats_row lines) (List.hd lines)
 
 let test_fleet_fact_row_line () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "tester · manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -1785,7 +1835,7 @@ let test_render_memory_body_sorting () =
   let state = make_state () in
   let k1 = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:2048 in
   let k2 = make_keeper_health ~keeper_id:"beta" ~facts:50 ~snapshot_bytes:1024 in
-  let health : Decode.memory_health_snapshot =
+  let health : Masc.Tui_decode_memory_health.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ k1; k2 ]
     ; mhs_refused_keepers = []
@@ -1822,7 +1872,7 @@ let test_render_memory_body_sorting () =
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
   check bool "render completed" true (List.length !lines > 0);
-  let selected () = Option.map (fun k -> k.Decode.mkh_keeper_id) (Types.selected_memory_keeper state) in
+  let selected () = Option.map (fun k -> k.Masc.Tui_decode_memory_health.mkh_keeper_id) (Types.selected_memory_keeper state) in
   check (option string) "Enter opens the first visible fact-sorted row" (Some "beta") (selected ());
   check bool "total facts are readable" true (List.exists (contains "Total 60 facts") !lines);
   check bool "ready state has a mark" true (List.exists (contains "+") !lines);
@@ -1853,7 +1903,7 @@ let test_render_memory_overflow_selection () =
         { keeper with
           mkh_source_read_error = Some "unreadable source snapshot"
         ; mkh_alerts =
-            [{ ma_code = Decode.Source_snapshot_read_error
+            [{ ma_code = Masc.Tui_decode_memory_health.Source_snapshot_read_error
              ; ma_label = "source"
              ; ma_message = "unreadable source snapshot"
              }]
@@ -1934,7 +1984,7 @@ let test_render_memory_overflow_selection () =
   let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
+    (Some ["keeper-4 read-error"]) (Masc_tui_surface_search.surface_row_texts state Types.Memory);
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;
@@ -1983,21 +2033,21 @@ let test_facts_selection_follows_the_rendered_viewport () =
   state.memory_facts_sort <- Types.Sort_claim;
   let facts =
     List.init 24 (fun index ->
-      { Decode.mf_claim = Printf.sprintf "fact-%02d %s" index
+      { Masc.Tui_decode_memory_facts.mf_claim = Printf.sprintf "fact-%02d %s" index
           (if index mod 2 = 0 then "short" else String.make 180 'x')
       ; mf_category = Cat.Fact
       ; mf_origin = "manual"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = string_of_int index
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       })
   in
   answer_memory_facts state
-    { Decode.mfs_keeper = "alpha"
-    ; mfs_ordinary = Decode.Memory_store_present
+    { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+    ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present
         { mos_revision = 1; mos_updated_at = 200.0; mos_facts = facts }
-    ; mfs_source = Decode.Memory_store_read_error "source unavailable"
+    ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_read_error "source unavailable"
     ; mfs_events_read_error = None
     };
   let assert_visible ~cols ~budget () =
@@ -2042,9 +2092,9 @@ let test_facts_selection_follows_the_rendered_viewport () =
 let test_event_sidecar_read_error_is_visible () =
   let state = make_state () in
   answer_memory_facts state
-      { Decode.mfs_keeper = "alpha"
-      ; mfs_ordinary = Decode.Memory_store_absent
-      ; mfs_source = Decode.Memory_store_absent
+      { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+      ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_absent
+      ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
       ; mfs_events_read_error = Some "permission denied"
       };
   let styled = ref [] in
@@ -2096,8 +2146,8 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
   let base =
     let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
     { keeper with
-      Decode.mkh_librarian =
-        { keeper.Decode.mkh_librarian with Decode.mlh_last_success_at = Some 1_775_000_000.0 }
+      Masc.Tui_decode_memory_health.mkh_librarian =
+        { keeper.Masc.Tui_decode_memory_health.mkh_librarian with Masc.Tui_decode_memory_health.mlh_last_success_at = Some 1_775_000_000.0 }
     }
   in
   let render ~detail keeper =
@@ -2142,16 +2192,16 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
     ];
   let unread =
     { base with
-      Decode.mkh_librarian =
-        { base.Decode.mkh_librarian with Decode.mlh_unread_atom_turns = None }
+      Masc.Tui_decode_memory_health.mkh_librarian =
+        { base.Masc.Tui_decode_memory_health.mkh_librarian with Masc.Tui_decode_memory_health.mlh_unread_atom_turns = None }
     }
   in
   check bool "a lag that did not read is an action, not a zero" true
     (contains "unread ?" (joined (render ~detail:false unread)));
-  let failing = { base with Decode.mkh_librarian_failures = 3 } in
+  let failing = { base with Masc.Tui_decode_memory_health.mkh_librarian_failures = 3 } in
   check bool "Librarian failures are an action" true
     (contains "failed 3 since server start" (joined (render ~detail:false failing)));
-  let unreadable = { base with Decode.mkh_read_error = Some "EACCES on facts.jsonl" } in
+  let unreadable = { base with Masc.Tui_decode_memory_health.mkh_read_error = Some "EACCES on facts.jsonl" } in
   check bool "a read error is an action" true
     (contains "ordinary read error: EACCES on facts.jsonl"
        (joined (render ~detail:false unreadable)))
@@ -2173,6 +2223,8 @@ let () =
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
+        ; test_case "narrow detail preserves exact provenance" `Quick
+            test_narrow_detail_preserves_provenance
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
         ; test_case "the detail keeps the claim's line breaks" `Quick
             test_detail_keeps_the_claim_line_breaks

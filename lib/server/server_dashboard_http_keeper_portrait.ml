@@ -39,7 +39,7 @@ let current_build () =
   | None -> Unscoped
 
 module Cache = struct
-  type key = string * int
+  type key = string * int * string
 
   type t =
     { byte_budget : int
@@ -86,6 +86,9 @@ let process_cache = Cache.create ~byte_budget:cache_byte_budget
 type answer =
   | Invalid_name
   | Invalid_size of string
+  | Invalid_preview of string
+  | Invalid_equipment of string
+  | Equipment_changed
   | Unknown_keeper
   | Lookup_failed of string
   | Encode_failed of string
@@ -112,44 +115,64 @@ let size_of_request = function
   | None -> Ok default_draw_size
   | Some raw -> Option.to_result ~none:raw (parse_size raw)
 
-let draw ~name size =
-  let image = Draw.render (Look.body_of_name name) (Look.equipment_of_name name) size in
+let draw ~name ~equipment size =
+  let image = Draw.render (Look.body_of_name name) equipment size in
   Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
 
 (* The cached bytes, or a drawing that is then kept. *)
-let png_of cache ~name size =
+let png_of cache ~name ~equipment size =
   let edge = Draw.int_of_size size in
-  match Cache.find cache (name, edge) with
+  let key = name, edge, Keeper_portrait_equipment.key equipment in
+  match Cache.find cache key with
   | Some png -> Ok png
   | None ->
-    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name size) with
-    | Ok png -> Cache.add cache (name, edge) png; Ok png
+    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name ~equipment size) with
+    | Ok png -> Cache.add cache key png; Ok png
     | Error _ as refused -> refused
 
-let build_tag digest ~name size =
+let build_tag digest ~name ~equipment size =
   Http.Response.etag_of_body
-    (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size) ])
+    (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size); Keeper_portrait_equipment.key equipment ])
 
-let answer ~cache ~build ~name ~size ~keeper_present ~holds_tag =
+let answer ~cache ~build ~name ~size ~preview ~expected_equipment ~keeper_present ~equipment ~holds_tag =
   if not (Keeper_config.validate_name name) then Invalid_name
   else
     match size_of_request size with
     | Error raw -> Invalid_size raw
     | Ok size ->
+      let preview = match preview with
+        | None -> Ok None
+        | Some id -> Option.to_result ~none:id
+            (Option.map Option.some (Keeper_portrait_item.of_id id)) in
+      match preview with
+      | Error id -> Invalid_preview id
+      | Ok preview ->
+      match expected_equipment with
+      | Some (Error detail) -> Invalid_equipment detail
+      | Some (Ok _) | None ->
       match keeper_present () with
       | Error message -> Lookup_failed message
       | Ok false -> Unknown_keeper
       | Ok true ->
+        match equipment () with
+        | Error message -> Lookup_failed message
+        | Ok equipment when (match expected_equipment with
+            | Some (Ok expected) -> expected <> equipment
+            | Some (Error _) | None -> false) -> Equipment_changed
+        | Ok equipment ->
+        let equipment = match preview with
+          | None -> equipment
+          | Some item -> Keeper_portrait_item.preview item equipment in
         match build with
         | Executable digest ->
-          let etag = build_tag digest ~name size in
+          let etag = build_tag digest ~name ~equipment size in
           if holds_tag etag then Not_modified etag
           else (
-            match png_of cache ~name size with
+            match png_of cache ~name ~equipment size with
             | Ok png -> Png { etag; png }
             | Error message -> Encode_failed message)
         | Unscoped ->
-          match png_of cache ~name size with
+          match png_of cache ~name ~equipment size with
           | Error message -> Encode_failed message
           | Ok png ->
             let etag = Http.Response.etag_of_body png in
@@ -181,10 +204,17 @@ let handle_get state request reqd name =
   let refuse status message =
     Server_auth.respond_json_value_with_cors ~status request reqd (error_json message)
   in
+  let expected_equipment = Server_utils.query_param request "expected_equipment"
+    |> Option.map (fun raw ->
+      match Yojson.Safe.from_string raw with
+      | json -> Keeper_portrait_equipment.of_json json
+      | exception Yojson.Json_error detail -> Error detail) in
   match
-    answer ~cache:process_cache ~build:(current_build ()) ~name
+    answer ~expected_equipment ~cache:process_cache ~build:(current_build ()) ~name
       ~size:(Server_utils.query_param request "size")
+      ~preview:(Server_utils.query_param request "preview")
       ~keeper_present:(keeper_present config name)
+      ~equipment:(fun () -> Candle_equipment.read_persisted ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper:name)
       ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
   with
   | Invalid_name -> refuse `Bad_request (Printf.sprintf "invalid keeper name: %s" name)
@@ -192,7 +222,10 @@ let handle_get state request reqd name =
     refuse `Bad_request
       (Printf.sprintf "size must be a whole number of pixels from %d to %d, not %S"
          Draw.min_size Draw.max_size raw)
+  | Invalid_equipment detail -> refuse `Bad_request ("invalid expected equipment: " ^ detail)
+  | Equipment_changed -> refuse `Conflict "Keeper equipment changed; refresh the Keeper observation before reading its portrait"
   | Unknown_keeper -> refuse `Not_found (Printf.sprintf "keeper %S not found" name)
+  | Invalid_preview id -> refuse `Bad_request (Printf.sprintf "unknown portrait item: %s" id)
   | Lookup_failed message -> refuse `Service_unavailable message
   | Encode_failed message -> refuse `Internal_server_error message
   | Not_modified etag -> Http.Response.bytes_not_modified ~etag ~cache_control reqd

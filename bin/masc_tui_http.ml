@@ -27,7 +27,7 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let slow_report_ns = 1_000_000_000L
 let ms_of_ns ns = Int64.to_float ns /. 1e6
 
-let timed ~verb ~path (run : unit -> (int * string, string) result) =
+let timed_with ~status ~verb ~path run =
   let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
   let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
@@ -36,9 +36,12 @@ let timed ~verb ~path (run : unit -> (int * string, string) result) =
       path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
-       | Ok (status, _) -> Printf.sprintf "status %d" status
+       | Ok answer -> Printf.sprintf "status %d" (status answer)
        | Error detail -> detail);
   result
+
+let timed ~verb ~path (run : unit -> (int * string, string) result) =
+  timed_with ~status:fst ~verb ~path run
 let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
@@ -484,11 +487,53 @@ let decode_json ~allow_empty ~status_code ~body =
    length, and for a 401 the auth JSON [refusal] exists to replace. *)
 let named_refusal what ~status ~body = what ^ ": " ^ refusal ~status_code:status ~body
 
-(** GET a JSON response from a dashboard endpoint. *)
+(* Dashboard answers kept with their entity tags ([Masc_tui_kept_reads]). Each
+   refresh pass reads most dashboard paths again, and most answers have not
+   changed since the last one: on 2026-09-30 the board list,
+   keepers/composite, scheduled automation, goals, briefing and planning
+   changed at most once in five two-second polls. The JSON lexer was 11.6% of
+   this process's busy samples on its main thread, and parsing one of those
+   bodies takes 0.38 ms to 1.86 ms. *)
+let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.create ()
+
+(** Starts a new generation of kept dashboard answers. A full refresh pass
+    calls it when it starts; an answer no read asked for in two passes is
+    dropped. *)
+let start_read_generation () = Masc_tui_kept_reads.start_generation kept_reads
+
+(* [http_get] with request headers of the caller's and the response headers. *)
+let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
+    (Masc_http_client.response, string) result =
+  let url = url_of ~host ~port ~path in
+  timed_with
+    ~status:(fun { Masc_http_client.status; _ } -> status)
+    ~verb:"GET" ~path
+  @@ fun () ->
+  with_credential_refresh_on
+    ~refused:(function
+      | Ok { Masc_http_client.status = 401; _ } -> true
+      | Ok _ | Error _ -> false)
+  @@ fun () ->
+  match
+    Masc_http_client.get_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~headers:(headers @ auth_headers ()) ()
+  with
+  | Ok response -> Ok response
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+(** GET a JSON response from a dashboard endpoint. The answer kept from the
+    last read of the same address goes out as [If-None-Match], and a 304
+    answers with the value decoded from it. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
-  match http_get ~host ~port ~path with
-  | Error e -> Error e
-  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+  Masc_tui_kept_reads.read kept_reads
+    ~address:(url_of ~host ~port ~path)
+    ~send:(fun headers ->
+      http_get_response ~host ~port ~path ~headers
+      |> Result.map (fun { Masc_http_client.status; headers; body } ->
+             { Masc_tui_kept_reads.status; headers; body }))
+    ~decode:(fun { Masc_tui_kept_reads.status; body; _ } ->
+      decode_json ~allow_empty:false ~status_code:status ~body)
 
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does
@@ -706,7 +751,19 @@ let tick_msx ~(host : string) ~(port : int) :
 ;;
 
 
-let post_keeper_chat ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~(host : string) ~(port : int)
+let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
+  let payload = Masc_tui_keeper_chat_projection.request_to_yojson
+      ~admission_intent ~since_seq request in
+  let payload = match expected_workspace, payload with
+    | Some (expected : Masc.Tui_decode.server_identity), `Assoc fields ->
+        `Assoc (("expected_workspace", `Assoc
+          [ "base_path", `String expected.sid_base_path
+          ; "masc_root", `String expected.sid_masc_root ]) :: fields)
+    | None, _ | Some _, _ -> payload in
+  Yojson.Safe.to_string payload
+;;
+
+let post_keeper_chat ?expected_workspace ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
@@ -714,7 +771,7 @@ let post_keeper_chat ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_
   let url = url_of ~host ~port ~path:keeper_chat_stream_path in
   (* Whole body, no live view, nothing held to resume after. *)
   let body =
-    Masc_tui_keeper_chat_projection.request_body ~admission_intent
+    keeper_chat_body ?expected_workspace ~admission_intent
       ~since_seq:Masc.Keeper_chat_event_log.Whole_turn request
   in
   match
@@ -752,7 +809,7 @@ let post_keeper_chat ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_
 (* [since_seq] is the whole turn on the first POST and the log's resume
    position on a re-POST after the stream was cut, so the server replays only
    what the pane missed before switching to live frames. *)
-let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~clock ~(host : string) ~(port : int)
+let post_keeper_chat_streaming ?expected_workspace ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~clock ~(host : string) ~(port : int)
     ~(on_chunk : string -> unit)
     ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -761,7 +818,7 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
     result =
   let url = url_of ~host ~port ~path:keeper_chat_stream_path in
   let body =
-    Masc_tui_keeper_chat_projection.request_body ~admission_intent ~since_seq request
+    keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
@@ -1514,16 +1571,26 @@ type tool_approval_answer =
   ; remembered : bool
   }
 
-let post_keeper_tool_approval ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
+(* [expected_workspace] is a required labeled argument rather than
+   [?expected_workspace]: this signature has no positional argument, so an
+   optional here can never be erased (warning 16). Both TUI callers
+   always supply the verified server identity. *)
+let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(tool_call_id : string) ~(allow : bool) :
     (tool_approval_answer, string) result =
+  let expected_fields =
+    [ ("expected_workspace", `Assoc
+         [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
+         ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ]) ]
+  in
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("name", `String keeper_name)
-         ; ("tool_call_id", `String tool_call_id)
-         ; ("decision", `String (if allow then "approve" else "deny"))
-         ])
+         ([ ("name", `String keeper_name)
+          ; ("tool_call_id", `String tool_call_id)
+          ; ("decision", `String (if allow then "approve" else "deny"))
+          ] @ expected_fields))
   in
   match post_json ~host ~port ~path:keeper_tool_approval_path ~body with
   | Error detail -> Error detail
@@ -1642,9 +1709,10 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) :
+let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
     (int * string, string) result =
-  http_get ~host ~port ~path:"/api/v1/gate/keepers?detailed=true"
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+    ^ percent_encode_path_segment expected_workspace)
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -1987,13 +2055,17 @@ let expect_ok_true ~(what : string) json =
 (* [reason] is a required-labeled option rather than [?reason]: nothing
    follows it, so an optional argument here is unerasable (warning 16). *)
 let post_dashboard_gate_resolve ~(host : string) ~(port : int)
-    ~(approval_id : string) ~(approve : bool) ~(reason : string option) :
+    ~(approval_id : string) ~(approve : bool) ~(reason : string option)
+    ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (unit, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
          ([ ("id", `String approval_id)
           ; ("decision", `String (if approve then "approve" else "reject"))
+          ; ("expected_workspace", `Assoc
+               [ "base_path", `String expected_workspace.sid_base_path
+               ; "masc_root", `String expected_workspace.sid_masc_root ])
           ]
          @ match reason with
            | None -> []
@@ -2008,8 +2080,17 @@ let post_dashboard_gate_resolve ~(host : string) ~(port : int)
     every field again, so this never turns a refresh race into a retry of a
     different external effect. *)
 let post_dashboard_gate_retry ~(host : string) ~(port : int)
-    ~(request : Yojson.Safe.t) : (unit, string) result =
-  let body = Yojson.Safe.to_string request in
+    ~(request : Yojson.Safe.t) ~(expected_workspace : Masc.Tui_decode.server_identity)
+    : (unit, string) result =
+  let ( let* ) = Result.bind in
+  let* fields = match request with
+    | `Assoc fields when not (List.mem_assoc "expected_workspace" fields) -> Ok fields
+    | _ -> Error "gate retry request must be an unbound object"
+  in
+  let body = Yojson.Safe.to_string (`Assoc
+    (("expected_workspace", `Assoc
+      [ "base_path", `String expected_workspace.sid_base_path
+      ; "masc_root", `String expected_workspace.sid_masc_root ]) :: fields)) in
   match post_json ~host ~port ~path:"/api/v1/dashboard/gate/retry" ~body with
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate retry" json
@@ -2155,7 +2236,12 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let post_board_new ~(host : string) ~(port : int) ~(title : string)
+let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
+  "expected_workspace", `Assoc
+    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
+    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
+
+let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =
     match hearth with
@@ -2164,7 +2250,7 @@ let post_board_new ~(host : string) ~(port : int) ~(title : string)
   in
   let payload =
     `Assoc
-      ([ ("title", `String title); ("body", `String body) ]
+      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2202,11 +2288,12 @@ let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
 
 (** POST /api/v1/tools/masc_board_vote. [up] rides as a bool rather than a
     string so no direction word exists here to drift from the tool's. *)
-let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
+let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ ("post_id", `String post_id)
+      [ board_workspace_field expected_workspace
+      ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
   in
@@ -2215,10 +2302,10 @@ let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
 
 (** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
     HTTP auth resolver, exactly as for a new post. *)
-let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
+let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
@@ -2446,13 +2533,31 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
     the same lane swap as a config save, so this call carries the same
     extended budget. *)
 let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(expected_workspace : Masc.Tui_decode.server_identity option)
     ~(declaration_json : string) : (Yojson.Safe.t, string) result =
-  post_json_with_timeout ~timeout_sec:keeper_config_save_timeout_sec ~host
-    ~port
-    ~path:
-      (Printf.sprintf "/api/v1/keepers/%s/up"
-         (percent_encode_path_segment keeper_name))
-    ~body:declaration_json
+  match expected_workspace with
+  | None -> Error "Cannot create: workspace identity is unverified"
+  | Some identity
+    when String.equal identity.sid_base_path "" || String.equal identity.sid_masc_root "" ->
+      Error "Cannot create: workspace identity is incomplete"
+  | Some identity ->
+    (match Yojson.Safe.from_string declaration_json with
+     | exception Yojson.Json_error detail -> Error ("Invalid declaration: " ^ detail)
+     | `Assoc fields ->
+       (* Bind the mutation itself to the probe. A replacement server on the
+          same port must reject before dispatching any Keeper operation. *)
+       let expected = `Assoc
+         [ "base_path", `String identity.sid_base_path
+         ; "masc_root", `String identity.sid_masc_root ] in
+       let body = Yojson.Safe.to_string (`Assoc
+         (("expected_workspace", expected) :: List.remove_assoc "expected_workspace" fields)) in
+       post_json_with_timeout ~timeout_sec:keeper_config_save_timeout_sec ~host
+         ~port
+         ~path:
+           (Printf.sprintf "/api/v1/keepers/%s/up"
+              (percent_encode_path_segment keeper_name))
+         ~body
+     | _ -> Error "Keeper declaration must be a JSON object")
 
 (** Register a repository. Same permission boundary as the dashboard's add
     dialog: the route wants CanAdmin, and [post_json] carries the token. *)

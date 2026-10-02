@@ -76,20 +76,21 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 
 type runtime_attempt_candidate =
-  | Resolved_runtime of Runtime.t
+  | Resolved_runtime of Runtime_instance.t
   | Missing_runtime of string
 
-let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~lane_attempt_index result =
+let selected_runtime_result ?official_client_settlement (runtime : Runtime_instance.t) ~lane_attempt_index result =
   Result.map
     (fun run_result ->
        { run_result
        ; official_client_settlement
        ; selected_runtime_id = runtime.id
-       ; selected_max_context = Runtime.max_context_of_runtime runtime
+       ; selected_max_context = Runtime_instance.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
        ; lane_attempt_index
        })
@@ -107,6 +108,24 @@ let run_result_answered (run_result : Runtime_agent.run_result) =
   | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; tool_name = _; repeated_count = _ }
   | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count = _ }
   | Runtime_agent.InputRequired { turns_used; request = _ } -> turns_used > 0
+;;
+
+(* The prompt-sent callback is the invocation boundary, including resumed
+   conversations. Configuration/admission errors before that boundary must not
+   invent a provider attempt. Failed invocations have no successful run_result
+   from which the receipt could otherwise obtain an observation. *)
+let official_client_observation ~runtime_id ~model_id ~prompt_sent_at ~now = function
+  | Ok (result : Runtime_agent.run_result) -> result.runtime_observation
+  | Error error ->
+    Option.map (fun started_at ->
+      let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+      Runtime_observation.record_attempt_terminal capture ~model_id
+        ~latency_ms:(Some (int_of_float (max 0.0 (now -. started_at) *. 1000.0)))
+        ~error:(Some (Agent_core.Error.to_string error));
+      Runtime_observation.runtime_observation_with_metrics
+        ~runtime_id ~selected_model_raw:None ~capture
+        ~attempt_details_source:"official_client_terminal_error"
+        ~agent_core_internal_runtime_allowed:false ()) prompt_sent_at
 ;;
 
 let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
@@ -250,9 +269,9 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = demote_unavailable_candidates ~now ~walk
-    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
+    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime_instance.quota_scope_of_runtime rt)
     ~candidate_backpressure_of:(fun (_, rt) ->
-      Option.map (fun (rt : Runtime.t) -> rt.candidate_backpressure) rt)
+      Option.map (fun (rt : Runtime_instance.t) -> rt.candidate_backpressure) rt)
     resolvable in
   List.map fst (ordered @ unresolvable)
 ;;
@@ -301,7 +320,7 @@ type next_dispatch =
 let path_rest ~now runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Path_serving
-  | Some (runtime : Runtime.t) ->
+  | Some (runtime : Runtime_instance.t) ->
     let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
     let rest_sec retry_class retry_after_hint =
       Keeper_runtime_failure_route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint
@@ -328,7 +347,7 @@ let path_rest ~now runtime_id =
           , promotes )
     in
     let quota_rest =
-      let scope = Runtime.quota_scope_of_runtime runtime in
+      let scope = Runtime_instance.quota_scope_of_runtime runtime in
       match Runtime_quota_window.active_until ~scope ~now with
       | Some resets_at -> Some (resets_at, true)
       | None ->
@@ -425,11 +444,11 @@ let assignment_walk_rest ~now assignment_id =
    (RFC-provider-path-rest §3.1).
 
    A deferred suffix names where the input goes next, and its walk decides.
-   Without a suffix the turn used every path the input may take: a rate limit
-   or quota waits for the failed path's rest, and no less than the moment a
-   fresh walk of the assignment can start on a serving path, so the wait never
-   ends on a head that still rests. Every other failure without a suffix has
-   no provider wait. *)
+   Without a suffix a multi-candidate assignment follows its fresh walk's
+   rest. A final candidate's quota does not rest siblings that failed for
+   unrelated reasons; a serving head returns to ordinary cadence, not an
+   immediate replay. A single/unresolved assignment also retains the failed
+   response's rest. Other failures without a suffix have no provider wait. *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
@@ -454,18 +473,31 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
     , None ) ->
-    let failed_release_at = route_release retry_class retry_after in
-    let release_at, waiting_on, basis =
-      match assignment_walk_rest ~now assignment_id with
-      | Walk_waits_until { release_at; resting_runtime_id }
-        when Float.compare release_at failed_release_at > 0 ->
-        release_at, resting_runtime_id, Observed_path_rest
-      | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
-        failed_release_at, assignment_id, Observed_path_rest
-      | Walk_head_serving _ ->
-        failed_release_at, assignment_id, Failure_response
-    in
-    Some (Wait_until { release_at; waiting_on; basis })
+    (match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
+     | Ok { order = _ :: _ :: _; _ } ->
+       (* The refusal names the last failed candidate, not every path in the
+          lane. Other candidates may already serve again after a transient
+          failure. Keep normal cadence when a fresh walk can start; only the
+          walk's own observed rest can delay all of its pending inputs. *)
+       (match assignment_walk_rest ~now assignment_id with
+        | Walk_head_serving _ -> None
+        | Walk_waits_until { release_at; resting_runtime_id } ->
+          Some (Wait_until
+            { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest }))
+     | Ok { order = [] | [ _ ]; _ }
+     | Error (Assignment_missing | Catalog_unavailable _) ->
+       let failed_release_at = route_release retry_class retry_after in
+       let release_at, waiting_on, basis =
+         match assignment_walk_rest ~now assignment_id with
+         | Walk_waits_until { release_at; resting_runtime_id }
+           when Float.compare release_at failed_release_at > 0 ->
+           release_at, resting_runtime_id, Observed_path_rest
+         | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
+           failed_release_at, assignment_id, Observed_path_rest
+         | Walk_head_serving _ ->
+           failed_release_at, assignment_id, Failure_response
+       in
+       Some (Wait_until { release_at; waiting_on; basis }))
   | ( ( Route.Retry_after_observed
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
@@ -641,7 +673,7 @@ let attempt_runtime_candidates
     | Some candidate_backpressure_of -> candidate_backpressure_of
     | None -> fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
+        |> Option.map (fun (runtime : Runtime_instance.t) -> runtime.candidate_backpressure)
   in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
@@ -680,7 +712,7 @@ let attempt_runtime_candidates
     | None ->
       fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.model.api_name)
+        |> Option.map (fun (runtime : Runtime_instance.t) -> runtime.model.api_name)
   in
   (* The refusal a candidate earns from the models that repeated so far: its
      served name and the terminal record that observed the repeat. One pure
@@ -1214,7 +1246,7 @@ let dedupe_runtimes_preserve_order runtimes =
   let rec loop seen acc = function
     | [] -> List.rev acc
     | runtime :: rest ->
-      let runtime_id = runtime.Runtime.id in
+      let runtime_id = runtime.Runtime_instance.id in
       if List.exists (String.equal runtime_id) seen then
         loop seen acc rest
       else
@@ -1243,10 +1275,10 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
     |> demote_unavailable_candidates
          ~now
          ~walk
-         ~quota_scope_of:(fun (runtime : Runtime.t) ->
-           Some (Runtime.quota_scope_of_runtime runtime))
-         ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
-           Some runtime.Runtime.candidate_backpressure)
+         ~quota_scope_of:(fun (runtime : Runtime_instance.t) ->
+           Some (Runtime_instance.quota_scope_of_runtime runtime))
+         ~candidate_backpressure_of:(fun (runtime : Runtime_instance.t) ->
+           Some runtime.Runtime_instance.candidate_backpressure)
 
 (* The media walk (every lane candidate that takes the media, live ones first),
    then the rest of the lane in its declared order as the degrade tail, where
@@ -1279,7 +1311,7 @@ let log_modality_reroute ~keeper_name ~assignment_id ~first_candidate_id = funct
       "%s: RFC-0265 modality reroute %s -> %s (assignment %s: %s)"
       keeper_name
       first_candidate_id
-      target.Runtime.id
+      target.Runtime_instance.id
       assignment_id
       reason
 
@@ -1313,7 +1345,7 @@ let project_input_for_attempt
     ~initial_messages
     ~agent_core_checkpoint
     ~runtime_id
-    (runtime : Runtime.t) =
+    (runtime : Runtime_instance.t) =
   let current_goal_blocks =
     match goal_blocks with
     | Some blocks -> blocks
@@ -1698,6 +1730,7 @@ let run_named
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
+    ?on_tool_execution
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -1989,7 +2022,7 @@ let run_named
     | first :: _ ->
       (match deferred_runtime_lane, lane_candidate_ids with
        | Some _, head_id :: _
-         when not (String.equal first.Runtime.id head_id) ->
+         when not (String.equal first.Runtime_instance.id head_id) ->
          (* The head rotated past ids a reload removed; the hint is spent
             the way a missing head spent it. Consume is idempotent. *)
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed
@@ -2139,13 +2172,13 @@ let run_named
        | Some hint -> hint.assignment_id
        | None -> runtime_id)
     ~runtime_id_of:(function
-      | Resolved_runtime runtime -> runtime.Runtime.id
+      | Resolved_runtime runtime -> runtime.Runtime_instance.id
       | Missing_runtime runtime_id -> runtime_id)
     ~quota_scope_of:(function
-      | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
+      | Resolved_runtime runtime -> Some (Runtime_instance.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
     ~candidate_backpressure_of:(function
-      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_backpressure
+      | Resolved_runtime runtime -> Some runtime.Runtime_instance.candidate_backpressure
       | Missing_runtime _ -> None)
     ~read_usage_after_account_refusal:(function
       | Resolved_runtime runtime ->
@@ -2158,7 +2191,7 @@ let run_named
       (* The served name comes from the same frozen snapshot as the quota
          scope and backpressure above: a runtime.toml reload mid-walk must not
          turn the same-model refusal off by dropping the id from the table. *)
-      | Resolved_runtime runtime -> Some runtime.Runtime.model.api_name
+      | Resolved_runtime runtime -> Some runtime.Runtime_instance.model.api_name
       | Missing_runtime _ -> None)
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml
@@ -2177,25 +2210,25 @@ let run_named
         , Keeper_provider_attempt_effect.No_effect_observed
         , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Resolved_runtime runtime ->
-      let agent_core_tools = match runtime.Runtime.execution, agent_ref with
+      let agent_core_tools = match runtime.Runtime_instance.execution, agent_ref with
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
       let source_reader_ready =
         if required_native_posture = Some Runtime_native_tools.Native_none
-           && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
+           && not (Runtime_execution.supports_native_none runtime.Runtime_instance.execution) then
           Error (Keeper_required_tools.to_core_error
             {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
         else match official_client_continuation with
         | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
-            || Runtime_execution.checkpoint_owner runtime.Runtime.execution <> Runtime_execution.Official_client ->
+            || Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution <> Runtime_execution.Official_client ->
           Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
-        | Some _ | None -> match recovery_view, runtime.Runtime.execution with
+        | Some _ | None -> match recovery_view, runtime.Runtime_instance.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
         | _ -> Ok () in
-      let has_tools, surface_enabled = match runtime.Runtime.execution with
+      let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
@@ -2226,7 +2259,7 @@ let run_named
       (* Native continuation already owns its input in the checkpoint. Official
          clients still need the explicit goal, including any media blocks. *)
       let goal_blocks =
-        match continue_from_checkpoint, runtime.Runtime.execution with
+        match continue_from_checkpoint, runtime.Runtime_instance.execution with
         | true, Runtime_execution.Agent_core _ -> None
         | _ -> goal_blocks
       in
@@ -2260,13 +2293,22 @@ let run_named
              ; runtime_id = attempt_runtime_id
              ; lane_attempt_index = idx
              ; checkpoint_owner =
-                 Runtime_execution.checkpoint_owner runtime.Runtime.execution
+                 Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution
              ; tool_result_inline_ceiling_bytes =
-                 Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime.execution
-             ; usage_report = Runtime_execution.usage_report runtime.Runtime.execution
+                 Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime_instance.execution
+             ; tool_surface_enabled = surface_enabled
+             ; usage_report = Runtime_execution.usage_report runtime.Runtime_instance.execution
              })
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
+      let official_prompt_sent_at = ref None in
+      let observe_official_result result =
+        Option.iter (fun observe ->
+          official_client_observation ~runtime_id:attempt_runtime_id
+            ~model_id:runtime.model.api_name ~prompt_sent_at:!official_prompt_sent_at
+            ~now:(Time_compat.now ()) result
+          |> Option.iter observe) on_runtime_observation
+      in
       let official_model_input_observation hooks =
         let attempted = ref None in
         let transmitted_observation = ref None in
@@ -2287,7 +2329,9 @@ let run_named
                         observation)
                    on_model_input_window_observation)
         in
-        let on_transmitted_model_input = function
+        let on_transmitted_model_input transmitted =
+          official_prompt_sent_at := Some (Time_compat.now ());
+          match transmitted with
           | Keeper_official_client_host.Whole_input_transmitted _ ->
             transmitted_observation := !attempted
           | Keeper_official_client_host.Held_by_client_session ->
@@ -2343,7 +2387,8 @@ let run_named
         in
         ( (fun () ->
             attempted := None;
-            transmitted_observation := None)
+            transmitted_observation := None;
+            official_prompt_sent_at := None)
         , on_observation
         , on_transmitted_model_input
         , hooks )
@@ -2354,13 +2399,13 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
-      (match runtime.Runtime.execution with
+      (match runtime.Runtime_instance.execution with
        | Runtime_execution.Agent_core _ -> ()
        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
          Log.Keeper.info ~keeper_name
            "input policy runtime=%s selected=%s context_owner=official_client applied=false"
            attempt_runtime_id (Keeper_input_policy.to_string input_policy));
-      match runtime.Runtime.execution with
+      match runtime.Runtime_instance.execution with
       | (Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
         | Runtime_execution.Antigravity_cli _
@@ -2387,6 +2432,8 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?on_tool_execution
+            ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
@@ -2506,12 +2553,7 @@ let run_named
                 ~terminal_effect_state
                 run_result)
         in
-        (match codex_result with
-         | Ok run_result ->
-           Option.iter
-             (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
-             on_runtime_observation
-         | Error _ -> ());
+        observe_official_result codex_result;
         ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
@@ -2629,13 +2671,7 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        (match antigravity_result with
-         | Ok run_result ->
-           Option.iter
-             (fun observe ->
-               Option.iter observe run_result.Runtime_agent.runtime_observation)
-             on_runtime_observation
-         | Error _ -> ());
+        observe_official_result antigravity_result;
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
@@ -2666,7 +2702,7 @@ let run_named
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run
             ?composed_context:official_client_composed_context
-            ~prompt_capacity:(Runtime.muse_prompt_capacity runtime)
+            ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime)
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope
@@ -2764,13 +2800,7 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        (match muse_result with
-         | Ok run_result ->
-           Option.iter
-             (fun observe ->
-               Option.iter observe run_result.Runtime_agent.runtime_observation)
-             on_runtime_observation
-         | Error _ -> ());
+        observe_official_result muse_result;
         ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
         , None
         , muse_attempt.effect_disposition
@@ -2894,13 +2924,7 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        (match claude_result with
-         | Ok run_result ->
-           Option.iter
-             (fun observe ->
-               Option.iter observe run_result.Runtime_agent.runtime_observation)
-             on_runtime_observation
-         | Error _ -> ());
+        observe_official_result claude_result;
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
@@ -2941,12 +2965,12 @@ let run_named
            Keeper_attempt_dispatch.Rejected_before_dispatch
          | Ok () ->
         (match
-           Runtime.validate_dispatch_credential ~provider_config runtime
+           Runtime_instance.validate_dispatch_credential ~provider_config runtime
          with
          | Error credential_error ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
            ( Error
-               (Runtime.dispatch_credential_error_to_core_error credential_error)
+               (Runtime_instance.dispatch_credential_error_to_core_error credential_error)
            , None
            , Keeper_provider_attempt_effect.No_effect_observed
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
@@ -2955,7 +2979,7 @@ let run_named
              declares them (RFC keeper-context-window-in-tokens §10.2); a binding
              that declares none leaves eviction to a refusal. Their agreement
              with the model's max-context was checked at load
-             ([Runtime.validate_runtime_context_marks]). *)
+             ([Runtime_config_validation.validate_runtime_context_marks]). *)
           (let context_marks =
              Runtime.context_marks_of_runtime_id attempt_runtime_id
            in
@@ -3163,6 +3187,7 @@ module For_testing = struct
 
   let selected_runtime_result = selected_runtime_result
   let provider_attempt_dispatch = provider_attempt_dispatch
+  let official_client_observation = official_client_observation
   let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision

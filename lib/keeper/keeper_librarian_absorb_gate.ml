@@ -741,6 +741,19 @@ let copy_check_to_yojson { claim_id; sources; verdict; requests } =
      @ [ "requests", `Int requests ])
 ;;
 
+let evaluation_request_to_yojson ~direction ~destinations ~state ~questions =
+  `Assoc
+    [ "direction", `String (direction_to_string direction)
+    ; "request", `Assoc
+        [ "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
+        ; "state", state
+        ; "questions", `Assoc
+            (List.map (fun (id, question) -> id, Typesafeai_types.question_to_yojson question)
+               questions)
+        ]
+    ]
+;;
+
 let evaluation_to_yojson { direction; destinations; state; questions; result } =
   let response =
     match result with
@@ -784,14 +797,9 @@ let evaluation_to_yojson { direction; destinations; state; questions; result } =
      this durable report so each answer remains interpretable; the outbound
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
-    @ [ "direction", `String (direction_to_string direction)
-      ; "request", `Assoc
-          [ "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
-          ; "state", state
-          ; "questions", `Assoc
-              (List.map (fun (id, question) -> id, Typesafeai_types.question_to_yojson question)
-                 questions)
-          ] ])
+    @ match evaluation_request_to_yojson ~direction ~destinations ~state ~questions with
+      | `Assoc fields -> fields
+      | _ -> [])
 ;;
 
 let run_result_to_yojson result =
@@ -910,7 +918,18 @@ let log_copy_checks ~keeper_id checks =
       checks
 ;;
 
-let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () =
+let run
+    ?observe
+    ?before_evaluate
+    ?after_evaluate
+    ?on_evaluation_aborted
+    ?clock
+    ~keeper_id
+    ~facts
+    ~new_claims
+    ~superseding
+    ~absorbed
+    () =
   let publish observation = Option.iter (fun notify -> notify observation) observe in
   let complete result = publish (Complete result); result in
   match absorbed with
@@ -963,8 +982,38 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () 
           value as provenance). *)
        let evaluations = ref [] in
        let evaluate direction ~state ~questions =
-         let result = Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () in
-         evaluations := { direction; destinations; state; questions; result } :: !evaluations;
+         let evaluation_id =
+           Option.map
+             (fun start -> start ~direction ~destinations ~state ~questions)
+             before_evaluate
+         in
+         let result =
+           try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
+           | Eio.Cancel.Cancelled _ as exn ->
+             Option.iter
+               (fun abort ->
+                  Option.iter
+                    (fun id -> abort ~evaluation_id:id `Cancelled)
+                    evaluation_id)
+               on_evaluation_aborted;
+             raise exn
+           | exn ->
+             Option.iter
+               (fun abort ->
+                  Option.iter
+                    (fun id -> abort ~evaluation_id:id (`Failed (Printexc.to_string exn)))
+                    evaluation_id)
+               on_evaluation_aborted;
+             raise exn
+         in
+         let evaluation = { direction; destinations; state; questions; result } in
+         evaluations := evaluation :: !evaluations;
+         Option.iter
+           (fun finish ->
+              Option.iter
+                (fun id -> finish ~evaluation_id:id evaluation)
+                evaluation_id)
+           after_evaluate;
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string

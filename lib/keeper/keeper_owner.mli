@@ -264,6 +264,10 @@ val projection : t -> Keeper_owner_reducer.projection
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
 
+val await_claimable_operation : t -> bool
+(** Wait for a durable claimable queued operation without consuming it. Returns
+    false when the owner closes. Cancellation unregisters the condition waiter. *)
+
 val wake_operation_drain : t -> (unit, error) result
 (** Reconsider existing Queued rows after the operation runner's dependency
     becomes ready. This command never changes sequence or state itself.
@@ -308,10 +312,12 @@ val run_autonomous_if_idle
     with that exception, so the callback's own return value is not available. *)
 
 val run_maintenance_if_idle
-  :  t
+  :  ?defer_to_chat:bool
+  -> t
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
-(** Mailbox-linearized exclusive maintenance attempt. *)
+(** Mailbox-linearized exclusive maintenance attempt. [defer_to_chat] fences
+    background work behind queued/running chat and unavailable operation stores. *)
 
 val begin_shutdown
   :  t
@@ -357,6 +363,13 @@ val has_newer_original_queued
   :  t
   -> operation_id:Chat_operation.Operation_id.t
   -> (bool, error) result
+
+val await_newer_original_operation
+  : t -> operation_id:Chat_operation.Operation_id.t -> bool
+(** Wait for later original input while the named direct operation is running.
+    Queued continuations do not trigger a handoff. Returns false if the operation
+    stops running, the store cannot be read or the owner closes. Cancellation
+    unregisters the condition waiter; no timer or polling loop is installed. *)
 
 (** The running operations {!start} settled as [Interrupted_by_restart], as
     they were read before settlement. The registry leaves a failure row in the

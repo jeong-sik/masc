@@ -256,6 +256,7 @@ let fanout_provider ~id ~url =
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
   ; wire_kind = None
+  ; max_context = None
   ; transport = Http url
   ; is_non_interactive = true
   ; credentials = Some (Inline "probe-test-token")
@@ -294,6 +295,7 @@ let fanout_binding ~provider_id ~is_default =
   ; enabled = true
   ; is_default
   ; wizard_default = false
+  ; max_context = None
   ; max_concurrent = None
   ; disable_parallel_tool_use = false
   ; context_marks = None
@@ -328,11 +330,11 @@ let fanout_runtimes () =
     }
   in
   let materialize binding =
-    match Runtime.of_binding config binding with
+    match Runtime_instance.of_binding config binding with
     | Ok runtime -> runtime
     | Error reason ->
       failf "expected fan-out runtime to materialize: %s"
-        (Runtime.string_of_drop_reason reason)
+        (Runtime_config_error.string_of_drop_reason reason)
   in
   [ materialize binding_a; materialize binding_b ]
 
@@ -397,7 +399,7 @@ let test_switch_fanout_runs_providers_concurrently_in_order () =
    | _ -> failf "missing probe events: %s" trace_text);
   let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
   check (list string) "rows keep input order"
-    (List.map (fun (rt : Runtime.t) -> rt.id) runtimes)
+    (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes)
     (List.map
        (fun row -> Yojson.Safe.Util.(member "runtime_id" row |> to_string))
        providers);

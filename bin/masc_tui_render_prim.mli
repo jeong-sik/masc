@@ -1,14 +1,6 @@
-(** Rendering primitives shared across every surface.
-
-    The set is computed, not curated, and the rule is now the whole rule: a
-    value that two or more screens reach belongs below both of them. It used
-    to be ten, which left the helpers shared by a handful of screens in the
-    godfile -- and those are exactly the ones that turn into a cycle the next
-    time a surface is lifted out. Six of them did, once. The rest are here
-    before they can.
-
-    31 values live in the implementation without appearing here. They are
-    the pieces the exported ones are built from, and no surface names them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 (* The same scope the implementation has, so the signatures read the way
    they are written there. *)
@@ -67,6 +59,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -348,7 +341,6 @@ val lexed_span : string * String.t -> string
 
 val keeper_lane_idle_text : int -> string
 
-val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
@@ -621,3 +613,8 @@ val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 
 val answering_preview_rows : int
+
+(** Common title and content geometry for surfaces with two panes. *)
+val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
+  name:string -> split:bool -> unit
+val pane_surface_content_height : rows:int -> int

@@ -116,7 +116,7 @@ let test_a_move_past_either_end_is_no_move () =
 let lane_state () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
@@ -359,7 +359,7 @@ let test_cli_probe_is_a_note () =
 let authority_state () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture";
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture";
       rrs_config_path = Some "/Users/operator/work/.masc/config/runtime.toml";
       rrs_default_runtime_id = Some "assigned";
       rrs_media_failover = []; rrs_media_failover_declared = [];
@@ -420,7 +420,7 @@ let test_the_authority_row_spells_its_config_path_whole () =
 let test_search_follows_the_runtime_mode () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "assigned";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
@@ -432,7 +432,7 @@ let test_search_follows_the_runtime_mode () =
   state.runtime_surface <- Some snapshot;
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
-      (Some expected) (surface_row_texts state Runtime);
+      (Some expected) (Masc_tui_surface_search.surface_row_texts state Runtime);
     match runtime_scrolled ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
@@ -441,19 +441,19 @@ let test_search_follows_the_runtime_mode () =
   state.runtime_mode <- Runtime_all;
   expect_rows ["unassigned"; "assigned"];
   Alcotest.(check (option int)) "unassigned runtime is searchable" (Some 1)
-    (surface_search_count state Runtime ~query:"unassigned");
+    (Masc_tui_surface_search.surface_search_count state Runtime ~query:"unassigned");
   Alcotest.(check (option int)) "hidden lane does not contribute" (Some 0)
-    (surface_search_count state Runtime ~query:"lane-only");
+    (Masc_tui_surface_search.surface_search_count state Runtime ~query:"lane-only");
   state.runtime_detail_target <- Some (Runtime_catalog_entry {runtime_id = "assigned"});
   Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
-    (surface_row_texts state Runtime)
+    (Masc_tui_surface_search.surface_row_texts state Runtime)
 
 (* Opening a detail, then receiving a reordered listing, must not turn an
    Enter/Right press in the reader into a selection of the hidden cursor. *)
 let test_runtime_detail_keeps_its_owner () =
   let snapshot ids =
     let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-      { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
         rrs_default_runtime_id = None;
         rrs_media_failover = []; rrs_media_failover_declared = [];
         rrs_runtimes = List.map runtime ids;
@@ -573,7 +573,7 @@ let test_every_row_fits_the_frame () =
          (Printf.sprintf "%d columns: the row stays inside the frame" cols)
          true
          (row <= Masc_tui_frame.inner_width ~cols))
-    [ 80; 100; 120; 160; 200 ]
+    [ 40; 60; 80; 100; 120; 160; 200 ]
 
 (* The facts a narrow row drops, and the one it keeps. *)
 let test_narrow_rows_keep_the_fact_that_is_said_nowhere_else () =
@@ -880,7 +880,7 @@ let fact_text = function
 let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
@@ -927,7 +927,7 @@ let test_the_picker_offers_only_declared_lanes () =
 let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [ "a"; "b" ]) () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
       rrs_media_failover = admitted; rrs_media_failover_declared = declared;
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
@@ -1364,8 +1364,44 @@ let test_the_keeper_picker_goes_through_the_shared_list () =
     (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_pick_label"
        "runtime_pick_columns")
 
+let test_account_usage_stays_spent_until_new_report () =
+  let open Masc.Tui_decode_usage in
+  let snapshot = match (lane_state ()).runtime_surface with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "missing fixture" in
+  let window = { puw_limit_id = Some "account-bucket";
+    puw_kind = Window_seven_day; puw_role = Role_gates_model_calls;
+    puw_utilization = Utilization_percent 100; puw_resets_at = Some 1.;
+    puw_observed_at = 0. } in
+  let account window = { pua_scope = "account:1"; pua_scope_id = "fixture";
+    pua_providers = []; pua_state = Account_reported (window, []) } in
+  let resolved window = { snapshot.rss_resolved with
+    rrs_usage = Ok { puws_since = 0.; puws_accounts = [account window] } } in
+  let rt = { (runtime "a") with ro_quota_scope = Some "account:1" } in
+  let count resolved rt = match runtime_spent_usage resolved rt with
+    | Ok windows -> List.length windows
+    | Error detail -> Alcotest.fail detail in
+  expect "past reset and no refusal do not clear observed spending" 1
+    (count (resolved window) rt);
+  expect "new report below limit clears warning" 0
+    (count (resolved {window with puw_utilization = Utilization_percent 99}) rt);
+  expect "rounded display100 is not actual exhaustion" 0
+    (count (resolved {window with puw_utilization = Utilization_fraction 0.999}) rt);
+  expect "non-model-call bucket does not warn" 0
+    (count (resolved {window with puw_role = Role_counts_other_use}) rt);
+  expect "unclassified bucket does not assert model-call exhaustion" 0
+    (count (resolved {window with puw_role = Role_unclassified_limit}) rt);
+  Alcotest.(check bool) "another account does not inherit evidence" true
+    (Result.is_error (runtime_spent_usage (resolved window)
+       {rt with ro_quota_scope = Some "account:2"}));
+  Alcotest.(check bool) "failed usage decode stays unknown" true
+    (Result.is_error (runtime_spent_usage
+       {snapshot.rss_resolved with rrs_usage = Error "bad report"} rt))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
+      Alcotest.test_case "account usage survives reset until new report" `Quick
+        test_account_usage_stays_spent_until_new_report;
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
       Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
       Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;

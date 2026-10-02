@@ -107,7 +107,7 @@ let same_confirmation_binding left right =
 
 let confirmation_lines ~width { goal_id; verdict; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
-  [ "CONFIRM THIS PROOF — [a] confirms; Esc cancels"
+  [ "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels"
   ; "Goal: " ^ goal_id
   ; "Title: " ^ criterion.title
   ; "Target: " ^ Option.value criterion.metric ~default:"not declared"
@@ -182,8 +182,7 @@ let body ~width proof last_review_note =
        | [] -> [ { tone = Quiet; text = "no verdict on the ledger" } ]
        | rows -> { tone = Quiet; text = "no verdict on the ledger" } :: rows)
 
-(* "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
-   rather than guessed at. *)
+(* Shared with Task history; Goal activity uses the full source timestamp. *)
 let short_ts ts =
   if String.length ts >= 16 then
     String.sub ts 5 5 ^ " " ^ String.sub ts 11 5
@@ -211,11 +210,6 @@ let subject (event : Tui_decode.goal_timeline_event) =
       String.sub event.gt_lane (index + 1)
         (String.length event.gt_lane - index - 1)
   | None -> event.gt_kind
-
-(* Wide enough for "task-1013" and a uuid-shaped approval id's readable head.
-   The column is padded so the titles start at one place down the block; what
-   overruns is cut by [fit_width], which marks the cut. *)
-let subject_column = 18
 
 (* Title first, state after: the title names the row and the summary qualifies
    it. A task's summary is its status ("todo"), an approval's is its input
@@ -253,8 +247,7 @@ let timeline ~width ~goal_id
                 let tone = severity_tone event.gt_severity in
                 let subject = subject event in
                 wrapped ~width tone
-                  (Printf.sprintf "  %s  %s  %s" (short_ts event.gt_ts)
-                     (Message_layout.fit_width subject subject_column)
+                  (Printf.sprintf "  %s  %s  %s" event.gt_ts subject
                      (headline ~subject event)))
               events
         | Ok (Tui_decode.Goal_timeline_unavailable failure) ->

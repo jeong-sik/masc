@@ -37,6 +37,11 @@ val heartbeat_message : heartbeat_outcome -> string
 val heartbeat :
   Workspace_utils_backend_setup.config -> agent_name:string -> heartbeat_outcome
 
+(** [tasks-archive.json] could not take the tasks {!gc} was about to archive
+    (unreadable, unparsable, or a failed write). The payload names the file and
+    the cause. The backlog was not changed. *)
+exception Task_archive_failed of string
+
 (** Run the explicit workspace garbage-collection pass. [days] has no default:
     the caller owns the retention decision rather than inheriting a fixed
     runtime heuristic.
@@ -54,6 +59,18 @@ val heartbeat :
     {!Workspace_task_id.append_archive_tasks}; restored tasks are removed from
     it via {!Workspace_task_id.drop_archive_tasks}.  The backlog is rewritten
     with [version + 1] when anything changes.  Returns a multi-line summary
-    string. *)
+    string.
+
+    Order of the writes: archived tasks go into the archive before the backlog
+    commit that removes them, so a crash between the two leaves them in both
+    stores and the next pass finishes the job. Restored tasks go the other
+    way, into the backlog before the archive drop. The orphan snapshot, backlog
+    commit and archive cleanup all run under the shared backlog lock, so another
+    GC pass cannot restore an older copy or remove a newly archived terminal row.
+    Nested archive locks are always acquired after the backlog lock.
+
+    Raises {!Task_archive_failed} when the archive cannot take the tasks to
+    archive, before the backlog is touched. Raises [Backlog_read_failed] when
+    the backlog cannot be read. *)
 val gc :
   Workspace_utils_backend_setup.config -> days:int -> unit -> string

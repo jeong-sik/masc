@@ -408,6 +408,8 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
 ;;
 
 let assemble_hooks
+      ?preview
+      ?observation_token
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
       ~(turn_system_prompt : string)
@@ -559,6 +561,7 @@ let assemble_hooks
            Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
              meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
+    let active_tool_surface_enabled = ref false in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
     let client_reported_in_attempt = ref false in
@@ -576,6 +579,7 @@ let assemble_hooks
           reading_name
     in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+      active_tool_surface_enabled := attempt.tool_surface_enabled;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       usage_report_of_attempt := Some attempt.usage_report;
       client_reported_in_attempt := false;
@@ -606,6 +610,8 @@ let assemble_hooks
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
+        ?preview
+        ?observation_token
         ~config
         ~meta_ref
         ~turn_ctx_cell
@@ -793,7 +799,7 @@ let assemble_hooks
               | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
                 (* A pre-hook observes a request, before validation/approval.
                    Include Skill without claiming the handler has started. *)
-                Keeper_turn_preview.note_tool ~keeper_name:meta.name
+                Keeper_turn_preview.note_tool ~writer:preview
                   ~now:(Time_compat.now ()) tool_name;
                 if not (String.equal tool_name
                           Keeper_tool_composition_catalog.skill_tool_name)
@@ -841,6 +847,7 @@ let assemble_hooks
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started
+                  ~observation_token
                   ~base_path:config.base_path
                   meta.name;
                 (* [enable_thinking] and [preserve_thinking] are not rewritten
@@ -947,6 +954,17 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let recall_tool_available name =
+                  !active_tool_surface_enabled
+                  && (match current_params.tool_choice with
+                      | Some Agent_core.Types.None_ -> false
+                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
+                  && List.mem name schema_filter
+                  && List.exists (fun (tool : Agent_core.Tool.t) ->
+                       String.equal tool.schema.name name)
+                       (Keeper_agent_tool_surface.on_the_wire
+                          ~agent_cell:turn_agent_cell ~built:built_tools)
+                in
                 let dynamic_context =
                   match dynamic_context_for_tools with
                   | Some project when not post_tool_round ->
@@ -959,25 +977,26 @@ let assemble_hooks
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
-                   Never scan a growing queue or serialize all pockets while
-                   the user is waiting for the first model request. Only offer
-                   a reference when its in-process reader is on this surface. *)
+                   Ordinary recall reads this index without scanning the queue;
+                   damaged derived artifacts are repaired on this IO worker
+                   from authoritative context. Only offer a reference when
+                   its in-process reader is on this surface. *)
                 let working_context_recall = if not post_tool_round
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_librarian_context_recall.render
+                     Keeper_librarian_context_recall.render ~base_path:config.base_path
                        ~artifact_reader_available:
-                         (List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter)
+                         (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                        ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())
                  else None in
                 (if not post_tool_round
                  then
                    let ordinary_recall =
-                     (* Memory OS recall — advisory block rendered from every
-                        persisted current fact in stored order. Source-bound
-                        facts are revalidated here; a changed source atomically
-                        replaces its fact with an invalidation before the block
-                        is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
+                     (* Search-capable recall injects store availability and
+                        lookup guidance only. Source claims are revalidated at
+                        retrieval, not while preparing every turn. Artifact-only
+                        surfaces use a retained paged projection instead.
+                        On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
                         turns it off.
                         The work is skipped, not just filtered, on post-tool
                         rounds: the block would be dropped at assembly anyway. *)
@@ -988,6 +1007,9 @@ let assemble_hooks
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~memory_search_available:(recall_tool_available "keeper_memory_search")
+                         ~artifact_reader_available:
+                           (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                          ~config
                          ~meta
                          ~keepers_dir:memory_os_keepers_dir
@@ -1133,10 +1155,12 @@ let assemble_hooks
                   ();
                 (ignore hook_t0;
                  Keeper_registry.set_turn_decision_stage
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name
                    Keeper_registry.Decision_active_tool_policy_selected;
                  Keeper_registry.set_turn_phase
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name
                    (Keeper_registry.Packed Keeper_registry.Turn_routing);
@@ -1157,6 +1181,7 @@ let assemble_hooks
                    trying] which is admitted by
                    [validate_runtime_transition]. *)
                  Keeper_registry.mark_turn_provider_attempt_started
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name);
                 (* RFC-0233 PR-3 + #20936: snapshot this agent-core turn's

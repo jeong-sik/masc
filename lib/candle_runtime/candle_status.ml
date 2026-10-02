@@ -40,9 +40,17 @@ let ensure_recovered ~base_path =
 ;;
 
 (* Installed by the server, so this library never depends on lane registry code.
-   Uninstalled is an observable disabled state, never implicit permission. *)
+   Availability gates appraisal; durable Goal facts use policy and ledger only. *)
 let appraiser_check = Atomic.make (fun () -> Error "candle_appraiser availability is not installed")
 let install_appraiser_check check = Atomic.set appraiser_check check
+
+let with_recovered_ledger ~base_path = function
+  | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
+  | Candle_config.Enabled policy ->
+    (match ensure_recovered ~base_path with
+     | Recovered | Locked_by_another_process -> Candle_config.Enabled policy
+     | Not_recoverable reason -> Candle_config.Disabled { reason })
+;;
 
 let configured ~base_path =
   match Candle_config.load ~base_path with
@@ -53,14 +61,77 @@ let configured ~base_path =
      | Ok () -> Candle_config.Enabled policy)
 ;;
 
+let ( let* ) = Result.bind
+
+type prepared = {
+  events : Candle_event.t list;
+  policy_events : Candle_event.t list;
+  balance : Candle_balance.t;
+}
+let prepare ~at ~half_life events =
+  let* balance = Candle_balance.of_events ~at events in
+  if Candle_balance.half_life balance = Some half_life then
+    Ok {events;policy_events=[];balance}
+  else
+    let* balance = Candle_balance.set_half_life balance ~at half_life in
+    let policy_events = [{Candle_event.at;body=Candle_event.Half_life_set half_life}] in
+    Ok {events=events @ policy_events;policy_events;balance}
+
+type view = {
+  policy : Candle_config.policy;
+  at : Candle_time.t;
+  events : Candle_event.t list;
+  balance : Candle_balance.t;
+}
+type error =
+  | Off
+  | Disabled of string
+  | Invalid_time of string
+  | Invalid_ledger of Candle_balance.error
+  | Ledger_unavailable of string
+let error_to_string = function
+  | Off -> "Candle is off"
+  | Disabled reason -> "Candle is disabled: " ^ reason
+  | Invalid_time detail | Ledger_unavailable detail -> detail
+  | Invalid_ledger error -> Candle_balance.error_to_string error
+
+let enabled ~base_path = match configured ~base_path with
+  | Candle_config.Off -> Error Off
+  | Candle_config.Disabled {reason} -> Error (Disabled reason)
+  | Candle_config.Enabled policy -> Ok policy
+
+let observed_view ~now ~base_path =
+  let* policy = enabled ~base_path in
+  let* ledger = Candle_ledger.read ~base_path
+    |> Result.map_error (fun error -> Ledger_unavailable (Candle_ledger.read_error_to_string error)) in
+  let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+  let events = Candle_ledger.events ledger in
+  let* balance = Candle_balance.of_events ~at events
+    |> Result.map_error (fun error -> Invalid_ledger error) in
+  Ok {policy;at;events;balance}
+
+let current_view ~now ~base_path =
+  let* (_ : Candle_config.policy) = enabled ~base_path in
+  Candle_ledger.update ~base_path (fun ledger ->
+    let* policy = enabled ~base_path in
+    let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> Invalid_time detail) in
+    let* prepared = prepare ~at ~half_life:policy.half_life (Candle_ledger.events ledger)
+      |> Result.map_error (fun error -> Invalid_ledger error) in
+    Ok (prepared.policy_events, {policy;at;events=prepared.events;balance=prepared.balance}))
+  |> Result.map_error (function
+    | Candle_ledger.Refused error -> error
+    | (Candle_ledger.Read_failed _ | Candle_ledger.Event_unwritable _
+      | Candle_ledger.Write_failed _ | Candle_ledger.Write_locked _) as error ->
+      Ledger_unavailable (Candle_ledger.update_error_to_string error_to_string error))
+
 let current ~base_path =
-  match configured ~base_path with
-  | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
-  | Candle_config.Enabled policy ->
-    (match ensure_recovered ~base_path with
-       | Recovered | Locked_by_another_process -> Candle_config.Enabled policy
-       | Not_recoverable reason -> Candle_config.Disabled { reason })
+  with_recovered_ledger ~base_path (configured ~base_path)
 ;;
+
+let for_recording ~base_path =
+  with_recovered_ledger ~base_path (Candle_config.load ~base_path)
+;;
+
 
 let report_at_start ~base_path =
   match current ~base_path with

@@ -14,6 +14,13 @@ val masc_root_dir_from :
 
 val masc_root_dir : config -> string
 
+type expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+val validate_expected_workspace :
+  config:config -> Yojson.Safe.t -> (Yojson.Safe.t, expected_workspace_error) result
+
 (** Default-cluster shortcut for callers holding only [base_path]
     (#8355: stops re-inlining [<base>/.masc] across non-workspace
     callsites). *)

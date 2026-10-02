@@ -1,6 +1,9 @@
-// Keeper portrait: the candle imp the server draws from the keeper's name.
+import { keeperEquipmentKey, type KeeperEquipment, type KeeperPortraitReading } from '../lib/keeper-portrait'
+// Keeper portrait: the name's body wearing the server-observed equipment.
 //
-// GET /api/v1/keepers/:name/portrait.png?size=N is authorised like the
+// GET /api/v1/keepers/:name/portrait.png?size=N&expected_equipment=JSON
+// binds the bytes to the observed equipment using the existing strict codec.
+// A changed current outfit is refused before PNG/304 publication. It is authorised like the
 // keeper's other reads: open on a loopback server, a token once HTTP auth is
 // strict. A bare <img src> cannot send the dashboard's token, so the PNG is
 // fetched with authHeaders() and shown through an object URL, the way
@@ -8,10 +11,10 @@
 // strong ETag and `Cache-Control: no-cache`; the fetch asks with
 // `cache: 'no-cache'`, so the browser keeps the file and only revalidates it.
 //
-// When the portrait cannot load (an older server, a keeper that is gone, a
+// When the portrait cannot load (a keeper that is gone, a
 // refused token) the caller's fallback is drawn instead, so the header never
 // shows a broken image icon. A failure is kept for this mount only: opening
-// the keeper again asks once more, and nothing retries on its own.
+// the keeper again or accepting a newer account observation asks once more.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -30,12 +33,14 @@ export const PORTRAIT_MAX_PX = 512
 // Pixels requested per CSS pixel, so the portrait stays sharp on a 2x screen.
 const DEVICE_PIXELS_PER_CSS_PIXEL = 2
 
-export function keeperPortraitUrl(name: string, cssPx: number): string {
+export function keeperPortraitUrl(name: string, cssPx: number, expectedEquipment?: KeeperEquipment, previewItem?: string): string {
   const px = Math.min(
     PORTRAIT_MAX_PX,
     Math.max(PORTRAIT_MIN_PX, Math.round(cssPx * DEVICE_PIXELS_PER_CSS_PIXEL)),
   )
   return `/api/v1/keepers/${encodeURIComponent(name)}/portrait.png?size=${px}`
+    + (previewItem === undefined ? '' : `&preview=${encodeURIComponent(previewItem)}`)
+    + (expectedEquipment === undefined ? '' : `&expected_equipment=${encodeURIComponent(JSON.stringify(expectedEquipment))}`)
 }
 
 /** The PNG at [path], asked for with the dashboard's token. Throws
@@ -60,48 +65,64 @@ export async function fetchKeeperPortrait(
 }
 
 type Portrait =
-  | { kind: 'loading'; path: string }
-  | { kind: 'shown'; path: string; objectUrl: string }
-  | { kind: 'failed'; path: string }
+  | { kind: 'loading'; identity: string }
+  | { kind: 'shown'; identity: string; objectUrl: string }
+  | { kind: 'failed'; identity: string; message: string }
 
 export interface KeeperPortraitProps {
+  /** An accessory to draw in place of its slot, without changing equipment. */
+  previewItem?: string
   name: string
+  reading: KeeperPortraitReading
+  accountRevision?: string | null
   /** Drawn width and height in CSS pixels; fixed so nothing shifts while it loads. */
   sizePx: number
   /** Drawn instead when the portrait cannot load. */
   fallback: VNode
 }
 
-export function KeeperPortrait({ name, sizePx, fallback }: KeeperPortraitProps) {
-  const path = keeperPortraitUrl(name, sizePx)
-  const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', path })
+export function KeeperPortrait({ name, reading, accountRevision, sizePx, fallback, previewItem }: KeeperPortraitProps) {
+  const path = keeperPortraitUrl(name, sizePx, reading.state === 'ready' ? reading.equipment : undefined, previewItem)
+  const equipmentKey = reading.state === 'ready' ? keeperEquipmentKey(reading.equipment) : null
+  const identity = JSON.stringify([path, equipmentKey, accountRevision])
+  const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', identity })
 
   // Synchronises with two things outside Preact: the request, and the object
-  // URL's lifetime. Each path gets one request; leaving the path or unmounting
+  // URL's lifetime. Each path and equipment snapshot gets one request; changing either or unmounting
   // aborts it and revokes the URL it made.
   useEffect(() => {
+    if (equipmentKey === null) {
+      setPortrait({ kind: 'loading', identity })
+      return
+    }
     const controller = new AbortController()
     let objectUrl: string | null = null
     fetchKeeperPortrait(path, { signal: controller.signal })
       .then(blob => {
         if (controller.signal.aborted) return
         objectUrl = URL.createObjectURL(blob)
-        setPortrait({ kind: 'shown', path, objectUrl })
+        setPortrait({ kind: 'shown', identity, objectUrl })
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setPortrait({ kind: 'failed', path })
+      .catch(error => {
+        if (!controller.signal.aborted) setPortrait({ kind: 'failed', identity,
+          message: error instanceof ApiRequestError && error.status === 409
+            ? '초상화 장비 관측이 변경되었습니다. 최신 Keeper 관측이 필요합니다.'
+            : '초상화를 읽지 못했습니다.' })
       })
     return () => {
       controller.abort()
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
     }
-  }, [path])
+  }, [path, identity, equipmentKey])
 
   // A state left from the previous path is not this path's answer.
-  const current: Portrait = portrait.path === path ? portrait : { kind: 'loading', path }
+  if (reading.state === 'unavailable') {
+    return html`<span title=${reading.reason} data-testid="keeper-portrait-unavailable">${fallback}</span>`
+  }
+  const current: Portrait = portrait.identity === identity ? portrait : { kind: 'loading', identity }
   switch (current.kind) {
     case 'failed':
-      return fallback
+      return html`<span title=${current.message} data-testid="keeper-portrait-refused">${fallback}</span>`
     case 'loading':
       return html`<span
         class="block shrink-0 rounded-full"
@@ -119,7 +140,7 @@ export function KeeperPortrait({ name, sizePx, fallback }: KeeperPortraitProps) 
         decoding="async"
         class="block shrink-0 rounded-full"
         data-testid="keeper-portrait"
-        onError=${() => setPortrait({ kind: 'failed', path })}
+        onError=${() => setPortrait({ kind: 'failed', identity, message: '초상화 이미지가 유효하지 않습니다.' })}
       />`
   }
 }

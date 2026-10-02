@@ -1,0 +1,15 @@
+{
+  "base_commit": "68db59f7d7ea05fe4f8128c84eebda69788c47f2",
+  "working_tree_delta": "scroll normalization before capture",
+  "source_sha256": {
+    "dashboard/e2e/keeper-items.mjs": "f35689102eb34661e53267eb7a01f4cac231fc59770d46a5d291428e01ad3565",
+    "dashboard/src/components/keeper-items-panel.ts": "bc6fce45474fc2deb5992caecc424611cfbe3949fe666b6087abd7ab2553a6d1",
+    "dashboard/src/components/keeper-portrait.ts": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8"
+  },
+  "command": "node e2e/keeper-items.mjs",
+  "exit_code": 1,
+  "scope": "actual Chromium against local Vite production components with synthetic account HTTP and portrait PNG503; no native, installed, CI or build proof",
+  "artifacts": {
+    "initial-server-not-ready.log": "5e7e4ab1840788d673b371af8ca2b530c355b14e689ebcf71781398f1db8ab88"
+  }
+}

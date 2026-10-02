@@ -2,10 +2,16 @@ module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Backpressure = Runtime_candidate_backpressure
 
-let candidate_of_slot slot_id =
-  Option.map
-    (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
-    (Runtime.get_runtime_by_id slot_id)
+let observation_of_slot (resolved : Registry.resolved_lane) slot_id =
+  Option.bind
+    (List.find_opt (fun (slot : Registry.selected_slot) -> slot.slot_id = slot_id)
+       resolved.selected_slots)
+    (fun slot -> slot.Registry.runtime_observation)
+;;
+
+let candidate_of_slot ~resolved slot_id =
+  Option.map (fun (observation : Registry.runtime_observation) -> observation.candidate)
+    (observation_of_slot resolved slot_id)
 ;;
 
 (* The same two stores the Keeper walk reads to demote a path
@@ -21,18 +27,18 @@ let candidate_of_slot slot_id =
    the path answers, because a later rotation still reaches it; an Exact lane
    whose siblings keep answering never would, so here the rest ends and the
    slot is tried in its declared place again. *)
-let resting ~now slot_id =
-  match Runtime.get_runtime_by_id slot_id with
+let resting ~now (slot : Registry.selected_slot) =
+  match slot.runtime_observation with
   | None -> false
-  | Some (runtime : Runtime.t) ->
+  | Some (observation : Registry.runtime_observation) ->
     let quota_exhausted =
       Runtime_quota_window.is_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime runtime)
+        ~scope:observation.quota_scope
         ~now
     in
     let rate_limited =
       match
-        Backpressure.candidate_backpressure ~now ~candidate:runtime.candidate_backpressure
+        Backpressure.candidate_backpressure ~now ~candidate:observation.candidate
       with
       | Some
           { Backpressure.rate_limit =
@@ -54,7 +60,7 @@ let resting ~now slot_id =
 let order_at ~now (resolved : Registry.resolved_lane) =
   let serving, resting =
     List.partition
-      (fun (slot : Registry.selected_slot) -> not (resting ~now slot.slot_id))
+      (fun (slot : Registry.selected_slot) -> not (resting ~now slot))
       resolved.selected_slots
   in
   { resolved with selected_slots = serving @ resting }
@@ -66,12 +72,12 @@ let order resolved =
   order_at ~now:(Unix.gettimeofday ()) resolved
 ;;
 
-let note_cause ~slot_id (cause : Exact.execution_error_cause) =
+let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   match cause with
   | Exact.Provider_response_refused { refusal = Exact.Rate_limited; retry_after_s; _ } ->
     Option.iter
       (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after:retry_after_s)
-      (candidate_of_slot slot_id)
+      (candidate_of_slot ~resolved slot_id)
   | Exact.Provider_response_refused _
   | Exact.Completion_failed _
   | Exact.Response_body_deadline_exceeded
@@ -82,64 +88,64 @@ let note_cause ~slot_id (cause : Exact.execution_error_cause) =
   | Exact.Invalid_json_output -> ()
 ;;
 
-let note_answered (success : Exact.flow_success) =
+let note_answered ~resolved (success : Exact.flow_success) =
   let answered = Exact.flow_success_candidate success in
   Option.iter
     (fun candidate -> Backpressure.note_candidate_success ~candidate)
-    (candidate_of_slot answered.visit.identity.candidate_id)
+    (candidate_of_slot ~resolved answered.visit.identity.candidate_id)
 ;;
 
 (* A refusal that advanced the flow is kept in its evidence; the one that
    ended it, or that a callback stopped before the advance, is not. *)
-let note_advances (evidence : Exact.flow_evidence) =
+let note_advances ~resolved (evidence : Exact.flow_evidence) =
   List.iter
     (fun (advance : Exact.flow_advance_receipt) ->
        match advance.failed with
        | Exact.Flow_advance_execution_failed { candidate; cause; _ } ->
-         note_cause ~slot_id:candidate.visit.identity.candidate_id cause
+         note_cause ~resolved ~slot_id:candidate.visit.identity.candidate_id cause
        | Exact.Flow_advance_candidate_rejected _ -> ())
     evidence.advances
 ;;
 
-let note_candidate_failure = function
+let note_candidate_failure ~resolved = function
   | Exact.Flow_candidate_execution_failed { candidate; cause } ->
-    note_cause ~slot_id:candidate.visit.identity.candidate_id cause.cause
+    note_cause ~resolved ~slot_id:candidate.visit.identity.candidate_id cause.cause
   | Exact.Flow_candidate_rejected _ -> ()
 ;;
 
-let note_rejections rejections =
+let note_rejections ~resolved rejections =
   List.iter
     (fun (rejection : _ Exact.semantic_rejection_receipt) ->
-       note_answered rejection.transport_success)
+       note_answered ~resolved rejection.transport_success)
     rejections
 ;;
 
-let note_terminal (cause : _ Exact.flow_execution_error) =
+let note_terminal ~resolved (cause : _ Exact.flow_execution_error) =
   match cause with
   | Exact.Flow_exact_execution_failed { candidate; cause; evidence } ->
-    note_advances evidence;
-    note_cause ~slot_id:candidate.visit.identity.candidate_id cause.cause
+    note_advances ~resolved evidence;
+    note_cause ~resolved ~slot_id:candidate.visit.identity.candidate_id cause.cause
   | Exact.Flow_before_advance_callback_failed { failed; evidence; _ } ->
-    note_advances evidence;
-    note_candidate_failure failed
+    note_advances ~resolved evidence;
+    note_candidate_failure ~resolved failed
   | Exact.Flow_attempt_already_started evidence
   | Exact.Flow_attempt_start_failed { evidence; _ }
   | Exact.Flow_measurement_start_failed { evidence; _ }
   | Exact.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
   | Exact.Flow_measurement_terminal_callback_failed { evidence; _ }
   | Exact.Flow_before_dispatch_callback_failed { evidence; _ }
-  | Exact.Flow_candidates_exhausted { evidence; _ } -> note_advances evidence
+  | Exact.Flow_candidates_exhausted { evidence; _ } -> note_advances ~resolved evidence
 ;;
 
-let observe = function
+let observe ~resolved = function
   | Ok (success : (_, _) Exact.validated_flow_success) ->
-    note_advances (Exact.flow_success_evidence success.transport_success);
-    note_rejections success.prior_rejections;
-    note_answered success.transport_success
+    note_advances ~resolved (Exact.flow_success_evidence success.transport_success);
+    note_rejections ~resolved success.prior_rejections;
+    note_answered ~resolved success.transport_success
   | Error (Exact.Flow_execution_terminal { cause; prior_rejections }) ->
-    note_rejections prior_rejections;
-    note_terminal cause
+    note_rejections ~resolved prior_rejections;
+    note_terminal ~resolved cause
   | Error (Exact.Flow_semantic_candidates_exhausted { rejections; evidence }) ->
-    note_advances evidence;
-    note_rejections (rejections.first :: rejections.rest)
+    note_advances ~resolved evidence;
+    note_rejections ~resolved (rejections.first :: rejections.rest)
 ;;

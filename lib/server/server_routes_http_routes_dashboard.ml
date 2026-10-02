@@ -14,6 +14,7 @@ include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
 module Keeper_portrait = Server_dashboard_http_keeper_portrait
+module Keeper_items = Server_dashboard_http_keeper_items
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Keeper_shutdown_reconciliation =
@@ -1530,8 +1531,9 @@ let handle_gate_external_mode_body state operator_name request reqd body_str =
 let handle_gate_resolve_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-    match dashboard_gate_resolve_http_json ~base_path ~created_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_resolve_http_json ~workspace_config ~base_path ~created_by:operator_name ~args () with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error (Gone _ as error) ->
       respond_json_value_with_cors
@@ -1563,8 +1565,9 @@ let handle_gate_resolve_body state operator_name request reqd body_str =
 let handle_gate_retry_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_retry_http_json ~base_path ~requested_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -1918,7 +1921,7 @@ let add_routes ~sw ~clock router =
            let default, runtimes = Runtime.get_default_and_runtimes () in
            let providers =
              List.fold_left
-               (fun providers (runtime : Runtime.t) ->
+               (fun providers (runtime : Runtime_instance.t) ->
                   if List.exists
                        (fun (known : Runtime_schema.provider) -> String.equal known.id runtime.provider.id)
                        providers
@@ -3048,6 +3051,18 @@ let add_routes ~sw ~clock router =
              (handle_gate_rule_delete_body state operator_name request reqd))
          request reqd)
 
+  |> Http.Router.get "/api/v1/operator/pause-status" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         match Eio_unix.run_in_systhread (fun () ->
+           Server_dashboard_http_core_entities.namespace_pause_status_json config)
+         with
+         | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+         | Error detail ->
+             respond_json_value_with_cors ~status:`Service_unavailable req reqd
+               (`Assoc [ "ok", `Bool false; "initializing", `Bool false;
+                 "paused", `Null; "error", `String detail ])
+       ) request reqd)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -3578,7 +3593,19 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           match parse_keeper_chat_stream_request body_str with
+           let admitted_body =
+             try
+               match Workspace.validate_expected_workspace
+                   ~config:(Mcp_server.workspace_config state)
+                   (Yojson.Safe.from_string body_str) with
+               | Ok payload -> Ok (Yojson.Safe.to_string payload)
+               | Error Workspace.Invalid_workspace_precondition ->
+                   Error "invalid expected_workspace precondition"
+               | Error Workspace.Workspace_precondition_failed ->
+                   Error "workspace precondition failed"
+             with Yojson.Json_error _ -> Error "invalid JSON body"
+           in
+           match Result.bind admitted_body parse_keeper_chat_stream_request with
            | Ok payload ->
                handle_keeper_chat_stream
                  ~sw
@@ -3596,6 +3623,12 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_items.route (Http.Request.path request) with
+       | Some name ->
+         with_token_permission_auth ~permission:Keeper_items.permission
+           (fun state _actor req reqd -> Keeper_items.handle_get state req reqd name)
+           request reqd
+       | None ->
        match Keeper_portrait.route (Http.Request.path request) with
        | Some name ->
          with_public_read

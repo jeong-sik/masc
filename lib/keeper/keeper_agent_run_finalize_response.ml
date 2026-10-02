@@ -30,6 +30,7 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
    checkpoint and no receipt yet, so nothing raised here may escape except a
    cancellation. After a failure the next line's span covers both turns. *)
 let record_turn_boundary
+      ~task_context
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn_ref
@@ -89,7 +90,7 @@ let record_turn_boundary
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
-          Keeper_turn_boundaries.Turn_ended { turn_ref; history_at_start; position }
+          Keeper_turn_boundaries.Turn_ended { turn_ref; task_context; history_at_start; position }
       }
     in
     (match
@@ -112,6 +113,7 @@ let record_turn_boundary
    assistant text, so the line is [No_atom_history] and the round reads the
    input and the tool observations. *)
 let record_errored_official_turn_boundary
+      ~task_context
       ~config
       ~meta
       ~turn_ref
@@ -121,6 +123,7 @@ let record_errored_official_turn_boundary
       ~restart_notice_pending
   =
   record_turn_boundary
+    ~task_context
     ~config
     ~meta
     ~turn_ref
@@ -133,6 +136,7 @@ let record_errored_official_turn_boundary
 ;;
 
 let finalize
+    ~task_context
     ~config
     ~meta
     ~publication_recovery
@@ -269,14 +273,40 @@ let finalize
          let save_outcome =
            if already_persisted
            then Ok `Reused
-           else
-             Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
-               ~session_dir:session.session_dir
-               ~encoding_memo:checkpoint_encoding_memo
-               ~history_retained:
-                 (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
-               patched
-             |> Result.map (fun outcome -> `Written outcome)
+           else (
+             let save_started_at = Time_compat.now () in
+             let save_started_mono = Mtime_clock.now () in
+             let save_result =
+               Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+                 ~session_dir:session.session_dir
+                 ~encoding_memo:checkpoint_encoding_memo
+                 ~history_retained:
+                   (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+                 patched
+             in
+             let save_finished_mono = Mtime_clock.now () in
+             let save_finished_at = Time_compat.now () in
+             let duration_ms =
+               Mtime.Span.to_float_ns (Mtime.span save_started_mono save_finished_mono)
+               /. 1_000_000.
+             in
+             let outcome, canonical_bytes =
+               match save_result with
+               | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
+                 "saved", Option.fold ~none:"unknown" ~some:string_of_int canonical_bytes
+               | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
+               | Error _ -> "error", "unknown"
+             in
+             Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+               "checkpoint_save trace_id=%s stage=finalize turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
+               patched.session_id
+               patched.turn_count
+               save_started_at
+               save_finished_at
+               duration_ms
+               canonical_bytes
+               outcome;
+             Result.map (fun outcome -> `Written outcome) save_result)
          in
          (match save_outcome with
        | Ok `Reused
@@ -373,6 +403,7 @@ let finalize
   in
   let* saved_checkpoint = saved_checkpoint_result in
     record_turn_boundary
+      ~task_context
       ~config
       ~meta
       ~turn_ref

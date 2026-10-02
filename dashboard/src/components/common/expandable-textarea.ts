@@ -2,10 +2,11 @@
 //
 // Uses local state while typing so large texts do not re-render the parent
 // panel on every keystroke. Changes are committed to the parent on blur and
-// when the full-screen modal is confirmed.
+// when the full-screen modal is confirmed. A caller saving while editing can
+// observe the current draft through onInput without waiting for blur.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useLayoutEffect, useState } from 'preact/hooks'
 
 export const EXPANDABLE_TEXTAREA_STYLE =
   'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-mono focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset resize-y custom-scrollbar'
@@ -17,6 +18,7 @@ function byteLength(s: string): number {
 export function ExpandableTextarea({
   value,
   onChange,
+  onInput,
   label,
   rows = 6,
   placeholder = '',
@@ -26,6 +28,7 @@ export function ExpandableTextarea({
 }: {
   value: string
   onChange: (value: string) => void
+  onInput?: (value: string) => void
   label: string
   rows?: number
   placeholder?: string
@@ -36,14 +39,20 @@ export function ExpandableTextarea({
   const [local, setLocal] = useState(value)
   const [expanded, setExpanded] = useState(false)
 
-  // Sync when the parent resets the draft (e.g. entering/exiting edit mode).
-  useEffect(() => {
+  // Apply parent resets before the editor accepts input. A delayed effect
+  // can overwrite text entered immediately after mounting or a parent reset.
+  useLayoutEffect(() => {
     setLocal(value)
   }, [value])
 
   function commit(next: string) {
     setLocal(next)
     onChange(next)
+  }
+
+  function input(next: string) {
+    setLocal(next)
+    onInput?.(next)
   }
 
   const borderClass = dirty
@@ -86,7 +95,7 @@ export function ExpandableTextarea({
         value=${local}
         placeholder=${placeholder}
         onInput=${(e: Event) =>
-          setLocal((e.target as HTMLTextAreaElement).value)}
+          input((e.target as HTMLTextAreaElement).value)}
         onBlur=${(e: Event) =>
           commit((e.target as HTMLTextAreaElement).value)}
       />
@@ -128,7 +137,7 @@ export function ExpandableTextarea({
                   value=${local}
                   placeholder=${placeholder}
                   onInput=${(e: Event) =>
-                    setLocal((e.target as HTMLTextAreaElement).value)}
+                    input((e.target as HTMLTextAreaElement).value)}
                 />
                 <div class="flex items-center justify-between gap-2 mt-3">
                   <${CountHint} />

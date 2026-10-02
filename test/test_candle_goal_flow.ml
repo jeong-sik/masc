@@ -10,6 +10,10 @@ let () = Candle_status.install_appraiser_check (fun () -> Ok ())
 open Alcotest
 open Masc
 
+module A = Candle_appraisal
+module Registry = Runtime_exact_output_registry
+module Exact_fixture = Exact_output_fixture
+
 module Route = Server_routes_http_routes_verification
 
 (* {1 Fixtures} *)
@@ -60,7 +64,8 @@ let enable_candle (config : Workspace.config) =
   if not (String.starts_with ~prefix:config.base_path path)
   then failf "the candle.toml path %s is outside the test workspace" path;
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -81,9 +86,9 @@ let ledger_events (config : Workspace.config) =
   | Error error -> failf "%s" (Candle_ledger.read_error_to_string error)
 ;;
 
-(* Kind, Goal and request of every row, in file order. *)
+(* Kind, Goal and request of every Goal row, in file order. *)
 let rows config =
-  List.map
+  List.filter_map
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Snapshot { goal_id; request_id; _ }
@@ -91,9 +96,10 @@ let rows config =
        | Candle_event.Candidates { goal_id; request_id; _ }
        | Candle_event.Unattributed { goal_id; request_id; _ }
        | Candle_event.Payout_failed { goal_id; request_id; _ } ->
-         Candle_event.kind event.body, goal_id, request_id
-       | Candle_event.Paid p -> Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id
-       | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
+         Some (Candle_event.kind event.body, goal_id, request_id)
+       | Candle_event.Paid p -> Some (Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id)
+       | Candle_event.Half_life_set _ -> None
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
     (ledger_events config)
 ;;
 
@@ -103,7 +109,7 @@ let count_kind config kind =
 
 let rows_testable = list (triple string string string)
 
-(* The Goal is made and moved through the tools, as its owner would. *)
+(* The shared Goal is made and moved through the tools by the recorded actor. *)
 let dispatch config ~name args =
   match
     Tool_workspace.dispatch
@@ -147,7 +153,7 @@ let phase config goal_id = Goal_phase.to_string (stored_goal config goal_id).Goa
 
 (* The verifier's passing result, committed with the Snapshot step installed
    the way the verifier installs it. *)
-let pass config goal_id =
+let pass ?(verification_run_id = "goal-verifier-test-run") config goal_id =
   let request_id, criterion =
     match Goal_verification.get_record_authoritative config ~goal_id with
     | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
@@ -163,7 +169,7 @@ let pass config goal_id =
       ~goal_id
       ~request_id
       ~criterion
-      ~verification_run_id:"goal-verifier-test-run"
+      ~verification_run_id
       ~decision:Workspace_goals.Proof_proven
       ~evidence:"observed by the test verifier"
   in
@@ -209,7 +215,114 @@ let confirmed config goal_id =
   | Error error -> failf "confirm: %s" (Route.For_testing.confirmation_error_to_string error)
 ;;
 
+let unpublish_appraiser () =
+  match Registry.unpublish () with
+  | Ok () -> ()
+  | Error error -> fail (Registry.publication_error_to_string error)
+;;
+
+let with_actual_appraiser_availability f =
+  unpublish_appraiser ();
+  Candle_status.install_appraiser_check Server_candle_appraiser.available;
+  Fun.protect
+    ~finally:(fun () ->
+      Candle_status.install_appraiser_check (fun () -> Ok ());
+      unpublish_appraiser ())
+    f
+;;
+
+(* Resolving this declared lane needs no provider call. The positive lifecycle
+   still injects model decisions, while availability uses the real registry. *)
+let publish_appraiser (config : Workspace.config) =
+  let snapshot = Exact_fixture.resolver_snapshot ~source:config.base_path [] in
+  ignore
+    (Exact_fixture.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[]
+       ~cli_slot_ids:[ Exact_fixture.cli_primary_runtime ] snapshot
+      : Registry.t);
+  match Server_candle_appraiser.available () with
+  | Ok () -> ()
+  | Error detail -> fail detail
+;;
+
+let during_appraiser_publication (config : Workspace.config) f =
+  let replacement = match Registry.prepare_retention () with
+    | Some replacement -> replacement
+    | None -> fail "the publication fixture requires a current registry" in
+  match Registry.transact_replacement replacement ~apply_write:(fun () ->
+    (match Registry.current () with
+     | Error Registry.Publication_busy -> ()
+     | Error error -> fail (Registry.publication_error_to_string error)
+     | Ok _ -> fail "the runtime replacement did not reserve publication");
+    (match Candle_status.current ~base_path:config.base_path with
+     | Candle_config.Disabled _ -> ()
+     | Candle_config.Off | Candle_config.Enabled _ ->
+       fail "appraisal must remain unavailable during publication");
+    Registry.Committed (f ())) with
+  | Ok (Registry.Committed value) -> value
+  | Ok (Registry.Not_committed _) -> fail "the publication fixture did not complete"
+  | Error error -> fail (Registry.publication_error_to_string error)
+;;
+
 (* {1 Tests} *)
+
+let test_an_unpublished_appraiser_keeps_the_confirmed_obligation () =
+  with_workspace @@ fun config ->
+  with_actual_appraiser_availability @@ fun () ->
+  enable_candle config;
+  (match Registry.current () with
+   | Error Registry.Registry_not_published -> ()
+   | Error error -> fail (Registry.publication_error_to_string error)
+   | Ok _ -> fail "the fixture must start before registry publication");
+  let goal_id = goal_in_verifying config in
+  pass config goal_id;
+  check string "proof can wait for confirmation with its Snapshot"
+    "awaiting_confirmation" (phase config goal_id);
+  confirmed config goal_id;
+  confirmed config goal_id;
+  let verdict = current_verdict config goal_id in
+  check string "confirmation completed while appraisal was unavailable"
+    "completed" (phase config goal_id);
+  check rows_testable "no bootstrap gap loses or duplicates either durable fact"
+    [ "snapshot", goal_id, verdict.request_id; "payout_owed", goal_id, verdict.request_id ]
+    (rows config);
+  publish_appraiser config;
+  (match Candle_payout.waiting (ledger_events config) with
+   | [ waiting ] ->
+     check string "publication restores the original obligation, without re-verification"
+       verdict.verification_run_id waiting.verification_run_id
+   | _ -> fail "the confirmed Goal must still have exactly one pending payout")
+;;
+
+let test_a_missing_appraiser_lane_keeps_the_confirmed_obligation () =
+  with_workspace @@ fun config ->
+  with_actual_appraiser_availability @@ fun () ->
+  enable_candle config;
+  let snapshot = Exact_fixture.resolver_snapshot ~source:config.base_path [] in
+  ignore
+    (Exact_fixture.publish_registry ~lane_id:"goal_verifier" ~slot_ids:[]
+       ~cli_slot_ids:[ Exact_fixture.cli_primary_runtime ] snapshot : Registry.t);
+  (match Registry.current () with
+   | Ok _ -> ()
+   | Error error -> fail (Registry.publication_error_to_string error));
+  (match Server_candle_appraiser.available () with
+   | Error _ -> ()
+   | Ok () -> fail "the fixture must not declare candle_appraiser");
+  let goal_id = goal_in_verifying config in
+  pass config goal_id;
+  confirmed config goal_id;
+  let verdict = current_verdict config goal_id in
+  check string "the missing lane does not block human confirmation"
+    "completed" (phase config goal_id);
+  check rows_testable "the missing lane cannot discard either durable fact"
+    [ "snapshot", goal_id, verdict.request_id; "payout_owed", goal_id, verdict.request_id ]
+    (rows config);
+  publish_appraiser config;
+  (match Candle_payout.waiting (ledger_events config) with
+   | [ waiting ] ->
+     check string "publishing an appraiser registry retains the original verified obligation"
+       verdict.verification_run_id waiting.verification_run_id
+   | _ -> fail "publishing an appraiser registry must retain exactly one pending payout")
+;;
 
 let test_a_confirmed_pass_leaves_a_payout_owed () =
   with_workspace
@@ -486,7 +599,7 @@ let test_a_confirmation_wakes_the_worker_that_prepares_the_payout () =
   pass config goal_id;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     confirmed config goal_id;
     match
       Eio.Time.with_timeout clock 10. (fun () ->
@@ -509,12 +622,234 @@ let test_a_confirmation_wakes_the_worker_that_prepares_the_payout () =
     (rows config)
 ;;
 
+(* The positive lifecycle uses production Goal, Task, Keeper and ledger
+   readers/writers. Only the appraiser's model decisions are injected. A Done
+   Task is a persisted fixture; no Candle fact is manufactured by this test. *)
+let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
+  with_workspace_and_env
+  @@ fun env config ->
+  with_actual_appraiser_availability
+  @@ fun () ->
+  enable_candle config;
+  publish_appraiser config;
+  let keeper = "paid-flow-keeper" in
+  let keeper_path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:config.base_path keeper
+  in
+  if not (String.starts_with ~prefix:(config.base_path ^ Filename.dir_sep) keeper_path)
+  then failf "the Keeper config %s is outside the test workspace" keeper_path;
+  mkdir_p (Filename.dirname keeper_path);
+  Out_channel.with_open_bin keeper_path (fun oc ->
+    Out_channel.output_string oc
+      "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"Complete the linked Task.\"\n");
+  let goal_id = make_goal config in
+  let task_title = "Persist the Goal's Candle ledger" in
+  let task_id =
+    match Task.Goal_assignment.add_task_with_result ~goal_id ~created_by:"planner"
+      config ~title:task_title ~priority:3 ~description:"Implement the promised ledger"
+    with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace_task.add_task_error_to_string error)
+  in
+  (* Candidate eligibility is strictly after the Goal's whole-second creation
+     timestamp. Cross the next real second; do not change the Goal or clock. *)
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.sleep_until clock (Float.floor (Eio.Time.now clock) +. 1.);
+  let completed_at = Masc_domain.now_iso () in
+  let backlog = match Workspace_backlog.read_backlog_r config with
+    | Ok backlog -> backlog
+    | Error detail -> fail detail
+  in
+  check bool "the created Task is persisted" true
+    (List.exists (fun (task : Masc_domain.task) -> task.id = task_id) backlog.tasks);
+  Workspace_backlog.write_backlog config
+    { backlog with tasks = List.map (fun (task : Masc_domain.task) ->
+        if task.id = task_id then
+          { task with task_status = Masc_domain.Done {assignee=keeper;completed_at;notes=None} }
+        else task) backlog.tasks };
+  transition config goal_id "request_complete";
+  during_appraiser_publication config (fun () ->
+    pass ~verification_run_id:"paid-flow-first-verifier" config goal_id;
+    check int "a busy appraiser cannot discard the passing Snapshot" 1
+      (count_kind config "snapshot"));
+  let first_verdict = current_verdict config goal_id in
+  let first_identity : A.identity =
+    {goal_id;request_id=first_verdict.request_id;verification_run_id=first_verdict.verification_run_id}
+  in
+  let payment () =
+    match List.filter_map (fun (event : Candle_event.t) -> match event.body with
+      | Candle_event.Paid payment -> Some payment
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+      | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+      | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _ -> None) (ledger_events config)
+
+    with
+    | [payment] -> payment
+    | _ -> fail "expected exactly one Paid fact"
+  in
+  let check_payment () =
+    let paid = payment () in
+    check bool "Paid retains the first exact confirmed identity" true
+      (paid.identity = first_identity);
+    check int "Small uses the explicit policy amount" 2000 paid.total_milli;
+    check int "no due date means no late deduction" 1000 paid.coefficient;
+    check (list (pair string int)) "only the contributing Keeper is paid"
+      [keeper,2000]
+      (List.map (fun (allocation : Candle_payment.allocation) ->
+        allocation.keeper, allocation.amount_milli) paid.allocations);
+    let balance = match Candle_balance.of_events ~at:(match Candle_stamp.at ~now:Time_compat.now with
+      | Ok at -> at | Error detail -> fail detail) (ledger_events config) with
+      | Ok balance -> balance
+      | Error error -> fail (Candle_balance.error_to_string error)
+    in
+    check int "replayed Keeper balance is credited once" 2000
+      (Candle_balance.balance balance ~keeper);
+    check int "the Goal caller receives no currency" 0
+      (Candle_balance.balance balance ~keeper:"planner")
+  in
+  let calls = ref [] in
+  let grade_started, signal_grade_started = Eio.Promise.create () in
+  let grade_release, release_grade = Eio.Promise.create () in
+  let appraise ~identity request =
+    (* Record entry before assertions: the worker converts callback exceptions
+       to Retry_later, so rejected extra invocations must remain observable. *)
+    calls := A.stage request :: !calls;
+    check bool "each model request names the confirmed proof" true (identity = first_identity);
+    check int "Candidates are durable before any model request" 1 (count_kind config "candidates");
+    let decision = match request with
+      | A.Grade goal ->
+        check string "grade reads the real Goal snapshot" "Ship the ledger" goal.title;
+        Eio.Promise.resolve signal_grade_started ();
+        Eio.Promise.await grade_release;
+        A.Grade_decided Candle_grade.Small
+      | A.Relation task ->
+        check string "relation reads the persisted linked Task" task_title task.task_title;
+        A.Relation_decided A.Related
+      | A.Weights weights ->
+        check (list string) "real Keeper configuration determines the recipient" [keeper] weights.keepers;
+        check (list (pair string string)) "weights use the real Task assignee"
+          [task_id,keeper]
+          (List.map (fun (task : A.task) -> task.task_id,task.keeper) weights.tasks);
+        A.Weights_decided [keeper,1]
+    in
+    Ok {A.decision;trace={run_id="paid-flow-" ^ A.stage request;slot_id="fixture.appraiser"}}
+  in
+  (* Failure bound for the fixture, not a worker retry policy. [idle] is the
+     barrier for negative assertions, including confirmation retries. *)
+  let await label predicate =
+    try Eio.Time.with_timeout_exn clock 5. (fun () ->
+      let rec loop () =
+        if predicate () then () else (Eio.Fiber.yield (); loop ())
+      in
+      loop ())
+    with Eio.Time.Timeout -> fail ("timed out waiting for " ^ label)
+  in
+  let idle () = await "the payout worker to finish its wake" Candle_payout_worker.For_testing.idle in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~appraise ~sw ~config ();
+    idle ();
+    check (list string) "startup cannot appraise an unconfirmed proof" [] !calls;
+    check rows_testable "before confirmation only the actual Snapshot exists"
+      ["snapshot",goal_id,first_verdict.request_id] (rows config);
+    during_appraiser_publication config (fun () ->
+      confirmed config goal_id;
+      check int "a busy appraiser cannot discard the confirmed obligation" 1
+        (count_kind config "payout_owed");
+      idle ();
+      check (list string) "the publication fence still prevents model dispatch" [] !calls;
+      check int "a waiting obligation is not paid while publication is reserved" 0
+        (count_kind config "paid"));
+    Candle_payout_worker.pulse ();
+    await "the retained obligation to resume after publication" (fun () -> Eio.Promise.is_resolved grade_started);
+    check string "the HTTP confirmation completed the Goal" "completed" (phase config goal_id);
+    check int "the held model has not paid yet" 0 (count_kind config "paid");
+    confirmed config goal_id;
+    check int "confirmation retry does not duplicate the pending obligation" 1
+      (count_kind config "payout_owed");
+    transition config goal_id "reopen";
+    check string "the confirmed Goal can reopen before payment" "executing" (phase config goal_id);
+    transition config goal_id "drop";
+    check string "the Goal can drop while its payout is still pending" "dropped" (phase config goal_id);
+    check int "phase changes happened before the payment" 0 (count_kind config "paid");
+    Eio.Promise.resolve release_grade ();
+    await "the confirmation wake to reach Paid" (fun () -> count_kind config "paid" = 1);
+    idle ();
+    check string "settling the durable obligation does not reopen the dropped Goal"
+      "dropped" (phase config goal_id);
+    check rows_testable "the complete positive path writes each fact once"
+      [ "snapshot",goal_id,first_verdict.request_id
+      ; "payout_owed",goal_id,first_verdict.request_id
+      ; "candidates",goal_id,first_verdict.request_id
+      ; "paid",goal_id,first_verdict.request_id ] (rows config);
+    let payout_events = List.filter (fun (event : Candle_event.t) -> match event.body with
+      | Candle_event.Half_life_set _ -> false
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+      | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+      | Candle_event.Purchased _ | Candle_event.Equipped _ -> true) (ledger_events config) in
+    (match payout_events with
+     | [ {Candle_event.body=Candle_event.Snapshot snapshot;_}
+       ; {Candle_event.body=Candle_event.Payout_owed owed;_}
+       ; {Candle_event.body=Candle_event.Candidates candidates;_}
+       ; {Candle_event.body=Candle_event.Paid _;_} ] ->
+       check (list string) "the Snapshot captured the real Goal link" [task_id] snapshot.linked_task_ids;
+       check (list string) "every preparation row keeps the verified run"
+         [first_verdict.verification_run_id;first_verdict.verification_run_id;first_verdict.verification_run_id]
+         [snapshot.verification_run_id;owed.verification_run_id;candidates.verification_run_id];
+       check (list string) "the production reader selected the completed Task" [task_id] candidates.candidate_task_ids;
+       check (list string) "the production reader selected its configured Keeper" [keeper] candidates.candidate_keepers;
+       (match candidates.tasks with
+        | [id,Candle_event.Found {assignee=Some assignee;status=Candle_event.Done done_task;_}] ->
+          check string "the durable candidate names the real Task" task_id id;
+          check string "the durable candidate keeps the real assignee" keeper assignee;
+          check string "the durable candidate keeps the persisted completion" completed_at
+            (Candle_time.to_rfc3339 done_task.completed_at);
+          check bool "completion follows Goal creation" true
+            (Candle_time.compare done_task.completed_at snapshot.goal_created_at > 0);
+          check bool "completion precedes or equals confirmation" true
+            (Candle_time.compare done_task.completed_at owed.confirmed_at <= 0)
+        | _ -> fail "the production Candidates lost the persisted Done Task")
+     | _ -> fail "the positive lifecycle did not retain its four authoritative facts");
+    check_payment ();
+    Candle_payout_worker.pulse ();
+    idle ();
+    check_payment ();
+    transition config goal_id "reopen";
+    transition config goal_id "request_complete";
+    pass ~verification_run_id:"paid-flow-reopened-verifier" config goal_id;
+    let second_verdict = current_verdict config goal_id in
+    check bool "reopening creates a different proof request" false
+      (second_verdict.request_id = first_verdict.request_id);
+    confirmed config goal_id;
+    Candle_payout_worker.pulse ();
+    idle ();
+    check string "the reopened Goal can complete again" "completed" (phase config goal_id);
+    check int "re-verification retains a second Snapshot" 2 (count_kind config "snapshot");
+    check int "reconfirmation/reopening never creates a second obligation" 1 (count_kind config "payout_owed");
+    check int "settled contribution is not prepared again" 1 (count_kind config "candidates");
+    check_payment ());
+  let settled_ledger = In_channel.with_open_bin (ledger_path config) In_channel.input_all in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~appraise ~sw ~config ();
+    idle ();
+    Candle_payout_worker.wake ();
+    idle ();
+    check_payment ());
+  check string "worker restart and event replay append no further fact" settled_ledger
+    (In_channel.with_open_bin (ledger_path config) In_channel.input_all);
+  check (list string) "all lifecycle retries leave exactly three model requests"
+    ["grade";"relation";"weights"] (List.rev !calls)
+;;
+
 let () =
   run
     "candle_goal_flow"
     [ ( "confirmation"
       , [ test_case "same-second retry uses the confirmed run Snapshot" `Quick
             test_same_second_retry_uses_the_confirmed_run_snapshot
+        ; test_case "an unpublished appraiser keeps the confirmed obligation" `Quick
+            test_an_unpublished_appraiser_keeps_the_confirmed_obligation
+        ; test_case "a missing appraiser lane keeps the confirmed obligation" `Quick
+            test_a_missing_appraiser_lane_keeps_the_confirmed_obligation
         ; test_case "a confirmed pass leaves a payout owed" `Quick test_a_confirmed_pass_leaves_a_payout_owed
         ; test_case
             "without a candle.toml a confirmation writes nothing"
@@ -544,6 +879,8 @@ let () =
             "a confirmation wakes the worker that prepares the payout"
             `Quick
             test_a_confirmation_wakes_the_worker_that_prepares_the_payout
+        ; test_case "publication resumes a confirmed payout once across reopen and restart" `Quick
+            test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart
         ] )
     ]
 ;;

@@ -272,6 +272,7 @@
  (package masc)
  (libraries
   masc
+  masc.config
   masc.masc_process
   masc.prompt_registry
   masc.server
@@ -414,7 +415,10 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
  (libraries
+  masc.sse_wire
   masc
+  masc.string_util
+  masc_tui_message_layout
   masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
@@ -442,7 +446,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc masc.masc_types masc_tui_keeper_chat_projection
-  masc_tui_sse_lines yojson))
+  masc.sse_wire yojson))
 
 (library
  (name masc_tui_keeper_chat_log)
@@ -554,7 +558,7 @@
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
- (libraries masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_acting)
@@ -1051,6 +1055,7 @@
   masc ; the health reading is a typed variant: the pane decides what a gone
        ; keeper's open turn may claim, as masc_tui_keeper_mark already
        ; reads the same variant for its glyph.
+  masc_tui_ansi
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -1300,6 +1305,12 @@
  (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
+ (name masc_tui_keeper_items)
+ (wrapped false)
+ (modules masc_tui_keeper_items)
+ (libraries yojson masc.keeper_portrait))
+
+(library
  (name masc_tui_keeper_sandbox)
  (wrapped false)
  (modules masc_tui_keeper_sandbox)
@@ -1352,10 +1363,16 @@
  (libraries masc_tui_theme masc_tui_terminal_palette))
 
 (library
+ (name masc_tui_voice_wizard_session)
+ (wrapped false)
+ (modules masc_tui_voice_wizard_session)
+ (libraries masc.voice_wizard masc.voice_setup masc_tui_message_layout))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1364,9 +1381,9 @@
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
+  ;; [task_goal_reading] derives Task Goal ids from the goal-link registry.
+  masc_workspace
   masc_tui_answering
-  masc.voice_wizard
-  masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_fusion_launch
@@ -1414,10 +1431,12 @@
   masc_tui_keeper_control
   masc_tui_keeper_selection
   masc_tui_keeper_sandbox
+  masc_tui_keeper_items
   masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector
+  masc_tui_observation_layout
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
@@ -1437,10 +1456,66 @@
  (libraries masc_tui_composer masc_tui_types))
 
 (library
+ (name masc_tui_approvals_model)
+ (wrapped false)
+ (modules masc_tui_approvals_model)
+ (libraries masc_tui_types masc_tui_operator_projection masc_tui_ask_projection masc))
+
+(library
+ (name masc_tui_home)
+ (wrapped false)
+ (modules masc_tui_home)
+ (libraries masc_tui_types masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
+  masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
+
+(library
+ (name masc_tui_surface_navigation)
+ (wrapped false)
+ (modules masc_tui_surface_navigation)
+ (libraries masc_tui_types masc_tui_approvals_model))
+
+(library
+ (name masc_tui_fusion_model)
+ (wrapped false)
+ (modules masc_tui_fusion_model)
+ (libraries masc_tui_types masc_tui_fetched masc))
+
+(library
+ (name masc_tui_surface_search)
+ (wrapped false)
+ (modules masc_tui_surface_search)
+ (libraries masc_tui_types masc_tui_fusion_model masc_tui_fetched masc_tui_pick_list
+  masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc))
+
+(library
+ (name masc_tui_identity_updates)
+ (wrapped false)
+ (modules masc_tui_identity_updates)
+ (libraries masc_tui_identity_model masc_tui_types))
+
+(library
+ (name masc_tui_resources_updates)
+ (wrapped false)
+ (modules masc_tui_resources_updates)
+ (libraries masc_tui_types masc_tui_mcp masc))
+
+(library
+ (name masc_tui_board_updates)
+ (wrapped false)
+ (modules masc_tui_board_updates)
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_board_selection))
+
+(library
+ (name masc_tui_fusion_updates)
+ (wrapped false)
+ (modules masc_tui_fusion_updates)
+ (libraries masc_tui_fusion_model masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc))
+
+(library
  (name masc_tui_approval_authority)
  (wrapped false)
  (modules masc_tui_approval_authority)
- (libraries masc_tui_types))
+ (libraries masc_tui_approvals_model masc_tui_types))
 
 (library
  (name masc_tui_terminal_title)
@@ -1477,6 +1552,13 @@
 ; surface could only be extracted from masc_tui_render.ml by staying inside
 ; this same stanza -- which is why the file split out in #3808 grew back to
 ; 16.5k lines. A library makes per-surface modules possible at all.
+(library
+ (name masc_tui_palette)
+ (wrapped false)
+ (modules masc_tui_palette)
+ (libraries masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows
+  masc_tui_message_layout masc_tui_code_lexer masc.keeper_contract masc))
+
 (library
  (name masc_tui_render_tools)
  (wrapped false)
@@ -1609,7 +1691,8 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries
+ (libraries masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
+  masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
@@ -1667,6 +1750,8 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc.keeper_portrait
+  masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer
   masc_tui_ansi
@@ -1705,6 +1790,13 @@
   masc_tui_types
   unix))
 
+;; Exact Candle presentation shared by the Overview and Keeper info pane.
+(library
+ (name masc_tui_candle)
+ (wrapped false)
+ (modules masc_tui_candle)
+ (libraries masc.masc_candle))
+
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1737,21 +1829,47 @@
   masc_tui_message_layout
   unix))
 
+;; The last answer to each dashboard read, kept with its entity tag so the
+;; next read can ask whether it changed. A library so a test can drive it.
+(library
+ (name masc_tui_kept_reads)
+ (wrapped false)
+ (modules masc_tui_kept_reads))
+
 (executable
  (name masc_tui)
  (modules
   masc_tui
+  masc_tui_async_protocol
+  masc_tui_board_requests
+  masc_tui_code_requests
+  masc_tui_resources_requests
+  masc_tui_identity_requests
+  masc_tui_github_requests
   masc_tui_render
+  masc_tui_render_board
+  masc_tui_render_code
+  masc_tui_render_resources
+  masc_tui_render_approvals
+  masc_tui_render_fusion
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries
+ (libraries masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+  masc_tui_palette
+  masc_tui_candle
+  masc.masc_candle
+  masc_cli_keeper_create
+  masc_tui_voice_wizard_session
+  masc_tui_kept_reads
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
+  masc_tui_keeper_items
+  masc.keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
@@ -1811,6 +1929,7 @@
   masc_tui_input_decoder
   masc_tui_input_reader
   masc_tui_code_lexer
+  masc_tui_code_results
   masc_tui_memo
   masc_tui_span
   masc_tui_diff
@@ -2056,7 +2175,7 @@
  (name masc_tui_link_preview)
  (wrapped false)
  (modules masc_tui_link_preview)
- (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+ (libraries masc masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
 
 (library
  (name masc_tui_image_mosaic)
@@ -2085,6 +2204,7 @@
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
+  masc
   masc.keeper_portrait
   masc_tui_keeper_portrait
   masc_tui_graphics
@@ -2109,7 +2229,7 @@
  (name masc_tui_chat_portrait)
  (wrapped false)
  (modules masc_tui_chat_portrait)
- (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+ (libraries masc.keeper_portrait masc_tui_keeper_portrait masc_tui_portrait_view
   masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
@@ -2202,6 +2322,18 @@
   masc_tui_utf8_input))
 
 (library
+ (name masc_tui_code_results)
+ (wrapped false)
+ (modules masc_tui_code_results)
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_fetched
+  masc_tui_code_lexer
+  masc_tui_memo
+  masc_tui_message_layout))
+
+(library
  (name masc_tui_input_reader)
  (wrapped false)
  (modules masc_tui_input_reader)
@@ -2218,3 +2350,33 @@
   eio.unix
   unix
   mtime.clock.os))
+
+(library
+ (name masc_tui_identity_model)
+ (wrapped false)
+ (modules masc_tui_identity_model)
+ (libraries masc_tui_pick_list masc_tui_message_layout))
+
+(library
+ (name masc_tui_render_identity)
+ (wrapped false)
+ (modules masc_tui_render_identity)
+ (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_identity_input)
+ (wrapped false)
+ (modules masc_tui_identity_input)
+ (libraries masc_tui_types masc_tui_identity_model masc_tui_message_layout))
+
+(library
+ (name masc_tui_github_ui)
+ (wrapped false)
+ (modules masc_tui_github_ui)
+ (libraries masc_tui_types masc_tui_ansi masc_tui_github_identity masc_tui_message_layout masc yojson))
+
+(library
+ (name masc_tui_render_github)
+ (wrapped false)
+ (modules masc_tui_render_github)
+ (libraries masc_tui_ansi masc))

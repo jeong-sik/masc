@@ -176,7 +176,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     require_slots "replacement-only lane" registry;
     let stable_registry_snapshot = registry in
     let prepared =
-      match Registry.prepare_replacement
+      match Registry.prepare_replacement ~runtime_observations:[]
               ~lanes
               ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
@@ -207,7 +207,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     in
     Registry.current () |> require_publication_busy "published registry read fence";
     let concurrently_prepared =
-      match Registry.prepare_replacement
+      match Registry.prepare_replacement ~runtime_observations:[]
               ~lanes
               ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
@@ -246,7 +246,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     require_slots "same-lane finish preserves slots" after_noop;
     let stable_registry_snapshot = after_noop in
     let successor_prepared =
-      match Registry.prepare_replacement
+      match Registry.prepare_replacement ~runtime_observations:[]
               ~lanes
               ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
@@ -327,7 +327,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       (after_failed_save == stable_registry_snapshot);
     require_slots "failed published save preserves slots" after_failed_save;
     let stale_prepared =
-      match Registry.prepare_replacement
+      match Registry.prepare_replacement ~runtime_observations:[]
               ~lanes
               ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
@@ -350,7 +350,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     |> require_replacement_base_changed
          "stale prepared candidate";
     let successor_prepared =
-      match Registry.prepare_replacement
+      match Registry.prepare_replacement ~runtime_observations:[]
               ~lanes
               ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)

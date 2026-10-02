@@ -178,7 +178,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
     ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
@@ -217,11 +217,17 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   read_request ();
   read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 1) ^ "\n");
+  if model_pages_before_thread then List.iter (fun page ->
+    read_request ();
+    output_string output ("printf '%s\\n' " ^ shell_quote page ^ "\n")) model_pages;
   read_request ();
   if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
   capture_request ();
+  if not model_pages_before_thread then List.iter (fun page ->
+    output_string output ("printf '%s\\n' " ^ shell_quote page ^ "\n");
+    capture_request ()) model_pages;
   let remaining_lines =
     if inject_items then (
       (* Acknowledge thread/inject_items before reading/capturing turn/start.
@@ -273,12 +279,14 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   path
 ;;
 
-let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?close_before_turn ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
       ?close_before_turn
       ?inject_items
+      ?model_pages
+      ?model_pages_before_thread
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
@@ -326,11 +334,11 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
-    ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?model ?reasoning_effort ?thread_mode ?(history = [])
+    ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
-    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?(prompt = "Return the fixture marker")
+    ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
+    ?on_prompt_sent ?on_reasoning_effort_resolved ?await_handoff ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
@@ -345,20 +353,19 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; model
       ; account_home
       ; isolated_home
+      ; context_window
       ; native
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
-    let on_thread_ready =
-      Option.map
-        (fun delay_s ~thread_id:_ ->
-           Eio.Time.sleep clock delay_s;
-           Ok ())
-        on_thread_ready_delay_s
+    let on_thread_ready ~thread_id =
+      Option.iter (Eio.Time.sleep clock) on_thread_ready_delay_s;
+      match on_thread_ready with None -> Ok () | Some callback -> callback ~thread_id
     in
     let on_turn_started =
       Option.map
@@ -376,10 +383,12 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ?thread_mode
       ~history
       ~developer_context
-      ?on_thread_ready
+      ~on_thread_ready
       ?on_turn_started
       ?on_stream_event
       ?on_prompt_sent
+      ?on_reasoning_effort_resolved
+      ?await_handoff
       config
       ~prompt
       ~images))
@@ -400,6 +409,19 @@ let test_dispatch_validation_is_process_free () =
     | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok () -> fail "invalid deterministic client config passed admission")
+;;
+
+let test_invalid_context_window_is_process_free () =
+  Eio_main.run (fun env ->
+    List.iter (fun tokens ->
+      let config = { (Runtime_codex_app_server.default_config ()) with
+        context_window = Some tokens } in
+      match Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config
+        ~prompt:"fixture" ~images:[] with
+      | Error (Runtime_codex_app_server.Invalid_config "context_window must be positive") -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok () -> fail "invalid context window reached dispatch") [0; -1])
 ;;
 
 let tool_call_request =
@@ -473,6 +495,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
             ; Dynamic_tool_started
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
+            ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] ->
             check string
@@ -518,6 +541,7 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
+           ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
@@ -554,6 +578,141 @@ let test_turn_returns_before_a_background_child_releases_the_pipes () =
            (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
            true
            (elapsed < turn_return_window_s))
+;;
+
+let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false) () =
+  List.iter (fun acceptance ->
+    let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
+      let calls = ref 0 in
+      let ready, signal = Eio.Promise.create () in
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "Observe an effect exactly once"
+        ; input_schema = `Assoc ["type", `String "object"]
+        ; loading = Runtime_official_client_tool.On_demand
+        ; result_bound = Runtime_official_client_tool.Unbounded
+        ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+        ; call = (fun ~call_id:_ _ -> incr calls;
+            if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
+            { success = true; content = "effect persisted";
+              content_blocks = None;
+              abort_turn = if terminal_second && !calls = 2 then
+                Some (Runtime_codex_app_server.Terminal_tool_boundary
+                  { tool_name = "masc_probe"; outcome = Terminal_completed })
+                else None }) } in
+      let second_tool =
+        {|{"id":"tool-request-2","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-2","tool":"masc_probe","arguments":{}}}|} in
+      let third_tool =
+        {|{"id":"tool-request-3","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-3","tool":"masc_probe","arguments":{}}}|} in
+      let reply = match acceptance with
+        | Some true -> Some {|{"id":6,"result":{"turnId":"turn-1"}}|}
+        | Some false -> Some {|{"id":6,"error":{"code":-32600,"message":"turn no longer steerable"}}|}
+        | None -> None in
+      with_fixture ([init_result; account_chatgpt; thread_result; turn_result;
+        tool_call_request; second_tool]
+        @ (if terminal_second then [third_tool] else [])
+        @ [agent_message_delta] @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
+          let original = In_channel.with_open_bin path In_channel.input_all in
+          let reply_line = "printf '%s\\n' " ^ shell_quote (Option.value reply ~default:item_completed) in
+          let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
+            ^ shell_quote capture_path ^ "\n" in
+          let instrumented = original |> String.split_on_char '\n'
+            |> List.concat_map (fun line -> if line = reply_line
+              then [capture ^ capture ^ capture ^ (if terminal_second then capture else ""); line] else [line])
+            |> String.concat "\n" in
+          Out_channel.with_open_bin path (fun out -> output_string out instrumented);
+          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true) path with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok result ->
+            let expected_handoff = match acceptance with
+              | Some true -> Runtime_codex_app_server.Handoff_accepted
+              | Some false -> Runtime_codex_app_server.Handoff_rejected
+              | None -> Runtime_codex_app_server.Handoff_pending in
+            check bool "terminal carries scheduling disposition" true
+              (result.scheduling_handoff = expected_handoff);
+            check int "concurrent tool frames survive steer response" 2 !calls;
+            check string "natural terminal survives handoff" "MASC_SUBSCRIPTION_OK" result.text);
+      let rows = In_channel.with_open_bin capture_path In_channel.input_lines
+        |> List.map Yojson.Safe.from_string in
+      let open Yojson.Safe.Util in
+      match rows with
+      | first_result :: steer :: second_result :: rest ->
+        check string "first effect returned before steering" "tool-request-1"
+          (first_result |> member "id" |> to_string);
+        check string "uses active-turn steering" "turn/steer"
+          (steer |> member "method" |> to_string);
+        check string "pins exact active turn" "turn-1"
+          (steer |> member "params" |> member "expectedTurnId" |> to_string);
+        check string "second effect returned while steering pending" "tool-request-2"
+          (second_result |> member "id" |> to_string);
+        (match terminal_second, rest with
+         | false, [] -> ()
+         | true, [denied] ->
+           check string "post-terminal request receives its own rejection" "tool-request-3"
+             (denied |> member "id" |> to_string);
+           check bool "post-terminal effect is refused while vendor settles" false
+             (denied |> member "result" |> member "success" |> to_bool)
+         | _ -> fail "unexpected protocol writes after terminal effect")
+      | _ -> fail "expected tool result, scheduling steer, and second tool result"))
+    (if terminal_second then [Some true; None] else [Some true; Some false; None])
+;;
+
+let test_scheduling_handoff_wakes_idle_before_first_tool () =
+  let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
+  let progress, signal_progress = Eio.Promise.create () in
+  Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      agent_message_delta; item_completed; turn_completed] (fun path ->
+      let original = In_channel.with_open_bin path In_channel.input_all in
+      let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
+      let wait_for_steer =
+        "IFS= read -r steer\nprintf '%s\\n' \"$steer\" > " ^ shell_quote capture_path
+        ^ "\nprintf '%s\\n' "
+        ^ shell_quote {|{"id":6,"result":{"turnId":"turn-1"}}|} in
+      let instrumented = original |> String.split_on_char '\n'
+        |> List.concat_map (fun line ->
+          if line = terminal then [wait_for_steer; line] else [line])
+        |> String.concat "\n" in
+      Out_channel.with_open_bin path (fun out -> output_string out instrumented);
+      let on_stream_event = function
+        | Runtime_codex_app_server.Text_delta _ ->
+          Eio.Promise.resolve signal_progress ()
+        | _ -> ()
+      in
+      let await_handoff () =
+        Eio.Promise.await progress;
+        (* Let the consumer enter its next receive. The fixture emits no more
+           provider frames until it receives the scheduling notice, so a
+           progress-boundary-only queue check cannot complete this turn. *)
+        Eio.Fiber.yield ();
+        true
+      in
+      match run_fixture ~on_stream_event ~await_handoff path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        check int "no tool required to wake idle turn" 0 result.dynamic_tool_calls;
+        let request = In_channel.with_open_bin capture_path In_channel.input_all
+          |> Yojson.Safe.from_string in
+        check string "idle transport receives scheduling steer" "turn/steer"
+          Yojson.Safe.Util.(request |> member "method" |> to_string)))
+;;
+
+let test_scheduling_handoff_waiter_released_at_terminal () =
+  let waiting, _resolve_waiting = Eio.Promise.create () in
+  let subscribed = ref false in
+  let released = ref false in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    let await_handoff () =
+      subscribed := true;
+      Fun.protect ~finally:(fun () -> released := true)
+        (fun () -> Eio.Promise.await waiting)
+    in
+    match run_fixture ~await_handoff path with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ ->
+      check bool "waiter subscribed" true !subscribed;
+      check bool "terminal unregisters waiter" true !released)
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -1217,7 +1376,10 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
      child capture must decode to these exact bytes. *)
   let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
-    with_fixture ~capture_path:captured lines (fun path ->
+    let page = {|{"id":4,"result":{"data":[{"id":"fixture","model":"gpt-fixture","displayName":"Fixture","isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Medium"},{"reasoningEffort":"ultra","description":"Ultra"}]}],"nextCursor":null}}|} in
+    let lines = [init_result; account_chatgpt; thread_result;
+      {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed] in
+    with_fixture ~capture_path:captured ~model_pages:[page] ~model_pages_before_thread:true lines (fun path ->
       let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report
         ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra path in
       check bool "complete turn succeeds" true (Result.is_ok result);
@@ -1280,12 +1442,123 @@ let test_subscription_probe_stops_before_thread () =
         check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
 ;;
 
+let effort_page ~request_id ~model ~efforts ?cursor () =
+  Yojson.Safe.to_string (`Assoc ["id", `Int request_id; "result", `Assoc [
+    "data", `List [`Assoc ["id", `String model; "model", `String model;
+      "displayName", `String model; "isDefault", `Bool true;
+      "defaultReasoningEffort", `String "medium";
+      "supportedReasoningEfforts", `List (List.map (fun effort ->
+        `Assoc ["reasoningEffort", `String effort; "description", `String effort]) efforts)]];
+    "nextCursor", (match cursor with None -> `Null | Some value -> `String value)]])
+;;
+
+let captured_requests path =
+  In_channel.with_open_bin path In_channel.input_all
+  |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")
+  |> List.map Yojson.Safe.from_string
+;;
+
+let test_account_reasoning_effort_admission () =
+  List.iter (fun (efforts, requested, expected) ->
+    let capture = Filename.temp_file "codex-account-effort-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+      let page = effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts () in
+      let resolved = ref None in
+      with_fixture ~capture_path:capture ~model_pages:[page] ~model_pages_before_thread:true
+        [init_result; account_chatgpt; thread_result;
+         {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed]
+        (fun path ->
+          let outcome = run_fixture ~reasoning_effort:requested
+            ~on_reasoning_effort_resolved:(fun ~model ~requested:asked ~effective ->
+              check string "resolved model" "gpt-fixture" model;
+              check bool "original declaration retained" true (asked = Some requested);
+              resolved := effective) path in
+          (match outcome with Ok _ -> () | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+          check bool "observer receives exact admitted wire effort" true (!resolved = Some expected);
+          let open Yojson.Safe.Util in
+          let requests = captured_requests capture in
+          check (list string) "metadata before prompt"
+            ["initialize";"initialized";"account/read";"model/list";"thread/start";"turn/start"]
+            (List.map (fun request -> request |> member "method" |> to_string) requests);
+          check bool "hidden selected models included" true
+            (List.nth requests 3 |> member "params" |> member "includeHidden" |> to_bool);
+          check string "thread pins the admitted account default" "gpt-fixture"
+            (List.nth requests 4 |> member "params" |> member "model" |> to_string);
+          check string "new model uses account ladder, without catalog" (Llm_provider.Reasoning_effort.to_string expected)
+            (List.nth requests 5 |> member "params" |> member "effort" |> to_string))))
+    [ ["low";"ultra";"adaptive-v2"], Llm_provider.Reasoning_effort.Ultra, Llm_provider.Reasoning_effort.Ultra
+    ; ["max";"high"], Ultra, Max
+    ; ["ultra";"high"], Low, High
+    ; ["ultra";"high"], Max, High ];
+  let capture = Filename.temp_file "codex-paged-effort-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    let pages = [effort_page ~request_id:4 ~model:"another-model" ~efforts:["low"] ~cursor:"next" ();
+      effort_page ~request_id:5 ~model:"gpt-fixture" ~efforts:["high";"ultra"] ()] in
+    with_fixture ~capture_path:capture ~model_pages:pages ~inject_items:true
+      [init_result; account_chatgpt; thread_result; {|{"id":6,"result":{}}|};
+       {|{"id":7,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed]
+      (fun path ->
+        let outcome = run_fixture ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra
+          ~thread_mode:(Runtime_codex_app_server.Resume {thread_id="thread-1"})
+          ~developer_context:["current account context"] path in
+        (match outcome with Ok result -> check bool "resumed successfully" true result.resumed
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+        let open Yojson.Safe.Util in
+        let requests = captured_requests capture in
+        check (list string) "resume effort pages precede context and turn"
+          ["initialize";"initialized";"account/read";"thread/resume";"model/list";"model/list";"thread/inject_items";"turn/start"]
+          (List.map (fun request -> request |> member "method" |> to_string) requests);
+        check (list int) "request IDs advance across pages and context" [4;5;6;7]
+          (List.drop 4 requests |> List.map (fun request -> request |> member "id" |> to_int))))
+;;
+
+let test_reasoning_metadata_refusal_precedes_input () =
+  let pages = [
+    effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts:[] ();
+    effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts:["adaptive-v2"] ();
+    effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts:["HIGH";" ultra "] ();
+    effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts:["high";"high"] ();
+    effort_page ~request_id:4 ~model:"another-model" ~efforts:["ultra"] ();
+    {|{"id":4,"result":{"data":[{"id":"fixture","model":"gpt-fixture","displayName":"Fixture","isDefault":true}],"nextCursor":null}}|};
+    {|{"id":4,"error":{"code":-32000,"message":"account model metadata unavailable"}}|} ] in
+  List.iter (fun page ->
+    let capture = Filename.temp_file "codex-refused-effort-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+      let observed = ref false and retained_thread = ref None in
+      with_fixture ~capture_path:capture ~model_pages:[page] ~model_pages_before_thread:true
+        [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+        (fun path ->
+          match run_fixture ~model:"gpt-fixture" ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra
+            ~developer_context:["must not be injected"]
+            ~on_thread_ready:(fun ~thread_id -> retained_thread := Some thread_id; Ok ())
+            ~on_reasoning_effort_resolved:(fun ~model:_ ~requested:_ ~effective:_ -> observed := true)
+            ~on_prompt_sent:(fun () -> observed := true) path with
+          | Error (Runtime_codex_app_server.Reasoning_effort_admission_failed _ as error) ->
+            check bool "refusal is retryable before dispatch" true
+              (Keeper_codex_runtime.For_testing.recovery_failure_of_client_error error
+               = Keeper_official_client_session_store.Pre_dispatch_failed)
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok _ -> fail "unsupported effort was sent");
+      check bool "no admission or prompt observation" false !observed;
+      check (option string) "refused effort creates no thread to retain"
+        None !retained_thread;
+      let open Yojson.Safe.Util in
+      check bool "no persistent thread, turn or history created" false
+        (List.exists (fun request -> List.mem (request |> member "method" |> to_string)
+          ["thread/start";"turn/start";"thread/inject_items"]) (captured_requests capture)))) pages;
+  (* With no explicit effort, even a model whose advertised effort vocabulary
+     is unknown to MASC remains runnable at its native default. *)
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+    (fun path -> check bool "default turn still runs after explicit refusal" true
+      (Result.is_ok (run_fixture path)))
+;;
+
 let test_metadata_listing_pages_without_turn () =
   let capture = Filename.temp_file "masc-model-list-capture-" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
     with_fixture ~capture_path:capture [init_result; account_chatgpt;
-      {|{"id":3,"result":{"data":[{"id":"first-ui","model":"exact-first","displayName":"First","isDefault":true}],"nextCursor":"page-two"}}|};
-      {|{"id":4,"result":{"data":[{"id":"second-ui","model":"exact-second","displayName":"Second","isDefault":false}],"nextCursor":null}}|}]
+      {|{"id":3,"result":{"data":[{"id":"first-ui","model":"exact-first","displayName":"First","isDefault":true,"defaultReasoningEffort":"ultra","supportedReasoningEfforts":[{"reasoningEffort":"high","description":"High"},{"reasoningEffort":"ultra","description":"Ultra"},{"reasoningEffort":"future-effort","description":"Future"}]}],"nextCursor":"page-two"}}|};
+      {|{"id":4,"result":{"data":[{"id":"second-ui","model":"exact-second","displayName":"Second","isDefault":false,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[]}],"nextCursor":null}}|}]
       (fun path ->
         let outcome = Eio_main.run (fun env ->
           let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
@@ -1294,6 +1567,11 @@ let test_metadata_listing_pages_without_turn () =
         let rows = match outcome with Ok rows -> rows | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
         check (list string) "exact models across pages" ["exact-first";"exact-second"]
           (List.map (fun (row : Runtime_codex_app_server.listed_model) -> row.model) rows);
+        check (list string) "open upstream effort strings retained" ["high";"ultra";"future-effort"]
+          (List.hd rows).supported_reasoning_efforts;
+        check string "advertised default retained" "ultra" (List.hd rows).default_reasoning_effort;
+        check (list string) "empty advertised ladder retained" []
+          (List.nth rows 1).supported_reasoning_efforts;
         let channel = open_in capture in
         let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
           let rec read acc = match input_line channel with
@@ -1867,8 +2145,8 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
-let test_native_read_disables_host_shell_argv () =
-  List.iter (fun native ->
+let test_client_argv_carries_posture_and_sub_agent_overrides () =
+  List.iter (fun (native, context_window) ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
     Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
       with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
@@ -1881,18 +2159,25 @@ let test_native_read_disables_host_shell_argv () =
                 ("printf '%s\\n' \"$@\" > " ^ shell_quote argv_path) :: rest)
             | _ -> fail "invalid fixture script" in
           Out_channel.with_open_bin path (fun output -> output_string output instrumented);
-          (match run_fixture ~native path with
+          (match run_fixture ~native ?context_window path with
            | Ok _ -> ()
            | Error error -> fail (Runtime_codex_app_server.error_to_string error)));
       let argv = In_channel.with_open_bin argv_path In_channel.input_lines in
       let expected = ["app-server"; "--stdio"] @
+        (match context_window with
+         | None -> []
+         | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens]) @
         (match native with
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
          | Native_full -> []
-         | Native_none -> fail "none is not part of this fixture") in
-      check (list string) "same process receives posture-scoped config overrides" expected argv))
-    [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
+         | Native_none -> fail "none is not part of this fixture") @
+        (* The model catalog picks the version when only features.multi_agent
+           is off, so the switch that counts is [agents] enabled. *)
+        ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
+      check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
+    [Runtime_native_tools.Native_read, None;
+     Runtime_native_tools.Native_full, Some 872000]
 ;;
 
 (* A live keeper failed every turn on a context overflow the server reported,
@@ -3551,7 +3836,7 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
         | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
       recorded_by :=
         (match Runtime_candidate_backpressure.candidate_backpressure
-                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
          | Some
              { Runtime_candidate_backpressure.failed_attempt =
                  Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
@@ -3790,7 +4075,7 @@ for line in sys.stdin:
     let boundary : Keeper_turn_boundaries.record =
       { recorded_at = 1.
       ; event = Keeper_turn_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
           ; history_at_start = Fresh_history
           ; position = Atom_history
               { end_atom = 4; last_atom_digest = Option.get (digest_at 3) }
@@ -4578,6 +4863,106 @@ let test_agent_message_delta_without_item_id_streams () =
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
+;;
+
+let test_completed_message_streams_without_delta () =
+  let events = ref [] in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      item_completed; turn_completed] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ ->
+      match List.rev !events with
+      | [Runtime_codex_app_server.Turn_started _;
+         Text_delta {item_id=Some "message-1"; delta="MASC_SUBSCRIPTION_OK"};
+         Turn_finished {text="MASC_SUBSCRIPTION_OK"}] -> ()
+      | _ -> fail "completed assistant item must reach live output before the turn ends")
+;;
+
+let test_mixed_item_identity_keeps_delta_order () =
+  let delta item_id text =
+    Yojson.Safe.to_string (`Assoc ["method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  List.iter (fun (first, second) ->
+    let events = ref [] in
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+        delta first "MASC_"; delta second "SUBSCRIPTION_OK"; item_completed;
+        delta (Some "message-next") "NEXT";
+        {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"message-next","text":"NEXT","phase":"commentary"}}}|};
+        turn_completed] (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ ->
+        let text = List.rev !events |> List.filter_map (function
+          | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+          |> String.concat "" in
+        check string "mixed identity neither repeats nor poisons the next item"
+          "MASC_SUBSCRIPTION_OKNEXT" text))
+    [None, Some "message-1"; Some "message-1", None]
+;;
+
+let test_anonymous_completion_closes_current_item () =
+  let delta item_id text = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  let complete text phase = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc ["type", `String "agentMessage"; "text", `String text; "phase", `String phase]]]) in
+  List.iter (fun first_id ->
+    let events = ref [] in
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+        delta first_id "A"; complete "A" "commentary";
+        delta None "B"; complete "B" "final_answer"; turn_completed]
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok _ ->
+            let text = List.rev !events |> List.filter_map (function
+              | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+              |> String.concat "" in
+            check string "anonymous completion consumes the current item once" "AB" text))
+    [None; Some "first-item"]
+;;
+
+let test_blank_completion_closes_identity_across_four_messages () =
+  let delta item_id text = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  let complete item_id text phase = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc (["type", `String "agentMessage"; "text", `String text;
+          "phase", `String phase] @ match item_id with None -> [] | Some id -> ["id", `String id])]]) in
+  let terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  List.iter (fun blank ->
+    List.iter (fun first_id ->
+      List.iter (fun first_completion_id ->
+        List.iter (fun second_completion_id ->
+          let events = ref [] in
+          with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+              delta first_id blank; complete first_completion_id blank "commentary";
+              delta None "B"; complete second_completion_id "B" "commentary";
+              delta (Some "n+2") "C"; complete (Some "n+2") "C" "commentary";
+              delta (Some "n+3") "D"; complete (Some "n+3") "D" "final_answer";
+              terminal] (fun path ->
+            match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok result ->
+                let text = List.rev !events |> List.filter_map (function
+                  | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+                  |> String.concat "" in
+                check string "blank completion cannot poison or repeat the next messages"
+                  (blank ^ "BCD") text;
+                check string "last named message remains the final answer" "D" result.text))
+          [None; Some "n+1"])
+        [None; Some "n"])
+      [None; Some "n"])
+    [""; "\n"]
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -6944,7 +7329,15 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
+    [ ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
+            test_blank_completion_closes_identity_across_four_messages
+        ; test_case "anonymous completion closes current item" `Quick
+            test_anonymous_completion_closes_current_item
+        ; test_case "mixed optional item identities preserve order" `Quick
+            test_mixed_item_identity_keeps_delta_order
+        ; test_case "completed text streams even without token deltas" `Quick
+            test_completed_message_streams_without_delta
+        ; test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
       , [ test_case "empty overflow retry survives the next production turn" `Quick
             test_production_empty_retry_boundary_survives_the_next_turn
@@ -6976,6 +7369,8 @@ let () =
             `Quick
             test_subscription_probe_stops_before_thread
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
+        ; test_case "account reasoning effort admission" `Quick test_account_reasoning_effort_admission
+        ; test_case "reasoning metadata refuses before input" `Quick test_reasoning_metadata_refusal_precedes_input
         ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
         ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
         ; test_case "unattributed single bucket preserves refusal" `Quick
@@ -7025,8 +7420,8 @@ let () =
             test_elicitation_cancel_then_dynamic_tool
         ; test_case "MCP elicitation identity and form validation" `Quick
             test_invalid_elicitation_keeps_protocol_error
-        ; test_case "read posture disables native host shell only" `Quick
-            test_native_read_disables_host_shell_argv
+        ; test_case "read posture disables native host shell; no posture allows sub-agents" `Quick
+            test_client_argv_carries_posture_and_sub_agent_overrides
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick
@@ -7150,6 +7545,16 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
+        ; test_case "invalid context window is refused before dispatch" `Quick
+            test_invalid_context_window_is_process_free
+        ; test_case "scheduling handoff preserves active protocol" `Quick
+            (fun () -> test_scheduling_handoff_preserves_active_protocol ())
+        ; test_case "handoff settles terminal effect without admitting more tools" `Quick
+            (fun () -> test_scheduling_handoff_preserves_active_protocol ~terminal_second:true ())
+        ; test_case "scheduling handoff wakes idle turn before any tool" `Quick
+            test_scheduling_handoff_wakes_idle_before_first_tool
+        ; test_case "scheduling handoff waiter released at terminal" `Quick
+            test_scheduling_handoff_waiter_released_at_terminal
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "worker encoded dynamic tool callback" `Quick

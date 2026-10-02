@@ -130,3 +130,18 @@ required = false
 min_length = 64
 max_length = 64
 pattern = "^[0-9a-f]{64}$"
+
+[[params]]
+name = "expected_workspace"
+type = "object"
+description = "Optional operator-client precondition binding the creation to the observed base_path and masc_root. The server rejects a changed workspace before reading or creating a Task."
+
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true

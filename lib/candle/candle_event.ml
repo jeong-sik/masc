@@ -23,7 +23,10 @@ type attribution = {
 }
 type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
 
+type equipment_choice = Default | Item of Keeper_portrait_item.t
+
 type body =
+  | Half_life_set of Candle_decay.half_life
   | Snapshot of
       { goal_id : string
       ; request_id : string
@@ -51,6 +54,7 @@ type body =
       ; tasks : (string * task_lookup) list
       ; candidate_task_ids : string list
       ; candidate_keepers : string list
+      ; candidate_task_keepers : (string * string option) list
       }
   | Unattributed of
       { goal_id : string
@@ -60,6 +64,7 @@ type body =
       }
   | Paid of Candle_payment.t
   | Purchased of { keeper : string; item : Keeper_portrait_item.t; amount_milli : int }
+  | Equipped of { keeper : string; slot : Keeper_portrait_item.slot; choice : equipment_choice }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
@@ -68,12 +73,14 @@ type t =
   }
 
 let kind = function
+  | Half_life_set _ -> "half_life_set"
   | Snapshot _ -> "snapshot"
   | Payout_owed _ -> "payout_owed"
   | Candidates _ -> "candidates"
   | Unattributed _ -> "unattributed"
   | Paid _ -> "paid"
   | Purchased _ -> "purchased"
+  | Equipped _ -> "equipped"
   | Payout_failed _ -> "payout_failed"
 ;;
 
@@ -125,6 +132,10 @@ let attribution_fields = function
      "relations", `List (List.map Candle_appraisal.relation_json a.relations)]
 
 let body_fields : body -> (string * Yojson.Safe.t) list = function
+  | Half_life_set half_life ->
+    ["half_life", (match half_life with
+      | Candle_decay.Off -> `String "off"
+      | Candle_decay.Hours hours -> `Int hours)]
   | Snapshot s ->
     [ "goal_id", `String s.goal_id
     ; "request_id", `String s.request_id
@@ -153,6 +164,8 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
       , `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks) )
     ; "candidate_task_ids", text_list c.candidate_task_ids
     ; "candidate_keepers", text_list c.candidate_keepers
+    ; "candidate_task_keepers", `List (List.map (fun (task_id, keeper) ->
+        `Assoc ["task_id", `String task_id; "keeper", nullable_text keeper]) c.candidate_task_keepers)
     ]
   | Unattributed u ->
     [ "goal_id", `String u.goal_id
@@ -161,6 +174,9 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "reason", `String (unattributed_reason_text u.reason)
     ] @ attribution_fields u.reason
   | Paid payment -> Candle_payment.to_fields payment
+  | Equipped e ->
+    [ "keeper", `String e.keeper; "slot", `String (Keeper_portrait_item.slot_id e.slot)
+    ; "item", (match e.choice with Default -> `Null | Item item -> `String (Keeper_portrait_item.id item)) ]
   | Purchased p ->
     [ "keeper", `String p.keeper
     ; "item", `String (Keeper_portrait_item.id p.item)
@@ -272,6 +288,15 @@ let lookup_of_json json =
   | unknown -> Error (Printf.sprintf "%s: unknown state %S" context unknown)
 ;;
 
+let candidate_keeper_of_json json =
+  let context = "candidate Keeper eligibility" in
+  let* fields = Candle_json.object_fields ~context json in
+  let* task_id, fields = Candle_json.field ~context "task_id" Candle_json.as_non_blank fields in
+  let* keeper, fields = Candle_json.field ~context "keeper"
+    (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (task_id, keeper)
+
 let candidates_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
@@ -284,8 +309,10 @@ let candidates_of_fields ~context fields =
   let* candidate_keepers, fields =
     field "candidate_keepers" (Candle_json.as_list Candle_json.as_non_blank) fields
   in
+  let* candidate_task_keepers, fields =
+    field "candidate_task_keepers" (Candle_json.as_list candidate_keeper_of_json) fields in
   let* () = Candle_json.finish ~context fields in
-  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers })
+  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers; candidate_task_keepers })
 ;;
 
 let unattributed_of_fields ~context fields =
@@ -330,6 +357,21 @@ let purchased_of_fields ~context fields =
   let* () = Candle_json.finish ~context fields in
   Ok (Purchased { keeper; item; amount_milli })
 
+let equipped_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* keeper, fields = field "keeper" Candle_json.as_non_blank fields in
+  let* slot_id, fields = field "slot" Candle_json.as_string fields in
+  let* slot = match Keeper_portrait_item.slot_of_id slot_id with
+    | Some slot -> Ok slot | None -> Error (context ^ ": unknown equipment slot") in
+  let* item_id, fields = field "item" (Candle_json.as_nullable Candle_json.as_string) fields in
+  let* choice = match item_id with
+    | None -> Ok Default
+    | Some id -> (match Keeper_portrait_item.of_id id with
+      | Some item when Keeper_portrait_item.slot item = slot -> Ok (Item item)
+      | Some _ | None -> Error (context ^ ": item does not belong to the slot")) in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Equipped {keeper;slot;choice})
+
 let of_yojson json =
   let context = "candle event" in
   let* fields = Candle_json.object_fields ~context json in
@@ -338,12 +380,22 @@ let of_yojson json =
   let context = Printf.sprintf "%s %s" context kind_text in
   let* body =
     match kind_text with
+    | "half_life_set" ->
+      let* half_life, fields = Candle_json.field ~context "half_life"
+        (function
+          | `String "off" -> Ok Candle_decay.Off
+          | value ->
+            let* hours = Candle_appraisal.as_int value in
+            Candle_decay.half_life_of_hours hours) fields in
+      let* () = Candle_json.finish ~context fields in
+      Ok (Half_life_set half_life)
     | "snapshot" -> snapshot_of_fields ~context fields
     | "payout_owed" -> payout_owed_of_fields ~context fields
     | "candidates" -> candidates_of_fields ~context fields
     | "unattributed" -> unattributed_of_fields ~context fields
     | "paid" -> Result.map (fun p -> Paid p) (Candle_payment.of_yojson (`Assoc fields))
     | "purchased" -> purchased_of_fields ~context fields
+    | "equipped" -> equipped_of_fields ~context fields
     | "payout_failed" -> payout_failed_of_fields ~context fields
     | unknown -> Error (Printf.sprintf "%s: unknown kind %S" context unknown)
   in

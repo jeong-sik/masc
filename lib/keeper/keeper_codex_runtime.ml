@@ -5,6 +5,10 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 
+type scheduling_turn =
+  | Autonomous_schedule
+  | Direct_schedule of Keeper_chat_operation.Operation_id.t
+
 type successful_tool_completion =
   | No_successful_tool_completion
   | Successful_tool_completion
@@ -64,9 +68,9 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
      | false, _ | _, None -> result)
 ;;
 
-(* Catalog-driven reasoning-effort clamping lives on the shared
-   official-client host so Codex and Claude Code treat the same declared
-   effort identically; see [Keeper_official_client_host.effective_reasoning_effort]. *)
+(* Codex admits explicit effort against the selected account's model/list
+   inside the app-server connection. The shared catalog clamp is for clients
+   without that discovery contract. *)
 
 let project_messages messages =
   let rec loop developer history = function
@@ -346,7 +350,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -375,8 +379,8 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action with
-  | None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts with
+  | None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
@@ -411,6 +415,9 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
+          Option.iter
+            (fun receipts -> Keeper_codex_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit
             (Agent_core.Types.ContentBlockStart
@@ -427,15 +434,13 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
                      (Yojson.Safe.to_string arguments)
                })
         | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
+          Option.iter (fun receipts -> Keeper_codex_tool_receipts.finish receipts ~call_id) receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
-          Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
           Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
@@ -457,9 +462,6 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
                ; tool_name = observation.tool_name
                })
         | Runtime_codex_app_server.Native_tool_finished observation ->
-          Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -593,7 +595,8 @@ let codex_error_to_core_error = function
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_connection_closed
          { runtime_id = "codex_app_server"; detail; turn_accepted })
-  | Runtime_codex_app_server.Turn_input_write_failed _ as error ->
+  | (Runtime_codex_app_server.Turn_input_write_failed _
+    | Runtime_codex_app_server.Reasoning_effort_admission_failed _) as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"
@@ -632,16 +635,19 @@ let codex_error_to_core_error = function
                seconds
          ; phase = None
          })
-  (* Idle after [turn/start] was accepted is ambiguous: the upstream turn may
-     still be executing and committing effects. Rotation would run the goal a
-     second time, so this stays non-rotating; session recovery
-     ([Transport_interrupted]) owns reconciliation. *)
+  (* Keep timeout evidence available to candidate backpressure for the next
+     turn. [observe_failed_dispatch] records the ambiguous dispatch separately,
+     so the driver's effect fence still forbids replay within this turn. *)
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = true } ->
-    Agent_core.Error.Internal
-      (Printf.sprintf
-         "Codex app-server stream was idle for %.3fs after turn/start was \
-          accepted (not rotated: the upstream turn may still commit)"
-         seconds)
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf
+               "Codex app-server stream was idle for %.3fs after turn/start was \
+                accepted; completion is unconfirmed"
+               seconds
+         ; phase = Some Llm_provider.Http_client.Cli_stdout_idle
+         })
   (* Server-reported "interrupted" turn status and host graceful shutdown:
      not a provider fault, so rotation to another runtime would re-run a turn
      that was intentionally stopped. Both stay off the rotation chain — the
@@ -667,6 +673,8 @@ let codex_error_to_core_error = function
 ;;
 
 let recovery_failure_of_client_error = function
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _ ->
+    Keeper_official_client_session_store.Pre_dispatch_failed
   | Runtime_codex_app_server.Spawn_failed _ ->
     Keeper_official_client_session_store.Transient_spawn_failed
   | Runtime_codex_app_server.Turn_interrupted
@@ -753,13 +761,37 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+(* A dispatched turn may have effects even if no tool/text notification made
+   it back to MASC. Preserve that uncertainty before mapping its failure into
+   provider evidence. Setup failures submitted no turn and remain rotatable. *)
+let observe_failed_dispatch ~observe_transport_uncertain = function
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Timeout { turn_accepted = true; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = true; _ } ->
+    observe_transport_uncertain ()
+  | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Unsupported_server_request _
+  | Runtime_codex_app_server.Context_window_exceeded _
+  | Runtime_codex_app_server.Turn_failed _
+  | Runtime_codex_app_server.Stopped_by_host _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down -> ()
+;;
+
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -773,7 +805,15 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~field:"eio_clock"
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
+    let receipts =
+      Option.map (fun notify -> Keeper_codex_tool_receipts.create ~notify) on_tool_execution
+    in
     let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_codex_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
     let* stored_session =
       match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -941,18 +981,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
       |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
-    (* Snap the operator-declared effort into the catalog's accepted set so a
-       per-model cap (e.g. [Max] unsupported on a model that tops out at
-       [XHigh]) does not fail the turn. The same value feeds the raw_trace
-       start record and the request so observation matches the wire. *)
-    let effective_reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-    in
+    (* Preserve the declaration until the selected account admits it. The raw
+       run start records this request; the admission hook records the wire
+       effort after live negotiation, including on every resumed turn. *)
+    let requested_reasoning_effort = prepared.reasoning_effort in
     (* A Resume sends none of the conversation: the thread holds it and
        compacts it itself. What changes per turn or per operation -- the
        context carrier, the Librarian working state and the historical task
@@ -1080,6 +1112,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; account_home = config.account_home
       ; isolated_home = None
       ; model = config.model
+      ; context_window
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
@@ -1174,7 +1207,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             ?reasoning_effort:
               (Option.map
                  Llm_provider.Reasoning_effort.to_string
-                 effective_reasoning_effort)
+                 requested_reasoning_effort)
             ())
     in
     let* host_dynamic_tools =
@@ -1367,7 +1400,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback
+          codex_stream_callback ?receipts
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1396,14 +1429,51 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
+        let scheduling_turn =
+           match Keeper_owner_registry.get ~base_path ~keeper_name with
+           | Error _ -> None
+           | Ok owner ->
+             (match Keeper_owner.turn_in_flight owner with
+              | Some { lane = Keeper_owner.Autonomous; _ } ->
+                Some (owner, Autonomous_schedule)
+              | Some { lane = Keeper_owner.Chat_operation; _ } ->
+                Option.map (fun operation_id -> owner, Direct_schedule operation_id)
+                  (Keeper_owner.operation_projection owner).running_operation_id
+              | Some { lane = Keeper_owner.Maintenance; _ } | None -> None)
+        in
+        let await_handoff = Option.map (fun (owner, turn) ->
+          match turn with
+          | Autonomous_schedule ->
+            (fun () -> Keeper_owner.await_claimable_operation owner)
+          | Direct_schedule operation_id ->
+            (fun () -> Keeper_owner.await_newer_original_operation owner ~operation_id)) scheduling_turn in
         (match
        Runtime_codex_app_server.run_turn
+         ?await_handoff
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools
-         ?reasoning_effort:effective_reasoning_effort
+         ?reasoning_effort:requested_reasoning_effort
+         ~on_reasoning_effort_resolved:(fun ~model ~requested ~effective ->
+           let wire effort = match effort with
+             | None -> `Null
+             | Some value -> `String (Llm_provider.Reasoning_effort.to_string value) in
+           (match requested, effective with
+            | Some asked, Some admitted when Llm_provider.Reasoning_effort.compare asked admitted <> 0 ->
+              Log.Keeper.info ~keeper_name
+                "Codex reasoning effort clamped to account metadata: model=%s asked=%s effective=%s"
+                model (Llm_provider.Reasoning_effort.to_string asked)
+                (Llm_provider.Reasoning_effort.to_string admitted)
+            | _ -> ());
+           Option.iter (fun active ->
+             (* See Host.observe_raw_trace: it already logs trace errors without changing admission. *)
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Reasoning_effort (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_reasoning_effort" ~hook_decision:"admitted"
+                 ~hook_detail:(Yojson.Safe.to_string (`Assoc [
+                   "model", `String model; "requested", wire requested; "effective", wire effective])) ()))) raw_trace_run)
          ~thread_mode
          ~history
          ~developer_context
@@ -1447,9 +1517,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         | _, Some detail -> Error (internal_error detail)
         | _, None -> settle_host_stop stop)
      | Error error ->
-       (match error with
-        | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
-        | _ -> ());
+       observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then
          read_usage_after_quota_refusal
@@ -1569,7 +1637,20 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; cooperative_boundary = None
-         ; stop_reason = Completed
+         ; stop_reason =
+             (* This is after natural vendor completion and durable session
+                settlement. The direct turn owner retains that exact authority
+                before requeueing the original operation, never succeeding it
+                on the scheduling reply. An unacknowledged notice is equally
+                unable to prove original-work completion. Autonomous turns keep
+                their own event-batch completion contract. *)
+             (match scheduling_turn, turn.scheduling_handoff with
+              | Some (_, Direct_schedule _),
+                  (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+                Yielded_to_operation_queued { turns_used = turn_count }
+              | (Some (_, Autonomous_schedule) | None), _
+              | Some (_, Direct_schedule _),
+                  (Handoff_unrequested | Handoff_rejected) -> Completed)
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did
@@ -1651,7 +1732,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1662,6 +1743,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
+    ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
@@ -1737,7 +1819,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope
@@ -1789,7 +1871,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
           ~on_usage_report
           ~event_bus
           ~raw_trace
@@ -1809,6 +1891,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
 
 module For_testing = struct
   let note_transport_uncertainty = note_transport_uncertainty
+  let observe_failed_dispatch = observe_failed_dispatch
   let observe_stream_native_action ~turn_count ~observe event =
     match
       codex_stream_callback

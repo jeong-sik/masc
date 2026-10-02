@@ -39,7 +39,7 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
    cache is about 3 MB -- and holds a roster walked end to end. *)
 let cache_capacity = 32
 
-type entry = { name : string; edge : int; compact : bool; picture : Draw.image }
+type entry = { name : string; equipment_key : string; edge : int; compact : bool; picture : Draw.image }
 
 (* Newest first. *)
 type cache = { mutable entries : entry list }
@@ -47,22 +47,30 @@ type cache = { mutable entries : entry list }
 let cache () = { entries = [] }
 let cached c = List.length c.entries
 
-let image ?(compact = false) c ~name size =
+let image ?(compact = false) c ~name ~equipment size =
+  let equipment_key = Keeper_portrait_equipment.key equipment in
   let edge = Draw.int_of_size size in
   let same entry =
-    String.equal entry.name name && entry.edge = edge && Bool.equal entry.compact compact
+    String.equal entry.name name && String.equal entry.equipment_key equipment_key
+    && entry.edge = edge && Bool.equal entry.compact compact
   in
   let rest = List.filter (fun entry -> not (same entry)) c.entries in
   let entry =
     match List.find_opt same c.entries with
     | Some entry -> entry
     | None ->
-        let body = Look.body_of_name name and equipment = Look.equipment_of_name name in
+        let body = Look.body_of_name name in
         let picture =
-          if compact then Draw.render_compact_posed body equipment Draw.still size
-          else Draw.render body equipment size
+          (* The compact silhouette draws only the body and its dish. Keep
+             that geometry where it is complete; other slots need the full
+             drawing rather than silently losing their observed equipment. *)
+          match compact, equipment.Look.face, equipment.Look.neck,
+                equipment.Look.head, equipment.Look.hand with
+          | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
+              Draw.render_compact_posed body equipment Draw.still size
+          | _ -> Draw.render body equipment size
         in
-        { name; edge; compact; picture }
+        { name; equipment_key; edge; compact; picture }
   in
   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
   entry.picture
@@ -74,7 +82,7 @@ type band = {
   lines : string list;
 }
 
-let band c ~display ~project ~name ~content_rows ~content_cols =
+let band c ~display ~project ~name ~equipment ~content_rows ~content_cols =
   match band_size display with
   | None -> None
   | Some size when content_rows < min_content_rows size || content_cols < min_content_cols size ->
@@ -85,7 +93,7 @@ let band c ~display ~project ~name ~content_rows ~content_cols =
              let compact =
                match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
              in
-             let image = image ~compact c ~name box.View.size in
+             let image = image ~compact c ~name ~equipment box.View.size in
              { display; box; image; lines = View.lines ~project display box image })
 
 let beside band facts =
@@ -114,6 +122,22 @@ let placement band ~scroll ~visible_rows ~origin:(row, column) =
 
 let session_cache = cache ()
 
-let shown ~name ~content_rows ~content_cols =
+let shown ~name ~equipment ~content_rows ~content_cols =
   band session_cache ~display:(View.current_display ())
-    ~project:Masc_tui_terminal_palette.best_color ~name ~content_rows ~content_cols
+    ~project:Masc_tui_terminal_palette.best_color ~name ~equipment ~content_rows ~content_cols
+
+let preview ~name ~equipment ~content_rows ~content_cols =
+  let display = View.current_display () in
+  match band_size display with
+  | None -> None
+  | Some size when content_rows < size.rows + 2 || content_cols < String.length indent + size.cols + 2 ->
+      None
+  | Some size ->
+      View.fit display ~max_cols:size.cols ~max_rows:size.rows
+      |> Option.map (fun box ->
+             let compact =
+               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
+             in
+             let picture = image ~compact session_cache ~name ~equipment box.View.size in
+             { display; box; image = picture
+             ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

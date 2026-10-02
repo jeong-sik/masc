@@ -14,7 +14,7 @@ module Types = Masc_tui_types
    cases ask what the surface itself fetches, so they ask with the pane
    down. [test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn]
    asks the other way. *)
-let needs surface = Types.surface_needs ~keeper_pane_drawn:false surface
+let needs surface = Types.surface_needs ~about_open:false ~keeper_pane_drawn:false surface
 
 let test_only_the_chat_pane_asks_for_chat_history () =
   check bool "the chat pane asks for it" true
@@ -35,6 +35,8 @@ let test_only_the_chat_pane_asks_for_chat_history () =
 ;;
 
 let test_every_keeper_sub_mode_still_asks_for_the_roster () =
+  check bool "Overview reads the Candle envelope with its Keeper pane hidden" true
+    (needs Types.Overview).Types.needs_keeper_roster;
   List.iter
     (fun (label, mode) ->
        let n = needs (Types.Keepers mode) in
@@ -58,12 +60,12 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
       check bool
         (label ^ " does not fetch the roster for itself")
         false
-        (Types.surface_needs ~keeper_pane_drawn:false surface)
+        (Types.surface_needs ~about_open:false ~keeper_pane_drawn:false surface)
           .Types.needs_keeper_roster;
       check bool
         (label ^ " fetches it while the pane draws it")
         true
-        (Types.surface_needs ~keeper_pane_drawn:true surface)
+        (Types.surface_needs ~about_open:false ~keeper_pane_drawn:true surface)
           .Types.needs_keeper_roster)
     [ ("approvals", Types.Approvals)
     ; ("board", Types.Board)
@@ -72,12 +74,30 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
     ; ("memory", Types.Memory)
     ];
   (* And the pane changes nothing else: a surface asks for what it draws. *)
-  let board_without = Types.surface_needs ~keeper_pane_drawn:false Types.Board in
-  let board_with = Types.surface_needs ~keeper_pane_drawn:true Types.Board in
+  let board_without = Types.surface_needs ~about_open:false ~keeper_pane_drawn:false Types.Board in
+  let board_with = Types.surface_needs ~about_open:false ~keeper_pane_drawn:true Types.Board in
   check bool "the board still asks for the board" true
     board_with.Types.needs_board;
   check bool "and for nothing else the pane does not draw" true
     ({ board_with with Types.needs_keeper_roster = false } = board_without)
+
+let test_about_refreshes_observed_outfits_over_another_surface () =
+  let closed = Types.surface_needs ~keeper_pane_drawn:false
+    ~about_open:false Types.Config in
+  let opened = Types.surface_needs ~keeper_pane_drawn:false
+    ~about_open:true Types.Config in
+  let opening = Types.surface_needs_delta ~previous:closed ~next:opened in
+  check bool "opening About reads outfit observations through the existing scoped owner"
+    true opening.Types.needs_keeper_roster;
+  check bool "closing About requests no additional read" false
+    (Types.surface_needs_any (Types.surface_needs_delta ~previous:opened ~next:closed));
+  (* A newer full bundle supersedes an in-flight scoped ticket, so it reads
+     every currently visible dataset, including About outfit observations. *)
+  let cadence = Types.surface_needs
+    ~keeper_pane_drawn:false ~about_open:true Types.Config in
+  check bool "a newer full bundle keeps observing the visible About gallery"
+    true cadence.Types.needs_keeper_roster
+;;
 
 let test_forward_navigation_fetches_only_new_surface_datasets () =
   (* Walk the whole ring forward from Overview. A named stop marker rotted
@@ -132,21 +152,6 @@ let test_equal_needs_have_no_delta () =
   check bool "keeper modes share an already loaded dataset set" false
     (Types.surface_needs_any
        (Types.surface_needs_delta ~previous ~next))
-;;
-
-let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
-  let concurrent =
-    Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true Types.Board
-  in
-  let alone =
-    Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true Types.Board
-  in
-  check bool "concurrent full refresh is global-only" false
-    (Types.surface_needs_any concurrent);
-  check bool "an unopposed full refresh still updates the visible board" true
-    alone.Types.needs_board
 ;;
 
 let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
@@ -208,10 +213,6 @@ let test_usage_asks_for_keeper_usage () =
 let test_only_usage_asks_for_account_emails () =
   check bool "Usage asks for them" true
     (needs Types.Metrics).Types.needs_account_emails;
-  check bool "and so does its full refresh" true
-    (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false Types.Metrics)
-      .Types.needs_account_emails;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
@@ -238,12 +239,12 @@ let () =
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"
             `Quick test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn
+        ; test_case "About observes outfits while its underlying surface stays open"
+            `Quick test_about_refreshes_observed_outfits_over_another_surface
         ; test_case "forward navigation fetches only new datasets" `Quick
             test_forward_navigation_fetches_only_new_surface_datasets
         ; test_case "equal needs have no delta" `Quick
             test_equal_needs_have_no_delta
-        ; test_case "full refresh does not race a scoped owner" `Quick
-            test_full_refresh_omits_scoped_datasets_while_their_owner_is_running
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
         ] )

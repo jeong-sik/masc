@@ -297,7 +297,7 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
   @ revision
   @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
         values.mrow_facts
-    ; Table.cell ~align:Table.Right ~style:size_style ~header:"RECALL"
+    ; Table.cell ~align:Table.Right ~style:size_style ~header:"STORED"
         ~width:memory_size_width values.mrow_size
     ]
   @ source
@@ -405,11 +405,17 @@ let workspace_column_width = function
   | Workspace_sync -> workspace_sync_width
   | Workspace_path -> workspace_minimum_path_width
 
+let workspace_columns =
+  [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync; Workspace_path ]
+
+let workspace_minimum_width =
+  Table.used_width
+    (List.map (fun column -> Table.cell ~header:""
+       ~width:(workspace_column_width column) "") workspace_columns)
+
 let workspace_layout ~inner_width =
   Table.fit ~inner_width ~width:workspace_column_width ~flex:Workspace_path
-    ~drop_order:[ Workspace_sync; Workspace_branch ]
-    [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync;
-      Workspace_path ]
+    ~drop_order:[ Workspace_sync; Workspace_branch ] workspace_columns
 
 let workspace_cells ~(layout : workspace_column Table.layout) values =
   List.map
@@ -683,15 +689,8 @@ let schedule_columns =
   ; Schedule_recurrence
   ]
 
-(* What a narrow list gives up, first to go first (operator, 2026-09-28).
-   - The delivery: the two rows under the list read the selected row's
-     queue and reaction whole, so the column shortens what stays on the
-     screen for the row the cursor is on.
-   - The wake: the last wake's status, which the schedule's detail lists
-     wake by wake.
-   - The state last.
-   When it is due, whom it reaches and how it repeats never go: they are
-   what a row is for. *)
+(* Preserve the operator's list priority: due time, target and recurrence.
+   Delivery goes first, then wake, then state; full state is in the detail. *)
 let schedule_drop_order =
   [ Schedule_delivery; Schedule_wake; Schedule_status ]
 
@@ -700,25 +699,37 @@ let schedule_drop_order =
    the header and every row are drawn from the same ones. *)
 type schedule_layout = {
   sl_columns : schedule_column Table.layout;
+  sl_due_width : int;
   sl_target_width : int;
   sl_wake_width : int;
   sl_delivery_width : int;
 }
 
 let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
-  (* The recurrence's entry is its floor: it is the flexible column and takes
-     what the others leave. *)
+  let due_floor = Masc_tui_message_layout.display_width "DUE" in
+  let target_floor = Masc_tui_message_layout.display_width "TARGET" in
+  let primary_gaps = 2 * Table.cell_gap in
+  let due_width = min schedule_due_width
+      (max due_floor (inner_width - target_floor - schedule_minimum_recurrence_width - primary_gaps)) in
+  (* A target takes at most a third of the row and leaves the operator's due
+     and recurrence readings their floors before optional columns are fitted. *)
+  let target_width = min target_width
+      (max target_floor (min (inner_width / 3)
+         (inner_width - due_width - schedule_minimum_recurrence_width - primary_gaps))) in
+  let recurrence_floor = min schedule_minimum_recurrence_width
+      (max 1 (inner_width - due_width - target_width - primary_gaps)) in
   let width = function
     | Schedule_status -> schedule_status_width
-    | Schedule_due -> schedule_due_width
+    | Schedule_due -> due_width
     | Schedule_target -> target_width
     | Schedule_wake -> wake_width
     | Schedule_delivery -> delivery_width
-    | Schedule_recurrence -> schedule_minimum_recurrence_width
+    | Schedule_recurrence -> recurrence_floor
   in
   { sl_columns =
       Table.fit ~inner_width ~width ~flex:Schedule_recurrence
         ~drop_order:schedule_drop_order schedule_columns
+  ; sl_due_width = due_width
   ; sl_target_width = target_width
   ; sl_wake_width = wake_width
   ; sl_delivery_width = delivery_width
@@ -730,7 +741,7 @@ let schedule_cell ~status_style ~wake_style ~recurrence_style
       Table.cell ~style:status_style ~header:"STATUS"
         ~width:schedule_status_width values.srow_status
   | Schedule_due ->
-      Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
+      Table.cell ~header:"DUE" ~width:layout.sl_due_width values.srow_due
   | Schedule_target ->
       Table.cell ~header:"TARGET" ~width:layout.sl_target_width
         values.srow_target
@@ -756,6 +767,231 @@ let schedule_header_row ~layout =
 let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
   Table.row
     (schedule_cells ?status_style ?wake_style ?recurrence_style ~layout values)
+
+(* Keeper automation tab columns.
+
+   The Keeper detail's Automation tab is the Schedules list read for one
+   Keeper, and until it met this description it was the one list on the
+   screen without the others' dress: no names above the rows, no colour on
+   the state, and -- the reason for the columns below -- no reading of
+   whether a schedule ever actually fired. The row said when a request was
+   stored and how it repeats; the two facts an operator opens the tab for,
+   when the last wake went out and when this Keeper took it, stayed in the
+   projection the row never read.
+
+   So the row tells the occurrence's story left to right: the state's mark
+   and word, when the last wake started, what became of that wake, when the
+   ledger saw the stimulus arrive. RECEIVED, not consumed: the clock is the
+   arrival the ledger recorded, and the queue's acknowledgement of the same
+   stimulus is a later, separate fact the detail surfaces -- the two part
+   company exactly when the keeper sat on a wake before taking it, and a
+   column that named one while reading the other would misdate the other.
+   Then the schedule's own identity: how it repeats, what it asks for. The
+   storage context -- who asked and when -- rides the last two named
+   columns, because "why does this exist" is a question the tab could not
+   answer before even though the projection carried both facts on every
+   row.
+
+   The mark is one cell of the vocabulary the Fusion pipeline already draws
+   (done, active, waiting, failed), so a page of rows reads by shape before
+   the reader reaches any word. Its colour is the state's own; the two
+   always move together, one [schedule_status_color] for both cells. *)
+let kauto_mark_width = 1
+
+(* The recurrence keeps the floor the Schedules list gives it: below this the
+   row is a schedule the reader cannot tell from a one-shot. *)
+let kauto_minimum_recurrence_width = schedule_minimum_recurrence_width
+
+(* The BY column carries the projection's own actor reading -- a display
+   name and its kind, "won-chik (human_operator)". A floor of 16 holds the
+   shortest names whole; the cap keeps one long identifier from taking the
+   clocks' room, which are the columns this tab exists for. *)
+let kauto_minimum_by_width = 16
+let kauto_maximum_by_width = 26
+
+(* A summary folded below this identifies no schedule. *)
+let kauto_minimum_what_width = 16
+
+type kauto_row_values = {
+  krow_mark : string;
+  krow_status : string;
+  krow_triggered : string;
+  krow_outcome : string;
+  krow_received : string;
+  krow_recurrence : string;
+  krow_by : string;
+  krow_requested : string;
+  krow_what : string;
+}
+
+let kauto_no_values =
+  { krow_mark = ""
+  ; krow_status = ""
+  ; krow_triggered = ""
+  ; krow_outcome = ""
+  ; krow_received = ""
+  ; krow_recurrence = ""
+  ; krow_by = ""
+  ; krow_requested = ""
+  ; krow_what = ""
+  }
+
+(* What a row wears whatever it says: the recurrence and the storage context
+   recede, the way the Schedules list dims its recurrence. The three that
+   change with the reading -- the mark, the state word, the outcome -- are
+   the row's own per-row styles. *)
+type kauto_row_styles = {
+  kstyle_mark : string;
+  kstyle_status : string;
+  kstyle_outcome : string;
+  kstyle_recurrence : string;
+  kstyle_by : string;
+}
+
+let kauto_plain_styles =
+  { kstyle_mark = ""
+  ; kstyle_status = ""
+  ; kstyle_outcome = ""
+  ; kstyle_recurrence = ""
+  ; kstyle_by = ""
+  }
+
+(* The list's columns, named so a narrow pane can say which it gives up. *)
+type kauto_column =
+  | Kauto_mark
+  | Kauto_status
+  | Kauto_triggered
+  | Kauto_outcome
+  | Kauto_received
+  | Kauto_recurrence
+  | Kauto_by
+  | Kauto_requested
+  | Kauto_what
+
+let kauto_columns =
+  [ Kauto_mark
+  ; Kauto_status
+  ; Kauto_triggered
+  ; Kauto_outcome
+  ; Kauto_received
+  ; Kauto_recurrence
+  ; Kauto_by
+  ; Kauto_requested
+  ; Kauto_what
+  ]
+
+(* What a narrow pane gives up, first to go first. The storage context leads
+   the list -- on a narrow pane the occurrence still being told matters more
+   than who filed it -- then the outcome word, whose failure colour the mark
+   and the state word already carry, then the recurrence. The mark, the
+   state, the two clocks and the summary never go: they are the four facts
+   the tab was rewritten to state. *)
+let kauto_drop_order =
+  [ Kauto_by; Kauto_requested; Kauto_outcome; Kauto_recurrence ]
+
+(* The BY column, measured from the actors on the page the way the delivery
+   column is: the projection's actor list is open, so the page is what fits
+   it. *)
+let kauto_by_width words =
+  List.fold_left
+    (fun widest word -> max widest (Masc_tui_message_layout.display_width word))
+    kauto_minimum_by_width words
+  |> min kauto_maximum_by_width
+
+(* The status, clock and outcome widths are the caller's: this module does
+   not link the schedule contract, so the status comes measured from the
+   contract's own word list, the clock from the stamp format, and the
+   outcome from the words on the page ([schedule_delivery_width] holds the
+   wake words too -- "terminal_cancelled" is wider than any of them). *)
+type kauto_layout = {
+  k_columns : kauto_column Table.layout;
+  k_status_width : int;
+  k_clock_width : int;
+  k_outcome_width : int;
+  k_by_width : int;
+}
+
+let kauto_layout ~inner_width ~status_width ~clock_width ~outcome_width
+    ~by_width =
+  let width = function
+    | Kauto_mark -> kauto_mark_width
+    | Kauto_status -> status_width
+    | Kauto_triggered | Kauto_received | Kauto_requested -> clock_width
+    | Kauto_outcome -> outcome_width
+    | Kauto_recurrence -> kauto_minimum_recurrence_width
+    | Kauto_by -> by_width
+    | Kauto_what -> kauto_minimum_what_width
+  in
+  { k_columns =
+      Table.fit ~inner_width ~width ~flex:Kauto_what
+        ~drop_order:kauto_drop_order kauto_columns
+  ; k_status_width = status_width
+  ; k_clock_width = clock_width
+  ; k_outcome_width = outcome_width
+  ; k_by_width = by_width
+  }
+
+let kauto_cell ~styles ~(layout : kauto_layout) values = function
+  | Kauto_mark ->
+      (* A mark, like Board's kind mark: no name is narrower than the cell
+         holding it, and the glyph carries its own dress. *)
+      Table.cell ~style:styles.kstyle_mark ~header:" " ~width:kauto_mark_width
+        values.krow_mark
+  | Kauto_status ->
+      Table.cell ~style:styles.kstyle_status ~header:"STATUS"
+        ~width:layout.k_status_width values.krow_status
+  | Kauto_triggered ->
+      Table.cell ~header:"TRIGGERED" ~width:layout.k_clock_width
+        values.krow_triggered
+  | Kauto_outcome ->
+      Table.cell ~style:styles.kstyle_outcome ~header:"OUTCOME"
+        ~width:layout.k_outcome_width values.krow_outcome
+  | Kauto_received ->
+      Table.cell ~header:"RECEIVED" ~width:layout.k_clock_width
+        values.krow_received
+  | Kauto_recurrence ->
+      Table.cell ~style:styles.kstyle_recurrence ~header:"RECURRENCE"
+        ~width:kauto_minimum_recurrence_width values.krow_recurrence
+  | Kauto_by ->
+      Table.cell ~style:styles.kstyle_by ~header:"BY"
+        ~width:layout.k_by_width values.krow_by
+  | Kauto_requested ->
+      Table.cell ~header:"REQUESTED" ~width:layout.k_clock_width
+        values.krow_requested
+  | Kauto_what ->
+      Table.cell ~fold:Table.Fold_tail ~header:"WHAT"
+        ~width:layout.k_columns.Table.flex_width values.krow_what
+
+let kauto_cells ~styles ~(layout : kauto_layout) values =
+  List.map (kauto_cell ~styles ~layout values) layout.k_columns.Table.shown
+
+let kauto_header_row ~layout =
+  Table.header_row (kauto_cells ~styles:kauto_plain_styles ~layout kauto_no_values)
+
+let kauto_row ~styles ~layout values =
+  Table.row (kauto_cells ~styles ~layout values)
+
+(* The mark a schedule's state draws, from the projection's own status
+   vocabulary. A word this build does not name keeps the middot: the mark
+   says "the pane did not classify this" rather than claiming a liveness the
+   pane never read, the same promise the status word makes by rendering as
+   itself. *)
+let kauto_status_mark = function
+  | "scheduled" -> "\xe2\x97\x8b" (* waiting *)
+  | "due" | "running" -> "\xe2\x97\x90" (* active *)
+  | "succeeded" -> "\xe2\x97\x8f" (* done *)
+  | "failed" -> "\xc3\x97" (* failed *)
+  | "cancelled" | "expired" -> "\xe2\x97\x8b" (* inert; the colour dims it *)
+  | _ -> "\xc2\xb7"
+
+(* The label on the rule that parts the live rows from the closed ones. The
+   parts are the page's own counts, in the order the statuses first appear,
+   so the label describes the rows under it rather than a store-wide tally
+   the header line above the list already states. *)
+let kauto_group_label ~title parts =
+  match parts with
+  | [] -> title
+  | _ -> Printf.sprintf "%s \xc2\xb7 %s" title (String.concat " \xc2\xb7 " parts)
 
 (* Lane run columns.
 

@@ -124,7 +124,8 @@ let enable_candle (config : Workspace.config) =
     inside config (Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path)
   in
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -193,7 +194,7 @@ let last_candidates (config : Workspace.config) =
       (fun (event : E.t) ->
          match event.body with
          | E.Candidates c -> Some (c.candidate_task_ids, c.candidate_keepers)
-         | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Purchased _ | E.Payout_failed _ -> None)
+         | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None)
       (List.rev (Candle_ledger.events view))
 
 
@@ -218,7 +219,7 @@ let test_the_worker_settles_a_waiting_payout_when_it_starts () =
   enable_candle config;
   seed_payout config ~goal_id:"goal-1";
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     await_within env "the payout being settled" (fun () -> settled config));
   check
     (list string)
@@ -232,7 +233,7 @@ let test_a_wake_makes_the_worker_look_again () =
   @@ fun env config ->
   enable_candle config;
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     (* The start-up pass finds nothing waiting. *)
     Eio.Time.sleep (Eio.Stdenv.clock env) 0.2;
     seed_payout config ~goal_id:"goal-2";
@@ -250,7 +251,7 @@ let test_the_worker_does_nothing_while_candle_is_off () =
   @@ fun env config ->
   seed_payout config ~goal_id:"goal-3";
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     Candle_payout_worker.wake ();
     Eio.Time.sleep (Eio.Stdenv.clock env) 0.3);
   check (list string) "nothing was added" [ "snapshot"; "payout_owed" ] (kinds config)
@@ -267,7 +268,7 @@ let test_a_payout_with_a_keeper_to_pay_gets_candidates_and_keeps_waiting () =
   write_keeper config "keeper-a";
   seed_payout config ~goal_id:"goal-4" ~linked_task_ids:[ "task-1" ];
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     await_within env "the Candidates row" (fun () -> List.mem "candidates" (kinds config)));
   check
     (list string)
@@ -293,9 +294,9 @@ let test_a_start_while_a_worker_runs_is_refused () =
   seed_payout config ~goal_id:"goal-5";
   seed_payout other ~goal_id:"goal-6";
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
-    Candle_payout_worker.start ~appraise ~sw ~config;
-    Candle_payout_worker.start ~appraise ~sw ~config:other;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
+    Candle_payout_worker.start ~appraise ~sw ~config ();
+    Candle_payout_worker.start ~appraise ~sw ~config:other ();
     await_within env "the first base path's payout" (fun () -> settled config);
     Candle_payout_worker.wake ();
     Eio.Time.sleep (Eio.Stdenv.clock env) 0.3);
@@ -314,10 +315,10 @@ let test_a_worker_can_start_again_once_its_switch_has_ended () =
   seed_payout config ~goal_id:"goal-7";
   seed_payout other ~goal_id:"goal-8";
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     await_within env "the first payout" (fun () -> settled config));
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config:other;
+    Candle_payout_worker.start ~appraise ~sw ~config:other ();
     await_within env "the second payout" (fun () -> settled other))
 ;;
 

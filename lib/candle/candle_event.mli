@@ -37,7 +37,12 @@ type attribution = {
 type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
 (** Nobody could be paid. *)
 
+type equipment_choice = Default | Item of Keeper_portrait_item.t
+
 type body =
+  | Half_life_set of Candle_decay.half_life
+      (** An explicit configuration boundary; subsequent intervals use it.
+          Earlier payments and purchases keep their preceding policy. *)
   | Snapshot of
       { goal_id : string
       ; request_id : string  (** The verification request that passed. *)
@@ -69,6 +74,9 @@ type body =
             (** One entry per Task the [Snapshot] linked, in its order. *)
       ; candidate_task_ids : string list
       ; candidate_keepers : string list
+      ; candidate_task_keepers : (string * string option) list
+          (** Each candidate Task has its frozen admitted Keeper name, or [None]
+              when its assignee was not a Keeper at candidate creation. *)
       }
   | Unattributed of
       { goal_id : string
@@ -82,6 +90,7 @@ type body =
       ; item : Keeper_portrait_item.t
       ; amount_milli : int
       }
+  | Equipped of { keeper : string; slot : Keeper_portrait_item.slot; choice : equipment_choice }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
@@ -90,8 +99,7 @@ type t =
   }
 
 val kind : body -> string
-(** The row's ["kind"]: [snapshot], [payout_owed], [candidates] or
-    [unattributed], [paid], [purchased] or [payout_failed]. *)
+(** The closed row-kind discriminator, including payouts, purchases and equipment choices. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

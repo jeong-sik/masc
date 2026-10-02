@@ -579,21 +579,16 @@ type not_committed =
   ; walk_shows_size : bool
   }
 
-(* One official-client slot's failure. A slot that names the limit it refused
-   at is answered by [fit_continuity], not here. Of the rest, an answer that
-   came back unusable is a refused output, which RFC-librarian-lifecycle §4.3
-   counts among the failures reading less answers; an id this module cannot
-   run is a configuration error; and a client that simply failed does not say
-   why -- its quota and its input limit arrive in the same constructor -- so it
-   is no evidence either way. Reading less on it would let a CLI quota storm
-   walk the width down to one atom. *)
+(* Only typed input-capacity evidence makes an execution failure about size.
+   A quota or an unclassified transport failure cannot narrow the source. *)
 let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
   | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
   | Keeper_lane_cli_oneshot.Unknown_runtime _
-  | Keeper_lane_cli_oneshot.Not_an_official_client _
-  | Keeper_lane_cli_oneshot.Execution_failed _ -> false
+  | Keeper_lane_cli_oneshot.Not_an_official_client _ -> false
+  | Keeper_lane_cli_oneshot.Execution_failed _ ->
+    Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
 ;;
 
 (* Whether anything this pass met says the range's size stopped it. A failure
@@ -628,9 +623,19 @@ let rec extraction_shows_size = function
    its caller with the size verdict above instead. *)
 let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
-    (match List.rev failures with
-     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
-     | [] -> None)
+    (* Every refusal belongs to its runtime; a later quota must not erase
+       an earlier measured limit. Fit to the largest actual CLI boundary,
+       so a more restrictive fallback cannot unnecessarily narrow input
+       that another measured slot can take. Ties retain walk order. *)
+    List.fold_left
+      (fun selected failure ->
+        match selected, Keeper_lane_cli_oneshot.input_capacity failure with
+        | None, observed -> observed
+        | Some _, None -> selected
+        | Some previous, Some observed ->
+          if observed.capacity.max_chars > previous.capacity.max_chars
+          then Some observed else selected)
+      None failures
   | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
@@ -882,7 +887,8 @@ let execute_answer
       ~validate:validate_flow
       attempt
   in
-  Runtime_exact_lane_backpressure.observe flow;
+  Runtime_exact_lane_backpressure.observe
+    ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots } flow;
   match flow with
   | Ok success ->
     let selected_slot =
@@ -1053,6 +1059,7 @@ let exact_input_payload
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "goal_context", Keeper_librarian.goal_context_to_json inp.goal_context
+    ; "historical_task_contexts", Keeper_librarian_task_context.to_json inp.historical_task_contexts
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "prompt", prompt_material_payload ~key:prompt_key prompt_material
     ; ( "rendered_prompt_variables"
@@ -1152,13 +1159,26 @@ let context_write_json = function
 
 type write_scope = Context_only | Context_and_memory
 
+(* How one continuity publication ended. The caller that owns nothing else
+   decides its run's outcome from it. *)
+type continuity_publication =
+  | Continuity_committed
+  | Continuity_not_committed of string
+
+(* The [Failed] code of a run whose only product, the continuity snapshot, was
+   not committed. *)
+let continuity_not_committed_code = "continuity_not_committed"
+
 let commit_continuity ~commit ~observe =
   (* The executor job has its own cancellation scope. Keep its caller alive
      until all disk effects and their observation finish; shutdown/purge must
      not run past a detached writer after cancellation of the await. *)
-  Eio.Cancel.protect (fun () ->
-    observe (Domain_pool_ref.submit_io_or_inline commit));
-  Eio.Fiber.check ()
+  let observed =
+    Eio.Cancel.protect (fun () ->
+      observe (Domain_pool_ref.submit_io_or_inline commit))
+  in
+  Eio.Fiber.check ();
+  observed
 ;;
 
 let run_best_effort
@@ -1271,6 +1291,79 @@ let run_best_effort
            existing failure classification. *)
         let observed_absorb_gate = ref None in
         let committed_memory = ref None in
+        let register_absorb_evaluation
+            ~direction
+            ~destinations
+            ~state
+            ~questions =
+          let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
+          Exact_lane_run_registry.register_running
+            registry
+            ~run_id:evaluation_id
+            ~lane:Exact_lane_run_registry.Librarian
+            ~actor:keeper_id
+            ~started_at:(Time_compat.now ())
+            ~input:
+              (Exact_lane_run_registry.Exact_input
+                 (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
+                    ~direction ~destinations ~state ~questions));
+          evaluation_id
+        in
+        let complete_absorb_evaluation ~evaluation_id evaluation =
+          let outcome =
+            match evaluation.Keeper_librarian_absorb_gate.result with
+            | Ok _ -> Exact_lane_run_registry.Succeeded
+            | Error failure ->
+              Exact_lane_run_registry.Failed
+                { code = "absorb_gate_provider_failure"
+                ; detail = Typesafeai_client.failure_to_string failure
+                }
+          in
+          (match
+             Exact_lane_run_registry.mark_completed
+               registry
+               ~run_id:evaluation_id
+               ~outcome
+               ~elapsed_s:0.0
+               ~selected_slot:None
+               ~output:
+                 (Keeper_librarian_absorb_gate.observation_to_yojson
+                    (Keeper_librarian_absorb_gate.Incomplete [ evaluation ]))
+           with
+           | Ok () -> ()
+           | Error error ->
+             Log.Keeper.warn
+               ~keeper_name:keeper_id
+               "absorb gate evaluation completion persistence failed id=%s: %s"
+               evaluation_id
+               (Exact_lane_run_registry.completion_error_to_string error))
+        in
+        let abort_absorb_evaluation ~evaluation_id result =
+          let outcome, output =
+            match result with
+            | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
+            | `Failed detail ->
+              ( Exact_lane_run_registry.Failed
+                  { code = "absorb_gate_dispatch_failed"; detail }
+              , `Assoc [ "status", `String "aborted"; "detail", `String detail ] )
+          in
+          (match
+             Exact_lane_run_registry.mark_completed
+               registry
+               ~run_id:evaluation_id
+               ~outcome
+               ~elapsed_s:0.0
+               ~selected_slot:None
+               ~output
+           with
+           | Ok () -> ()
+           | Error error ->
+             Log.Keeper.warn
+               ~keeper_name:keeper_id
+               "absorb gate evaluation abort persistence failed id=%s: %s"
+               evaluation_id
+               (Exact_lane_run_registry.completion_error_to_string error))
+        in
         (try
            let result =
              let open Result.Syntax in
@@ -1359,25 +1452,28 @@ let run_best_effort
                    continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
                       "prefix_sha256", `String snapshot.prefix_sha256];
-                   on_continuity_committed ~served_by:served_slot snapshot
+                   on_continuity_committed ~served_by:served_slot snapshot;
+                   Continuity_committed
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
+                   let reason = "continuity state not committed: " ^ detail in
                    (* A snapshot that did not commit -- a CAS the history moved
                       under, a disk error -- is not the range's size, so the
                       caller keeps the width and logs this cause. *)
-                   on_not_committed
-                     { detail = "continuity state not committed: " ^ detail
-                     ; walk_shows_size = false
-                     };
-                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
+                   on_not_committed { detail = reason; walk_shows_size = false };
+                   Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
+                   Continuity_not_committed reason)
              in
              match answer with
              | Working_context_answer proposed ->
                organize_working_context proposed;
                Ok (`Context_organized (exact_output, selected_slot))
              | Continuity_state_answer { prepared; working_state } ->
-               publish_continuity prepared working_state;
-               Ok (`Context_organized (exact_output, selected_slot))
+               (match publish_continuity prepared working_state with
+                | Continuity_committed ->
+                  Ok (`Context_organized (exact_output, selected_slot))
+                | Continuity_not_committed reason ->
+                  Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
              | Memory_answer { selection; continuity_answer } ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
@@ -1431,6 +1527,9 @@ let run_best_effort
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
+                 ~before_evaluate:register_absorb_evaluation
+                 ~after_evaluate:complete_absorb_evaluation
+                 ~on_evaluation_aborted:abort_absorb_evaluation
                  ~clock
                  ~keeper_id
                  ~facts:(match prompt_input.current with
@@ -1488,7 +1587,10 @@ let run_best_effort
              (match continuity_answer with
               | Memory_only -> ()
               | Continuity { prepared; working_state } ->
-                publish_continuity prepared working_state);
+                (* The Memory decision is saved above and stands. A snapshot
+                   that did not commit is on the run's output and in the log. *)
+                (match publish_continuity prepared working_state with
+                 | Continuity_committed | Continuity_not_committed _ -> ()));
              (* The snapshot is committed; each supersede it carried out is now
                 a Revised event on the old id (RFC-0418). A supersede of a
                 memory the keeper removed during the pass was not carried out
@@ -1519,6 +1621,16 @@ let run_best_effort
            match result with
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot Exact_lane_run_registry.Succeeded
+               (`Assoc [ "memory_write", `String "skipped_context_only"
+                       ; "exact_output", exact_output ]);
+             Eio.Fiber.check ()
+           | Ok (`Continuity_not_committed (reason, exact_output, selected_slot)) ->
+             (* The answer was accepted and the store refused it. The snapshot
+                is this pass's whole product, so the run failed, as a Memory
+                snapshot that cannot be written fails its run. *)
+             complete ~selected_slot
+               (Exact_lane_run_registry.Failed
+                  { code = continuity_not_committed_code; detail = reason })
                (`Assoc [ "memory_write", `String "skipped_context_only"
                        ; "exact_output", exact_output ]);
              Eio.Fiber.check ()

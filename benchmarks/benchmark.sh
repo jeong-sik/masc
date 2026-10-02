@@ -1,17 +1,31 @@
 #!/bin/bash
 # MASC Benchmark Framework
-# Usage: ./benchmark.sh [session|read|workspace-collaboration|runtime|a2a|all] [iterations]
+# Usage: ./benchmark.sh [session|read|workspace-collaboration|runtime|all] [iterations]
 
 set -euo pipefail
+
+# Refuse unsupported patterns before creating result files or an MCP session.
+PATTERN="${1:-all}"
+case "$PATTERN" in
+  session|read|workspace-collaboration|runtime|all) ;;
+  *)
+    printf '[ERROR] Unsupported pattern: %s\n' "$PATTERN" >&2
+    printf 'Available: session, read, workspace-collaboration, runtime, all\n' >&2
+    exit 1
+    ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MASC_URL="${MASC_URL:-http://127.0.0.1:8935/mcp}"
+# No default URL. masc_broadcast writes a real message and masc_runtime_verify
+# sends a real chat completion to every endpoint, so a default of the
+# production server (8935) would spend its quota and post to its Board. Point
+# this at an isolated server on port 9400 or above (docs/BENCHMARK-RUNBOOK.md).
+MASC_URL="${MASC_URL:?set MASC_URL to the /mcp URL of an isolated benchmark server on port 9400 or above, see docs/BENCHMARK-RUNBOOK.md}"
 MASC_AGENT="${MASC_AGENT:-bench}"
 MASC_TOKEN="${MASC_TOKEN:-}"
 BENCH_WORKSPACE_PATH="${BENCH_WORKSPACE_PATH:-$ROOT_DIR}"
-PATTERN="${1:-all}"
 ITERATIONS="${2:-3}"
 RESULTS_DIR="${SCRIPT_DIR}/results"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -411,7 +425,6 @@ collect_tool_samples() {
 
 bench_read_path() {
   collect_tool_samples "mcp_read_status" "masc_status" '{}' "$ITERATIONS" "workspace status"
-  collect_tool_samples "mcp_read_agents" "masc_agents" '{}' "$ITERATIONS" "agent details"
   collect_tool_samples "mcp_read_tasks" "masc_tasks" '{}' "$ITERATIONS" "active backlog"
   collect_tool_samples "mcp_read_messages" "masc_messages" '{"limit":5}' "$ITERATIONS" "recent workspace messages"
 }
@@ -420,10 +433,6 @@ bench_workspace_collaboration() {
   collect_tool_samples "mcp_workspace_broadcast" "masc_broadcast" \
     "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,content:"benchmark",format:"compact"}')" \
     "$ITERATIONS" "bound agent write path"
-}
-
-bench_a2a() {
-  :
 }
 
 bench_runtime() {
@@ -450,7 +459,6 @@ run_pattern() {
       ensure_session_ready
       bench_read_path
       bench_workspace_collaboration
-      bench_a2a
       bench_runtime
       ;;
     session)
@@ -467,15 +475,6 @@ run_pattern() {
     runtime)
       ensure_session_ready
       bench_runtime
-      ;;
-    a2a)
-      ensure_session_ready
-      bench_a2a
-      ;;
-    *)
-      error "Unknown pattern: $PATTERN"
-      echo "Available: session, read, workspace-collaboration, runtime, a2a, all" >&2
-      exit 1
       ;;
   esac
 }

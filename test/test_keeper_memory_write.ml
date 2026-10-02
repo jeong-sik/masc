@@ -721,6 +721,215 @@ let test_unsupported_derived_write_is_proven_pre_effect () =
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 ;;
 
+let test_demand_recall_does_not_materialize_or_verify_all_memory () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "demand-recall" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let claim = "Remember the deployment decision only when it is relevant." in
+  let write = Runtime.keeper_memory_write_with_outcome ~config ~meta
+      ~args:(make_args ~title:"" ~content:claim) in
+  Alcotest.(check bool) "ordinary write succeeds" true
+    (json_field "ok" (Yojson.Safe.from_string write.raw_output) = `Bool true);
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let source_path = "deployment.txt" in
+  let host_path = Filename.concat sandbox_root source_path in
+  Fs_compat.save_file host_path "old bytes";
+  let source_claim = "The source-bound deployment claim is not a standing instruction." in
+  let write = Runtime.keeper_memory_write_with_outcome ~config ~meta
+      ~args:(make_source_args ~title:"" ~content:source_claim ~source_path) in
+  Alcotest.(check bool) "source write succeeds" true
+    (json_field "ok" (Yojson.Safe.from_string write.raw_output) = `Bool true);
+  let source_file = Masc.Keeper_memory_source_current.path_for_keepers_dir
+      ~keepers_dir ~keeper_id:meta.name in
+  let before = Fs_compat.load_file source_file in
+  Fs_compat.save_file host_path "changed bytes";
+  let render ~search ~reader ~now =
+    Masc.Keeper_memory_os_recall.render_if_enabled
+      ~memory_search_available:search ~artifact_reader_available:reader
+      ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now () |> Option.get in
+  let prompt = render ~search:true ~reader:true ~now:100. in
+  List.iter (fun text -> Alcotest.(check bool) "notice omits claim and source bodies" false
+      (contains ~needle:text prompt)) [claim; source_claim; source_path];
+  Alcotest.(check string) "prompt preparation performs no source invalidation write"
+    before (Fs_compat.load_file source_file);
+  let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
+  Alcotest.(check bool) "default recall publishes no current artifact pin" false
+    (Sys.file_exists (Filename.concat keeper_dir "memory-recall-current.json"));
+  Alcotest.(check bool) "default recall creates no complete blob store" false
+    (Sys.file_exists (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path)));
+  Alcotest.(check string) "reader availability does not change a search notice" prompt
+    (render ~search:true ~reader:false ~now:200.);
+  let no_tools = render ~search:false ~reader:false ~now:200. in
+  Alcotest.(check bool) "retrieval-less fallback never includes complete facts" false
+    (contains ~needle:claim no_tools || contains ~needle:source_claim no_tools);
+  Alcotest.(check bool) "retrieval-less state explicitly withdraws prior authority" true
+    (contains ~needle:"Memory retrieval is unavailable" no_tools
+     && contains ~needle:"this notice verifies no claim" no_tools);
+  Alcotest.(check string) "notice is independent of wall clock" prompt
+    (render ~search:true ~reader:true ~now:300.);
+  let search = Runtime.keeper_memory_search_json ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc ["query", `String "deployment"; "limit", `Int 10])
+      |> Yojson.Safe.from_string in
+  Alcotest.(check (list string)) "demand search withholds changed source and keeps ordinary fact"
+    [claim] (match_texts search);
+  Alcotest.(check bool) "lookup revalidates and updates the changed source" false
+    (String.equal before (Fs_compat.load_file source_file))
+;;
+
+let test_search_revalidates_query_sources_only () =
+  let module Source = Masc.Keeper_memory_source_current in
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "selective-source-search" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let write path claim =
+    Fs_compat.save_file (Filename.concat sandbox_root path) "original";
+    let output = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) in
+    Alcotest.(check bool) "source write succeeds" true
+      (json_field "ok" (Yojson.Safe.from_string output.raw_output) = `Bool true) in
+  write "unrelated.txt" "The unrelated astronomy claim.";
+  write "stale.txt" "Deployment stale candidate.";
+  write "valid.txt" "Deployment valid candidate.";
+  Fs_compat.save_file (Filename.concat sandbox_root "unrelated.txt") "changed";
+  Fs_compat.save_file (Filename.concat sandbox_root "stale.txt") "changed";
+  let read () = match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "source snapshot absent"
+    | Error detail -> Alcotest.fail detail in
+  let before = read () in
+  let search query limit = Runtime.keeper_memory_search_json ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc ["query", `String query; "limit", `Int limit])
+      |> Yojson.Safe.from_string in
+  Alcotest.(check (list string)) "stale match does not crowd out valid successor"
+    ["Deployment valid candidate."] (match_texts (search "Deployment" 1));
+  let after = read () in
+  Alcotest.(check (list string)) "only selected changed source is invalidated"
+    ["stale.txt"] (List.map (fun (i : Source.invalidation) -> i.source_path) after.invalidations);
+  Alcotest.(check bool) "unrelated stored claim survives without being read" true
+    (List.exists (fun (fact : Source.fact) -> fact.source.path = "unrelated.txt") after.facts);
+  let saved = Fs_compat.load_file (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
+  ignore (search "no matching celestial word" 5);
+  Alcotest.(check string) "no-match search does not invalidate unrelated source"
+    saved (Fs_compat.load_file (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name));
+  Alcotest.(check int) "selected invalidation is one durable revision" (before.revision + 1) after.revision;
+  ignore (search "astronomy" 5);
+  Alcotest.(check bool) "later relevant lookup invalidates the unrelated changed source" true
+    (List.exists (fun (i : Source.invalidation) -> i.source_path = "unrelated.txt") (read ()).invalidations)
+;;
+
+let test_selected_source_rebound_digest_stays_unverified () =
+  let module Source = Masc.Keeper_memory_source_current in
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "rebound-source-query" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let path = "config.txt" in
+  let host_path = Filename.concat sandbox_root path in
+  Fs_compat.save_file host_path "first bytes";
+  let write claim = Runtime.keeper_memory_write_with_outcome ~config ~meta
+      ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) |> ignore in
+  let read () = match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "missing snapshot"
+    | Error detail -> Alcotest.fail detail in
+  write "Original selected source claim.";
+  let selected = (List.hd (read ()).facts).source in
+  Fs_compat.save_file host_path "second bytes";
+  write "Replacement source claim.";
+  let file = Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  let before = Fs_compat.load_file file in
+  Fs_compat.save_file host_path "third bytes";
+  let projection = match Source.revalidate ~scope:(Source.Selected_sources [selected])
+      ~config ~meta ~keepers_dir ~now:200. () with
+    | Ok projection -> projection
+    | Error detail -> Alcotest.fail detail in
+  Alcotest.(check (list string)) "old query cannot verify replacement identity" [path]
+    projection.unverified_paths;
+  Alcotest.(check string) "replacement identity is not read or invalidated" before
+    (Fs_compat.load_file file);
+  Alcotest.(check int) "replacement stays stored" 1 (List.length projection.facts)
+;;
+
+let test_recall_artifacts_follow_history_retention () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "recall-retention" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let store = Tool_blob_store.create ~base_path in
+  let write content =
+    let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_args ~title:"" ~content) in
+    let response = Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output in
+    Alcotest.(check bool) "memory write succeeds" true (json_field "ok" response = `Bool true)
+  in
+  let render now =
+    Masc.Keeper_memory_os_recall.render_if_enabled ~memory_search_available:false
+      ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now () |> Option.get
+  in
+  let artifact prompt =
+    let json = List.hd (List.rev (String.split_on_char '\n' prompt))
+        |> Yojson.Safe.from_string in
+    match Tool_output.normalized_artifact_ref_of_json json with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | _ -> Alcotest.fail "expected published recall artifact"
+  in
+  let sweep mode =
+    match Tool_blob_maintenance.run ~base_path
+        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+  in
+  let present (reference : Tool_output.artifact_ref) =
+    match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+    | Ok value -> Option.is_some value
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+  in
+  write "The first historical memory remains readable.";
+  let first = artifact (render 1.) in
+  write "A later decision changes the complete snapshot.";
+  let latest = artifact (render 2.) in
+  Alcotest.(check bool) "changed memory creates a distinct snapshot" false
+    (String.equal first.sha256 latest.sha256);
+  sweep Tool_blob_maintenance.Observe_only;
+  sweep Tool_blob_maintenance.Delete_previous_candidates;
+  Alcotest.(check bool) "historical snapshot survives GC" true (present first);
+  Alcotest.(check bool) "latest snapshot survives GC" true (present latest);
+  let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
+  let history_dir = Filename.concat keeper_dir
+      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
+  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  sweep Tool_blob_maintenance.Observe_only;
+  sweep Tool_blob_maintenance.Delete_previous_candidates;
+  Alcotest.(check bool) "expired historical snapshot becomes collectable" false (present first);
+  Alcotest.(check bool) "current snapshot stays reachable" true (present latest);
+  let current_pin = Filename.concat keeper_dir "memory-recall-current.json" in
+  Sys.remove current_pin;
+  Unix.mkdir current_pin 0o700;
+  let failed = render (Time_compat.now ()) in
+  Alcotest.(check bool) "failed retention does not publish an artifact" false
+    (contains ~needle:"keeper_artifact_read" failed);
+  Alcotest.(check bool) "failed retention preserves readable store availability" false
+    (contains ~needle:"memory is unavailable" failed);
+  Alcotest.(check bool) "artifact-only failure does not offer absent search" false
+    (contains ~needle:"keeper_memory_search" failed);
+  let search = Runtime.keeper_memory_search_json ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc ["query", `String "later decision";
+                    "source", `String "current"; "limit", `Int 10])
+      |> Yojson.Safe.from_string in
+  Alcotest.(check (list string)) "search still retrieves the readable snapshot"
+    ["A later decision changes the complete snapshot."] (match_texts search)
+;;
+
 let test_source_bound_write_discards_stale_claim_and_recreates () =
   with_temp_dir
   @@ fun base_path ->
@@ -746,8 +955,9 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
     |> Yojson.Safe.from_string
   in
-  let render_at ~now =
+  let render_prompt ~now =
     Masc.Keeper_memory_os_recall.render_if_enabled
+      ~memory_search_available:false
       ~config
       ~meta
       ~keepers_dir
@@ -755,6 +965,24 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
       ~now
       ()
     |> Option.value ~default:""
+  in
+  let render_at ~now =
+    let prompt = render_prompt ~now in
+    match List.rev (String.split_on_char '\n' prompt) with
+    | reference :: _ ->
+      (match Yojson.Safe.from_string reference with
+       | json ->
+         (match Tool_output.normalized_artifact_ref_of_json json with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
+            (match Tool_blob_store.fetch
+               (Tool_blob_store.create ~base_path:config.base_path)
+               ~sha256:artifact.sha256 with
+             | Ok (Some body) -> body
+             | Ok None -> Alcotest.fail "recall artifact is missing"
+             | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+          | _ -> prompt)
+       | exception Yojson.Json_error _ -> prompt)
+    | [] -> prompt
   in
   let render () = render_at ~now:(Time_compat.now ()) in
   write_source "region=us-west-1\n";
@@ -792,6 +1020,28 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
        (string_field "source_sha256" matched)
    | _ -> Alcotest.fail "expected one source-bound memory match");
   let first_prompt = render () in
+  let index_prompt = render_prompt ~now:(Time_compat.now ()) in
+  Alcotest.(check bool) "stored claim is not copied into the model prompt" false
+    (contains ~needle:"deployment region is us-west-1" index_prompt);
+  Alcotest.(check bool) "complete memory is reachable through a paged reader" true
+    (contains ~needle:"keeper_artifact_read" index_prompt);
+  let no_reader = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~config ~meta ~keepers_dir
+    ~keeper_id:meta.name ~now:(Time_compat.now ()) ()
+    |> Option.value ~default:"" in
+  Alcotest.(check bool) "search remains available without an artifact reader" true
+    (contains ~needle:"keeper_memory_search" no_reader);
+  Alcotest.(check bool) "missing reader does not fall back to full injection" false
+    (contains ~needle:"deployment region is us-west-1" no_reader);
+  let no_tools = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~memory_search_available:false
+    ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ()) ()
+    |> Option.value ~default:"" in
+  Alcotest.(check bool) "a tool-less runtime does not bulk-inject its snapshot" false
+    (contains ~needle:"deployment region is us-west-1" no_tools);
+  Alcotest.(check bool) "a tool-less runtime is not directed to absent tools" false
+    (contains ~needle:"keeper_memory_search" no_tools
+     || contains ~needle:"keeper_artifact_read" no_tools);
   Alcotest.(check bool)
     "unchanged source claim reaches recall"
     true
@@ -850,6 +1100,27 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "typed invalidation persists in recall"
     true
     (contains ~needle:"reason=source_changed" invalidated_prompt);
+  let without_reader = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~config ~meta ~keepers_dir
+    ~keeper_id:meta.name ~now:(Time_compat.now ()) () |> Option.get in
+  Alcotest.(check bool) "search notice reports pending invalidations without per-source growth" true
+    (contains ~needle:"1 pending invalidations" without_reader);
+  Alcotest.(check bool) "search notice does not enumerate source paths" false
+    (contains ~needle:source_path without_reader);
+  let blob_root = Tool_blob_store.root_dir
+      (Tool_blob_store.create ~base_path) in
+  let saved_blob_root = blob_root ^ ".saved" in
+  Sys.rename blob_root saved_blob_root;
+  Fs_compat.save_file blob_root "not a directory";
+  Fun.protect ~finally:(fun () -> Sys.remove blob_root; Sys.rename saved_blob_root blob_root)
+    (fun () ->
+      let failed_publication = render_prompt ~now:(Time_compat.now ()) in
+      Alcotest.(check bool) "publication failure does not report source-store failure" false
+        (contains ~needle:"Source-bound memory is unavailable" failed_publication);
+      Alcotest.(check bool) "publication failure retains the invalidation" true
+        (contains ~needle:"reason=source_changed" failed_publication);
+      Alcotest.(check bool) "artifact-only failure does not offer absent search" false
+        (contains ~needle:"keeper_memory_search" failed_publication));
   Alcotest.(check string)
     "a retained invalidation renders the same block at a later clock"
     invalidated_prompt
@@ -1068,7 +1339,46 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
   let revalidated =
     Fun.protect
       ~finally:(fun () -> Unix.chmod unreadable_host 0o600)
-      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+      (fun () ->
+        let prompt = Masc.Keeper_memory_os_recall.render_if_enabled
+            ~memory_search_available:false ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
+        let reference = List.hd (List.rev (String.split_on_char '\n' prompt))
+          |> Yojson.Safe.from_string in
+        let body = match Tool_output.normalized_artifact_ref_of_json reference with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
+            let execution, page = Masc.Keeper_artifact_read.handle_with_page
+                ~base_path ~args:(`Assoc ["sha256", `String artifact.sha256]) in
+            (match page with
+             | Some page ->
+               Alcotest.(check bool) "reader returns the whole small fixture" true page.eof;
+               Alcotest.(check bool) "reader returns text" true
+                 (page.encoding = Masc.Keeper_artifact_read.Utf_8);
+               page.content
+             | None -> Alcotest.fail execution.Masc.Keeper_tool_execution.raw_output)
+          | _ -> Alcotest.fail "expected recall artifact" in
+        Alcotest.(check bool) "unreadable claim is absent from the complete artifact" false
+          (contains ~needle:("claim about " ^ unreadable) body);
+        Alcotest.(check bool) "verified claim survives alongside deferred source" true
+          (contains ~needle:("claim about " ^ unchanged) body);
+        Alcotest.(check bool) "artifact retains deferred identity and invalidation" true
+          (contains ~needle:"reason=source_unreadable_this_turn" body
+           && contains ~needle:unreadable body
+           && contains ~needle:"reason=source_changed" body);
+        let inline = Masc.Keeper_memory_os_recall.render_if_enabled
+            ~artifact_reader_available:false ~memory_search_available:false
+            ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
+        Alcotest.(check bool) "tool-less fallback also withholds unreadable claim" false
+          (contains ~needle:("claim about " ^ unreadable) inline);
+        Alcotest.(check bool) "tool-less fallback does not bulk-inject verified facts" false
+          (contains ~needle:("claim about " ^ unchanged) inline);
+        let search = Runtime.keeper_memory_search_json ~config ~meta
+            ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+            ~args:(`Assoc ["query", `String "claim about";
+                          "source", `String "current"; "limit", `Int 10])
+            |> Yojson.Safe.from_string in
+        Alcotest.(check (list string)) "search returns only revalidated source claims"
+          ["claim about " ^ unchanged] (match_texts search);
+        Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
   match revalidated with
   | Error detail -> Alcotest.fail detail
@@ -1804,7 +2114,7 @@ let test_absorbed_search_preserves_board_basis source =
     original;
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
-    ; goal_context = Librarian.No_task
+    ; historical_task_contexts = []; goal_context = Librarian.No_task
     ; keeper_id = Masc_test_deps.keeper_id_fixture meta.name
     ; keeper_instructions = "Preserve useful observations."
     ; current = Some { Librarian.facts = original }
@@ -3225,6 +3535,16 @@ let () =
             "retract cascades and journals durable reason"
             `Quick
             test_retract_cascades_through_public_tool_and_journals_reason
+        ; Alcotest.test_case
+            "recall snapshots survive GC until history retention releases them"
+            `Quick
+            test_recall_artifacts_follow_history_retention
+        ; Alcotest.test_case "demand recall avoids bulk artifact and source work" `Quick
+            test_demand_recall_does_not_materialize_or_verify_all_memory
+        ; Alcotest.test_case "source search validates query candidates only" `Quick
+            test_search_revalidates_query_sources_only
+        ; Alcotest.test_case "selected source replacement is not verified by an old query" `Quick
+            test_selected_source_rebound_digest_stays_unverified
         ; Alcotest.test_case
             "source change discards stale claim until recreation"
             `Quick

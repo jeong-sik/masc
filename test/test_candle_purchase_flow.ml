@@ -1,3 +1,33 @@
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
 (* Real Keeper/MCP tools read and mutate the authoritative ledger. Values in
    this file are explicit scenario prices, not product economic defaults. *)
 open Alcotest
@@ -30,13 +60,16 @@ epic = 5000
 |}
 ;;
 
-let write_config config shop =
+let write_config_half_life config ~half_life shop =
   let path =
     Config_dir_resolver.candle_toml_path_for_base_path
       ~base_path:config.Workspace.base_path
   in
   Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path (payout_config ^ shop)
+  Fs_compat.save_file path ("half_life = " ^ half_life ^ "\n" ^ payout_config ^ shop)
+;;
+
+let write_config config shop = write_config_half_life config ~half_life:"\"off\"" shop
 ;;
 
 let with_workspace f =
@@ -127,14 +160,13 @@ let append config rows =
   | Error error -> fail (Candle_ledger.update_error_to_string Fun.id error)
 ;;
 
-let credit config ~goal ~keeper amount =
-  let payment =
+let payment_fixture ?(run = "confirmed-verifier") ~goal ~keeper amount =
     ok
       (Candle_payment.make
          ~identity:
            { goal_id = goal
            ; request_id = "confirmed-request"
-           ; verification_run_id = "confirmed-verifier"
+           ; verification_run_id = run
            }
          ~grade:Candle_grade.Trivial
          ~total_milli:amount
@@ -151,8 +183,11 @@ let credit config ~goal ~keeper amount =
          ~deduction_floor:1000
          ~overdue_hours:0
          ~weights:[ keeper, 1 ])
-  in
-  append config [ { E.at; body = E.Paid payment } ]
+
+;;
+
+let credit config ~goal ~keeper amount =
+  append config (funding_rows at (payment_fixture ~goal ~keeper amount))
 ;;
 
 let purchases config =
@@ -160,6 +195,7 @@ let purchases config =
   |> List.filter_map (fun (event : E.t) ->
     match event.body with
     | E.Purchased p -> Some (p.keeper, Item.id p.item, p.amount_milli)
+    | E.Half_life_set _ | E.Equipped _ -> None
     | E.Snapshot _
     | E.Payout_owed _
     | E.Candidates _
@@ -401,6 +437,55 @@ let test_corruption_and_partial_tail_are_read_only () =
       ])
 ;;
 
+let test_settlement_replay_requires_durable_authority () =
+  let payment = payment_fixture ~goal:"forged-goal" ~keeper:"keeper-a" 1000 in
+  let outsider = payment_fixture ~goal:"forged-goal" ~keeper:"outsider" 1000 in
+  let paid p : E.t = {E.at;body=E.Paid p} in
+  let snapshot, owed, candidates = match funding_rows at payment with
+    | [_policy;snapshot;owed;candidates;_] -> snapshot,owed,candidates
+    | _ -> fail "invalid complete payout fixture" in
+  let wrong_run = payment_fixture ~run:"another-run" ~goal:"forged-goal" ~keeper:"keeper-a" 1000 in
+  let candidate_status status = match candidates.body with
+    | E.Candidates c -> {candidates with body=E.Candidates
+        {c with tasks=List.map (fun (id,lookup) -> id,match lookup with
+          | E.Found task -> E.Found {task with status}
+          | E.Deleted -> E.Deleted) c.tasks}}
+    | _ -> fail "expected Candidates" in
+  let unlinked = match snapshot.body with
+    | E.Snapshot s -> {snapshot with body=E.Snapshot {s with linked_task_ids=[]}}
+    | _ -> fail "expected Snapshot" in
+  List.iter (fun suffix ->
+    with_workspace (fun _ _ config ->
+      credit config ~goal:"healthy-goal" ~keeper:"keeper-a" 1000;
+      let healthy = bytes config in
+      (* A writer cannot persist an arithmetic-valid settlement without its
+         authority. The whole proposed batch must remain unwritten. *)
+      (match Candle_ledger.update ~base_path:config.base_path (fun _ -> Ok (suffix, ())) with
+       | Error (Candle_ledger.Event_unwritable _) -> ()
+       | _ -> fail "invalid settlement reached the append boundary");
+      check string "refused append preserved every ledger byte" healthy (bytes config);
+      let lines = List.map (fun event -> ok (E.to_line event) ^ "\n") suffix in
+      let damaged = healthy ^ String.concat "" lines in
+      Fs_compat.save_file (ledger_path config) damaged;
+      rejected "ledger_unavailable" (call config "keeper-a" "keeper_candle_balance" (`Assoc []));
+      rejected "ledger_unavailable" (buy config "keeper-a" "glasses");
+      check string "read and purchase do not rewrite invalid authority" damaged (bytes config);
+      Fs_compat.save_file (ledger_path config) healthy;
+      ignore (buy config "keeper-a" "glasses" |> succeeded);
+      check string "valid historical funding still buys the configured item" "600"
+        U.(member "balance_milli" (balance config "keeper-a") |> to_string)))
+    [ [paid payment]
+    ; [snapshot;owed;paid payment]
+    ; [snapshot;owed;candidates;paid outsider]
+    ; [snapshot;owed;candidates;paid wrong_run]
+    ; [snapshot;owed;candidates;paid payment;paid payment]
+    ; [snapshot;owed;candidate_status E.Todo;paid payment]
+    ; [snapshot;owed;candidate_status (E.Done {completed_at=ok (Candle_time.of_rfc3339 "1970-01-01T00:00:00Z")});paid payment]
+    ; [snapshot;owed;candidate_status (E.Done {completed_at=ok (Candle_time.of_rfc3339 "2026-09-30T00:00:00Z")});paid payment]
+    ; [unlinked;owed;candidates;paid payment]
+    ]
+;;
+
 let test_keeper_dispatch_and_mcp_use_trusted_self () =
   with_workspace (fun env sw config ->
     credit config ~goal:"identity-a" ~keeper:"keeper-a" 1000;
@@ -478,6 +563,92 @@ let test_keeper_dispatch_and_mcp_use_trusted_self () =
       (List.length (purchases config)))
 ;;
 
+let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
+  with_workspace (fun _ _ config ->
+    credit config ~goal:"decay-goal" ~keeper:"keeper-a" 1000;
+    let keeper = ok (Keeper_id.Keeper_name.of_string "keeper-a") in
+    let base_path = config.Workspace.base_path in
+    let start = Ptime.to_float_s (Candle_time.to_ptime at) in
+    let clock = ref start in
+    let now () = !clock in
+    let account () = match Candle_shop.account ~now ~base_path ~keeper with
+      | Ok account -> account
+      | Error error -> fail (Candle_shop.error_to_string error) in
+    let shop = "\n[shop.prices_milli]\nglasses = 400\n" in
+    write_config_half_life config ~half_life:"2" shop;
+    check int "old Off interval preserves the original funding" 1000 (account ()).balance_milli;
+    let synchronized = bytes config in
+    clock := start +. 3600.;
+    ignore (account () : Candle_shop.account);
+    check string "an intermediate display creates no monetary rounding event" synchronized (bytes config);
+    clock := start +. 7200.;
+    let item = match Item.of_id "glasses" with Some item -> item | None -> fail "missing canonical glasses" in
+    let receipt = match Candle_shop.purchase ~now ~base_path ~keeper ~item with
+      | Ok receipt -> receipt
+      | Error error -> fail (Candle_shop.error_to_string error) in
+    check int "purchase spends the decayed amount at its own instant" 100 receipt.account.balance_milli;
+    check bool "the purchased item is owned" true (List.mem item receipt.account.owned_items);
+    clock := start +. 10800.;
+    (match Candle_equipment.equip ~now ~base_path ~keeper ~slot:(Item.slot item) ~choice:(E.Item item) with
+     | Ok receipt -> check bool "owned item changes equipment" true receipt.changed
+     | Error error -> fail (Candle_equipment.error_to_string error));
+    clock := start +. 14400.;
+    check int "equipment did not split the monetary interval" 50 (account ()).balance_milli;
+    let observation = Candle_observe.read ~now ~base_path in
+    check (option string) "one response uses the same current wallet" (Some "50")
+      (Candle_observe.balance observation ~keeper:"keeper-a");
+    (match Candle_observe.equipment observation ~keeper:"keeper-a" with
+     | Ok equipment -> check bool "portrait retains the purchased equipment" true
+         (equipment = Keeper_portrait_item.preview item (Keeper_portrait_look.equipment_of_name "keeper-a"))
+     | Error detail -> fail detail);
+    let before_portrait = bytes config in
+    let early () = start -. 60. in
+    (match Candle_equipment.read_persisted ~now:early ~base_path ~keeper:"keeper-a" with
+     | Ok equipment -> check bool "rollback preserves recorded equipment" true
+         (equipment = Item.preview item (Keeper_portrait_look.equipment_of_name "keeper-a"))
+     | Error detail -> fail detail);
+    check string "rollback portrait read preserves ledger bytes" before_portrait (bytes config);
+    write_config config shop;
+    check int "Off closes the preceding decaying interval" 50 (account ()).balance_milli;
+    clock := start +. 28800.;
+    check int "explicit Off preserves the money after its fact" 50 (account ()).balance_milli;
+    let policy_facts = events config |> List.filter_map (fun (event : E.t) -> match event.body with
+      | E.Half_life_set policy -> Some policy
+      | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _ | E.Paid _
+      | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> None) in
+    check int "only historical Off, Hours and restored Off are recorded" 3 (List.length policy_facts))
+;;
+
+let test_purchase_reprices_each_cursor_attempt () =
+  List.iter (fun remove_price ->
+    with_workspace (fun _ _ config ->
+      credit config ~goal:"retry-price-funding" ~keeper:"keeper-a" 2000;
+      let keeper=ok (Keeper_id.Keeper_name.of_string "keeper-a") in
+      let item=match Item.of_id "glasses" with Some item -> item | None -> fail "missing glasses" in
+      let changed=ref false and competing_bytes=ref "" in
+      let now () =
+        if not !changed then (
+          changed:=true;
+          write_config config (if remove_price then "" else "\n[shop.prices_milli]\nglasses = 700\n");
+          (* Append after purchase read but before its CAS append, through the
+             real ledger API, so the purchase must ask its callback again. *)
+          append config [{E.at;body=E.Half_life_set Candle_decay.Off}];
+          competing_bytes:=bytes config);
+        Ptime.to_float_s (Candle_time.to_ptime at) in
+      let result=Candle_shop.purchase ~now ~base_path:config.Workspace.base_path ~keeper ~item in
+      if remove_price then (
+        check bool "repricing to unpriced refuses the retried purchase" true
+          (match result with Error (Candle_shop.Unpriced _) -> true | _ -> false);
+        check string "refused retry writes no monetary event" !competing_bytes (bytes config))
+      else (
+        let receipt=match result with Ok receipt -> receipt | Error error -> fail (Candle_shop.error_to_string error) in
+        check int "retry charges current explicit price" 700 receipt.amount_milli;
+        check int "retry debits current price exactly once" 1300 receipt.account.balance_milli;
+        check int "one durable purchase follows contended cursor" 1
+          (List.length (List.filter (fun (event : E.t) -> match event.body with
+            | E.Purchased _ -> true | _ -> false) (events config)))))) [false;true]
+;;
+
 let test_tool_surface_is_eager () =
   List.iter
     (fun name ->
@@ -519,7 +690,11 @@ let () =
     run
       "candle_purchase_flow"
       [ ( "public tools and ledger"
-        , [ test_case
+        , [ test_case "purchase reprices every real cursor retry" `Quick test_purchase_reprices_each_cursor_attempt
+          ; test_case
+              "recorded decay keeps purchase ownership and portrait equipment coherent" `Quick
+              test_policy_intervals_preserve_purchase_and_equipped_ownership
+          ; test_case
               "purchase debits self and survives a process restart"
               `Quick
               test_tool_purchase_and_restart
@@ -543,6 +718,10 @@ let () =
               "corrupt rows and partial tails are never repaired by reads or purchase"
               `Quick
               test_corruption_and_partial_tail_are_read_only
+          ; test_case
+              "replay and append require durable payout authority"
+              `Quick
+              test_settlement_replay_requires_durable_authority
           ; test_case
               "Keeper and authenticated MCP routes use trusted self"
               `Quick

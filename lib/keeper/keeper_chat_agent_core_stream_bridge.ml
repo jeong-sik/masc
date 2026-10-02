@@ -66,6 +66,7 @@ type state =
       (string * string * Agent_core.Types.api_usage option) option
   ; finalized_tools : tool_ref list
   ; tool_quarantines : tool_quarantine list
+  ; committed_tools : Keeper_chat_events.tool_stream_occurrence list
   ; max_wire_bytes : int
         (* Read once per stream. [Keeper_chat_media_store.max_wire_bytes]
            resolves an env var on every call, so reading it again at finalize
@@ -95,6 +96,7 @@ let empty_state () =
   ; current_message_start = None
   ; finalized_tools = []
   ; tool_quarantines = []
+  ; committed_tools = []
   ; max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
   }
 
@@ -319,8 +321,20 @@ let tools_in_current_scope state =
     else Int.compare left.occurrence.block_index right.occurrence.block_index)
 ;;
 
-let poison_scope state ~kind ~reason =
-  let tools = tools_in_current_scope state in
+let record_tool_result state occurrence =
+  { state with committed_tools = occurrence :: state.committed_tools }
+;;
+
+let poison_scope ?(preserve_committed = false) state ~kind ~reason =
+  let retained (tool : tool_ref) =
+    preserve_committed
+    && List.exists
+         (fun (occurrence : Keeper_chat_events.tool_stream_occurrence) ->
+            occurrence.stream_scope = tool.occurrence.stream_scope
+            && occurrence.block_index = tool.occurrence.block_index)
+         state.committed_tools
+  in
+  let tools = List.filter (fun tool -> not (retained tool)) (tools_in_current_scope state) in
   let chat_events =
     match tools with
     | [] -> [ protocol_error ~reason kind ]
@@ -336,6 +350,7 @@ let poison_scope state ~kind ~reason =
     List.map
       (fun (index, block) ->
          match block with
+         | Active_tool tool when retained tool -> index, block
          | Active_tool tool ->
            ( index
            , Invalid_tool_block
@@ -379,7 +394,7 @@ let start_runtime_attempt ?runtime_id ?attempt_index ~previous_scope state =
       if tools_in_current_scope state = []
       then { bridge_state = state; chat_events = [] }
       else
-        poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded
+        poison_scope ~preserve_committed:true state ~kind:Keeper_chat_events.Tool_attempt_superseded
           ~reason
   in
   { bridge_state = reset_runtime_attempt_state terminalized.bridge_state
@@ -400,7 +415,7 @@ let fail_stream state ~reason =
   match state.scope_disposition with
   | Scope_cut | Scope_poisoned -> { bridge_state = state; chat_events = [] }
   | Scope_live ->
-    poison_scope state ~kind:Keeper_chat_events.Sse_stream_incomplete ~reason
+    poison_scope ~preserve_committed:true state ~kind:Keeper_chat_events.Sse_stream_incomplete ~reason
 ;;
 
 let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =

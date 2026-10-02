@@ -11,12 +11,11 @@
     stream callbacks {!Keeper_agent_run.run_turn} exposes, then
     {!persist_continuation} once the turn has a result.
 
-    The rows are delivery-only: they carry the provider call id, the tool
-    name and the arguments, but no canonical execution identity. Joining the
-    tool-log execution id needs the run's third callback,
-    [on_tool_result_ready], and handing that callback to a turn also makes the
-    run's tool-log write failures fatal ({!Keeper_run_tools_setup}'s
-    commit-required rule), which is the chat lane's policy and not the loop's.
+    Agent Core rows are delivery-only here: its [on_tool_result_ready]
+    callback is not installed by the loop. Codex can separately report an
+    [Official_tool_result] with its producer-bound block and committed host
+    invocation. That receipt is retained without changing the loop's
+    tool-log failure policy.
 
     The projection is visibility, not authority: a stream whose occurrence
     mapping the collector rejects loses its rows for this turn and says so

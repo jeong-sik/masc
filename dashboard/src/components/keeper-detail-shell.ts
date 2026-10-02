@@ -3,7 +3,8 @@ import type { ComponentChildren } from 'preact'
 import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
-import { keepers } from '../store'
+import { keepers, candleObservation, executionWorkspaceAuthority } from '../store'
+import { KeeperCandleBalance } from './candle-economy'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperBadge } from './keeper-badge'
 import { KeeperPortrait } from './keeper-portrait'
@@ -81,6 +82,7 @@ export function KeeperDetailHeaderInfo({
           ? html`<span aria-hidden="true">${keeper.emoji}</span>`
           : html`<${KeeperPortrait}
               name=${keeper.name}
+              accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: 'Portrait observation not yet read' }}
               sizePx=${HEADER_PORTRAIT_PX}
               fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
             />`}
@@ -95,6 +97,10 @@ export function KeeperDetailHeaderInfo({
             phaseEnteredAtSec=${phaseEnteredAtSec}
           />
         </div>
+        <${KeeperCandleBalance}
+          reading=${executionWorkspaceAuthority.value ? candleObservation.value : { status: 'unavailable', reason: 'Workspace authority is being verified' }}
+          amount=${executionWorkspaceAuthority.value ? keeper.candle_balance_milli : undefined}
+        />
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
             ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
@@ -109,6 +115,7 @@ export function KeeperDetailHeaderInfo({
 
 type KeeperDetailSectionId =
   | 'keeper-summary'
+  | 'keeper-items'
   | 'keeper-comms'
   | 'keeper-runtime'
   | 'keeper-identity'
@@ -128,6 +135,10 @@ const KEEPER_DETAIL_SECTIONS: Array<{
   {
     id: 'keeper-summary',
     label: '상태',
+  },
+  {
+    id: 'keeper-items',
+    label: '아이템',
   },
   {
     id: 'keeper-runtime',

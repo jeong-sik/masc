@@ -76,6 +76,8 @@ type t
 
 val create : ?path:string -> unit -> t
 val replay : string -> t
+(** Keeps durable terminal history for delayed observers across restart. The
+    ordinary in-memory list remains bounded by [max_completed_retained]. *)
 
 val register_running
   :  t
@@ -98,6 +100,9 @@ val mark_progress : t -> run_id:string -> progress:progress -> unit
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option
+val get_for_observer : t -> run_id:string -> (run option, string) result
+(** Current live run, or its exact durable terminal lifecycle after cache eviction.
+    A new registration for the same id supersedes the previous terminal owner. *)
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
 type global_install_error = Already_installed
@@ -109,5 +114,8 @@ val storage_filename : string
 val max_completed_retained : int
 
 val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
-(** Deployment-time store cut for {!storage_filename}. See
+(** Explicit destructive deployment-time store cut for {!storage_filename}.
+    Unlike ordinary restart this can discard terminal source history; operators
+    must preserve any history needed by retained observers before authorizing it.
+    See
     {!Run_registry_core.Make.cut_replay_log}. *)

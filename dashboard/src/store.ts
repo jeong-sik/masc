@@ -1,3 +1,4 @@
+import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
 import { decodeGoalProof } from './api/goal-proof'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
 // MASC Dashboard — Centralized reactive state via @preact/signals
@@ -97,6 +98,7 @@ export const messages = signal<Message[]>([])
 export const workspaceMessagesLoading = signal(false)
 export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
+export const candleObservation = signal<CandleReading>({ status: 'unavailable', reason: 'Not yet read' })
 
 // Acceptance is optimistic; completion comes only from durable shutdown receipts.
 export const keeperPurgePending = signal<ReadonlySet<string>>(new Set<string>())
@@ -140,6 +142,10 @@ export const serverStatus = signal<ServerStatus | null>(null)
 // tile labelled 전체 작업, most visibly for cancellations, which leave the
 // window and then appear nowhere. Null when the payload omits the count.
 export const executionTaskTotal = signal<number | null>(null)
+// Invalidates asynchronous account reads when workspace/publication authority changes.
+export const executionWorkspaceRevision = signal(0)
+// Accepted roster observations drive retries without changing workspace identity.
+export const keeperRosterObservationRevision = signal(0)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -1039,8 +1045,45 @@ let executionReconnectPreviousEpoch: string | null = null
 let executionReconnectAwaitingHttp = false
 const executionReconnectInvalidationFloors = new Map<string, number>()
 let executionPublicationGenerationWatermark = -1
+let candleObservationSequenceWatermark = -1
 let executionHydrationRequestGeneration = 0
 const retiredExecutionPublicationEpochs = new Set<string>()
+
+export interface ExecutionWorkspaceAuthority {
+  readonly epoch: string
+  readonly workspaceRoot: string
+  readonly connectionGeneration: number
+}
+
+const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(null)
+/** Authority of an accepted execution response, not a retained display status.
+ *  Object identity is the admission token: A → B → A cannot revive an old A read. */
+export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
+  = acceptedExecutionWorkspace
+
+function withdrawExecutionWorkspaceAuthority(): void {
+  acceptedExecutionWorkspace.value = null
+  candleObservation.value = { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+}
+
+function acceptExecutionWorkspace(
+  epoch: string | null,
+  workspaceRoot: unknown,
+): void {
+  if (epoch === null || typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') {
+    withdrawExecutionWorkspaceAuthority()
+    return
+  }
+  const previous = acceptedExecutionWorkspace.peek()
+  if (
+    previous?.epoch === epoch
+    && previous.workspaceRoot === workspaceRoot
+    && previous.connectionGeneration === executionHydrationRequestGeneration
+  ) return
+  acceptedExecutionWorkspace.value = Object.freeze({
+    epoch, workspaceRoot, connectionGeneration: executionHydrationRequestGeneration,
+  })
+}
 
 function retireExecutionPublicationEpoch(epoch: string): void {
   retiredExecutionPublicationEpochs.add(epoch)
@@ -1082,11 +1125,14 @@ export function invalidateExecutionSnapshotGeneration(
     return true
   }
   if (executionPublicationEpoch !== epoch) {
+    executionWorkspaceRevision.value += 1
     const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
     if (previousEpoch !== null && previousEpoch !== epoch) {
       retireExecutionPublicationEpoch(previousEpoch)
     }
     executionPublicationEpoch = epoch
+    candleObservationSequenceWatermark = -1
+    withdrawExecutionWorkspaceAuthority()
     executionReconnectPreviousEpoch = null
     executionPublicationGenerationWatermark = generation
     return true
@@ -1099,12 +1145,15 @@ export function invalidateExecutionSnapshotGeneration(
 }
 
 export function resetExecutionSnapshotGeneration(): void {
+  executionWorkspaceRevision.value += 1
   executionReconnectPreviousEpoch = executionPublicationEpoch
   executionPublicationEpoch = null
   executionPublicationGenerationWatermark = -1
+  candleObservationSequenceWatermark = -1
   executionReconnectAwaitingHttp = true
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
+  withdrawExecutionWorkspaceAuthority()
 }
 
 /** Hydrate all execution-related signals from a raw data payload.
@@ -1148,8 +1197,15 @@ export function hydrateExecutionSnapshot(
   ) {
     return false
   }
+  const candleSequence = data.candle_observation_sequence
+  if (candleSequence !== undefined && (!Number.isSafeInteger(candleSequence) || candleSequence < 0)) return false
+  if (identity !== null && identity.epoch === executionPublicationEpoch
+    && candleObservationSequenceWatermark >= 0
+    && (candleSequence === undefined || candleSequence < candleObservationSequenceWatermark)) return false
   if (identity !== null) {
     if (executionPublicationEpoch === null) {
+      executionWorkspaceRevision.value += 1
+      candleObservationSequenceWatermark = -1
       if (
         executionReconnectPreviousEpoch !== null
         && executionReconnectPreviousEpoch !== identity.epoch
@@ -1166,7 +1222,11 @@ export function hydrateExecutionSnapshot(
       identity.generation,
     )
   }
+  if (candleSequence !== undefined) candleObservationSequenceWatermark = candleSequence
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+  // Read the current response only. mergeServerStatus may retain an old root
+  // for presentation; that root cannot admit account reads in this response.
+  acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -1176,6 +1236,7 @@ export function hydrateExecutionSnapshot(
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {
+    executionWorkspaceRevision.value += 1
     // cancelDashboardWorkspaceMessagesRefresh() releases
     // workspaceMessagesDurableAuthority itself.
     cancelDashboardWorkspaceMessagesRefresh()
@@ -1202,7 +1263,11 @@ export function hydrateExecutionSnapshot(
       ? executionMessages
       : mergeMessages(messages.value, executionMessages)
   }
+  candleObservation.value = acceptedExecutionWorkspace.peek() === null
+    ? { status: 'unavailable', reason: 'Current workspace identity unavailable' }
+    : readCandleRosterObservation(data.candle, data.keepers)
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
+  keeperRosterObservationRevision.value += 1
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
@@ -1221,7 +1286,8 @@ let nextExecutionForce = false
 // keeper list against [] and report the fleet as loaded-and-empty (the
 // "일치하는 키퍼가 없습니다" screen 37s after a restart, 2026-08-22).
 export function isInitializingExecutionPayload(data: DashboardExecutionResponse): boolean {
-  return data.status?.project === 'initializing'
+  const status: unknown = data.status
+  return status === 'initializing' || (isRecord(status) && status.project === 'initializing')
 }
 
 let executionWarmRetryAttempt = 0
@@ -1242,25 +1308,52 @@ function scheduleExecutionWarmRetry(): void {
   }, delayMs)
 }
 
+class ExecutionRefreshUnavailable extends Error {}
+
 async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const requestEpoch = executionPublicationEpoch
+  const requestPublicationGeneration = executionPublicationGenerationWatermark
+  const requestCandleSequence = candleObservationSequenceWatermark
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
+      if (requestGeneration !== executionHydrationRequestGeneration
+        || requestEpoch !== executionPublicationEpoch
+        || requestPublicationGeneration !== executionPublicationGenerationWatermark
+      || requestCandleSequence !== candleObservationSequenceWatermark) {
+        throw new ExecutionRefreshUnavailable('Execution initialization was superseded by a newer observation')
+      }
+      acceptedExecutionWorkspace.value = null
+      candleObservation.value = { status: 'unavailable', reason: 'Server is initializing' }
       scheduleExecutionWarmRetry()
-      return
+      throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }
     executionWarmRetryAttempt = 0
-    hydrateExecutionSnapshot(data, { requestGeneration })
+    if (!hydrateExecutionSnapshot(data, { requestGeneration })) {
+      throw new ExecutionRefreshUnavailable('Execution response was superseded by a newer observation')
+    }
   } catch (err) {
+    // Initializing keeps its existing warm retry; superseded reads cannot
+    // overwrite the newer accepted authority or turn into successful refresh.
+    if (err instanceof ExecutionRefreshUnavailable) throw err
+    if (requestGeneration !== executionHydrationRequestGeneration
+      || requestEpoch !== executionPublicationEpoch
+      || requestPublicationGeneration !== executionPublicationGenerationWatermark
+      || requestCandleSequence !== candleObservationSequenceWatermark) {
+      throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
+    }
     console.warn('[Dashboard] execution fetch error:', err)
+    acceptedExecutionWorkspace.value = null
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
+    candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)
+    throw err
   } finally {
     executionLoading.value = false
   }
@@ -1271,25 +1364,27 @@ const executionScheduler = new FetchScheduler(doFetchExecution, {
   debounceMs: 300,
 })
 
-export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
+export function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (opts?.force) {
     nextExecutionForce = true
-    executionScheduler.requestNow()
-  } else if (opts?.immediate) {
-    executionScheduler.requestNow()
-  } else {
-    executionScheduler.request()
+    return executionScheduler.requestNow()
   }
-  if (executionScheduler.inflightPromise) {
-    await executionScheduler.inflightPromise
-  }
+  if (opts?.immediate) return executionScheduler.requestNow()
+  executionScheduler.request()
+  // Preserve normal scheduling/current-wait semantics. Return the already
+  // observed promise itself so ignored background refreshes remain handled.
+  return executionScheduler.inflightPromise ?? Promise.resolve()
 }
 
 export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
   const force = opts?.force ?? true
-  await refreshShell({ light: true, force })
-  await refreshExecution({ force })
-  await refreshKeeperDeletions()
+  try {
+    await refreshShell({ light: true, force })
+    await refreshExecution({ force })
+  } finally {
+    // Deletion receipts are independent of execution projection availability.
+    await refreshKeeperDeletions()
+  }
 }
 
 /** Reconcile board posts by id+updated_at so unchanged items keep

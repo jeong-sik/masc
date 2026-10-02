@@ -1,7 +1,9 @@
 type 'message t =
   { equal : 'message -> 'message -> bool
   ; shown : Buffer.t (* every delta forwarded this turn, breaks included *)
+  ; raw : Buffer.t (* provider pieces, without presentation separators *)
   ; current : Buffer.t (* the text of the message streaming now *)
+  ; mutable previous_messages : string list
   ; mutable message : 'message option
         (* that message's identity, once the wire named it *)
   ; mutable after_tool_row : bool
@@ -11,7 +13,9 @@ type 'message t =
 let create ~equal () =
   { equal
   ; shown = Buffer.create 256
+  ; raw = Buffer.create 256
   ; current = Buffer.create 256
+  ; previous_messages = []
   ; message = None
   ; after_tool_row = false
   }
@@ -48,6 +52,7 @@ let forward t ~message piece =
     let delta =
       if starts_new_message t ~message
       then (
+        t.previous_messages <- Buffer.contents t.current :: t.previous_messages;
         Buffer.clear t.current;
         if t.after_tool_row then piece else break_after t.shown ^ piece)
       else piece
@@ -55,6 +60,7 @@ let forward t ~message piece =
     (match message with
      | Some _ -> t.message <- message
      | None -> ());
+    Buffer.add_string t.raw piece;
     Buffer.add_string t.current piece;
     Buffer.add_string t.shown delta;
     t.after_tool_row <- false;
@@ -79,8 +85,19 @@ let complete_message t ~message ~text =
 ;;
 
 let remainder t ~final_text =
-  let shown = Buffer.contents t.shown in
-  if String.starts_with ~prefix:shown final_text
-  then suffix_after ~prefix:shown final_text
+  let raw = Buffer.contents t.raw in
+  if String.starts_with ~prefix:raw final_text
+  then suffix_after ~prefix:raw final_text
   else suffix_after ~prefix:(Buffer.contents t.current) final_text
+;;
+
+let finish_response t ~final_text =
+  if String.equal final_text ""
+     || String.equal final_text (Buffer.contents t.raw)
+     || String.equal final_text (Buffer.contents t.current)
+     || List.exists (String.equal final_text) t.previous_messages
+  then None
+  else match remainder t ~final_text with
+    | Some _ as missing -> missing
+    | None -> Some ((if t.after_tool_row then "" else break_after t.shown) ^ final_text)
 ;;

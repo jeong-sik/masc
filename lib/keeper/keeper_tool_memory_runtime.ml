@@ -172,30 +172,52 @@ let search_durable_facts
       ~(limit : int)
   : (fact_match list * int, durable_search_error) result
   =
-  match
-    Keeper_memory_source_current.revalidate
-      ~config
-      ~meta
-      ~keepers_dir
-      ~now:(Time_compat.now ())
-      ()
+  let selected_sources =
+    match Keeper_memory_source_current.read_for_keepers_dir
+        ~keepers_dir ~keeper_id:meta.name with
+    | Error detail -> Error (Source_revalidate_failed detail)
+    | Ok None -> Ok ([], [])
+    | Ok (Some snapshot) ->
+      Ok (answering
+          ~claim_of:(fun (fact : Keeper_memory_source_current.fact) -> fact.claim)
+          ~query snapshot.facts) in
+  match Result.bind selected_sources (fun (whole, fragments) ->
+    let sources = List.map (fun (fact : Keeper_memory_source_current.fact) -> fact.source)
+        (whole @ fragments) in
+    Result.map (fun projection -> projection, whole, fragments)
+      (Result.map_error (fun detail -> Source_revalidate_failed detail)
+        (Keeper_memory_source_current.revalidate
+          ~scope:(Keeper_memory_source_current.Selected_sources sources)
+          ~config ~meta ~keepers_dir ~now:(Time_compat.now ()) ())))
   with
-  | Error detail -> Error (Source_revalidate_failed detail)
-  | Ok source_projection ->
-  let source_facts = source_projection.facts in
-  let total_candidates = List.length facts + List.length source_facts in
+  | Error _ as error -> error
+  | Ok (source_projection, source_whole, source_fragments) ->
+  (* A retained claim is not a verified search result. Recall exposes only
+     deferred source identities until this read boundary can validate bytes. *)
+  let unverified_paths = StringSet.of_list source_projection.unverified_paths in
+  let source_facts = List.filter
+      (fun (fact : Keeper_memory_source_current.fact) ->
+        not (StringSet.mem fact.source.path unverified_paths))
+      source_projection.facts in
+  let total_candidates = List.length facts + List.length source_projection.facts in
   let ordinary_whole, ordinary_fragments =
     answering
       ~claim_of:(fun (fact : Keeper_memory_os_types.fact) -> fact.claim)
       ~query
       facts
   in
-  let source_whole, source_fragments =
-    answering
-      ~claim_of:(fun (fact : Keeper_memory_source_current.fact) -> fact.claim)
-      ~query
-      source_facts
-  in
+  (* Keep the query's ranked order without building a second index. A
+     concurrently rewritten claim is not the selected claim, even if its
+     path/digest stayed equal: withhold it until another query selects it. *)
+  let current_by_path = List.fold_left
+      (fun indexed (fact : Keeper_memory_source_current.fact) ->
+        StringMap.add fact.source.path fact indexed) StringMap.empty source_facts in
+  let still_current (fact : Keeper_memory_source_current.fact) =
+    match StringMap.find_opt fact.source.path current_by_path with
+    | Some current -> current = fact
+    | None -> false in
+  let source_whole = List.filter still_current source_whole in
+  let source_fragments = List.filter still_current source_fragments in
   let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
     { claim = fact.claim
     ; identity =

@@ -28,6 +28,15 @@ fi
 if [[ -n "${KEEPER_COLLAB_SANDBOX_PROFILE:-}" ]]; then
   args+=("--sandbox-profile" "$KEEPER_COLLAB_SANDBOX_PROFILE")
 fi
+if [[ -n "${KEEPER_COLLAB_SANDBOX_IMAGE:-}" ]]; then
+  args+=("--sandbox-image" "$KEEPER_COLLAB_SANDBOX_IMAGE")
+fi
+if [[ -n "${KEEPER_COLLAB_MICROVM_BACKEND:-}" ]]; then
+  args+=("--microvm-backend" "$KEEPER_COLLAB_MICROVM_BACKEND")
+fi
+if [[ -n "${KEEPER_COLLAB_REMOTE_ENDPOINT:-}" ]]; then
+  args+=("--remote-endpoint" "$KEEPER_COLLAB_REMOTE_ENDPOINT")
+fi
 if [[ -n "${KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC:-}" ]]; then
   args+=("--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC")
 fi

@@ -236,9 +236,16 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Official_tool_result of
+      { block_index : int
+      ; tool_call_id : string
+      ; execution_id : Ids.Execution_id.t
+      }
   | Turn_closed_without_sources of { turn : int }
 
 let make_hooks
+    ?preview
+    ?observation_token
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
@@ -277,6 +284,7 @@ let make_hooks
   in
   let record_progress event_kind =
     Keeper_registry.record_turn_progress
+      ~observation_token
       ~base_path:config.base_path
       (!meta_ref).name
       ~event_kind
@@ -321,7 +329,7 @@ let make_hooks
            |> String.concat "\n"
          in
          Keeper_turn_preview.note_text
-           ~keeper_name:(!meta_ref).name
+           ~writer:preview
            ~now:(Unix.gettimeofday ())
            visible_text);
         let meta = !meta_ref in
@@ -622,7 +630,7 @@ let make_hooks
            turn ran. Written beside the progress stamp so the two facts
            cannot drift apart. *)
         Keeper_turn_preview.note_tool
-          ~keeper_name:(!meta_ref).name
+          ~writer:preview
           ~now:(Time_compat.now ())
           tool_name;
         incr tool_call_count_ref;
@@ -973,7 +981,7 @@ let make_hooks
       | Agent_core.Hooks.PostToolUseFailure
           { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
-        Keeper_turn_preview.note_tool ~keeper_name:meta.name
+        Keeper_turn_preview.note_tool ~writer:preview
           ~now:(Time_compat.now ()) tool_name;
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"

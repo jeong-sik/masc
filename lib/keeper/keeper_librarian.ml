@@ -33,6 +33,7 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; historical_task_contexts : Keeper_librarian_task_context.t list
   ; keeper_id : Keeper_identity.Keeper_id.t
   ; keeper_instructions : string
   ; current : current_selection option
@@ -323,6 +324,8 @@ let prompt_variables (inp : input) : (string * string) list =
   ; facts_budget_variable inp
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "historical_task_contexts", Yojson.Safe.to_string
+      (Keeper_librarian_task_context.to_json inp.historical_task_contexts)
   ; "continuity", "null"
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
@@ -339,6 +342,8 @@ let prompt_variables (inp : input) : (string * string) list =
 
 let continuity_prompt_variables (inp : input) ~continuity =
   [ keeper_id_variable inp
+  ; "historical_task_contexts", Yojson.Safe.to_string
+      (Keeper_librarian_task_context.to_json inp.historical_task_contexts)
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)

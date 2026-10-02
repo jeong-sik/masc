@@ -1,3 +1,5 @@
+import { CandleAccountRevisionSchema } from './candle-observation'
+import { KeeperPortraitSchema } from './keeper-portrait'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
@@ -14,6 +16,11 @@ const KeeperMetaWireSchema = Schema.Struct({
 // echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
+  // Shared connector discovery omits currency. Operator observations may
+  // accompany the same lifecycle rows; this consumer does not interpret them.
+  candle_balance_milli: Schema.optional(Schema.Unknown),
+  candle_account_revision: Schema.optional(CandleAccountRevisionSchema),
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
   status: Schema.NonEmptyString,
@@ -41,6 +48,9 @@ const GateKeeperDirectoryIssueWireSchema = Schema.Struct({
 const GateKeeperIssueBaseWireSchema = Schema.Struct({
   status: Schema.Literal('error'),
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
+  candle_balance_milli: Schema.optional(Schema.Unknown),
+  candle_account_revision: Schema.optional(CandleAccountRevisionSchema),
   name: Schema.NonEmptyString,
   keepalive_running: Schema.Boolean,
   effective_meta_error: GateKeeperDirectoryIssueWireSchema,
@@ -72,6 +82,7 @@ const GateKeeperEntryWireSchema = Schema.Union(
 )
 
 const GateKeepersWireSchema = Schema.Struct({
+  candle: Schema.optional(Schema.Unknown),
   count: Schema.NonNegativeInt,
   keepers: Schema.Array(GateKeeperEntryWireSchema),
   // Listing truth: `total` counts keepers known before `limit` was applied, so

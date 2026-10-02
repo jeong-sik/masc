@@ -235,10 +235,60 @@ let test_a_body_asks_for_its_picture () =
 
 let about ~cols ~frame display =
   Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
-    ~frame ~keepers:["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"]
+    ~frame ~keepers:(List.map (fun name ->
+      name, Keeper_portrait_equipment.Ready Keeper_portrait_look.bare)
+      ["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"])
     ~display ~project ~origin
 
+let test_about_observed_outfit_and_unavailable_names () =
+  let scene keepers =
+    let keepers = List.map (fun (name, equipment) -> name,
+      match equipment with
+      | Some value -> Keeper_portrait_equipment.Ready value
+      | None -> Keeper_portrait_equipment.Unavailable "fixture not observed") keepers in
+    Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
+    ~caption ~frame:Screen.final_frame ~keepers ~display:pixels ~project ~origin in
+  let name = "fixture-alpha" in
+  let equipment = { Keeper_portrait_look.bare with face = Keeper_portrait_look.Glasses } in
+  let picture scene = List.find (fun placement ->
+    placement.View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_1)
+    scene.Screen.placements in
+  let bare = picture (scene [name, Some Keeper_portrait_look.bare]) in
+  let dressed = picture (scene [name, Some equipment]) in
+  check bool "observed clothing changes the same registered Keeper's portrait" false
+    (String.equal bare.View.image.Draw.rgba dressed.View.image.Draw.rgba);
+  let repeated = picture (scene [name, Some equipment]) in
+  check bool "unchanged observed clothing reuses the cached picture" true
+    (dressed.View.image == repeated.View.image);
+  let unavailable = scene [name, None; "fixture-bravo", None; "extra", None] in
+  check int "unavailable outfits retain visible registered names" 2
+    unavailable.Screen.visible_keepers;
+  check int "unavailable outfits draw only the candle" 1
+    (List.length unavailable.Screen.placements);
+  List.iter (fun label -> check bool "registered names and overflow stay readable" true
+    (List.exists (fun line -> String.equal (trimmed line) label) unavailable.Screen.lines))
+    [name; "fixture-bravo"; "+1 more Keepers"];
+  let raw_name = "fixture-\027-alpha" in
+  let unsafe = scene [raw_name, Some equipment] in
+  check bool "control bytes in a registered name cannot reach terminal rows" false
+    (List.exists (fun line -> String.contains (trimmed line) '\027')
+      unsafe.Screen.lines);
+  let actual = picture unsafe in
+  let expected = Draw.render (Keeper_portrait_look.body_of_name raw_name) equipment actual.View.box.View.size in
+  check string "label sanitizing never changes portrait identity" expected.Draw.rgba
+    actual.View.image.Draw.rgba
+
 let test_the_arrival_gathers_then_stops () =
+  let unavailable = Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
+    ~caption ~frame:Screen.final_frame
+    ~keepers:["fixture-alpha", Keeper_portrait_equipment.Unavailable "not observed"]
+    ~display:pixels ~project ~origin in
+  check (list int) "unobserved equipment keeps only the mascot placement"
+    [Masc_tui_graphics.image_id Masc_tui_graphics.Mascot]
+    (List.map (fun p -> p.View.image_id) unavailable.Screen.placements);
+  check bool "unobserved equipment retains the registered name" true
+    (List.exists (fun line -> String.equal (trimmed line) "fixture-alpha")
+       unavailable.Screen.lines);
   let at_start = about ~cols:76 ~frame:0 pixels in
   let gathered = about ~cols:76 ~frame:7 pixels in
   let finished = about ~cols:76 ~frame:Screen.final_frame pixels in
@@ -358,6 +408,8 @@ let () =
     ; ( "about"
       , [ test_case "it says only what was read" `Quick
             test_about_says_only_what_was_read
+        ; test_case "observed outfits and unread outfits retain roster identity" `Quick
+            test_about_observed_outfit_and_unavailable_names
         ; test_case "the arrival gathers then stops" `Quick
             test_the_arrival_gathers_then_stops
         ; test_case "wide mosaic keeps the roster" `Quick

@@ -394,22 +394,36 @@ let relay_to_board ~author content =
    call returns. One Eio mutex lets one fiber drain at a time, so the queue's
    order is the board's order. A line left behind by a failed drain goes out
    with the next one. *)
-let announcements : (string * string) Queue.t = Queue.create ()
+type announcement = { author : string; content : string; ready : bool Atomic.t }
+let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
 let posting = Eio.Mutex.create ()
 
-let announce ~author content () =
-  Mutex.protect announcements_lock (fun () -> Queue.push (author, content) announcements)
+let enqueue ~ready ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
+;;
+let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author content ()
+;;
+
+(* Queue in machine order, but keep this transaction's notices invisible to
+   every flusher until its Auth admission has exited, including on exception. *)
+let with_deferred_announcements f =
+  let ready = Atomic.make false in
+  Fun.protect ~finally:(fun () -> Atomic.set ready true)
+    (fun () -> f (enqueue ~ready))
 ;;
 
 let flush_announcements () =
-  let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
+  let next () = Mutex.protect announcements_lock (fun () ->
+    match Queue.peek_opt announcements with
+    | Some notice when Atomic.get notice.ready -> Queue.take_opt announcements
+    | Some _ | None -> None) in
   try
     Eio.Mutex.use_rw ~protect:false posting (fun () ->
       let rec drain () =
         match next () with
         | None -> ()
-        | Some (author, content) ->
+        | Some {author;content;ready=_} ->
           relay_to_board ~author content;
           drain ()
       in
@@ -470,7 +484,7 @@ let departure_notice holder = function
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
 ;;
 
-let free_left_controller ~holder_left ~who =
+let free_left_controller ?(announce = announce) ~holder_left ~who () =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
     when not (String.equal holder who) ->
@@ -567,7 +581,7 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
    never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
    controller would otherwise go to a name no caller has, nobody could move or
    eject the machine again, and the post meant to wake the next player would
-   address no one. [Keeper_dos_controller.before_call] reads the name here
+   address no one. [Keeper_dos_controller.execute] reads the name here
    too, so the check of who sits at the machine sees the name the pass
    uses. *)
 let pass_target args =
@@ -587,7 +601,9 @@ let pass_target args =
    with @, which the board delivers to that Keeper as an explicit mention, so
    the player whose turn it is does not have to poll the machine to find out.
    A post is a message in their queue, not an obligation to answer. *)
-let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
+(* Only the machine operation: the Keeper handoff owner keeps Auth admission
+   until this returns, then flushes the queued Board announcements. *)
+let pass_without_announcing ?(announce = announce) ~tool_name ~start_time ~base_path ~agent_name args =
   match pass_target args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok to_ ->
@@ -596,10 +612,13 @@ let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
       | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
       | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
     in
-    after_announcing
-      (of_lane ~base_path ~tool_name ~start_time
-         (off_domain (fun () ->
-            Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
+    of_lane ~base_path ~tool_name ~start_time
+      (off_domain (fun () ->
+         Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content)))
+;;
+
+let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
+  after_announcing (pass_without_announcing ~tool_name ~start_time ~base_path ~agent_name args)
 ;;
 
 (* The screen as an image. A VGA game draws its menus as pixels -- 삼국지3's

@@ -1,22 +1,23 @@
-(** Render current ordinary and source-bound Memory OS facts.
+(** Demand recall separates stored knowledge from per-turn context.
 
-    Ordinary facts come from the same snapshot as the dashboard. Source-bound
-    facts are revalidated against their exact file bytes before injection;
-    changed or unavailable sources contribute a typed invalidation instead of
-    their old claim. Recall never truncates, ranks, or partially injects facts.
+    Search-capable surfaces receive only store availability and counts plus a
+    current-lookup requirement: no claim bodies, source-file revalidation,
+    artifact rendering, blob writes or retention writes. The Keeper selects
+    relevant facts through [keeper_memory_search], whose read boundary
+    revalidates source claims before returning them.
 
-    Each store is rendered as present, authoritatively empty/absent, or
-    unavailable. Empty and absent states explicitly supersede earlier current
-    facts. Read failures mark prior facts as unverified without claiming they
-    were deleted. Source-store failure retains readable ordinary facts.
-    Disabling recall emits a stable suspension marker. These explicit states
-    let resumed sessions observe withdrawal, uncertainty and later recovery.
+    Artifact-only surfaces revalidate the complete projection and publish a
+    retained, paged snapshot; no claim body is copied into the prompt. If no
+    retrieval capability is available or publication fails, emit availability
+    and explicit historical-reference withdrawal, never the complete facts.
+    No stored memory is deleted by a recall decision. Source invalidations
+    and unreadable-source identities accompany the artifact-only projection.
 
-    The rendered block depends on fact contents and provenance, availability,
-    invalidations and per-pass source readability. Snapshot commit revisions
-    and update times remain in the durable stores and tools; identical facts
-    recommitted by a later Librarian tick render identically. The wall clock
-    passed as [now] drives revalidation only and never appears in the text. *)
+    Empty/absent, unreadable and disabled states remain distinct and stable.
+    [now] drives source revalidation and artifact retention only, never notice
+    identity. A notice is not verification of any previous retrieved claim;
+    current facts must be looked up again when used. Caller capabilities are
+    those of the actual selected runtime surface. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)
@@ -29,7 +30,9 @@ val render_context
 val enabled : unit -> bool
 
 val render_if_enabled
-  :  config:Workspace.config
+  :  ?artifact_reader_available:bool
+  -> ?memory_search_available:bool
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string
   -> keeper_id:string

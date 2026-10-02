@@ -589,7 +589,7 @@ let model_capabilities_override_of_model_spec
 (* The window handed to AGENT_CORE is MASC's effective window, not the raw
    runtime.toml override (#36540). Keeper turns are budgeted with the override
    clamped by the capability catalog cap
-   ([Runtime.resolve_max_context_of_runtime]), and AGENT_CORE's
+   ([Runtime_instance.resolve_max_context_of_runtime]), and AGENT_CORE's
    [Provider_config.context_window] — exact-fit admission and response
    telemetry — reads [config.max_context] verbatim when set. Passing the raw
    override sized those paths against a window the keeper budget never
@@ -658,13 +658,20 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
     | Muse_serve_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
 ;;
 
-let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
+let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
     ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
+  (* Resolve deployment scope before synthesizing custom-model capabilities:
+     their max_context is this declaration, not a second independent hard cap.
+     Known catalog rows remain unchanged and still clamp the selected value. *)
+  let max_context = match binding_max_context, provider.max_context with
+    | Some tokens, _ | None, Some tokens -> Some tokens
+    | None, None -> spec.max_context in
+  let spec = { spec with max_context } in
   let ( let* ) = Result.bind in
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
       ~disable_parallel_tool_use in
@@ -847,6 +854,7 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
           verbatim instead of collapsing to a generic "resolution failed" that
           hid which provider/protocol was unmapped. *)
        provider_config_from_declared_provider
+         ?binding_max_context:binding.max_context
          ?keep_alive:binding.keep_alive
          ?num_ctx:binding.num_ctx
          ?repeat_penalty:binding.repeat_penalty

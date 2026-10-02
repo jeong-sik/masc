@@ -91,7 +91,7 @@ def approval_typing(binary: str, decision: str) -> None:
         try:
             open_chat(process, fd, output)
             h.send_and_wait(process, fd, output, b"first", h.composer_showing(b"first"))
-            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             # Approval arrives while the operator is already writing NEXT.
             h.send_and_wait(process, fd, output, b"ma", h.composer_showing(b"ma"))
             before = len(output)
@@ -109,11 +109,14 @@ def approval_typing(binary: str, decision: str) -> None:
             assert not [body for path, body in requests if path == APPROVAL], requests
             os.write(fd, b"\r")
             body = h.wait_for_http_request(process, fd, output, requests, path=APPROVAL)
-            assert json.loads(body) == {
-                "name": "alpha",
-                "tool_call_id": "typing-call",
-                "decision": decision,
-            }, body
+            payload = json.loads(body)
+            assert payload["name"] == "alpha"
+            assert payload["tool_call_id"] == "typing-call"
+            assert payload["decision"] == decision
+            assert payload["expected_workspace"] == {
+                "base_path": "",
+                "masc_root": "",
+            }
             assert len([body for path, body in requests if path == APPROVAL]) == 1
         finally:
             show_approval.set()
@@ -258,7 +261,7 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
         try:
             open_chat(process, fd, output)
             h.send_and_wait(process, fd, output, b"trigger-error", b"trigger-error")
-            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             before = len(output)
             show_failure.set()
             h.wait_for_output(

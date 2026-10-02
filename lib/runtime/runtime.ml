@@ -4,119 +4,24 @@
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 
-    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Runtime_declarative_types]
-    대체). parse 는 {!Runtime_toml}, hot-path materialize 는 {!Runtime_adapter}
-    가 담당한다 — 셋 다 [Runtime_*] 코드 의존 0. *)
+    선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance}
+    소유. parse 는 {!Runtime_toml}, provider 실행 해석은 {!Runtime_adapter}
+    가 담당한다. *)
 
 open Runtime_schema
+open Runtime_config_error
+open Runtime_instance
+open Runtime_config_validation
+open Runtime_config_text
 open Result.Syntax
-
-type t =
-  { id : string
-    (** binding key ["provider.model"], 예 ["runpod_mtp.qwen-runpod"] *)
-  ; provider : provider
-  ; model : model_spec
-  ; binding : binding
-  ; execution : Runtime_execution.t
-    (** Turn owner materialized at load time. HTTP bindings become
-        [Agent_core]; official client runtimes remain distinct and can never
-        be dispatched as a fake LLM provider config. *)
-  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
-    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
-  ; quota_scope : Runtime_quota_window.scope
-    (** Quota ownership key frozen at materialization, from the same
-        credential-alias selection that resolved the dispatched API key
-        (PR #28219 review). *)
-  }
-
-type dispatch_credential_error =
-  | Required_env_credential_missing of
-      { provider_id : string
-      ; env_key : string
-      }
-  | Declared_credential_unavailable of
-      { provider_id : string
-      ; carrier : Agent_core.Error.credential_carrier
-      }
 
 (* runtime.toml tables this module reads or edits, spelled once (#39539). *)
 let runtime_table = Runtime_toml_namespace.(key Runtime)
-let egress_table = Runtime_toml_namespace.(key Egress)
 let fusion_table = Runtime_toml_namespace.(key Fusion)
 let providers_table = Runtime_toml_namespace.(key Providers)
 let assignments_table = Runtime_toml_namespace.(path Runtime) "assignments"
 let lanes_table = Runtime_toml_namespace.(path Runtime) "lanes"
 let exact_output_lanes_table = Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
-let fusion_presets_table = Runtime_toml_namespace.(path Fusion) "presets"
-
-let dispatch_credential_error_to_string = function
-  | Required_env_credential_missing { provider_id; env_key } ->
-    Printf.sprintf
-      "provider %S requires non-empty credential env %S"
-      provider_id
-      env_key
-  | Declared_credential_unavailable { provider_id; carrier } ->
-    Printf.sprintf
-      "provider %S declares an unavailable %s credential"
-      provider_id
-      (match carrier with
-       | Agent_core.Error.InlineCredential -> "inline"
-       | Agent_core.Error.FileCredential -> "file")
-;;
-
-let dispatch_credential_error_to_core_error = function
-  | Required_env_credential_missing { env_key; _ } ->
-    Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name = env_key })
-  | Declared_credential_unavailable { provider_id; carrier } ->
-    Agent_core.Error.Config
-      (Agent_core.Error.CredentialUnavailable { provider_id; carrier })
-;;
-
-let validate_dispatch_credential
-    ~(provider_config : Llm_provider.Provider_config.t)
-    (runtime : t)
-  =
-  match runtime.execution with
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ ->
-    Ok ()
-  | Runtime_execution.Agent_core _ ->
-    let requirement =
-      Runtime_adapter.credential_requirement
-        ~provider_id:runtime.provider.id
-        runtime.provider.credentials
-    in
-    if not (Llm_provider.Secret.is_empty provider_config.api_key)
-    then Ok ()
-    else
-      match requirement with
-      | Not_required -> Ok ()
-      (* An unknown provider is not turned away here. This is a pre-dispatch
-         check, and [Runtime_adapter.resolve_api_key] is where the absence is
-         answered with a refusal that names it; failing twice for one cause
-         would report the same thing in two vocabularies. What changed is that
-         the two absences are no longer one value, so this arm now says which
-         one it is letting through. *)
-      | Unknown_provider -> Ok ()
-      | Reference (Env env_key) ->
-        Error
-          (Required_env_credential_missing
-             { provider_id = runtime.provider.id; env_key })
-      | Reference (Inline _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.InlineCredential
-             })
-      | Reference (File _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.FileCredential
-             })
-;;
 
 type config_source_revision = Config_source_revision of string
 type config_commit_order = Config_commit_order of int64
@@ -293,159 +198,6 @@ let config_observation ~path source_text =
   { path; source_text; source_revision = Config_source_revision digest }
 ;;
 
-(* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
-   인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
-let id_of_binding (b : binding) : string = binding_key b
-
-(** binding 을 Runtime 으로 변환하되 실패 이유를 보존한다. provider/model
-    resolve 또는 provider_config materialize 가 실패하면 [Error reason] —
-    동작은 fail-closed 그대로(partial-boot 없음, 해당 binding 은 Runtime 목록에서
-    제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
-    task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
-    (Unknown→silent-drop 안티패턴 차단). *)
-(* Quota scope is frozen here, at materialization, from the same
-   credential-alias selection that resolves the dispatched API key. Deriving
-   it later would re-run alias selection against a possibly changed process
-   environment and charge the window to an account the dispatch never used
-   (PR #28219 review). *)
-let quota_scope_of_materialized
-    ~(provider : provider)
-    ~(execution : Runtime_execution.t) =
-  let credential =
-    match execution with
-    | Runtime_execution.Agent_core _ ->
-      Runtime_adapter.effective_credential_reference
-        ~provider_id:provider.id
-        provider.credentials
-    | Runtime_execution.Antigravity_cli _ -> provider.credentials
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Muse_serve _ -> None
-  in
-  let official_home client selected scope =
-    match selected with
-    | None -> Error (client ^ " needs account-home or an absolute CLI home")
-    | Some home ->
-      (match Runtime_account_home.of_string home with
-       | Ok home -> Ok (scope (Some home))
-       | Error reason -> Error (client ^ ": " ^ reason))
-  in
-  match execution with
-  | Runtime_execution.Claude_code client ->
-    official_home "Claude Code"
-      (Runtime_claude_code.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_claude_code_home
-  | Runtime_execution.Codex_app_server client ->
-    official_home "Codex"
-      (Runtime_codex_app_server.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_codex_home
-  | Runtime_execution.Muse_serve client ->
-    Runtime_account_home.of_string client.account_home
-    |> Result.map Runtime_quota_window.scope_of_muse_home
-  | Runtime_execution.Agent_core _
-  | Runtime_execution.Antigravity_cli _ ->
-    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
-;;
-
-(* Why a binding did not become a runtime, as a closed vocabulary rather than a
-   string. The distinction the variant makes is the one the config loader has to
-   act on: [Binding_disabled] and [Provider_disabled] are choices the operator
-   wrote down, [Execution_unbuildable] is a capability limit of the adapter, and
-   the two [*_not_declared] cases are dangling references — the binding names a
-   [\[providers.x\]] or [\[models.y\]] row that does not exist. Collapsing all
-   five into one string is what let a dangling reference be dropped as quietly as
-   a deliberate disable (masc#28403): a [local_llama_server.qwen3-6-35b-uncensored]
-   binding pointed at a model row an unquoted dot had split into
-   [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
-   Deciding fatality by matching the reason string would be the same defect one
-   layer up, so the vocabulary is closed and {!load_list} matches it. *)
-type drop_reason =
-  | Binding_disabled
-  | Provider_disabled of string (* provider id *)
-  | Provider_not_declared of string (* provider id the binding names *)
-  | Model_not_declared of string (* model id the binding names *)
-  | Execution_unbuildable of string (* adapter's own reason *)
-
-let string_of_drop_reason = function
-  | Binding_disabled -> "binding is disabled by runtime.toml"
-  | Provider_disabled id -> Printf.sprintf "provider %S is disabled by runtime.toml" id
-  | Provider_not_declared id -> Printf.sprintf "provider not found: %s" id
-  | Model_not_declared id -> Printf.sprintf "model not found: %s" id
-  | Execution_unbuildable reason -> reason
-;;
-
-let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
-  if not b.enabled
-  then Error Binding_disabled
-  else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
-  | Some provider, Some model ->
-    if not provider.enabled
-    then Error (Provider_disabled provider.id)
-    else
-      (match Runtime_adapter.binding_to_execution cfg b with
-       | Ok execution ->
-         Result.map (fun quota_scope ->
-           { id = id_of_binding b
-           ; provider
-           ; model
-           ; binding = b
-           ; execution
-           ; candidate_backpressure = (
-               let binding = match execution with
-                 | Runtime_execution.Agent_core config ->
-                     (match Agent_core.Binding_identity.of_provider_config
-                       ~transport:Agent_core.Binding_identity.Http config with
-                      | Ok binding -> Runtime_candidate_backpressure.Resolved_http_binding binding
-                      | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
-                 | Runtime_execution.Codex_app_server _
-                 | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _
-                 | Runtime_execution.Muse_serve _ -> Runtime_candidate_backpressure.Official_client_binding
-               in
-               Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope
-           })
-           (quota_scope_of_materialized ~provider ~execution)
-         |> Result.map_error (fun reason -> Execution_unbuildable reason)
-       | Error reason -> Error (Execution_unbuildable reason))
-  | None, _ -> Error (Provider_not_declared b.provider_id)
-  | Some _, None -> Error (Model_not_declared b.model_id)
-;;
-
-let is_local_provider (provider : provider) =
-  match provider.transport, provider.credentials with
-  | Cli _, _ -> true
-  | Http endpoint, None ->
-    Uri.of_string endpoint |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
-  | Http _, Some _ -> false
-;;
-
-let is_local_runtime (runtime : t) = is_local_provider runtime.provider
-
-(* Split configured bindings into successfully materialized runtimes and the
-   ones that were defined but could not be materialized, each paired with the
-   reason it was dropped. The drop set ([id -> reason]) lets assignment /
-   default / task-route / lane validation surface *why* a target binding is
-   absent from the runtime list (e.g. "provider ... uses protocol messages-http,
-   which the runtime adapter cannot build a provider_config for ...") instead of
-   the misleading "not found among N runtimes", which points the operator at a
-   typo that does not exist. Materialize failure stays fail-closed: the binding
-   is still excluded from [runtimes] (RFC-0206 §2.1). *)
-let partition_bindings (cfg : config) (bindings : binding list)
-  : t list * (string * drop_reason) list
-  =
-  let runtimes, dropped =
-    List.fold_left
-      (fun (runtimes, dropped) (b : binding) ->
-         match of_binding cfg b with
-         | Ok rt -> rt :: runtimes, dropped
-         | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
-      ([], [])
-      bindings
-  in
-  List.rev runtimes, List.rev dropped
-;;
-
 (* Explain why a validation target [id] is absent from the materialized
    [runtimes]. An [id] present in [dropped_bindings] was defined but failed to
    materialize — surface that reason (the actionable cause). An [id] absent from
@@ -459,444 +211,6 @@ let partition_bindings (cfg : config) (bindings : binding list)
     fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
     silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
-(* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
-   over a same-named runtime), so route validation must judge the same target
-   the consumer will actually get: lane first, runtime second. *)
-let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
-  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
-;;
-
-(* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is on it:
-     its entries name runtimes that can read an image, and the order of that
-     list is the whole walk. verifier_exact slots are on it: judgement admits
-     each slot as a direct runtime and dispatches that id alone. No lane
-     expands underneath either.
-   - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
-     assignments and route ids are on it, so validation judges the same target
-     [resolve_assignment] hands the consumer: lane first, runtime second.
-   Unknown ids are rejected while loading the configuration. *)
-type reference_domain =
-  | Runtime_only
-  | Lane_then_runtime
-
-(* A list entry renders as "field entry \"id\"" and a scalar as "field = \"id\"".
-   Keeping both is not cosmetic: [runtime].media_failover = "x" would tell the
-   operator a list field equals one id. The variance is in rendering the site,
-   never in deciding it. *)
-type reference_shape =
-  | Scalar
-  | List_entry
-
-type runtime_reference =
-  { site : string (* the config path as the operator wrote it *)
-  ; shape : reference_shape
-  ; id : string
-  ; domain : reference_domain
-  }
-
-(* Why an id named in runtime.toml did not become a runtime. [reason] carries
-   the binding's own drop reason when something was declared under that id;
-   [None] means nothing declared it, and [runtime_count] is what the message
-   counts against. *)
-type resolution_failure =
-  { unresolved_id : string
-  ; declared_drop : drop_reason option
-  ; runtime_count : int
-  }
-
-(* One exact-output lane slot whose HTTP provider declares no
-   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
-type exact_slot_body_deadline_gap =
-  { lane_id : string
-  ; slot_id : string
-  ; provider_id : string
-  }
-
-(* What rule 3 left out of a loaded file: every gap, and the exact lanes
-   those gaps emptied -- a lane whose every slot is a gap and that declares
-   no cli_slots. Such a lane is unavailable on its own; the other lanes
-   still publish. *)
-type exact_slot_degradation =
-  { gaps : exact_slot_body_deadline_gap list
-  ; emptied_lane_ids : string list
-  }
-
-(* One declared [cli_slots] entry that resolves to a configured runtime the
-   CLI tail cannot call: a provider-dispatched (HTTP / [Agent_core]) one, or
-   an official client with no output-schema channel.
-   [Keeper_lane_cli_oneshot.run] (the sole consumer of every lane's
-   [cli_slots]) requires an official client and hands it an output schema on
-   every call, so this is a load-time gap of the same shape as
-   [exact_slot_body_deadline_gap] but a different rule: that one is about a
-   missing timeout key, this one is about the runtime kind. See
-   [exact_lane_cli_slot_gaps]. *)
-type exact_lane_cli_slot_unservable_reason =
-  | Not_an_official_client
-  | Client_without_output_schema
-
-type exact_lane_cli_slot_unservable =
-  { lane_id : string
-  ; slot_id : string
-  ; provider_id : string
-  ; reason : exact_lane_cli_slot_unservable_reason
-  }
-
-(* The ways loading runtime.toml fails, closed so a consumer decides per case
-   instead of matching rendered text — the contract [drop_reason] already keeps
-   one level down. [Toml_unparsable] is the single case whose text comes from
-   the parser and can quote what the operator wrote; every other case names ids
-   and config keys this repository authored. *)
-type load_failure =
-  | Toml_unparsable of Runtime_toml.parse_error list
-  | Undeclared_bindings of (string * drop_reason) list
-  | Default_runtime_absent
-  | Default_runtime_unresolved of resolution_failure
-  | Reference_unresolved of
-      { site : string
-      ; shape : reference_shape
-      ; resolution : resolution_failure
-      }
-  | Lane_candidate_unresolved of
-      { lane_id : string
-      ; resolution : resolution_failure
-      }
-  | Max_context_absent of
-      { runtime_id : string
-      ; execution_model : string
-      ; declared_model : string
-      }
-  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
-  | Context_marks_exceed_max_context of
-      { runtime_id : string
-      ; high_water_tokens : int
-      ; max_context : int
-      }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
-      ; max_context : int
-      }
-  | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
-
-(* A dangling reference is an operator typo, and unlike every other drop reason
-   it is not survivable by ignoring the binding: the runtime the operator
-   declared simply does not exist, and nothing downstream will say so unless the
-   id happens to be referenced by an assignment, route, or lane. Reporting it
-   here — at load, over the whole binding list — is what makes the absence
-   visible without a reference to hang the message on (masc#28403). The other
-   three reasons stay non-fatal: they keep the RFC-0206 §2.1 contract that a
-   binding MASC cannot run is excluded rather than fatal. *)
-let dangling_reference_reason = function
-  | Provider_not_declared id ->
-    Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
-  | Model_not_declared id ->
-    Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
-  | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
-;;
-
-let resolution_of ~(dropped_bindings : (string * drop_reason) list)
-    ~(runtime_count : int) (id : string) : resolution_failure =
-  { unresolved_id = id; declared_drop = List.assoc_opt id dropped_bindings; runtime_count }
-;;
-
-(* Rendering lives here now, and only here. Every message below is the one the
-   failing site used to build inline, kept byte for byte: it is the operator's
-   whole account of a refused configuration, and a reworded one would read as a
-   different failure. *)
-let resolution_suffix (resolution : resolution_failure) : string =
-  match resolution.declared_drop with
-  | Some reason ->
-    Printf.sprintf
-      ": binding is defined but could not be materialized as a runtime — %s"
-      (string_of_drop_reason reason)
-  | None -> Printf.sprintf " not found among %d runtimes" resolution.runtime_count
-;;
-
-(* One line per slot: the lane table, the slot, the provider and the key to
-   add where it goes. The save refusal lists these, and so do the boot WARN
-   and the startup degradation report. *)
-let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
-  Printf.sprintf
-    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s to \
-     [providers.%s]"
-    gap.lane_id
-    gap.slot_id
-    gap.provider_id
-    Runtime_schema.exact_body_timeout_s_key
-    gap.provider_id
-;;
-
-let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) =
-  `Assoc
-    [ "lane_id", `String gap.lane_id
-    ; "slot_id", `String gap.slot_id
-    ; "provider_id", `String gap.provider_id
-    ; "missing_key", `String Runtime_schema.exact_body_timeout_s_key
-    ; "message", `String (exact_slot_body_deadline_gap_to_string gap)
-    ]
-;;
-
-let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
-  | Toml_unparsable errors ->
-    let detail =
-      errors
-      |> List.map (fun (e : Runtime_toml.parse_error) ->
-        Printf.sprintf "  - %s: %s" e.path e.message)
-      |> String.concat "\n"
-    in
-    Printf.sprintf
-      "runtime config parse failed (%s): %d error(s):\n%s"
-      config_path
-      (List.length errors)
-      detail
-  | Undeclared_bindings dropped ->
-    let dangling =
-      List.filter_map
-        (fun (id, reason) ->
-          Option.map
-            (fun why -> Printf.sprintf "  %s %s" id why)
-            (dangling_reference_reason reason))
-        dropped
-    in
-    Printf.sprintf
-      "%s: %d binding(s) reference a provider or model that is not declared, \
-       so the runtime they define does not exist:\n%s"
-      config_path
-      (List.length dangling)
-      (String.concat "\n" dangling)
-  | Default_runtime_absent ->
-    Printf.sprintf
-      "%s: [runtime].default is required (no default runtime configured; \
-       silent fallback removed)"
-      config_path
-  | Default_runtime_unresolved resolution ->
-    (* The entry names a route: a declared lane or a runtime. The shared
-       suffix counts runtimes alone, so the lane half is said here rather than
-       leaving the reader to think only a runtime was ever allowed. *)
-    Printf.sprintf
-      "%s: [runtime].default = %S%s, and no [runtime.lanes] table declares it"
-      config_path
-      resolution.unresolved_id
-      (resolution_suffix resolution)
-  | Reference_unresolved { site; shape; resolution } ->
-    let named =
-      match shape with
-      | Scalar -> Printf.sprintf "%s = %S" site resolution.unresolved_id
-      | List_entry -> Printf.sprintf "%s entry %S" site resolution.unresolved_id
-    in
-    Printf.sprintf "%s: %s%s" config_path named (resolution_suffix resolution)
-  | Lane_candidate_unresolved { lane_id; resolution } ->
-    Printf.sprintf
-      "%s: [runtime.lanes.%s] candidate %S%s"
-      config_path
-      lane_id
-      resolution.unresolved_id
-      (resolution_suffix resolution)
-  | Max_context_absent { runtime_id; execution_model; declared_model } ->
-    Printf.sprintf
-      "%s: runtime %S (model=%s) has no [models.%s].max-context override \
-       and no AGENT_CORE capability catalog max-context; set the override or add \
-       the model to the capability catalog (no silent default — \
-       RFC-0206 §2.1)"
-      config_path
-      runtime_id
-      execution_model
-      declared_model
-  | Context_marks_exceed_max_context { runtime_id; high_water_tokens; max_context } ->
-    Printf.sprintf
-      "%s: runtime %S declares context-high-water-tokens = %d above the model's \
-       max-context %d; a request that large is refused before the mark is \
-       reached, so lower the mark or raise max-context"
-      config_path
-      runtime_id
-      high_water_tokens
-      max_context
-  | Muse_window_below_host_overhead { runtime_id; max_context } ->
-    Printf.sprintf
-      "%s: runtime %S has no start-prompt ceiling: %s, so the host compacts any \
-       input. Raise max-context"
-      config_path
-      runtime_id
-      (Runtime_muse_prompt_capacity.error_to_string
-         (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
-  | Exact_slot_body_deadlines_absent gaps ->
-    Printf.sprintf
-      "%s: this change adds %d exact-output slot(s) on a provider that declares \
-       no %s. %s ends when the response headers arrive and does not bound the \
-       response body, so %s is the only deadline on the whole request:\n%s"
-      config_path
-      (List.length gaps)
-      Runtime_schema.exact_body_timeout_s_key
-      Runtime_schema.connect_timeout_s_key
-      Runtime_schema.exact_body_timeout_s_key
-      (gaps
-       |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
-       |> String.concat "\n")
-  | Exact_lane_cli_slot_unservable
-      { lane_id; slot_id; provider_id; reason = Not_an_official_client } ->
-    Printf.sprintf
-      "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
-       dispatched over HTTP rather than an official-client CLI; cli_slots \
-       dispatches through the official-client CLI alone \
-       (Keeper_lane_cli_oneshot), so move this id to slots or replace it with \
-       an official-client runtime (protocol = \"claude-code\" / \
-       \"codex-app-server\" / \"antigravity-cli\")"
-      config_path
-      lane_id
-      slot_id
-      provider_id
-  | Exact_lane_cli_slot_unservable
-      { lane_id; slot_id; provider_id; reason = Client_without_output_schema } ->
-    Printf.sprintf
-      "%s: [runtime.exact_output_lanes.%s] entry %S is provider %S, \
-       whose client has no output-schema channel; exact-output lanes require \
-       the selected client to accept a JSON Schema, so \
-       remove this id or replace it with protocol = \"claude-code\" / \
-       \"codex-app-server\" / \"antigravity-cli\""
-      config_path
-      lane_id
-      slot_id
-      provider_id
-;;
-
-(* The same account, minus the one part this repository did not write. A parse
-   error's text comes from the TOML parser and can quote the line it choked on,
-   which on an operator surface may be a value rather than a key. Every other
-   case names ids and config keys, so it reads identically to the diagnostic.
-   Listed case by case on purpose: a new failure has to decide where it
-   belongs instead of falling into a default. *)
-let to_operator_text ~(config_path : string) (failure : load_failure) : string =
-  match failure with
-  | Toml_unparsable errors ->
-    Printf.sprintf
-      "%s: %d parse error(s) in the file itself. Run masc runtime-probe for the \
-       parser's own report."
-      config_path
-      (List.length errors)
-  | Undeclared_bindings _
-  | Default_runtime_absent
-  | Default_runtime_unresolved _
-  | Reference_unresolved _
-  | Lane_candidate_unresolved _
-  | Max_context_absent _
-  | Context_marks_exceed_max_context _
-  | Muse_window_below_host_overhead _
-  | Exact_slot_body_deadlines_absent _
-  | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
-;;
-
-(* The list is carried out whole rather than counted here: the caller decides
-   whether an operator sees it, and how much of it. *)
-let validate_no_dangling_bindings
-    ~(dropped_bindings : (string * drop_reason) list) : (unit, load_failure) result =
-  match
-    List.filter
-      (fun (_, reason) -> Option.is_some (dangling_reference_reason reason))
-      dropped_bindings
-  with
-  | [] -> Ok ()
-  | dangling -> Error (Undeclared_bindings dangling)
-;;
-
-let validate_runtime_references
-    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
-    (lanes : Runtime_lane.t list) (references : runtime_reference list)
-  : (unit, load_failure) result
-  =
-  let resolves_as_runtime id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
-  in
-  let resolves (reference : runtime_reference) =
-    match reference.domain with
-    | Runtime_only -> resolves_as_runtime reference.id
-    | Lane_then_runtime ->
-      (* [validate_lanes] already guaranteed every candidate id of a declared
-         lane resolves, so naming the lane is enough. *)
-      Option.is_some (find_declared_lane lanes reference.id)
-      || resolves_as_runtime reference.id
-  in
-  match List.find_opt (fun reference -> not (resolves reference)) references with
-  | None -> Ok ()
-  | Some { site; shape; id; domain = _ } ->
-    Error
-      (Reference_unresolved
-         { site
-         ; shape
-         ; resolution =
-             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
-         })
-;;
-
-(* Reference constructors keep each site string next to the field it names, so a
-   renamed config key cannot drift away from its diagnostic. *)
-let assignment_references (assignments : (string * string) list) =
-  List.map
-    (fun (keeper_name, runtime_id) ->
-      { site = Printf.sprintf "[%s].%s" assignments_table keeper_name
-      ; shape = Scalar
-      ; id = runtime_id
-      ; domain = Lane_then_runtime
-      })
-    assignments
-;;
-
-let media_failover_references (media_failover : string list) =
-  List.map
-    (fun id ->
-      { site = "[runtime].media_failover"
-      ; shape = List_entry
-      ; id
-      ; domain = Runtime_only
-      })
-    media_failover
-;;
-
-(* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
-   Empty candidate lists are rejected at parse time; here we reject unknown ids
-   as operator typos (mirrors [runtime].default validation). *)
-let validate_lanes
-    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
-    (lane_decls : Runtime_schema.lane_decl list)
-  : (unit, load_failure) result
-  =
-  let runtime_exists id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
-  in
-  let rec first_unknown = function
-    | [] -> None
-    | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
-      (match List.find_opt (fun id -> not (runtime_exists id)) candidate_ids with
-       | Some id -> Some (lane_id, id)
-       | None -> first_unknown rest)
-  in
-  match first_unknown lane_decls with
-  | None -> Ok ()
-  | Some (lane_id, id) ->
-    Error
-      (Lane_candidate_unresolved
-         { lane_id
-         ; resolution =
-             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
-         })
-;;
-
-(* A lane is exactly the candidates it declares: a keeper reaches another
-   runtime only when a lane names it. *)
-let lanes_of_decls
-    ~(dropped_bindings : (string * drop_reason) list)
-    (runtimes : t list)
-    (lane_decls : Runtime_schema.lane_decl list)
-  : (Runtime_lane.t list, load_failure) result
-  =
-  let* () = validate_lanes ~dropped_bindings runtimes lane_decls in
-  Ok
-    (List.map
-       (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id candidate_ids)
-       lane_decls)
-;;
-
-
 type missing_catalog_model =
   { runtime_id : string
   ; provider_id : string
@@ -1143,131 +457,6 @@ let startup_degradation_to_yojson
        @ [ "next_action", `String (String.concat " " (catalog_next_action :: next_actions parts)) ])
 ;;
 
-let capabilities_for_runtime (rt : t) =
-  match rt.execution with
-  | Runtime_execution.Agent_core provider_config ->
-    Llm_provider.Provider_config.capabilities_for_config_model provider_config
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ -> None
-;;
-
-type max_context_source =
-  | Override
-  | Capability
-  | Override_clamped_by_capability
-
-let max_context_source_to_string = function
-  | Override -> "override"
-  | Capability -> "capability"
-  | Override_clamped_by_capability -> "override_clamped_by_capability"
-;;
-
-(* Effective input context window and the source that produced it.
-   [None] means neither the runtime.toml [model.max-context] override nor the
-   AGENT_CORE capability catalog declares a positive context window for this
-   binding — [validate_runtime_max_context] rejects such a runtime at load
-   (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
-let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
-  let capability_cap =
-    match capabilities_for_runtime rt with
-    | Some caps ->
-      (match caps.Llm_provider.Capabilities.max_context_tokens with
-       | Some c when c > 0 -> Some c
-       | Some _ | None -> None)
-    | None -> None
-  in
-  match rt.model.max_context, capability_cap with
-  | Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
-  | Some o, (Some _ | None) -> Some (o, Override)
-  | None, Some c -> Some (c, Capability)
-  | None, None -> None
-;;
-
-(* The start-prompt ceiling of a Muse runtime: derived from the window its
-   host reports and narrowed by a declared max-prompt-bytes, because the host
-   rewrites an oversized input instead of refusing it
-   ([Runtime_muse_prompt_capacity]). *)
-let muse_prompt_capacity (runtime : t) : (int, Runtime_muse_prompt_capacity.error) result =
-  Runtime_muse_prompt_capacity.start_prompt_bytes
-    ~declared:runtime.model.max_prompt_bytes
-    ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime))
-;;
-
-(* Every materialized runtime must resolve a positive context window from the
-   runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
-   both unset is a config error rejected here, not a runtime defaulted to a
-   fallback window (RFC-0206 §2.1 no silent fallback). *)
-let validate_runtime_max_context (runtimes : t list)
-  : (unit, load_failure) result
-  =
-  match
-    List.find_opt
-      (fun (r : t) -> Option.is_none (resolve_max_context_of_runtime r))
-      runtimes
-  with
-  | None -> Ok ()
-  | Some r ->
-    Error
-      (Max_context_absent
-         { runtime_id = r.id
-         ; execution_model =
-             (match Runtime_execution.model_id r.execution with
-              | Some model_id -> model_id
-              | None -> "<official-client-selected>")
-         ; declared_model = r.model.id
-         })
-;;
-
-(* A high-water mark above the model's context cannot be reached: the
-   provider refuses first. Checked here, where the model is resolved, because
-   the binding table cannot see [max-context]. *)
-let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.binding.Runtime_schema.context_marks, resolve_max_context_of_runtime r with
-         | Some marks, Some (max_context, _)
-           when marks.Runtime_schema.high_water_tokens > max_context ->
-           Some
-             (Context_marks_exceed_max_context
-                { runtime_id = r.id
-                ; high_water_tokens = marks.Runtime_schema.high_water_tokens
-                ; max_context
-                })
-         | Some _, Some _ | Some _, None | None, (Some _ | None) -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
-;;
-
-(* A Muse window too small for the host's own overhead leaves no start-prompt
-   ceiling ([muse_prompt_capacity]), declared max-prompt-bytes or not, and is
-   refused here rather than at its first turn. *)
-let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.provider.api_format with
-         | Muse_serve_runtime ->
-           (match muse_prompt_capacity r with
-            | Ok _ -> None
-            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }) ->
-              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context })
-            (* A runtime with no resolved window fails
-               [validate_runtime_max_context] instead. *)
-            | Error Runtime_muse_prompt_capacity.No_window_declared -> None)
-         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
-         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
-         | Claude_code_runtime -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
-;;
-
 (* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
    (RFC-0361 D7(a)) is the single selector for completion-authority judgement
    calls: admitted slots in frozen declaration order, fail over in that
@@ -1358,7 +547,7 @@ let exact_lane_cli_slot_references
 
 (* One declared [cli_slots] entry that resolves to a configured runtime the
    CLI tail cannot call ([exact_lane_cli_slot_unservable], declared with
-   [load_failure] above since the failure type needs it).
+   [Runtime_config_error.load_failure] since the failure type needs it).
    [exact_lane_cli_slot_references] above already refuses an id that resolves
    to nothing; this is the other half of what [Keeper_lane_cli_oneshot.run]
    requires before it will dispatch a cli_slots id: an official client
@@ -1980,6 +1169,19 @@ let enter_setup_required ~reason () =
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
+let preserve_candidate previous (runtime : t) =
+    match List.find_opt (fun (old : t) ->
+      String.equal old.id runtime.id
+      && Runtime_schema.equal_provider old.provider runtime.provider
+      && Runtime_schema.equal_model_spec old.model runtime.model
+      && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_candidate_backpressure.same_candidate_binding
+           old.candidate_backpressure runtime.candidate_backpressure) previous with
+    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
+    | None -> runtime
+
+;;
+
 let set_loaded
     ?startup_degradation
     ?declared_media_failover
@@ -1998,17 +1200,7 @@ let set_loaded
      credentials/catalog facts after a reload. Removed/rebound rows retain no
      global registry entry; in-flight snapshots alone keep their old cells. *)
   let previous = (Atomic.get loaded_state_ref).runtimes in
-  let preserve_candidate (runtime : t) =
-    match List.find_opt (fun (old : t) ->
-      String.equal old.id runtime.id
-      && Runtime_schema.equal_provider old.provider runtime.provider
-      && Runtime_schema.equal_model_spec old.model runtime.model
-      && Runtime_schema.equal_binding old.binding runtime.binding
-      && Runtime_candidate_backpressure.same_candidate_binding
-           old.candidate_backpressure runtime.candidate_backpressure) previous with
-    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
-    | None -> runtime
-  in
+  let preserve_candidate = preserve_candidate previous in
   let runtimes = List.map preserve_candidate runtimes in
   let rt = preserve_candidate rt in
   let declared_media_failover =
@@ -2167,9 +1359,25 @@ let load_exact_output_resolver_snapshot catalog =
     ()
 ;;
 
-let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
+let exact_output_runtime_observations ~origin runtimes =
+  match origin with
+  | Replacement_catalog_targets _ -> []
+  | Runtime_binding_targets ->
+    let previous = (Atomic.get loaded_state_ref).runtimes in
+    List.filter_map (fun (runtime : t) ->
+      let runtime = preserve_candidate previous runtime in
+      match runtime.execution with
+      | Runtime_execution.Agent_core _ ->
+        Some (runtime.id, Runtime_exact_output_registry.{
+          candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope })
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None) runtimes
+;;
+
+let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
+      ?runtime_observations
       ?required_lane_ids
       ?excused_lane_ids
       ~lanes
@@ -2645,17 +1853,7 @@ let is_local_runtime_id (id : string) : bool option =
   get_runtime_by_id id |> Option.map is_local_runtime
 ;;
 
-let max_context_of_runtime (rt : t) : int =
-  match resolve_max_context_of_runtime rt with
-  | Some (n, _source) -> n
-  | None ->
-    failwith
-      (Printf.sprintf
-         "Runtime.max_context_of_runtime: %s has no resolvable max-context; \
-          materialize_config should have rejected this at load (no silent \
-          fallback — RFC-0206 §2.1)"
-         rt.id)
-;;
+
 
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
@@ -2734,25 +1932,7 @@ let entry_runtime_id_of_route (route : string) : string option =
   | `Unavailable _ | `Missing -> None
 ;;
 
-let prompt_capacity_bytes (runtime : t) : int option =
-  match runtime.provider.api_format with
-  | Muse_serve_runtime ->
-    (match muse_prompt_capacity runtime with
-     | Ok bytes -> Some bytes
-     (* A full load refuses such a runtime; one built without it (a load that
-        skips the window check, [of_binding]) refuses its own turn with this
-        cause through [muse_prompt_capacity]. *)
-     | Error Runtime_muse_prompt_capacity.No_window_declared
-     | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _) -> None)
-  | Claude_code_runtime
-  | Antigravity_cli_runtime
-  | Codex_app_server_runtime
-  | Messages_api
-  | Chat_completions_api
-  | Ollama_api
-  | Gemini_api
-  | Vertex_gemini_api -> runtime.model.max_prompt_bytes
-;;
+
 
 (* A lane walks past its head: a candidate that fails is demoted behind its
    siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
@@ -2821,20 +2001,6 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT).
-   [None] for an official-client runtime, for a model with no catalog row, and
-   for a row that leaves it unset.
-   Mirrors [max_context_of_runtime] but projects the AGENT_CORE-typed capability
-   rather than the runtime.toml [model] record, because max output is owned by
-   the provider/model catalog, not the per-binding runtime config. This is an
-   observable capability ceiling only. AGENT_CORE owns request validation and clamp
-   policy; MASC never turns this value into a request default. *)
-let max_output_tokens_of_runtime (rt : t) : int option =
-  match capabilities_for_runtime rt with
-  | Some caps -> caps.Llm_provider.Capabilities.max_output_tokens
-  | None -> None
-;;
-
 let thinking_support_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.thinking_support
@@ -2877,19 +2043,13 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 ;;
 
 
-(* Reads the scope frozen at materialization ({!of_binding}); no
-   environment access here, so a post-load env change cannot re-select the
-   credential alias out from under the recorded window. *)
-let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
-  rt.quota_scope
-;;
+
 
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
   | None -> None
 ;;
-
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> prompt_capacity_bytes rt
@@ -2987,311 +2147,6 @@ let load_config_observation ?runtime_config_path () =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* content = load_file_result path in
   Ok (config_observation ~path content)
-;;
-
-let contains_newline s =
-  String.exists (function
-    | '\n' | '\r' -> true
-    | _ -> false)
-    s
-;;
-
-(* Comment-preserving TOML line editing lives in [Toml_line_editor] (RFC-0306
-   §3.2). These aliases keep the runtime.toml routing/assignment editor's call
-   sites unchanged while removing the duplicated implementations. *)
-let toml_escape_string = Toml_line_editor.escape_string
-
-let assignment_line ~keeper_name ~runtime_id =
-  Printf.sprintf
-    "\"%s\" = \"%s\""
-    (toml_escape_string keeper_name)
-    (toml_escape_string runtime_id)
-;;
-
-let runtime_scalar_line ~key ~runtime_id =
-  Toml_line_editor.scalar_line ~key ~value:runtime_id
-;;
-
-let runtime_string_array_line = Toml_line_editor.string_array_line
-
-let split_lines = Toml_line_editor.split_lines
-let join_lines = Toml_line_editor.join_lines
-let is_toml_table_header = Toml_line_editor.is_table_header
-let is_runtime_assignments_header = Toml_line_editor.is_table ~path:(runtime_table ^ ".assignments")
-let is_runtime_header = Toml_line_editor.is_table ~path:runtime_table
-
-let split_at = Toml_line_editor.split_at
-let find_index = Toml_line_editor.find_index
-let assignment_key_of_line = Toml_line_editor.key_of_line
-
-let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
-  let line = assignment_line ~keeper_name ~runtime_id in
-  let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match assignment_key_of_line existing with
-       | Some key when String.equal key keeper_name ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
-  in
-    loop [] section_lines
-;;
-
-let remove_assignment section_lines ~keeper_name =
-  List.filter
-    (fun existing ->
-      match assignment_key_of_line existing with
-      | Some key when String.equal key keeper_name -> false
-      | _ -> true)
-    section_lines
-;;
-
-let replace_or_append_runtime_scalar section_lines ~key ~runtime_id =
-  let line = runtime_scalar_line ~key ~runtime_id in
-  let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match assignment_key_of_line existing with
-       | Some existing_key when String.equal existing_key key ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
-  in
-  loop [] section_lines
-;;
-
-let replace_or_append_runtime_string_array section_lines ~key ~values =
-  let line = runtime_string_array_line ~key ~values in
-  let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match assignment_key_of_line existing with
-       | Some existing_key when String.equal existing_key key ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
-  in
-  loop [] section_lines
-;;
-
-let remove_runtime_scalar section_lines ~key =
-  List.filter
-    (fun existing ->
-      match assignment_key_of_line existing with
-      | Some existing_key when String.equal existing_key key -> false
-      | _ -> true)
-    section_lines
-;;
-
-let append_runtime_section lines ~key ~runtime_id =
-  let section = [ "[" ^ runtime_table ^ "]"; runtime_scalar_line ~key ~runtime_id ] in
-  match List.rev lines with
-  | [] -> section
-  | last :: _ when String.equal (String.trim last) "" -> lines @ section
-  | _ -> lines @ ("" :: section)
-;;
-
-let append_runtime_string_array_section lines ~key ~values =
-  let section = [ "[" ^ runtime_table ^ "]"; runtime_string_array_line ~key ~values ] in
-  match List.rev lines with
-  | [] -> section
-  | last :: _ when String.equal (String.trim last) "" -> lines @ section
-  | _ -> lines @ ("" :: section)
-;;
-
-let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
-  let section =
-    [ "[" ^ assignments_table ^ "]"; assignment_line ~keeper_name ~runtime_id ]
-  in
-  match List.rev lines with
-  | [] -> section
-  | last :: _ when String.equal (String.trim last) "" -> lines @ section
-  | _ -> lines @ ("" :: section)
-;;
-
-let update_runtime_assignment_text content ~keeper_name ~runtime_id =
-  let lines, _trailing_newline = split_lines content in
-  let updated_lines =
-    match find_index is_runtime_assignments_header lines with
-    | None -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
-    | Some header_index ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
-       | header :: after_header ->
-         let section_lines, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next_header_index -> split_at next_header_index after_header
-         in
-         before
-         @ (header
-            :: replace_or_append_assignment
-                 section_lines
-                 ~keeper_name
-                 ~runtime_id)
-         @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
-;;
-
-(* [\[egress.keepers.<name>\]] as text, so a keeper's allowlist can be written
-   by the same call that puts the keeper in the policy lane. Two files edited
-   by hand is how the two halves come apart, and an allowlist that does not
-   match its keeper's mode fails silently in the direction that looks like
-   permission.
-
-   The table is replaced wholesale rather than merged: an allowlist is the
-   complete statement of what a keeper may reach, so a write that kept
-   unnamed entries would mean an operator could not remove one. *)
-let egress_keepers_table = [ egress_table; "keepers" ]
-
-(* Quoted, like an assignment row's key: a keeper name carries dots
-   (edgar.a.poe is live), and [egress.keepers.edgar.a.poe] would be a path
-   into nested tables rather than one keeper. Unquoted, the loader reads
-   "a" as an unknown key under keeper "edgar" and refuses the file. *)
-let egress_keepers_header keeper_name =
-  Printf.sprintf
-    "[%s.\"%s\"]"
-    (String.concat "." egress_keepers_table)
-    (toml_escape_string keeper_name)
-;;
-
-let egress_allow_line allow =
-  Printf.sprintf
-    "allow = [%s]"
-    (allow
-     |> List.map (fun entry -> Printf.sprintf "\"%s\"" (toml_escape_string entry))
-     |> String.concat ", ")
-;;
-
-(* The file has two authors, so the header is recognised by what the TOML
-   grammar reads out of it rather than by its spelling: this writer quotes
-   the key; an operator's hand may not, may space the brackets, may
-   single-quote, may leave a note on the line. The loader reads every one of
-   those as the path egress, keepers, name, and so does this, which is what
-   keeps one keeper at one table. [\[\[egress.keepers.<name>\]\]] is not the
-   keeper's table: the loader refuses an array of tables as a keeper, so the
-   writer leaves it as the table boundary it is. *)
-let is_egress_keeper_header ~keeper_name line =
-  match Toml_line_editor.header_of_line line with
-  | Some (Toml_line_editor.Table path) ->
-    List.equal String.equal path (egress_keepers_table @ [ keeper_name ])
-  | Some (Toml_line_editor.Table_array _) | None -> false
-;;
-
-let update_egress_allow_text content ~keeper_name ~allow =
-  let lines, _trailing_newline = split_lines content in
-  let section = [ egress_keepers_header keeper_name; egress_allow_line allow ] in
-  let updated_lines =
-    match find_index (is_egress_keeper_header ~keeper_name) lines with
-    | None ->
-      (match List.rev lines with
-       | [] -> section
-       | last :: _ when String.equal (String.trim last) "" -> lines @ section
-       | _ -> lines @ ("" :: section))
-    | Some header_index ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] -> lines @ section
-       | _ :: after_header ->
-         let _replaced, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next -> split_at next after_header
-         in
-         before @ section @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
-;;
-
-let remove_egress_allow_text content ~keeper_name =
-  let lines, _trailing_newline = split_lines content in
-  let updated_lines =
-    match find_index (is_egress_keeper_header ~keeper_name) lines with
-    | None -> lines
-    | Some header_index ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] -> lines
-       | _ :: after_header ->
-         let _dropped, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next -> split_at next after_header
-         in
-         before @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
-;;
-
-let update_runtime_scalar_text content ~key ~runtime_id =
-  let lines, _trailing_newline = split_lines content in
-  let updated_lines =
-    match find_index is_runtime_header lines, runtime_id with
-    | None, None -> lines
-    | None, Some runtime_id -> append_runtime_section lines ~key ~runtime_id
-    | Some header_index, _ ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] ->
-         (match runtime_id with
-          | None -> lines
-          | Some runtime_id -> append_runtime_section lines ~key ~runtime_id)
-       | header :: after_header ->
-         let section_lines, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next_header_index -> split_at next_header_index after_header
-         in
-         let next_section_lines =
-           match runtime_id with
-           | None -> remove_runtime_scalar section_lines ~key
-           | Some runtime_id -> replace_or_append_runtime_scalar section_lines ~key ~runtime_id
-         in
-         before @ (header :: next_section_lines) @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
-;;
-
-let update_runtime_string_array_text content ~key ~values =
-  let lines, _trailing_newline = split_lines content in
-  let updated_lines =
-    match find_index is_runtime_header lines with
-    | None -> append_runtime_string_array_section lines ~key ~values
-    | Some header_index ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] -> append_runtime_string_array_section lines ~key ~values
-       | header :: after_header ->
-         let section_lines, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next_header_index -> split_at next_header_index after_header
-         in
-         before
-         @ (header :: replace_or_append_runtime_string_array section_lines ~key ~values)
-         @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
-;;
-
-let remove_runtime_assignment_text content ~keeper_name =
-  let lines, _trailing_newline = split_lines content in
-  let updated_lines =
-    match find_index is_runtime_assignments_header lines with
-    | None -> lines
-    | Some header_index ->
-      let before, from_header = split_at header_index lines in
-      (match from_header with
-       | [] -> lines
-       | header :: after_header ->
-         let section_lines, after_section =
-           match find_index is_toml_table_header after_header with
-           | None -> after_header, []
-           | Some next_header_index -> split_at next_header_index after_header
-         in
-         before @ (header :: remove_assignment section_lines ~keeper_name) @ after_section)
-  in
-  join_lines updated_lines ~trailing_newline:true
 ;;
 
 let runtime_parse_errors_to_string errs =
@@ -3483,27 +2338,6 @@ let validate_fusion_change ~config_path content =
       Error
         ("fusion config invalid: "
          ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
-;;
-
-(* A place in runtime.toml that names a lane. [resolve_assignment] reads a lane
-   before a runtime of the same id, and each of these is resolved that way: a
-   keeper's route is its assignment or, without one, the default, and a Fusion
-   run resolves each seat when it reaches it. [\[runtime\].media_failover] and
-   [verifier_exact] slots name runtimes only and never reach a lane, so they
-   are not here. *)
-type route_reference =
-  | Keeper_assignment of string
-  | Default_runtime
-  | Fusion_seat of
-      { preset : string
-      ; seat : Fusion_policy.seat_kind
-      }
-
-let route_reference_to_string = function
-  | Keeper_assignment keeper_name -> Printf.sprintf "[%s].%s" assignments_table keeper_name
-  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
-  | Fusion_seat { preset; seat } ->
-    Printf.sprintf "[%s.%s].%s" fusion_presets_table preset (Fusion_policy.seat_kind_key seat)
 ;;
 
 (* How a run fails at a seat on [route] under the config [validated], or
@@ -3896,6 +2730,7 @@ type exact_output_commit_plan =
 let prepare_exact_output_replacement ~runtimes ~lanes =
   let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
   Runtime_exact_output_registry.prepare_replacement
+    ~runtime_observations:(exact_output_runtime_observations ~origin:catalog.catalog_origin runtimes)
     ~lanes
     ~excused_lane_ids:catalog.catalog_exact_slots.emptied_lane_ids
     ~load_resolver_snapshot:(fun () ->
@@ -4581,29 +3416,6 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
 
-(* [\[runtime.lanes."<id>"\]] is written by table path, not by the [\[runtime\]]
-   array writer above: the candidates live in their own table, one per lane.
-
-   The id is quoted exactly when TOML requires it: a bare key is
-   [A-Za-z0-9_-] and every runtime id carries a dot, so in practice this
-   quotes. Either spelling names the same table to [Toml_line_editor.is_table],
-   which compares the key path the grammar reads, so the choice is only what
-   the operator sees in the file. *)
-let table_path_under prefix id =
-  let bare =
-    String.for_all
-      (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
-      id
-  in
-  if bare && not (String.equal id "")
-  then Printf.sprintf "%s.%s" prefix id
-  else
-    (* [escape_string] escapes the contents; the quotes are the caller's. *)
-    Printf.sprintf "%s.\"%s\"" prefix (Toml_line_editor.escape_string id)
-;;
-
-let lane_table_path lane_id = table_path_under (runtime_table ^ ".lanes") lane_id
-
 (* The two declared lists of an exact lane. An official client answers
    through its own CLI, so it can only be a CLI slot; every other id -- an
    Agent Core runtime, a catalog id, or a binding whose provider is not
@@ -4813,29 +3625,6 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
-let validated_lane_id lane_id =
-  let lane_id = String.trim lane_id in
-  if String.equal lane_id ""
-  then Error "lane id must not be empty"
-  else if contains_newline lane_id
-  then Error "lane id must not contain newlines"
-  else Ok lane_id
-;;
-
-let validated_lane_candidates runtime_ids =
-  let runtime_ids = List.map String.trim runtime_ids in
-  if runtime_ids = []
-  then
-    (* An empty list is not "no failover", it is a lane that resolves to
-       nothing. Removing a lane is a different edit than emptying it. *)
-    Error "a lane needs at least one candidate"
-  else if List.exists (String.equal "") runtime_ids
-  then Error "runtime_ids must not contain empty entries"
-  else if List.exists contains_newline runtime_ids
-  then Error "runtime_ids must not contain newlines"
-  else Ok runtime_ids
-;;
-
 (* One lane edit under the runtime.toml write lock: [decide] reads the parsed
    file and either refuses or returns the edited text, which the commit
    validates as a whole before anything is written. *)
@@ -4853,20 +3642,6 @@ let edit_runtime_lanes ?runtime_config_path decide =
   in
   let* receipt = locked.value in
   Ok (attach_lock_warnings locked.warnings receipt)
-;;
-
-let lane_is_declared (config : Runtime_schema.config) lane_id =
-  List.exists
-    (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane_id)
-    config.lane_decls
-;;
-
-let write_lane_candidates ~content ~lane_id ~runtime_ids =
-  Toml_line_editor.edit_table_multiline_array
-    content
-    ~path:(lane_table_path lane_id)
-    ~key:"candidates"
-    ~values:runtime_ids
 ;;
 
 let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
@@ -4933,103 +3708,6 @@ let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
     if lane_is_declared config lane_id
     then Error (Printf.sprintf "lane %S already exists" lane_id)
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
-;;
-
-(* Every place the config names a lane, with the route it names. The Fusion
-   seats come from [Fusion_config.seat_routes_of_toml], which reads them
-   without validating the presets. *)
-let route_references (config : Runtime_schema.config) seats =
-  List.map (fun (keeper_name, target) -> Keeper_assignment keeper_name, target)
-    config.keeper_assignments
-  @ (match config.default_runtime_id with
-     | Some id -> [ Default_runtime, id ]
-     | None -> [])
-  @ List.map
-      (fun (preset, seat, route) -> Fusion_seat { preset; seat }, String.trim route)
-      seats
-;;
-
-(* A preset naming the lane at two panel seats is one reference to report. *)
-let lane_references config seats ~lane_id =
-  List.fold_left
-    (fun found (reference, route) ->
-       if String.equal route lane_id && not (List.mem reference found)
-       then found @ [ reference ]
-       else found)
-    []
-    (route_references config seats)
-;;
-
-let lane_edit_toml content =
-  Result.map_error
-    (fun detail -> "runtime config parse failed: " ^ detail)
-    (Otoml.Parser.from_string_result content)
-;;
-
-(* The seats are read from the text under the lock, without validating the
-   presets: a preset that does not validate still names what it names, so an
-   error in another preset does not block a lane edit. Only a [fusion] whose
-   values have the wrong TOML type hides its seats, and then a lane edit
-   refuses rather than leave them pointing at a name that is gone. *)
-let lane_fusion_seats toml ~lane_id =
-  Fusion_config.seat_routes_of_toml toml
-  |> Result.map_error (fun error ->
-    Printf.sprintf
-      "lane %S cannot be edited while the seats of [fusion] cannot be read (%s): \
-       they may name the lane. Fix [fusion] first"
-      lane_id
-      (Fusion_config.config_error_message error))
-;;
-
-(* A seat is a route, so a rename rewrites every preset with a seat on the
-   lane through the Fusion writer, in the same text as the header. The writer
-   takes validated presets, so this needs [fusion] to load -- but only when a
-   seat names the lane; otherwise [fusion] is not read. A preset the writer
-   cannot address refuses the rename, and the refusal says the lane rename is
-   what reached it. *)
-let rename_fusion_seats text toml references ~lane_id ~new_lane_id =
-  let seat_presets =
-    List.filter_map
-      (function
-        | Fusion_seat { preset; _ } -> Some preset
-        | Keeper_assignment _ | Default_runtime -> None)
-      references
-  in
-  match seat_presets with
-  | [] -> Ok text
-  | _ :: _ ->
-    let* (fusion : Fusion_policy.t) =
-      Fusion_config.of_toml toml
-      |> Result.map_error (fun errors ->
-        Printf.sprintf
-          "renaming lane %S rewrites Fusion seats that name it, and [fusion] does not \
-           load (%s). Fix [fusion] first"
-          lane_id
-          (String.concat "; " (List.map Fusion_config.config_error_message errors)))
-    in
-    List.fold_left
-      (fun acc validated ->
-         let* text = acc in
-         let preset = Fusion_policy.Validated_preset.preset validated in
-         if not (List.mem preset.name seat_presets)
-         then Ok text
-         else (
-           let rename route =
-             if String.equal (String.trim route) lane_id then new_lane_id else route
-           in
-           let* renamed =
-             Fusion_policy.Validated_preset.of_preset
-               (Fusion_policy.map_seat_routes rename preset)
-             |> Result.map_error (fun invalid ->
-               Printf.sprintf "preset %s %s after the rename" preset.name
-                 (Fusion_policy.Validated_preset.invalid_to_string invalid))
-           in
-           Fusion_config_writer.upsert_preset text renamed
-           |> Result.map_error (fun error ->
-             Printf.sprintf "renaming lane %S rewrites a seat of preset %s, and %s"
-               lane_id preset.name (Fusion_config_writer.error_message error))))
-      (Ok text)
-      fusion.presets
 ;;
 
 (* A lane's name is its routing key: [\[runtime.assignments\]] entries,

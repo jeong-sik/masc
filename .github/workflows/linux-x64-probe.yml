@@ -10,6 +10,7 @@ on:
         default: linux-x64
         options:
           - linux-x64
+          - macos-arm64
           - stagehand-model-macos-arm64
 
 permissions:
@@ -17,7 +18,7 @@ permissions:
 
 jobs:
   linux-x64-probe:
-    if: inputs.target != 'stagehand-model-macos-arm64'
+    if: inputs.target == 'linux-x64'
     name: Build Linux x64 probe
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -46,6 +47,102 @@ jobs:
         with:
           name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-linux-x64-probe/
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-arm64-probe:
+    if: inputs.target == 'macos-arm64'
+    name: Build manual macOS arm64 runtime probe
+    runs-on: macos-14
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Set isolated probe directories
+        run: |
+          echo "PROBE_OUT=$RUNNER_TEMP/masc-macos-arm64-probe" >> "$GITHUB_ENV"
+          echo "PROBE_STAGE=$RUNNER_TEMP/masc-macos-arm64-stage" >> "$GITHUB_ENV"
+      - name: Install native build dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+      - name: Pin and install OCaml dependencies
+        run: |
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
+          opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build runtime companions
+        run: |
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          scripts/check-version-truth.sh
+          opam exec -- dune build --release \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe
+      - name: Bundle relocatable runtime with release filenames
+        run: |
+          mkdir -p "$PROBE_OUT"
+          cp _build/default/bin/main_eio.exe "$PROBE_OUT/masc-macos-arm64"
+          cp _build/default/bin/masc_tui.exe "$PROBE_OUT/masc-tui-macos-arm64"
+          cp _build/default/bin/masc_browser_host.exe "$PROBE_OUT/masc-browser-host-macos-arm64"
+          cp _build/default/bin/deployment_preflight_helper.exe "$PROBE_OUT/masc-deployment-preflight-helper-macos-arm64"
+          cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
+          python3 scripts/package-macos-runtime.py --dist "$PROBE_OUT" \
+            --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$GITHUB_SHA"
+      - name: Validate packaged identity and record dependencies
+        run: |
+          set -euo pipefail
+          # Identity flags exit before opening a TTY or contacting a server.
+          "$PROBE_STAGE/masc-tui" --version | tee "$PROBE_OUT/tui-version.txt"
+          "$PROBE_STAGE/masc-tui" --build-commit | tee "$PROBE_OUT/tui-build-commit.txt"
+          test "$(cat "$PROBE_OUT/tui-build-commit.txt")" = "$GITHUB_SHA"
+          test -s "$PROBE_OUT/tui-version.txt"
+          # Both companions use the same linked dune-build-info version.
+          "$PROBE_STAGE/masc" --version > "$PROBE_OUT/server-version.txt"
+          cmp "$PROBE_OUT/tui-version.txt" "$PROBE_OUT/server-version.txt"
+          test "$("$PROBE_STAGE/masc" build-commit)" = "$GITHUB_SHA"
+          cp "$PROBE_STAGE/runtime-provenance.json" "$PROBE_OUT/"
+          {
+            uname -a
+            opam exec -- ocamlc -version
+            opam list --installed --columns=name,version
+            brew list --versions
+            for binary in "$PROBE_STAGE"/masc "$PROBE_STAGE"/masc-tui \
+              "$PROBE_STAGE"/masc-browser-host "$PROBE_STAGE"/masc-deployment-preflight-helper \
+              "$PROBE_STAGE"/lib/*; do
+              otool -L "$binary"
+            done
+          } > "$PROBE_OUT/dependencies.txt"
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          receipt = dict(source_commit=os.environ['GITHUB_SHA'], platform='macos-arm64',
+                         run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+                         release_verified=False, published=False)
+          (Path(os.environ['PROBE_OUT']) / 'probe.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYCODE
+          cd "$PROBE_OUT"
+          shasum -a 256 ./* > SHA256SUMS
+          shasum -a 256 --check SHA256SUMS
+      - name: Upload macOS arm64 runtime probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-arm64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/masc-macos-arm64-probe/
           if-no-files-found: error
           retention-days: 7
 

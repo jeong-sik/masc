@@ -2529,6 +2529,13 @@ let gc_backlog_has config task_id =
     (Workspace.read_backlog config).tasks
 ;;
 
+(* A test that seeds the archive wants the seed to have landed. *)
+let append_archive config tasks =
+  match Workspace.append_archive_tasks config tasks with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail ("seeding the archive failed: " ^ detail)
+;;
+
 let gc_message_path_with_content config content =
   let messages_dir = Workspace.messages_dir config in
   let matching_paths =
@@ -2636,7 +2643,7 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
     in
     (* Simulate the orphaning a buggy GC pass produced: obligation lives in the
        archive only, absent from the backlog. *)
-    Workspace.append_archive_tasks config [ orphan ];
+    append_archive config [ orphan ];
     Alcotest.(check bool)
       "precondition: orphan not yet in backlog"
       false
@@ -2669,7 +2676,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              ; verification_id = "verif-904"
              })
     in
-    Workspace.append_archive_tasks config [ orphan ];
+    append_archive config [ orphan ];
     let content = "verification context for task-904" in
     let _ =
       Workspace.broadcast ~audience:Workspace_broadcast.System_record
@@ -2722,6 +2729,74 @@ let test_gc_archives_terminal_tasks () =
     let archive_ids = Workspace.read_archive_task_ids config in
     Alcotest.(check bool) "done task archived" true (List.mem 902 archive_ids);
     Alcotest.(check bool) "cancelled task archived" true (List.mem 903 archive_ids))
+;;
+
+let gc_done_task id =
+  gc_make_task
+    ~id
+    ~created_at:gc_ancient_ts
+    ~status:
+      (Masc_domain.Done
+         { assignee = "claude"; completed_at = gc_ancient_ts; notes = None })
+;;
+
+(* The backlog commit is the point after which an archived task lives only in
+   the archive, so a crash right after it loses whatever the archive does not
+   hold yet. [on_task_mutation_fn] runs when the backlog commit settles: read
+   the archive there. *)
+let test_gc_archives_before_it_commits_the_backlog () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-920"; gc_done_task "task-921" ];
+    let archive_ids_at_commit = ref [] in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      archive_ids_at_commit :=
+        List.sort Int.compare (Workspace.read_archive_task_ids config)
+        :: !archive_ids_at_commit);
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () -> ignore (Workspace.gc config ~days:1 ()));
+    (match !archive_ids_at_commit with
+     | [ ids ] ->
+       Alcotest.(check (list int))
+         "the archive already holds both tasks when the backlog commit settles"
+         [ 920; 921 ]
+         ids
+     | commits ->
+       Alcotest.fail
+         (Printf.sprintf "expected one backlog commit, saw %d" (List.length commits)));
+    Alcotest.(check bool) "first task left the live backlog" false
+      (gc_backlog_has config "task-920");
+    Alcotest.(check bool) "second task left the live backlog" false
+      (gc_backlog_has config "task-921"))
+;;
+
+(* A directory where the archive file should be cannot be read as an archive.
+   That is not an empty archive: GC stops before it touches the backlog, so
+   the task it was about to archive stays live, and the path is left alone. *)
+let test_gc_stops_before_the_backlog_when_the_archive_is_unreadable () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-922" ];
+    let archive_path = Workspace_utils_paths_backend.archive_path config in
+    Fs_compat.mkdir_p archive_path;
+    let occupant = Filename.concat archive_path "occupant" in
+    Fs_compat.save_file occupant "keep";
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.remove occupant;
+        Unix.rmdir archive_path)
+      (fun () ->
+        (match Workspace.gc config ~days:1 () with
+         | (_ : string) -> Alcotest.fail "gc returned although the archive cannot be read"
+         | exception Workspace.Task_archive_failed detail ->
+           Alcotest.(check bool)
+             "the failure names the archive file"
+             true
+             (str_contains detail "tasks-archive.json"));
+        Alcotest.(check bool) "the task is still live" true
+          (gc_backlog_has config "task-922");
+        Alcotest.(check bool) "the archive path is untouched" true
+          (Sys.file_exists occupant)))
 ;;
 
 (* ============================================================ *)
@@ -2808,10 +2883,237 @@ let test_append_archive_tasks () =
       ; skills = []
       }
     in
-    Workspace.append_archive_tasks config [ task ];
+    append_archive config [ task ];
     (* Add a new task to verify archive max ID is checked *)
     let result = Workspace.add_task config ~title:"New Task" ~priority:1 ~description:"" in
     Alcotest.(check bool) "task added" true (contains_check result))
+;;
+
+let archive_file config = Workspace_utils_paths_backend.archive_path config
+
+let archive_append_error config tasks =
+  match Workspace.append_archive_tasks config tasks with
+  | Ok () -> Alcotest.fail "append reported success on an archive it cannot read"
+  | Error detail -> detail
+;;
+
+(* A file that is not an archive stays exactly as it was: the append reports
+   the failure and does not replace it with a new archive of one task. *)
+let test_append_archive_tasks_refuses_a_file_that_is_not_an_archive () =
+  List.iter
+    (fun (label, content) ->
+      with_test_env (fun config ->
+        let path = archive_file config in
+        Fs_compat.save_file path content;
+        let detail = archive_append_error config [ gc_done_task "task-930" ] in
+        Alcotest.(check bool)
+          (label ^ ": the error names the archive file")
+          true
+          (str_contains detail "tasks-archive.json");
+        Alcotest.(check string)
+          (label ^ ": the file is untouched")
+          content
+          (Fs_compat.load_file path)))
+    [ "not json", "this is not json"
+    ; "blank", ""
+    ; "no tasks list", {|{"last_updated":"2026-01-01T00:00:00Z"}|}
+    ; "tasks is not a list", {|{"tasks":"task-1"}|}
+    ]
+;;
+
+let archive_rows config =
+  match Yojson.Safe.from_string (Fs_compat.load_file (archive_file config)) with
+  | `Assoc fields ->
+    (match List.assoc_opt "tasks" fields with
+     | Some (`List rows) -> rows
+     | Some _ | None -> Alcotest.fail "the archive lost its tasks list")
+  | _ -> Alcotest.fail "the archive is not an object"
+;;
+
+(* The single archive row with [id], decoded as the Task it has to be. *)
+let archived_task config id =
+  match
+    List.filter (fun row -> Json_util.get_string row "id" = Some id) (archive_rows config)
+  with
+  | [ row ] ->
+    (match Masc_domain.task_of_yojson row with
+     | Ok task -> task
+     | Error detail ->
+       Alcotest.fail (id ^ " is in the archive but does not decode: " ^ detail))
+  | rows ->
+    Alcotest.fail
+      (Printf.sprintf "%s: expected one archive row, found %d" id (List.length rows))
+;;
+
+(* Only the tasks given replace anything. A row with no id is not a duplicate
+   of anything, and two rows that share an id are not ours to merge: the rule
+   [drop_archive_tasks] already applies to the same file. *)
+let test_append_archive_tasks_keeps_the_rows_it_does_not_replace () =
+  with_test_env (fun config ->
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"title":"row with no id"},{"id":"task-943","title":"first copy"},{"id":"task-943","title":"second copy"}]}|};
+    append_archive config [ gc_done_task "task-931" ];
+    let rows = archive_rows config in
+    Alcotest.(check int) "the three rows and the new one" 4 (List.length rows);
+    let titles = List.filter_map (fun row -> Json_util.get_string row "title") rows in
+    List.iter
+      (fun title -> Alcotest.(check bool) (title ^ " survived") true (List.mem title titles))
+      [ "row with no id"; "first copy"; "second copy"; "GC task-931" ])
+;;
+
+(* The tasks given are the current copies. An archive row with the same id that
+   does not decode as a Task must not stand in for one. *)
+let test_append_archive_tasks_replaces_a_row_that_does_not_decode () =
+  with_test_env (fun config ->
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"id":"task-942","title":"incomplete"}]}|};
+    append_archive config [ gc_done_task "task-942" ];
+    let archived = archived_task config "task-942" in
+    Alcotest.(check bool) "the row is the Done task given" true
+      (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* The backlog commit must not leave a Task nowhere readable: an archive row
+   with the same id that does not decode is replaced by the row GC archives. *)
+let test_gc_archives_over_a_same_id_row_that_does_not_decode () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-940" ];
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"id":"task-940","title":"incomplete"}]}|};
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the task left the live backlog" false
+      (gc_backlog_has config "task-940");
+    let archived = archived_task config "task-940" in
+    Alcotest.(check bool) "the archive holds the finished task" true
+      (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* A stale non-terminal copy sits in the archive while the backlog holds the
+   same task finished. The backlog's row is the current one: GC archives it
+   over the stale copy, does not bring the stale copy back into the backlog,
+   and does not drop the row it has just written. *)
+let test_gc_archives_a_finished_task_over_its_stale_orphan_copy () =
+  with_test_env (fun config ->
+    let stale =
+      gc_make_task
+        ~id:"task-941"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; started_at = gc_ancient_ts
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-941"
+             })
+    in
+    append_archive config [ stale ];
+    write_tasks config [ gc_done_task "task-941" ];
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the stale copy is not brought back" false
+      (gc_backlog_has config "task-941");
+    let archived = archived_task config "task-941" in
+    Alcotest.(check bool) "the archive holds the finished task" true
+      (Masc_domain.task_status_is_terminal archived.task_status);
+    Alcotest.(check int) "no orphan is left in the archive" 0
+      (List.length (Workspace.read_orphaned_nonterminal_tasks config)))
+;;
+
+(* The Memory backend uses the same per-path cooperative backlog/archive
+   locks, without filesystem lease retries. Wait for the actual queued lock
+   claimant rather than choosing a sleep duration for the interleaving. *)
+let gc_wait_for_lock_waiter path =
+  let rec wait () =
+    if File_lock_eio.For_testing.holders_and_waiters ~lock_path:path < 2 then begin
+      Eio.Fiber.yield ();
+      wait ()
+    end
+  in
+  wait ()
+;;
+
+let with_gc_memory_env f =
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let root = Filename.temp_dir "masc-gc-serialization-" "" in
+    let original = Workspace.default_config root in
+    let config =
+      { original with
+        backend = Workspace_utils.Memory (Backend.Memory.create ()) }
+    in
+    ignore (Workspace.init config ~agent_name:None);
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Workspace.reset config);
+        Unix.rmdir root)
+      (fun () -> f config))
+;;
+
+(* A GC queued behind a competing pass must read the orphan snapshot after
+   acquiring the backlog lock. The competing pass replaces the stale orphan
+   with its terminal row and removes it from the backlog while holding that
+   lock. A pre-lock snapshot would resurrect the stale row and drop the
+   terminal archive record. *)
+let test_gc_queued_pass_preserves_new_terminal_archive () =
+  with_gc_memory_env (fun config ->
+    let stale = gc_make_task ~id:"task-942" ~created_at:gc_ancient_ts
+        ~status:Masc_domain.Todo in
+    append_archive config [ stale ];
+    write_tasks config [ gc_done_task "task-942" ];
+    let lock_path = Workspace_backlog.backlog_lock_path config in
+    Eio.Switch.run (fun sw ->
+      Workspace_utils.with_file_lock config lock_path (fun () ->
+        Eio.Fiber.fork ~sw (fun () -> ignore (Workspace.gc config ~days:1 ()));
+        gc_wait_for_lock_waiter lock_path;
+        append_archive config [ gc_done_task "task-942" ];
+        write_tasks config []));
+    Alcotest.(check bool) "queued GC does not resurrect the stale obligation"
+      false (gc_backlog_has config "task-942");
+    let archived = archived_task config "task-942" in
+    Alcotest.(check bool) "queued GC preserves the terminal archive row"
+      true (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* Block restore cleanup at the archive lock. The backlog commit has settled,
+   but the GC must retain its backlog lock until the stale archive copy is
+   gone; otherwise another pass can archive a newer row before cleanup. *)
+let test_gc_restore_holds_backlog_lock_through_archive_cleanup () =
+  with_gc_memory_env (fun config ->
+    let orphan = gc_make_task ~id:"task-943" ~created_at:gc_ancient_ts
+        ~status:Masc_domain.Todo in
+    append_archive config [ orphan ];
+    let archive_path = Workspace_utils_paths_backend.archive_path config in
+    let backlog_path = Workspace_backlog.backlog_lock_path config in
+    let committed, resolve_committed = Eio.Promise.create () in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      Eio.Promise.resolve resolve_committed ());
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () ->
+        Eio.Switch.run (fun sw ->
+          Workspace_utils.with_file_lock config archive_path (fun () ->
+            Eio.Fiber.fork ~sw (fun () -> ignore (Workspace.gc config ~days:1 ()));
+            Eio.Promise.await committed;
+            gc_wait_for_lock_waiter archive_path;
+            Alcotest.(check int) "GC retains backlog lock while cleanup waits"
+              1 (File_lock_eio.For_testing.holders_and_waiters ~lock_path:backlog_path))));
+    Alcotest.(check bool) "restored obligation stays live" true
+      (gc_backlog_has config "task-943");
+    Alcotest.(check bool) "cleanup removes the stale archive copy" false
+      (List.mem 943 (Workspace.read_archive_task_ids config)))
+;;
+
+(* A missing archive is an empty one: the first append creates it. *)
+let test_append_archive_tasks_creates_the_archive () =
+  with_test_env (fun config ->
+    Alcotest.(check bool) "precondition: no archive yet" false
+      (Sys.file_exists (archive_file config));
+    append_archive config [ gc_done_task "task-932" ];
+    Alcotest.(check (list int)) "the archive holds the task" [ 932 ]
+      (Workspace.read_archive_task_ids config))
 ;;
 
 (* ============================================================ *)
@@ -3556,6 +3858,30 @@ let () =
             "archives terminal tasks"
             `Quick
             test_gc_archives_terminal_tasks
+        ; Alcotest.test_case
+            "archives before it commits the backlog"
+            `Quick
+            test_gc_archives_before_it_commits_the_backlog
+        ; Alcotest.test_case
+            "stops before the backlog when the archive is unreadable"
+            `Quick
+            test_gc_stops_before_the_backlog_when_the_archive_is_unreadable
+        ; Alcotest.test_case
+            "archives over a same-id row that does not decode"
+            `Quick
+            test_gc_archives_over_a_same_id_row_that_does_not_decode
+        ; Alcotest.test_case
+            "archives a finished task over its stale orphan copy"
+            `Quick
+            test_gc_archives_a_finished_task_over_its_stale_orphan_copy
+        ; Alcotest.test_case
+            "queued GC preserves a newly terminal archive row"
+            `Quick
+            test_gc_queued_pass_preserves_new_terminal_archive
+        ; Alcotest.test_case
+            "restore holds backlog lock through archive cleanup"
+            `Quick
+            test_gc_restore_holds_backlog_lock_through_archive_cleanup
         ] )
     ; (* === Task ID Parsing === *)
       ( "task_id"
@@ -3570,7 +3896,25 @@ let () =
             test_next_task_number_includes_durable_event_history
         ] )
     ; (* === Archive === *)
-      "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]
+      ( "archive"
+      , [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks
+        ; Alcotest.test_case
+            "append refuses a file that is not an archive"
+            `Quick
+            test_append_archive_tasks_refuses_a_file_that_is_not_an_archive
+        ; Alcotest.test_case
+            "append keeps the rows it does not replace"
+            `Quick
+            test_append_archive_tasks_keeps_the_rows_it_does_not_replace
+        ; Alcotest.test_case
+            "append replaces a row that does not decode"
+            `Quick
+            test_append_archive_tasks_replaces_a_row_that_does_not_decode
+        ; Alcotest.test_case
+            "append creates a missing archive"
+            `Quick
+            test_append_archive_tasks_creates_the_archive
+        ] )
     ; ( "revision"
       , [ Alcotest.test_case
             "version bumps exactly once per commit"

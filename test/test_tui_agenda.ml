@@ -225,6 +225,7 @@ let render_family =
   [ "bin/masc_tui_render.ml"
   ; "bin/masc_tui_render_prim.ml"
   ; "bin/masc_tui_render_chat.ml"
+  ; "bin/masc_tui_render_approvals.ml"
   ]
 
 let test_the_drawing_does_not_measure_the_body_itself () =
@@ -507,6 +508,7 @@ let test_failed_reads_are_safe_before_the_panel_fits_them () =
   state.schedules_error <- Some raw;
   state.keeper_tool_approvals_error <- Some raw;
   state.tasks_error <- Some raw;
+  state.operator_stalled <- Agenda.Read_failed raw;
   check int "failed reads do not take a strip row" 0
     (Masc_tui_types.agenda_chrome_rows state);
   check int "failed reads preserve the body budget" body_rows
@@ -819,6 +821,26 @@ let opened_target state lines =
   Option.map (fun line -> line.Agenda.goes_to)
     (Agenda.selected_line lines ~selected:state.Masc_tui_types.agenda_selected)
 
+let test_task_goal_reading_preserves_source_truth () =
+  let state = agenda_state () in
+  let reading () = Masc_tui_types.task_goal_reading state ~task_id:"task-777" in
+  check bool "an unread registry makes no absence claim" true
+    (reading () = Agenda.Not_read);
+  let index = Workspace_goal_index.build_task_goal_index
+      ~goal_task_links:["goal-a", ["task-777"]; "goal-b", ["task-777"]] () in
+  state.goal_task_links <- Masc_tui_types.Goal_links_read index;
+  check bool "multiple Goal references come from the registry" true
+    (reading () = Agenda.Read ["goal-a"; "goal-b"]);
+  state.goal_task_links <- Masc_tui_types.Goal_links_read_failed "malformed primary";
+  check bool "failed refresh does not reuse references or assert absence" true
+    (reading () = Agenda.Read_failed "malformed primary");
+  state.goal_task_links <- Masc_tui_types.Goal_links_read (Hashtbl.create 0);
+  check bool "repaired empty registry proves absence" true
+    (reading () = Agenda.Read []);
+  state.goal_task_links <- Masc_tui_types.Goal_links_not_read;
+  check bool "workspace reset discards the old index" true
+    (reading () = Agenda.Not_read)
+
 let test_distinct_calls_from_one_keeper_remain_reachable () =
   let state = agenda_state () in
   let held tool_call_id : Masc.Tui_decode.keeper_tool_approval =
@@ -880,10 +902,53 @@ let test_goal_selection_survives_refresh_reordering () =
   check bool "Enter still opens the Goal actually selected" true
     (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-a"))
 
+let test_home_task_survives_supplemental_source_failure () =
+  List.iter (fun diagnostic ->
+    let state = agenda_state () in
+    let task_id = "task-primary" in
+    state.operator_stalled <- Agenda.Read [stuck ~task_id "Task to inspect"];
+    state.tasks_error <- Some diagnostic;
+    check bool "Home retains a current task despite supplemental failure" true
+      (List.mem_assoc (Masc_tui_types.Home_request (Home_operator_task task_id))
+         (Masc_tui_home.home_decision_rows state));
+    check bool "Agenda uses the same primary reading" true
+      (List.exists (fun line -> line.Agenda.goes_to = Agenda.Stuck_task task_id)
+         (lines_of_state state));
+    state.view <- Masc_tui_types.Planning;
+    state.home_opened_request <- Some (Home_operator_task task_id);
+    state.task_detail_id <- Some task_id;
+    Masc_tui_home.reconcile_home_request_detail state;
+    check bool "refresh retains the opened task reader" true
+      (state.view = Planning && state.home_opened_request = Some (Home_operator_task task_id)
+       && state.task_detail_id = Some task_id))
+    ["task archive unavailable"; "goal links unavailable"]
+
+let test_home_and_agenda_refuse_noncurrent_task_source () =
+  let state = agenda_state () in
+  let task_id = "task-primary" in
+  state.operator_stalled <- Agenda.Read_failed "backlog recovered from backup";
+  check bool "Home offers no current task from a backup" false
+    (List.exists (fun (action, _) -> match action with
+       | Masc_tui_types.Home_request (Home_operator_task _) -> true
+       | _ -> false) (Masc_tui_home.home_decision_rows state));
+  let agenda_lines = lines_of_state state in
+  check bool "Agenda reports the noncurrent source" true
+    (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
+       && contains ~needle:"backlog recovered from backup" line.Agenda.text)
+       agenda_lines);
+  check bool "Agenda offers no task from a backup" false
+    (List.exists (fun line -> match line.Agenda.goes_to with
+       | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines);
+  state.view <- Masc_tui_types.Planning;
+  state.home_opened_request <- Some (Home_operator_task task_id);
+  Masc_tui_home.reconcile_home_request_detail state;
+  check bool "an unavailable source requires fresh selection" true
+    (state.view = Overview && state.home_opened_request = None)
+
 let test_inserted_goals_do_not_retarget_a_selected_task () =
   let state = agenda_state () in
   state.goals_to_confirm <- Agenda.Read [];
-  state.operator_stalled <- Some [stuck ~task_id:"shared-id" "Task to inspect"];
+  state.operator_stalled <- Agenda.Read [stuck ~task_id:"shared-id" "Task to inspect"];
   let displayed = lines_of_state state in
   state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
   let old_row = selected_row state displayed in
@@ -1006,7 +1071,13 @@ let () =
             test_the_goal_section_answers_in_words
         ] )
     ; ( "selection across refreshed agenda projections"
-      , [ test_case "same Keeper calls retain distinct navigation identities" `Quick
+      , [ test_case "Task Goal references preserve registry reading truth" `Quick
+            test_task_goal_reading_preserves_source_truth
+        ; test_case "Home retains tasks when supplemental sources fail" `Quick
+            test_home_task_survives_supplemental_source_failure
+        ; test_case "Home and Agenda refuse noncurrent task sources" `Quick
+            test_home_and_agenda_refuse_noncurrent_task_source
+        ; test_case "same Keeper calls retain distinct navigation identities" `Quick
             test_distinct_calls_from_one_keeper_remain_reachable
         ; test_case "Goal reorder preserves selected identity" `Quick
             test_goal_selection_survives_refresh_reordering

@@ -38,6 +38,13 @@ for line in sys.stdin:
         if mode == 'exit-before-turn':
             sys.exit(9)
         emit({'id':ident,'result':{'thread':{'id':'vision-thread'},'model':'vision-response-model'}})
+    elif method == 'model/list':
+        assert request['params']['includeHidden'] is True
+        efforts = [] if mode == 'effort-empty' else ['future-depth'] if mode == 'effort-unknown' else ['high']
+        emit({'id':ident,'result':{'data':[{'id':'vision-request-model','model':'vision-response-model',
+            'displayName':'Vision fixture','isDefault':True,'defaultReasoningEffort':'high',
+            'supportedReasoningEfforts':[{'reasoningEffort':effort,'description':effort} for effort in efforts]}],
+            'nextCursor':None}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':'vision-turn'}}})
         if mode == 'interrupted':
@@ -51,7 +58,7 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let runtime_config ~command ~fallback ~media = Printf.sprintf {|
+let runtime_config ~reasoning_effort ~command ~fallback ~media = Printf.sprintf {|
 [providers.official]
 protocol = "codex-app-server"
 command = %S
@@ -64,6 +71,7 @@ is-non-interactive = true
 api-name = "vision-request-model"
 max-context = 400000
 tools-support = true
+%s
 [models.vision.capabilities]
 supports-image-input = true
 [official.vision]
@@ -74,7 +82,7 @@ media_failover = %s
 [runtime.exact_output_lanes.verifier_exact]
 slots = []
 cli_slots = ["official.vision"]
-|} command fallback media
+|} command fallback reasoning_effort media
 
 let with_fixture mode test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -102,9 +110,9 @@ let with_fixture mode test =
     Fs_compat.remove_tree root);
   let command, capture = fixture root ~mode in
   let fallback, fallback_capture = fixture root ~mode:"valid" in
-  let load media =
+  let load ?(reasoning_effort = "") media =
     let config_path = Filename.concat root "runtime.toml" in
-    write config_path (runtime_config ~command ~fallback ~media);
+    write config_path (runtime_config ~reasoning_effort ~command ~fallback ~media);
     match Runtime.init_default ~config_path with
     | Ok () -> () | Error detail -> fail detail in
   let run ?runtime_id () = V.run_vision ~base_path:root ?runtime_id
@@ -203,6 +211,35 @@ let test_transport_failure mode = with_fixture mode @@ fun ~root:_ ~load ~run ~e
      check bool "handler did not rotate after stop" false (Sys.file_exists fallback_capture)
    | _ -> fail "incorrect typed failure rotation")
 
+let test_reasoning_metadata_refusal mode =
+  with_fixture mode @@ fun ~root:_ ~load ~run ~execute ~capture ~fallback_capture ->
+  let reasoning_effort = "reasoning-effort = \"ultra\"" in
+  load ~reasoning_effort "[\"official.vision\"]";
+  let execution = execute () in
+  check bool "metadata refusal is proven before any effect" true
+    (execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  check bool "metadata refusal remains a failed result" true
+    (match execution.disposition with Tool_result.Failed _ -> true | _ -> false);
+  let rows = records capture in
+  check bool "account metadata was queried" true
+    (List.exists (fun row -> member "method" row = `String "model/list") rows);
+  check bool "refused account receives no turn or history input" false
+    (List.exists (fun row -> List.mem (member "method" row)
+       [`String "turn/start"; `String "thread/inject_items"]) rows);
+  check bool "single candidate never invokes another account" false
+    (Sys.file_exists fallback_capture);
+  load ~reasoning_effort "[\"official.vision\", \"fallback.vision\"]";
+  (match run () with
+   | V.Vo_ok reading -> check string "declared fallback survives metadata refusal"
+       "fallback.vision" reading.runtime_id
+   | _ -> fail "effort metadata refusal did not advance to the declared fallback");
+  let params = request "turn/start" (records fallback_capture) |> member "params" in
+  check string "fallback negotiates its own effort ladder" "high"
+    (member "effort" params |> Yojson.Safe.Util.to_string);
+  check bool "fallback sends the actual image" true
+    (member "input" params |> Yojson.Safe.Util.to_list
+     |> List.exists (fun item -> member "type" item = `String "image"))
+
 let test_claude_admission_failure () =
   with_fixture "valid" @@ fun ~root ~load:_ ~run ~execute:_ ~capture:_ ~fallback_capture ->
   let command = Filename.concat root "claude-invalid-auth" in
@@ -215,7 +252,7 @@ print('{}', flush=True)
 |} capture);
   Unix.chmod command 0o700;
   let fallback = Filename.concat root "valid-codex" in
-  let config_text = runtime_config ~command:fallback ~fallback
+  let config_text = runtime_config ~reasoning_effort:"" ~command:fallback ~fallback
       ~media:"[\"claude.vision\", \"fallback.vision\"]" ^ Printf.sprintf {|
 [providers.claude]
 protocol = "claude-code"
@@ -316,4 +353,7 @@ let () = run "Keeper standalone official-client vision"
   ; "transport failure", List.map (fun mode -> test_case mode `Quick (fun () -> test_transport_failure mode))
       ["no-account"; "interrupted"; "exit-before-turn"]
   ; "admission", [test_case "Claude preflight failure advances" `Quick test_claude_admission_failure]
+  ; "effort admission", List.map (fun mode ->
+      test_case mode `Quick (fun () -> test_reasoning_metadata_refusal mode))
+      ["effort-empty"; "effort-unknown"]
   ]

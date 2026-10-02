@@ -45,9 +45,9 @@ import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contrac
 // on it.
 const BACKEND_EMITTED: Record<string, string> = {
   'approval:audit': '../lib/keeper/keeper_gate.ml',
-  'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
-  'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
-  'approval:summary_updated': '../lib/keeper/keeper_approval_queue.ml',
+  'approval:pending': '../lib/keeper/keeper_approval_queue_projection.ml',
+  'approval:resolved': '../lib/keeper/keeper_approval_queue_projection.ml',
+  'approval:summary_updated': '../lib/keeper/keeper_approval_queue_projection.ml',
   execution_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
@@ -213,7 +213,7 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
   // class the HITL queue's liveness depends on.
   const backendApprovalEvents = ((): string[] => {
     const source = readFileSync(
-      resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'),
+      resolve(process.cwd(), '../lib/keeper/keeper_approval_queue_projection.ml'),
       'utf8',
     )
     const found = new Set<string>()

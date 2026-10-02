@@ -2,8 +2,10 @@
 
 open Keeper_approval_queue_rules_types
 open Keeper_approval_queue_rules
+open Keeper_approval_queue_projection
 open Keeper_approval_queue_result
 open Keeper_approval_queue_codec
+open Keeper_approval_queue_state
 
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -53,31 +55,6 @@ type write_mode =
   | Append_rows (* production: rows for what changed; the snapshot by ratio *)
   | Rewrite_snapshot
   (* test seams that inject the snapshot writer: exercise it on every write *)
-
-let exact_attempt_identity_matches
-      (left : exact_attempt_binding)
-      (right : exact_attempt_binding)
-  =
-  String.equal left.approval_id right.approval_id
-  && String.equal left.input_hash right.input_hash
-  && Int.equal left.sequence right.sequence
-  && String.equal left.slot_id right.slot_id
-  && String.equal left.call_id right.call_id
-  && String.equal left.plan_fingerprint right.plan_fingerprint
-  && String.equal left.request_body_sha256 right.request_body_sha256
-;;
-let summary_attempt_allows_exact_bind = function
-  | Summary_attempt_ready
-  | Summary_attempt_pre_worker_unavailable
-      { reason_code = Summary_pre_worker_start_reserved; _ } ->
-    true
-  | Summary_attempt_in_flight
-  | Summary_attempt_identity_unbound
-  | Summary_attempt_persistence_uncertain
-  | Summary_attempt_pre_worker_unavailable _
-  | Summary_attempt_settled ->
-    false
-;;
 
 let durable_state_for ~base_path = SMap.find_opt base_path (Atomic.get durable_states)
 
@@ -294,39 +271,6 @@ let publish_snapshot_outcome ~base_path result =
    | Ok _ -> bump_store_revision_unlocked ~base_path
    | Error error -> mark_store_unavailable_unlocked ~base_path error);
   result
-;;
-
-let entries_for_base ~base_path map project =
-  SMap.filter (fun _id value -> String.equal (project value).audit_base_path base_path) map
-;;
-
-(* Rows for what differs between the last durable state and the maps being
-   persisted. Physical equality: an entry a mutation did not touch is the
-   same record in both maps. *)
-let delta_rows ~before_pending ~before_deliveries ~after_pending ~after_deliveries =
-  let pending_rows =
-    SMap.merge
-      (fun id before after ->
-         match before, after with
-         | Some before, Some after when before == after -> None
-         | _, Some after -> Some (Pending_upsert after)
-         | Some _, None -> Some (Pending_remove id)
-         | None, None -> None)
-      before_pending
-      after_pending
-  in
-  let delivery_rows =
-    SMap.merge
-      (fun id before after ->
-         match before, after with
-         | Some before, Some after when before == after -> None
-         | _, Some after -> Some (Delivery_upsert after)
-         | Some _, None -> Some (Delivery_remove id)
-         | None, None -> None)
-      before_deliveries
-      after_deliveries
-  in
-  List.map snd (SMap.bindings pending_rows) @ List.map snd (SMap.bindings delivery_rows)
 ;;
 
 (* Writes the snapshot at the next generation, then empties the log at its
@@ -665,73 +609,6 @@ let read_pending_log_unlocked
          })
 ;;
 
-let classify_restarted_entry (entry : pending_approval) =
-  match entry.exact_attempt, entry.summary_status with
-  | Exact_bound
-      ( { status =
-            Exact_dispatch_uncertain
-        ; _
-        } as binding ),
-    _ ->
-    ( { entry with
-        exact_attempt =
-          Exact_bound
-            (exact_attempt_binding_with_status
-               binding
-               Exact_restart_quarantined)
-      ; summary_attempt_disposition =
-          Summary_attempt_persistence_uncertain
-      }
-    , true )
-  | Exact_bound
-      ( { status =
-            Exact_released_before_dispatch
-        ; _
-        } as binding ),
-    Summary_pending ->
-    ( { entry with
-        exact_attempt =
-          Exact_bound
-            (exact_attempt_binding_with_status
-               binding
-               Exact_released_recovery_required)
-      ; summary_attempt_disposition =
-          Summary_attempt_persistence_uncertain
-      }
-    , true )
-  | Exact_unbound, _
-  | Exact_bound
-      { status =
-          ( Exact_released_before_dispatch
-          | Exact_released_recovery_required
-          | Exact_quarantined _
-          | Exact_restart_quarantined
-          | Exact_completed )
-      ; _
-      },
-    _ ->
-    entry, false
-;;
-
-let classify_restarted_pending map =
-  SMap.fold
-    (fun id entry (changed, classified) ->
-       let entry, entry_changed = classify_restarted_entry entry in
-       changed || entry_changed, SMap.add id entry classified)
-    map
-    (false, SMap.empty)
-;;
-
-let classify_restarted_deliveries map =
-  SMap.fold
-    (fun id delivery (changed, classified) ->
-       let entry, entry_changed = classify_restarted_entry delivery.entry in
-       ( changed || entry_changed
-       , SMap.add id { delivery with entry } classified ))
-    map
-    (false, SMap.empty)
-;;
-
 (* What a restart would see: the snapshot plus the log rows after it. No
    classification, no write. *)
 let read_durable_unlocked ~base_path =
@@ -1002,14 +879,6 @@ let merge_loaded_map ~surface ~existing ~loaded =
 
 (* ── Persistent audit log ────────────────────────────────── *)
 
-(* Stdlib.Mutex: the store registry critical section only mutates an in-memory
-   hashtable and creates a Dated_jsonl handle. It is also used by synchronous
-   tests outside an Eio context, so an Eio mutex would either raise Get_context
-   or poison the registry after a recoverable store-creation failure. *)
-let approval_sse_pending_event = "approval:pending"
-let approval_sse_resolved_event = "approval:resolved"
-let approval_sse_summary_event = "approval:summary_updated"
-
 let generate_id () = make_generated_id "appr"
 
 let default_continuation_channel () =
@@ -1235,16 +1104,6 @@ let consume_approved_resolution
     Ok (Consumption_committed audit_receipt)
 ;;
 
-let input_preview_of_json (json : Yojson.Safe.t) =
-  (* Per-leaf marker-aware truncation: a naive [String.sub] on the
-     serialized form would chop a [masc:blob ...] marker mid-field and
-     leave sha256/bytes/mime malformed so the approval-queue viewer
-     cannot round-trip the preview. *)
-  let json = Observability_redact.preview_json_strings ~max_len:200 json in
-  let raw = Yojson.Safe.to_string json in
-  Observability_redact.redact_preview ~max_len:200 raw
-;;
-
 let create_entry
       ~id
       ~sequence
@@ -1279,178 +1138,6 @@ let create_entry
     ; exact_attempt = Exact_unbound
     ; summary_attempt_disposition = Summary_attempt_ready
     }
-;;
-
-let pending_entry_json_fields
-      ?(include_input = false)
-      (entry : pending_approval)
-  =
-  [ "id", `String entry.id
-  ; "keeper_name", `String entry.keeper_name
-  ; "tool_name", `String entry.tool_name
-  ; "input_hash", `String entry.input_hash
-  ; "sequence", `Int entry.sequence
-  ; "requested_at", `Float entry.requested_at
-  ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
-  ; "turn_id", Json_util.int_opt_to_json entry.turn_id
-  ; "task_id", Json_util.string_opt_to_json entry.task_id
-  ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ]
-  @ (if include_input
-     then
-       [ "input", entry.input
-       ; "input_preview", `String (input_preview_of_json entry.input)
-       ]
-     else [])
-    (* The [include_input] conditional stays parenthesized so the trailing
-       canonical [summary_status] field is present in every wire shape. *)
-    @ [ "summary_status", summary_status_to_yojson entry.summary_status
-      ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
-      ; ( "summary_attempt_disposition"
-        , summary_attempt_disposition_to_yojson
-            entry.summary_attempt_disposition )
-      ; ( "phase"
-        , approval_queue_phase_to_yojson
-            (phase_of_disposition_and_summary
-               ~disposition:entry.summary_attempt_disposition
-               ~summary_status:entry.summary_status) )
-      ]
-;;
-
-let broadcast_pending entry audit_receipt =
-  try
-    Sse.broadcast
-      (`Assoc
-          [ "type", `String approval_sse_pending_event
-          ; ( "payload"
-            , `Assoc
-                (pending_entry_json_fields
-                   ~include_input:true
-                   entry
-                 @ [ "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt ]) )
-          ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    record_queue_failure
-      ~keeper_name:entry.keeper_name
-      ~site:"broadcast_pending"
-      ~id:entry.id
-      ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Pending)
-      exn
-;;
-
-let publish_chat_projection_append ~keeper_name = function
-  | Error _ as error -> error
-  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-  | Ok (Keeper_chat_store.Appended _) ->
-    Keeper_chat_broadcast.chat_appended
-      ~keeper_name
-      ~source:"approval_lifecycle"
-      ();
-    Ok ()
-;;
-
-let append_chat_projection ~base_path ~keeper_name lifecycle =
-  Keeper_chat_store.append_approval_lifecycle_once
-    ~base_dir:base_path
-    ~keeper_name
-    ~lifecycle
-  |> publish_chat_projection_append ~keeper_name
-;;
-
-let record_pending ~call_summary (entry : pending_approval) =
-  Log.Keeper.info
-    "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
-    entry.id
-    entry.sequence
-    entry.keeper_name
-    entry.tool_name;
-  let audit_receipt =
-    Keeper_approval.Audit.record
-      ~base_path:entry.audit_base_path
-      ~event_type:Keeper_approval.Audit.Pending
-      ~id:entry.id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ()
-  in
-  broadcast_pending entry audit_receipt;
-  (* The parked call becomes visible before its answer does. The turn that
-     asked keeps running, so without this row the operator sees a tool call
-     and then nothing at all until the resolution lands. A projection failure
-     is logged and dropped: it must not stop the approval from being queued.
-     [call_summary] is the producer's own one-line statement of the call,
-     carried on the Gate request; this queue never derives one from the
-     input. *)
-  (match
-     append_chat_projection
-       ~base_path:entry.audit_base_path
-       ~keeper_name:entry.keeper_name
-       { Keeper_chat_store.approval_id = entry.id
-       ; tool_name = Some entry.tool_name
-       ; phase = Keeper_approval_lifecycle.Approval_requested
-       ; artifact_ref = None
-       ; call_summary
-       }
-   with
-   | Ok () -> ()
-   | Error detail ->
-     Log.Keeper.error
-       "approval request chat projection failed approval=%s: %s"
-       entry.id
-       detail);
-  audit_receipt
-;;
-
-let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
-  match entry.summary_status with
-  | Summary_available summary -> [ "model_run_id", `String summary.model_run_id ]
-  | Summary_failed { reason } -> [ "failure_reason", `String reason ]
-  | Summary_not_requested | Summary_pending -> []
-;;
-
-let record_summary_updated ~now (entry : pending_approval) =
-  let event_ts =
-    match entry.summary_status with
-    | Summary_available summary -> summary.generated_at
-    | Summary_not_requested | Summary_pending | Summary_failed _ -> now
-  in
-  ignore
-    (Keeper_approval.Audit.record
-       ~base_path:entry.audit_base_path
-       ~event_type:Keeper_approval.Audit.Summary_updated
-       ~id:entry.id
-       ~keeper_name:entry.keeper_name
-       ~tool_name:entry.tool_name
-       ~summary_status:entry.summary_status
-       ~exact_attempt:entry.exact_attempt
-       ~summary_attempt_disposition:entry.summary_attempt_disposition
-       ~timestamp:event_ts
-       ~extra_fields:(summary_audit_extras entry)
-       ());
-  try
-    Sse.broadcast
-      (`Assoc
-         [ "type", `String approval_sse_summary_event
-         ; ( "payload"
-           , `Assoc
-               (pending_entry_json_fields
-                  ~include_input:false
-                  entry) )
-         ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    record_queue_failure
-      ~keeper_name:entry.keeper_name
-      ~site:"broadcast_summary"
-      ~id:entry.id
-      ~event_type:approval_sse_summary_event
-      exn
 ;;
 
 (* ── Durable summary-state transitions ───────────────────── *)
@@ -1501,51 +1188,6 @@ let publish_exact_attempt_transition ~id = function
     Ok transition
   | Ok transition -> Ok transition
   | Error error -> Error error
-;;
-
-let validate_exact_attempt_candidate
-      ~id
-      ~input_hash
-      ~sequence
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-  =
-  let invalid field value =
-    if String.trim value = ""
-    then Error (Exact_attempt_rejected (Exact_attempt_invalid_identity field))
-    else Ok ()
-  in
-  let ( let* ) = Result.bind in
-  let* () = invalid "approval_id" id in
-  let* () = invalid "input_hash" input_hash in
-  let* () =
-    if sequence > 0
-    then Ok ()
-    else Error (Exact_attempt_rejected (Exact_attempt_invalid_identity "sequence"))
-  in
-  let* () = invalid "slot_id" slot_id in
-  let* () = invalid "call_id" call_id in
-  let* () = invalid "plan_fingerprint" plan_fingerprint in
-  let* () =
-    if is_lowercase_sha256 request_body_sha256
-    then Ok ()
-    else
-      Error
-        (Exact_attempt_rejected
-           (Exact_attempt_invalid_identity "request_body_sha256"))
-  in
-  Ok
-    (make_exact_attempt_binding
-       ~approval_id:id
-       ~input_hash
-       ~sequence
-       ~slot_id
-       ~call_id
-       ~plan_fingerprint
-       ~request_body_sha256
-       ())
 ;;
 
 let exact_attempt_entry_unlocked map (candidate : exact_attempt_binding) =
@@ -1620,85 +1262,16 @@ let bind_summary_exact_attempt_with
         match exact_attempt_entry_unlocked map candidate with
         | Error _ as error -> error
         | Ok entry ->
-          (match entry.summary_status with
-           | Summary_not_requested
-           | Summary_available _
-           | Summary_failed _ ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_summary_not_pending entry.id))
-           | Summary_pending ->
-             (match entry.exact_attempt with
-               | Exact_unbound
-                 when
-                   not
-                     (summary_attempt_allows_exact_bind
-                        entry.summary_attempt_disposition) ->
-                 Error
-                   (Exact_attempt_rejected
-                      (Exact_attempt_disposition_conflict
-                         { approval_id = entry.id
-                         ; disposition =
-                             entry.summary_attempt_disposition
-                         }))
-               | Exact_unbound ->
-                 persist_exact_attempt_entry_unlocked
-                   ~save_file_atomic_strict_staged
-                   ~write_mode
-                   ~changed:true
-                   ~map
-                   ~entry
-                   { entry with
-                     exact_attempt = Exact_bound candidate
-                   ; summary_attempt_disposition =
-                       Summary_attempt_in_flight
-                   }
-                | Exact_bound _
-                  when entry.summary_attempt_disposition
-                       <> Summary_attempt_in_flight ->
-                  Error
-                    (Exact_attempt_rejected
-                       (Exact_attempt_disposition_conflict
-                          { approval_id = entry.id
-                          ; disposition =
-                              entry.summary_attempt_disposition
-                          }))
-                | Exact_bound existing
-                  when exact_attempt_identity_matches existing candidate ->
-                  (match existing.status with
-                   | Exact_dispatch_uncertain ->
-                     persist_exact_attempt_entry_unlocked
-                       ~save_file_atomic_strict_staged
-                       ~write_mode
-                       ~changed:false
-                       ~map
-                       ~entry
-                       entry
-                   | Exact_released_before_dispatch
-                   | Exact_released_recovery_required
-                   | Exact_quarantined _
-                   | Exact_restart_quarantined
-                   | Exact_completed ->
-                   Error
-                     (Exact_attempt_rejected
-                        (Exact_attempt_status_conflict existing)))
-                | Exact_bound
-                    ({ status = Exact_released_before_dispatch; _ } as _existing) ->
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with
-                      exact_attempt = Exact_bound candidate
-                    ; summary_attempt_disposition =
-                        Summary_attempt_in_flight
-                    }
-              | Exact_bound existing ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_identity_conflict existing)))))
+          (match Keeper_approval_queue_exact_transition.bind ~candidate entry with
+           | Error _ as error -> error
+           | Ok transition ->
+             persist_exact_attempt_entry_unlocked
+               ~save_file_atomic_strict_staged
+               ~write_mode
+               ~changed:transition.changed
+               ~map
+               ~entry
+               transition.updated_entry))
   in
   publish_exact_attempt_transition ~id result
 ;;
@@ -1738,46 +1311,16 @@ let release_summary_exact_attempt_before_dispatch_with
         match exact_attempt_entry_unlocked map candidate with
         | Error _ as error -> error
         | Ok entry ->
-          (match entry.exact_attempt with
-           | Exact_unbound ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_unbound_state entry.id))
-           | Exact_bound existing
-             when not (exact_attempt_identity_matches existing candidate) ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_identity_conflict existing))
-           | Exact_bound existing ->
-             (match existing.status with
-              | Exact_dispatch_uncertain ->
-                let released =
-                  exact_attempt_binding_with_status
-                    existing
-                    Exact_released_before_dispatch
-                in
-                persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with exact_attempt = Exact_bound released }
-                | Exact_released_before_dispatch ->
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:false
-                    ~map
-                    ~entry
-                    entry
-                | Exact_quarantined _
-                | Exact_released_recovery_required
-                | Exact_restart_quarantined
-                | Exact_completed ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_status_conflict existing)))))
+          (match Keeper_approval_queue_exact_transition.release ~candidate entry with
+           | Error _ as error -> error
+           | Ok transition ->
+             persist_exact_attempt_entry_unlocked
+               ~save_file_atomic_strict_staged
+               ~write_mode
+               ~changed:transition.changed
+               ~map
+               ~entry
+               transition.updated_entry))
   in
   publish_exact_attempt_transition ~id result
 ;;
@@ -1818,81 +1361,16 @@ let quarantine_summary_exact_attempt_with
         match exact_attempt_entry_unlocked map candidate with
         | Error _ as error -> error
         | Ok entry ->
-          (match entry.exact_attempt with
-           | Exact_unbound ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_unbound_state entry.id))
-           | Exact_bound existing
-             when not (exact_attempt_identity_matches existing candidate) ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_identity_conflict existing))
-           | Exact_bound existing ->
-             (match existing.status with
-              | Exact_dispatch_uncertain ->
-                let quarantined =
-                  exact_attempt_binding_with_status
-                    existing
-                    (Exact_quarantined cause)
-                in
-                persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with
-                      summary_status = exact_attempt_quarantine_summary_status cause
-                    ; exact_attempt = Exact_bound quarantined
-                    ; summary_attempt_disposition =
-                        Summary_attempt_settled
-                    }
-                | Exact_quarantined durable_cause
-                  when durable_cause = cause ->
-                  let disposition_changed =
-                    entry.summary_attempt_disposition
-                    <> Summary_attempt_settled
-                  in
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:disposition_changed
-                    ~map
-                    ~entry
-                    { entry with
-                      summary_attempt_disposition =
-                        Summary_attempt_settled
-                    }
-                | Exact_released_before_dispatch
-                  when cause = Exact_terminal_persistence_failure
-                       || cause = Exact_cancellation
-                       || cause = Exact_flow_execution_failed ->
-                  let quarantined =
-                    exact_attempt_binding_with_status
-                      existing
-                      (Exact_quarantined cause)
-                  in
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with
-                      summary_status = exact_attempt_quarantine_summary_status cause
-                    ; exact_attempt = Exact_bound quarantined
-                    ; summary_attempt_disposition =
-                        Summary_attempt_settled
-                    }
-                | Exact_quarantined _
-                | Exact_released_before_dispatch
-                | Exact_released_recovery_required
-                | Exact_restart_quarantined
-                | Exact_completed ->
-            Error
-              (Exact_attempt_rejected
-                 (Exact_attempt_status_conflict existing)))))
+          (match Keeper_approval_queue_exact_transition.quarantine ~candidate ~cause entry with
+           | Error _ as error -> error
+           | Ok transition ->
+             persist_exact_attempt_entry_unlocked
+               ~save_file_atomic_strict_staged
+               ~write_mode
+               ~changed:transition.changed
+               ~map
+               ~entry
+               transition.updated_entry))
   in
   publish_exact_attempt_transition ~id result
 ;;
@@ -1933,80 +1411,16 @@ let complete_summary_exact_attempt_with
         match exact_attempt_entry_unlocked map candidate with
         | Error _ as error -> error
         | Ok entry ->
-          (match entry.exact_attempt with
-           | Exact_unbound ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_unbound_state entry.id))
-           | Exact_bound existing
-             when not (exact_attempt_identity_matches existing candidate) ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_identity_conflict existing))
-           | Exact_bound existing
-             when not (String.equal summary.model_run_id existing.call_id) ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_provenance_mismatch
-                     { approval_id = entry.id
-                     ; expected_call_id = existing.call_id
-                     ; actual_model_run_id = summary.model_run_id
-                     }))
-           | Exact_bound existing ->
-             (match existing.status, entry.summary_status with
-              | Exact_dispatch_uncertain, Summary_pending ->
-                  let completed =
-                    exact_attempt_binding_with_status existing Exact_completed
-                  in
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~write_mode
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with
-                    summary_status = Summary_available summary
-                  ; exact_attempt = Exact_bound completed
-                  ; summary_attempt_disposition =
-                      Summary_attempt_settled
-                  }
-              | Exact_completed, Summary_available durable_summary ->
-                if
-                  Yojson.Safe.equal
-                    (hitl_context_summary_to_yojson durable_summary)
-                      (hitl_context_summary_to_yojson summary)
-                  then
-                    let disposition_changed =
-                      entry.summary_attempt_disposition
-                      <> Summary_attempt_settled
-                    in
-                    persist_exact_attempt_entry_unlocked
-                      ~save_file_atomic_strict_staged
-                      ~write_mode
-                      ~changed:disposition_changed
-                      ~map
-                      ~entry
-                      { entry with
-                        summary_attempt_disposition =
-                          Summary_attempt_settled
-                      }
-                  else
-                    Error
-                    (Exact_attempt_rejected
-                       (Exact_attempt_content_conflict entry.id))
-              | ( Exact_released_before_dispatch
-                | Exact_released_recovery_required
-                | Exact_quarantined _
-                | Exact_restart_quarantined
-                | Exact_completed ),
-                _ ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_status_conflict existing))
-              | Exact_dispatch_uncertain, _ ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_summary_not_pending entry.id)))))
+          (match Keeper_approval_queue_exact_transition.complete ~candidate ~summary entry with
+           | Error _ as error -> error
+           | Ok transition ->
+             persist_exact_attempt_entry_unlocked
+               ~save_file_atomic_strict_staged
+               ~write_mode
+               ~changed:transition.changed
+               ~map
+               ~entry
+               transition.updated_entry))
   in
   publish_exact_attempt_transition ~id result
 ;;
@@ -2644,165 +2058,6 @@ let ensure_failed_continuation_chat_projection
   publish_settled_continuation ~keeper_name projected
 ;;
 
-let resolve_entry
-      ?(before_terminal_publish = fun () -> ())
-      ~base_path
-      (entry : pending_approval)
-      ~(source : decision_source)
-      ?actor
-      (decision : decision)
-  =
-  let decision_str = approval_decision_to_string decision in
-  Log.Keeper.info
-    "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
-    entry.id
-    entry.keeper_name
-    entry.tool_name
-    decision_str;
-  let audit_receipt =
-    Keeper_approval.Audit.record
-      ~base_path
-      ~event_type:Keeper_approval.Audit.Resolved
-      ~id:entry.id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ?actor
-      ~decision_source:source
-      ~decision
-      ~summary_status:entry.summary_status
-      ~exact_attempt:entry.exact_attempt
-      ()
-  in
-  before_terminal_publish ();
-  (try
-     Sse.broadcast
-       (`Assoc
-           [ "type", `String approval_sse_resolved_event
-           ; ( "payload"
-             , `Assoc
-                 [ "id", `String entry.id
-                 ; "keeper_name", `String entry.keeper_name
-                 ; "tool_name", `String entry.tool_name
-                 ; "decision", `String decision_str
-                 ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
-                 ] )
-           ])
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     record_queue_failure
-       ~keeper_name:entry.keeper_name
-       ~site:"broadcast_resolved"
-       ~id:entry.id
-       ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
-       exn);
-  audit_receipt
-;;
-
-(* The effect request's identity. [turn_id] is deliberately absent: it names
-   the turn that asked, not the effect being asked for. Keeping it in this
-   comparison made every next-turn retry of the same call a fresh approval —
-   measured 2026-08-16: one identical web_search deferred in turns
-   28959/28960/28961 produced three approvals, three auto-judge approvals,
-   and three replays of the same 17,712-byte output into the same context
-   (#28866). The turn that asked is still recorded on the entry for audit. *)
-let pending_entry_matches
-      (entry : pending_approval)
-      ~base_path
-      ~keeper_name
-      ~tool_name
-      ~input_hash
-      ~task_id
-      ~goal_id
-      ~continuation_channel
-  =
-  String.equal entry.audit_base_path base_path
-  && String.equal entry.keeper_name keeper_name
-  && String.equal entry.tool_name tool_name
-  && String.equal entry.input_hash input_hash
-  && entry.task_id = task_id
-  && entry.goal_id = goal_id
-  && Yojson.Safe.equal
-       (Keeper_continuation_channel.to_yojson entry.continuation_channel)
-       (Keeper_continuation_channel.to_yojson continuation_channel)
-;;
-
-let find_pending_id_in_map
-      (map : pending_approval SMap.t)
-      ~base_path
-      ~keeper_name
-      ~tool_name
-      ~input_hash
-      ~task_id
-      ~goal_id
-      ~continuation_channel
-  =
-  SMap.fold
-    (fun id (entry : pending_approval) acc ->
-       match acc with
-       | Some _ -> acc
-       | None ->
-         if
-           pending_entry_matches
-             entry
-             ~base_path
-             ~keeper_name
-             ~tool_name
-             ~input_hash
-             ~task_id
-             ~goal_id
-             ~continuation_channel
-         then Some id
-         else None)
-    map
-    None
-;;
-
-(* An approved resolution whose one-shot grant is still unconsumed is the
-   same effect request one step further along: the host owes the Keeper a
-   replay of exactly this call. A resubmission folds onto it instead of
-   opening a second approval — "an approval owns its effect" (RFC-0356)
-   implies its dual, an effect has one approval. Rejected and
-   grant-consumed deliveries never match: a retry after rejection is a new
-   approval cycle, and a retry after the effect ran is a new effect. *)
-let find_unconsumed_grant_id_in_deliveries
-      (map : persisted_delivery SMap.t)
-      ~base_path
-      ~keeper_name
-      ~tool_name
-      ~input_hash
-      ~task_id
-      ~goal_id
-      ~continuation_channel
-  =
-  SMap.fold
-    (fun id (delivery : persisted_delivery) acc ->
-       match acc with
-       | Some _ -> acc
-       | None ->
-         (match delivery.decision with
-          | Decision.Reject _ -> None
-          | Decision.Approve ->
-            if
-              (not delivery.grant_consumed)
-              && pending_entry_matches
-                   delivery.entry
-                   ~base_path
-                   ~keeper_name
-                   ~tool_name
-                   ~input_hash
-                   ~task_id
-                   ~goal_id
-                   ~continuation_channel
-            then Some id
-            else None))
-    map
-    None
-;;
-
 (* ── Nonblocking submission ───────────────────────────────── *)
 
 let submit_pending
@@ -3257,14 +2512,6 @@ let delivery_wake_was_observed delivery =
       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
          error);
     false
-;;
-
-let compare_pending_order left right =
-  match String.compare left.audit_base_path right.audit_base_path with
-  | 0 ->
-    let sequence_order = Int.compare left.sequence right.sequence in
-    if sequence_order = 0 then String.compare left.id right.id else sequence_order
-  | workspace_order -> workspace_order
 ;;
 
 (* ── Spent deliveries leave the store at install

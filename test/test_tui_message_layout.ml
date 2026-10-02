@@ -865,6 +865,17 @@ let test_an_unterminated_escape_absorbs_the_space_after_it () =
   check int "a terminated escape leaves the space alone" 6
     (Layout.display_width "\x1B[0m words")
 
+let test_styled_rows_remain_readable_independently () =
+  check (list string) "error color survives a viewport starting on a continuation"
+    [ "\027[31mfirst\027[0m"; "\027[31msecond\027[0m" ]
+    (Layout.wrap_styled_words ~max_cells:6 "\027[31mfirst second\027[0m");
+  check (list string) "reset prevents coloring subsequent plain text"
+    [ "\027[31mfirst\027[0m"; "second" ]
+    (Layout.wrap_styled_words ~max_cells:6 "\027[31mfirst\027[0m second");
+  check (list string) "uncolored text acquires no terminal controls"
+    [ "first"; "second" ]
+    (Layout.wrap_styled_words ~max_cells:6 "first second")
+
 (* Rows carrying an escape are measured whole rather than word by word, so
    they get their own case. The two texts below differ only in whether the
    escape was finished, and that alone moves where the rows break -- which is
@@ -2988,9 +2999,22 @@ let test_an_ascii_text_is_not_kept () =
     (Printf.sprintf "laying it out again allocates the same (%.0f then %.0f bytes)" first again)
     true (Float.equal first again)
 
+let test_scrolled_styled_meter_rows () =
+  let warning = "\027[33m" and reset = "\027[0m" in
+  let plain = "▕██        ▏  quota unavailable 한한" in
+  let rows = Layout.split_styled_cells ~max_cells:12 (warning ^ plain ^ reset) in
+  check string "quota blanks and all evidence survive physical splitting" plain
+    (String.concat "" (List.map Masc_tui_theme.strip_sgr rows));
+  List.iter (fun row ->
+    check bool "each independently scrolled row restores warning" true
+      (String.starts_with ~prefix:warning row);
+    check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
+    check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
+
 let () =
   run "tui_message_layout"
     [
+      ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );
       ( "layout across frames"
       , [ test_case "a text laid out again keeps its layout" `Quick
             test_a_text_laid_out_again_keeps_its_layout
@@ -3090,6 +3114,8 @@ let () =
             test_history_never_splits_grapheme_clusters
         ; test_case "an unterminated escape absorbs the space after it" `Quick
             test_an_unterminated_escape_absorbs_the_space_after_it
+        ; test_case "styled rows remain readable independently" `Quick
+            test_styled_rows_remain_readable_independently
         ; test_case "a row carrying an escape wraps by its real width" `Quick
             test_a_row_carrying_an_escape_wraps_by_its_real_width
         ; test_case "a body keeps the breaks its author wrote" `Quick

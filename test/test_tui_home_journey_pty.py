@@ -9,6 +9,9 @@ import sys
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
+    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml", "bin/masc_tui_keys.ml",
     "bin/masc_tui_render_chat.ml",
@@ -115,6 +118,7 @@ def requests_are_navigation(executable):
 
 
 def automatic_gate_is_not_a_human_decision(executable):
+    requests = []
     fixtures, _items, _new = h.approval_selection_http_fixtures()
     operator_path = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
     fixtures[operator_path] = h.approval_selection_snapshot([])
@@ -122,7 +126,7 @@ def automatic_gate_is_not_a_human_decision(executable):
     template = gate[1]["approval_queue"][0]
     gate[1]["approval_queue"] = [
         dict(template, id=f"appr-{phase}", phase=phase)
-        for phase in ("queued", "judging", "blocked")
+        for phase in ("queued", "judging")
     ]
     fixtures["/api/v1/dashboard/gate"] = gate
 
@@ -130,19 +134,31 @@ def automatic_gate_is_not_a_human_decision(executable):
         h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
         frame = capture(process, fd, output, "automatic-gate", b"No decision is waiting")
         assert b"Needs your decision" not in frame
-        # The same read becomes actionable only with the typed human handoff.
-        gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
+        # A blocked Auto Judge exposes manual resolution in Approvals.
+        gate[1]["approval_queue"].append(dict(template, id="appr-blocked", phase="blocked"))
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
+        frame = capture(process, fd, output, "blocked-gate", b"appr-blocked", columns=100)
+        assert b"appr-blocked" in frame
+        assert b"appr-queued" not in frame and b"appr-judging" not in frame
+        select_destination(process, fd, output, b"appr-blocked")
+        h.send_and_wait(process, fd, output, b"\r", b"AUTO JUDGE BLOCKED")
+        assert_no_decision_posts(requests)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+        # A separate explicit human handoff retains its own identity.
+        gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
+        h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 2 need you")
         # Change the width so capture receives a full redraw after refresh;
         # requesting the current 80x24 size does not produce another frame.
         frame = capture(process, fd, output, "mixed-gate", b"Approval", columns=120)
-        assert b"Approvals and questions: 1 need you" in frame
-        assert frame.count(b"Approval ") == 1, frame
+        assert b"Approvals and questions: 2 need you" in frame
+        assert b"appr-blocked" in frame and b"appr-human" in frame
+        assert frame.count(b"Approval ") == 2, frame
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Home excludes automatic Gate work",
                             interact=interact, http_fixtures=fixtures,
-                            prepare_workspace=seed_goals)
+                            http_requests=requests, prepare_workspace=seed_goals)
+    assert_no_decision_posts(requests)
 
 
 def refresh_preserves_destination(executable):

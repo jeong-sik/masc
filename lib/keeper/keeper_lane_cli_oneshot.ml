@@ -79,6 +79,7 @@ let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = funct
   | Runtime_codex_app_server.Turn_failed { codex_error_info = None; detail = _ }
   | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _
@@ -184,7 +185,7 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Error (Unknown_runtime { runtime_id })
   | Some runtime ->
-    (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
+    (match Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution with
      | Runtime_execution.Masc_agent_core -> Error (Not_an_official_client { runtime_id })
      | Runtime_execution.Official_client ->
        let runner =

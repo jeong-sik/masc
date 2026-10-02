@@ -55,6 +55,11 @@ val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared 
 val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms of the range. The pass renders them once, folded,
     for both Memory disposition and working-state inference. *)
+val source_spans : prepared ->
+  (Keeper_librarian_task_context.scope * Agent_core.Types.message list) list
+(** Ordered historical attribution and its exact selected messages, derived
+    solely from the frozen checkpoint and boundaries. Narrowing clips spans;
+    a missing admission witness stays unattributed. No current Task lookup. *)
 type turn_window = { after : float option; through : float }
 val turn_window : prepared -> turn_window option
 (** The recorded times of the turn-end lines that bound this unit's turn:

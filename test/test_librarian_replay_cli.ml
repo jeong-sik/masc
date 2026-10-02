@@ -49,7 +49,7 @@ let write_boundary ~keepers_dir ~trace_id ~turn messages =
   let record : Boundaries.record =
     { recorded_at = Float.of_int turn
     ; event = Boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
         ; history_at_start =
             (if turn = 1 then Boundaries.Fresh_history else Boundaries.Continued_history)
         ; position

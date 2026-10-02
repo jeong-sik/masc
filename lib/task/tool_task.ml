@@ -94,6 +94,16 @@ and handle_transition ~tool_name ~start_time ctx args =
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         names (String.concat ", " transition_known_args))
   else
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Error Workspace.Invalid_workspace_precondition ->
+    workflow_rejection_result ~tool_name ~start_time
+      ~rule_id:"task_invalid_workspace_precondition"
+      "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed ->
+    workflow_rejection_result ~tool_name ~start_time
+      ~rule_id:"task_workspace_precondition_failed"
+      "workspace precondition failed"
+  | Ok args ->
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response ~tool_name ~start_time (Error e)

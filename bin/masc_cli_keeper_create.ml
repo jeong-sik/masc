@@ -273,6 +273,28 @@ let successful_outcome json =
         | Some _, None | None, Some _ | None, None -> Reconfigured { name }))
 ;;
 
+let creation_receipt ~keeper_name json =
+  let invalid () = Refused
+    "Creation response did not confirm this Keeper; inspect the roster before retrying" in
+  let member key fields =
+    match List.filter (fun (name, _) -> String.equal name key) fields with
+    | [_, value] -> Some value
+    | [] | _ :: _ -> None
+  in
+  match json with
+  | `Assoc fields ->
+    (match member "ok" fields, member "action" fields, member "name" fields,
+           member "detail" fields with
+     | Some (`Bool true), Some (`String "up"), Some (`String name), Some (`Assoc detail)
+       when String.equal name keeper_name ->
+       (match member "name" detail with
+        | Some (`String detail_name) when String.equal detail_name keeper_name ->
+          successful_outcome json
+        | _ -> invalid ())
+     | _ -> invalid ())
+  | _ -> invalid ()
+;;
+
 let rejected_outcome ~body json =
   let conflict =
     match Json_util.assoc_object_opt "detail" json with

@@ -191,12 +191,22 @@ def run(args):
                 executor = handles.enter_context(ThreadPoolExecutor(max_workers=2))
                 probe_command = ['bash', str(repo / 'scripts/harness/perf/scheduler_lag_probe.sh')]
                 probe_env = {**env, 'MASC_URL': f'http://127.0.0.1:{port}',
-                             'PROBES': '30', 'GAP_S': '1', 'RATE_WINDOW_S': '10'}
+                             'PROBES': '30', 'GAP_S': '1', 'RATE_WINDOW_S': '10',
+                             'CURL_MAX_S': '30'}
                 write_json(out / 'scheduler-probe-command.json', {'argv': probe_command,
-                    'MASC_URL': probe_env['MASC_URL'], 'PROBES': 30, 'GAP_S': 1, 'RATE_WINDOW_S': 10})
+                    'MASC_URL': probe_env['MASC_URL'], 'PROBES': 30, 'GAP_S': 1,
+                    'RATE_WINDOW_S': 10, 'CURL_MAX_S': 30})
                 probe_output = handles.enter_context((out / 'scheduler-probe.txt').open('wb'))
-                processes.append(subprocess.Popen(probe_command, env=probe_env, cwd=repo,
-                    stdout=probe_output, stderr=probe_output, start_new_session=True))
+                probe = subprocess.Popen(probe_command, env=probe_env, cwd=repo,
+                    stdout=probe_output, stderr=probe_output, start_new_session=True)
+                processes.append(probe)
+                # The scheduler owns its measurement window independently of
+                # the checkpoint workload and its runtime-event readers.
+                probes = int(probe_env['PROBES'])
+                probe_deadline = (time.monotonic()
+                    + probes * float(probe_env['GAP_S'])
+                    + float(probe_env['RATE_WINDOW_S'])
+                    + (probes + 2) * float(probe_env['CURL_MAX_S']))
                 start = time.monotonic()
                 for cycle in range(args.cycles):
                     time.sleep(max(0, start + cycle * args.interval - time.monotonic()))
@@ -213,8 +223,10 @@ def run(args):
                             and all(row['status'] == 'available' for row in inventory['history']),
                             'scan did not return every valid snapshot in order')
                 require(time.monotonic() - start <= duration, 'workload exceeded the trace window')
-                for tracer in processes[1:]:
+                for tracer in processes[1:-1]:
                     require(tracer.wait(timeout=30) == 0, 'runtime-events consumer failed')
+                require(probe.wait(timeout=max(0, probe_deadline - time.monotonic())) == 0,
+                        'scheduler probe failed')
                 after = request('/health?full=1')
                 write_json(out / 'health-after.json', after)
                 require(after['keeper_fibers'] == 0, 'unexpected Keeper started')

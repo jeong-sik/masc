@@ -140,7 +140,15 @@ def run(executable):
         # An unrelated key cancels the arm; restore it on the readable frame.
         h.send_and_wait(process, fd, output, b"c", b"press c again")
         h.send_and_wait(process, fd, output, b"c", b"fixture intentionally refuses transition")
-        assert posted == [{"goal_id": GOAL_ID, "action": "request_complete"}], posted
+        workspace = Path(_base).resolve()
+        assert posted == [{
+            "expected_workspace": {
+                "base_path": str(workspace),
+                "masc_root": str(workspace / ".masc"),
+            },
+            "goal_id": GOAL_ID,
+            "action": "request_complete",
+        }], posted
         # Refresh removes the visible Goal and reconciles back to the list.
         # No hidden lifecycle or proof-confirmation command may run.
         fixtures[h.PLANNING_PATH] = h.planning_snapshot([])

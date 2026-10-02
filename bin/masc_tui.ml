@@ -11672,26 +11672,26 @@ let split_board_draft (text : string) : string * string =
    server's phase rules decide, so the TUI never pre-guesses a transition. *)
 let start_goal_transition state ~mailbox ~(goal_id : string)
     ~(action : Goal_phase.Public_action.t) =
-  if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot change goal: workspace identity is unverified"
-  else begin
-  supersede_home_decision_receipt state;
-  state.goal_action_error <- None;
-  report_action state "system"
-    (Printf.sprintf "goal %s: %s" goal_id
-       (Goal_phase.Public_action.to_string action));
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Goal_transition_done result)
-    (fun () ->
-      match
-        Masc_tui_http.post_goal_transition ~host ~port ~goal_id ~action
-          ~note:None
-      with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
-  end
+  match state.workspace_identity, state.server_identity with
+  | Workspace_identity_match, Some expected_workspace ->
+      supersede_home_decision_receipt state;
+      state.goal_action_error <- None;
+      report_action state "system"
+        (Printf.sprintf "goal %s: %s" goal_id
+           (Goal_phase.Public_action.to_string action));
+      let host = server_peer_host in
+      let port = state.port in
+      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        ~deliver:(fun result -> Goal_transition_done result)
+        (fun () ->
+          match
+            Masc_tui_http.post_goal_transition ~expected_workspace
+              ~host ~port ~goal_id ~action ~note:None
+          with
+          | Error err -> Error err
+          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
+  | _ ->
+      report_action state "error" "Cannot change goal: workspace identity is unverified"
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)

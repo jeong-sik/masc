@@ -19,13 +19,13 @@
 ## 검증 (Verification)
 
 - 1차: Official streaming documentation read and compared with current CLI invocation and protocol parsers.
-- 2차: Source paths inspected across Codex, Claude Code, Antigravity, Muse and HTTP provider codecs.
+- 2차: Source paths inspected across all runtime kinds; local `claude --version` reports 2.1.287, `claude --help` declares --include-partial-messages, and `codex --version` reports 0.160.0.
 - 3차: Regression fixtures added for partial/complete text and optional identities; syntax parsing and diff whitespace checks pass.
 - 재현 결과: Source defects identified and corrected; executable regressions are not run.
 
 ## 불확실성 (Uncertainty)
 
-- 미확인 항목: Runtime executable tests, installed CLI contracts, actual provider calls, actual TUI screenshot.
+- 미확인 항목: Runtime executable tests, actual provider calls, actual TUI screenshot.
 - 영향: Source review does not certify compiled or production behavior.
 - 추가 확인 필요: Focused runtime/TUI test suites on exact PR head; isolated actual TUI before/after-input frames.
 

@@ -1331,6 +1331,14 @@ let partial_block_index stage fields =
   | Some _ | None -> protocol_error stage "index must be a nonnegative integer"
 ;;
 
+(* Empty text starts a block; whitespace-only token pieces are content. *)
+let partial_text_value stage fields =
+  let* value = required_member stage "text" fields in
+  match value with
+  | `String text -> Ok text
+  | _ -> protocol_error stage "text must be a string"
+;;
+
 let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
     ~on_stream_event partial fields =
   let stage = "partial stream event" in
@@ -1361,7 +1369,7 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" block in
         (match kind with
          | "text" ->
-             let* text = required_string stage "text" block in
+             let* text = partial_text_value stage block in
              let buffer = Buffer.create 256 in
              Buffer.add_string buffer text;
              partial.text_block <- Some (index, buffer);
@@ -1381,7 +1389,7 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" delta in
         (match kind with
          | "text_delta" ->
-             let* text = required_string stage "text" delta in
+             let* text = partial_text_value stage delta in
              (match partial.message_id, partial.text_block with
               | Some _, Some (active, buffer) when active = index ->
                   Buffer.add_string buffer text;

@@ -40,7 +40,7 @@ Scope: TUI new input, queue admission, batch binding, journal replay, runtime re
 
 ## Verification limits
 
-Syntax parsing and whitespace checks pass for touched OCaml files. Regression executables, type checks, real provider calls and actual TUI screenshots have not run. The repository prohibits external-session local Dune builds; this report does not reinterpret source review as runtime proof. No server/TUI restart or installation was performed.
+Syntax parsing and whitespace checks pass for touched OCaml files. Regression executables, type checks, real provider calls and actual TUI screenshots have not run. The repository prohibits external-session local Dune builds; this report does not reinterpret source review as runtime proof. No server/TUI restart or installation was performed. Local CLI checks: Claude Code 2.1.287 advertises --include-partial-messages; Codex CLI 0.160.0. These are host CLI observations, not proof of sandbox provider behavior.
 
 Batch representative selection relies on ordered per-member journal delivery; highest seq is a replay position, not independent proof of contiguous coverage. Unknown model capabilities can intentionally disable native streaming. This is not a promise that every model streams.
 

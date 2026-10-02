@@ -142,6 +142,8 @@ val memory_row :
 (** {1 Workspace repository columns} *)
 
 val workspace_minimum_path_width : int
+val workspace_minimum_width : int
+(** Width of all repository columns at their floors, including table gaps. *)
 
 type workspace_row_values = {
   wrow_name : string;

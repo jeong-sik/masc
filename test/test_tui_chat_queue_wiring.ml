@@ -939,6 +939,47 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   }
 ;;
 
+let test_new_input_preserves_running_output () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (50, 120);
+    let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let occurrence : Live.tool_occurrence =
+      {stream_scope=0; block_index=0; provider_message_id=None; tool_call_id=Some "call-old"} in
+    let old = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+        [Live.Run_started; Live.Text "OLD_RUNNING_TEXT";
+         Live.Tool_started {occurrence; tool_name="read_file"}] in
+    state.msg_inflight <- [old];
+    state.msg_live <- Some old.log;
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+    let assert_old () =
+      let text = screen () in
+      List.iter (fun needle -> check bool needle true
+          (Astring.String.is_infix ~affix:needle text)) ["OLD_RUNNING_TEXT"; "read_file"] in
+    assert_old ();
+    let queued = inflight_with_log ~keeper_name:"alpha" ~started_at:2.
+        [Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None}] in
+    state.msg_inflight <- [queued; old];
+    state.msg_live <- Some queued.log;
+    assert_old ();
+    state.keeper_turns <-
+      [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
+        ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;
+          interrupt_token="fixture"; preview=Some {ktp_status_text="working";
+            ktp_updated_at_unix=3.; ktp_text_tail="AUTONOMOUS_TAIL"; ktp_last_tool=None}}}];
+    check bool "autonomous output survives a working chat subscription" true
+      (Astring.String.is_infix ~affix:"AUTONOMOUS_TAIL" (screen ())))
+;;
+
 let visible_reply reply =
   Live.Reply_details
     { reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
@@ -4663,6 +4704,7 @@ let () =
             test_a_nameless_heading_is_the_mark_and_the_rule
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
+        ; test_case "new input preserves running output" `Quick test_new_input_preserves_running_output
         ; test_case "an observed running turn is drawn from its journal" `Quick
             test_an_observed_running_turn_is_drawn_from_its_journal
         ; test_case "the pane's own turn is live in flight and observed once cut" `Quick

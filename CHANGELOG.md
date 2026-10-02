@@ -27,7 +27,7 @@
 
 ### Complete change record
 
-The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note and all 49 final-candidate fragments. Read the upgrade and fresh-state instructions above before updating.
+The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
 
 ## [0.48.0] - 2026-09-29
 

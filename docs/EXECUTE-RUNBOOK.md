@@ -135,7 +135,6 @@ A dispatch is a request, not a passing result. Retain the completed run URL,
 exact candidate SHA and selected PR scope. A candidate result does not certify
 a different head or authorize a merge.
 
-
 ## Counter Endpoint
 
 ```text

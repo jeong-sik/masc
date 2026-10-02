@@ -521,6 +521,38 @@ let test_a_lock_taken_between_the_read_and_the_append_is_reported () =
   Alcotest.(check string) "the file is untouched" before (file_text base_path)
 ;;
 
+(* The exact Item HTTP seed must replay through the production ledger and
+   wallet, not merely decode as JSON. It represents synthetic spending credit. *)
+let test_item_http_seed_replays_current_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture policy is absent"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  let bytes = fixture "restart-credit.jsonl" ^ fixture "paid-credit.jsonl" in
+  append_raw base_path bytes;
+  let view = read_ok base_path in
+  let events = Candle_ledger.events view in
+  let balance = balance_of_view view in
+  Alcotest.(check int) "free-purchase fixture retains 100 milli" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  Alcotest.(check int) "paid-purchase fixture retains 700 milli" 700
+    (Candle_balance.balance balance ~keeper:"item-paid-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+      Alcotest.(check int) "synthetic payout amount matches fixture policy"
+        (Candle_config.grade_amount_milli policy.payout payment.grade) payment.total_milli
+    | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> ()) events;
+  (match Candle_ledger.recover_at_start ~base_path with
+   | Ok recovered -> Alcotest.(check bool) "restart retains synthetic provenance"
+       true (Candle_ledger.events recovered = events)
+   | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error));
+  Alcotest.(check string) "replay leaves seed byte-identical" bytes (file_text base_path)
+;;
+
 let test_item_acceptance_seed_contract () =
   with_base_path @@ fun base_path ->
   let fixture name = In_channel.with_open_bin
@@ -560,7 +592,9 @@ let () =
   Alcotest.run
     "candle_ledger"
     [ ( "read"
-      , [ Alcotest.test_case "Item acceptance seeds satisfy current Candle contract" `Quick
+      , [ Alcotest.test_case "Item HTTP seed replays current payout and policy contract" `Quick
+            test_item_http_seed_replays_current_contract
+        ; Alcotest.test_case "Item acceptance seeds satisfy current Candle contract" `Quick
             test_item_acceptance_seed_contract
         ; Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger

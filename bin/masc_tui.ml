@@ -21994,6 +21994,7 @@ and is loaded on demand through keeper_skill.
                       | Planning_filter_completed | Planning_filter_dropped ->
                           state.planning_filter <- Planning_filter_active);
                      navigate Planning;
+                     state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
                      state.planning_mode <- Planning_detail goal_id;
                      Masc_tui_home.reconcile_home_request_detail state;
                      state.planning_scroll <- 0;

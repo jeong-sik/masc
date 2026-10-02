@@ -123,9 +123,12 @@ try:
         exec(compile(ast.Module(body=[assignment], type_ignores=[]),
                      str(args.source), 'exec'), ns)
         require(ns['status'] == 200, 'request assignment lost its response status')
+    consumer_lines = [assignment.lineno for assignment in request_assignments]
+    require(consumer_lines, 'acceptance source has no request consumers')
     print(json.dumps({'scope': 'actual extracted helpers, synthetic loopback TCP; no native run',
                       'source_sha256': hashlib.sha256(args.source.read_bytes()).hexdigest(),
                       'controls': results, 'direct_requests_pass': True,
+                      'request_consumer_lines': sorted(consumer_lines),
                       'request_assignments_executed': len(request_assignments)}, indent=2))
 finally:
     for s in servers:

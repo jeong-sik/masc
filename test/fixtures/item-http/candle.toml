@@ -6,7 +6,7 @@ deduction_rate = 0
 deduction_floor = 1000
 [payout.grades_milli]
 trivial = 100
-small = 1000
+small = 700
 medium = 1000
 large = 1000
 epic = 1000

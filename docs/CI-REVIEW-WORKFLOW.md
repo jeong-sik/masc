@@ -10,7 +10,17 @@ Release verdicts also cite the completed successful full run. Current independen
 approval, later blocking reviews, exact head and base changes remain admission
 checks; land parents first and review the changed child diff before integration.
 
-There is no automatic PR, push, tag or scheduled CI. For an explicitly selected
+There is no automatic PR, push or tag CI. The operator-authorized
+`main-minimal-build.yml` checks main at minutes 7 and 37: it builds the server,
+TUI, browser host and deployment preflight executables in one Dune invocation.
+Successful non-documentation input fingerprints skip toolchain setup and build;
+the summary names the actual previously built SHA, and a skip is not compilation
+evidence for a newer SHA. Existing opam caching and a shared Dune cache reduce
+repeated work. Builds are serialized without cancelling the active build.
+Scheduling may be delayed; this does not guarantee a build within 30 minutes.
+This observation does not approve a PR or replace full Release/Tag checks.
+
+For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source

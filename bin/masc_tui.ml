@@ -14707,8 +14707,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail ->
-           state.gate_pending <- [];
-           state.gate_snapshot_observed <- false;
            state.gate_error <- Some detail)
   | Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation) ->
       (* Release the single-action slot [launch_gate_resolve] took, whatever the

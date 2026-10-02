@@ -1,0 +1,1327 @@
+[
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_balance",
+    "arguments": {},
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[]}",
+            "status": "ok",
+            "tool": "keeper_candle_balance"
+          },
+          "trace_id": "3",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_balance",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[]}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "balance_milli": "0",
+        "owned_items": []
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "balance_milli": "0",
+      "owned_items": []
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_balance",
+    "arguments": {
+      "keeper": "another-keeper"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "Tool 'keeper_candle_balance' declares no input fields but received arguments",
+            "status": "error",
+            "tool": "keeper_candle_balance"
+          },
+          "trace_id": "4",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_balance",
+          "duration_ms": 0,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z",
+          "failure_class": "policy_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "Tool 'keeper_candle_balance' declares no input fields but received arguments"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "schema_shape": {
+          "properties": [],
+          "required": []
+        },
+        "error": "Tool 'keeper_candle_balance' declares no input fields but received arguments",
+        "validation": "agent_core_tool_middleware",
+        "reason": "empty_schema_args",
+        "failure_class": "policy_rejection"
+      }
+    },
+    "data": {
+      "schema_shape": {
+        "properties": [],
+        "required": []
+      },
+      "error": "Tool 'keeper_candle_balance' declares no input fields but received arguments",
+      "validation": "agent_core_tool_middleware",
+      "reason": "empty_schema_args",
+      "failure_class": "policy_rejection"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "default"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "5",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": false,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": false,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "glasses"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-runtime-probe does not own glasses",
+            "status": "error",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "6",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 2,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-runtime-probe does not own glasses"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "equipment_refused",
+        "error": "item-runtime-probe does not own glasses"
+      }
+    },
+    "data": {
+      "error_code": "equipment_refused",
+      "error": "item-runtime-probe does not own glasses"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "glasses"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"account\":{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[\"glasses\"]},\"item\":\"glasses\",\"amount_milli\":\"0\",\"purchased_at\":\"2026-09-30T06:43:16Z\"}",
+            "status": "ok",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "7",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"account\":{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[\"glasses\"]},\"item\":\"glasses\",\"amount_milli\":\"0\",\"purchased_at\":\"2026-09-30T06:43:16Z\"}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "account": {
+          "keeper": "item-runtime-probe",
+          "balance_milli": "0",
+          "owned_items": [
+            "glasses"
+          ]
+        },
+        "item": "glasses",
+        "amount_milli": "0",
+        "purchased_at": "2026-09-30T06:43:16Z"
+      }
+    },
+    "data": {
+      "account": {
+        "keeper": "item-runtime-probe",
+        "balance_milli": "0",
+        "owned_items": [
+          "glasses"
+        ]
+      },
+      "item": "glasses",
+      "amount_milli": "0",
+      "purchased_at": "2026-09-30T06:43:16Z"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "glasses"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-runtime-probe already owns glasses",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "8",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-runtime-probe already owns glasses"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "already_owned",
+        "error": "item-runtime-probe already owns glasses"
+      }
+    },
+    "data": {
+      "error_code": "already_owned",
+      "error": "item-runtime-probe already owns glasses"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "crown"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-runtime-probe has 0 milli-Candle; this item costs 200",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "9",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-runtime-probe has 0 milli-Candle; this item costs 200"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "insufficient_balance",
+        "error": "item-runtime-probe has 0 milli-Candle; this item costs 200"
+      }
+    },
+    "data": {
+      "error_code": "insufficient_balance",
+      "error": "item-runtime-probe has 0 milli-Candle; this item costs 200"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "glasses"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "10",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:16Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": true,
+        "equipment": {
+          "face": "glasses",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": true,
+      "equipment": {
+        "face": "glasses",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "default"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "11",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": true,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": true,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "glasses"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "12",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": true,
+        "equipment": {
+          "face": "glasses",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": true,
+      "equipment": {
+        "face": "glasses",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_balance",
+    "arguments": {},
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"700\",\"owned_items\":[]}",
+            "status": "ok",
+            "tool": "keeper_candle_balance"
+          },
+          "trace_id": "15",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_balance",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"700\",\"owned_items\":[]}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-paid-probe",
+        "balance_milli": "700",
+        "owned_items": []
+      }
+    },
+    "data": {
+      "keeper": "item-paid-probe",
+      "balance_milli": "700",
+      "owned_items": []
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "head",
+      "item": "default"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-paid-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"bare_head\",\"hand\":\"book\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "16",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-paid-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"bare_head\",\"hand\":\"book\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-paid-probe",
+        "changed": false,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "bare_head",
+          "hand": "book",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-paid-probe",
+      "changed": false,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "bare_neck",
+        "head": "bare_head",
+        "hand": "book",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "crown"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"account\":{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"500\",\"owned_items\":[\"crown\"]},\"item\":\"crown\",\"amount_milli\":\"200\",\"purchased_at\":\"2026-09-30T06:43:20Z\"}",
+            "status": "ok",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "17",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"account\":{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"500\",\"owned_items\":[\"crown\"]},\"item\":\"crown\",\"amount_milli\":\"200\",\"purchased_at\":\"2026-09-30T06:43:20Z\"}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "account": {
+          "keeper": "item-paid-probe",
+          "balance_milli": "500",
+          "owned_items": [
+            "crown"
+          ]
+        },
+        "item": "crown",
+        "amount_milli": "200",
+        "purchased_at": "2026-09-30T06:43:20Z"
+      }
+    },
+    "data": {
+      "account": {
+        "keeper": "item-paid-probe",
+        "balance_milli": "500",
+        "owned_items": [
+          "crown"
+        ]
+      },
+      "item": "crown",
+      "amount_milli": "200",
+      "purchased_at": "2026-09-30T06:43:20Z"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "crown"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-paid-probe already owns crown",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "18",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-paid-probe already owns crown"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "already_owned",
+        "error": "item-paid-probe already owns crown"
+      }
+    },
+    "data": {
+      "error_code": "already_owned",
+      "error": "item-paid-probe already owns crown"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "medal"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-paid-probe has 500 milli-Candle; this item costs 700",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "19",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-paid-probe has 500 milli-Candle; this item costs 700"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "insufficient_balance",
+        "error": "item-paid-probe has 500 milli-Candle; this item costs 700"
+      }
+    },
+    "data": {
+      "error_code": "insufficient_balance",
+      "error": "item-paid-probe has 500 milli-Candle; this item costs 700"
+    }
+  },
+  {
+    "server_generation": 1,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "head",
+      "item": "crown"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-paid-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"crown\",\"hand\":\"book\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "20",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:20Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-paid-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"crown\",\"hand\":\"book\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-paid-probe",
+        "changed": true,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "crown",
+          "hand": "book",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-paid-probe",
+      "changed": true,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "bare_neck",
+        "head": "crown",
+        "hand": "book",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_balance",
+    "arguments": {},
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[\"glasses\"]}",
+            "status": "ok",
+            "tool": "keeper_candle_balance"
+          },
+          "trace_id": "23",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_balance",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"balance_milli\":\"0\",\"owned_items\":[\"glasses\"]}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "balance_milli": "0",
+        "owned_items": [
+          "glasses"
+        ]
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "balance_milli": "0",
+      "owned_items": [
+        "glasses"
+      ]
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "glasses"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-runtime-probe already owns glasses",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "24",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 0,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-runtime-probe already owns glasses"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "already_owned",
+        "error": "item-runtime-probe already owns glasses"
+      }
+    },
+    "data": {
+      "error_code": "already_owned",
+      "error": "item-runtime-probe already owns glasses"
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "glasses"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":false,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "25",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 2,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":false,\"equipment\":{\"face\":\"glasses\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": false,
+        "equipment": {
+          "face": "glasses",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": false,
+      "equipment": {
+        "face": "glasses",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "face",
+      "item": "default"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "26",
+          "agent_id": "item-runtime-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-runtime-probe\",\"changed\":true,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"medal\",\"head\":\"bare_head\",\"hand\":\"empty_hand\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-runtime-probe",
+        "changed": true,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "medal",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-runtime-probe",
+      "changed": true,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "medal",
+        "head": "bare_head",
+        "hand": "empty_hand",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_balance",
+    "arguments": {},
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"500\",\"owned_items\":[\"crown\"]}",
+            "status": "ok",
+            "tool": "keeper_candle_balance"
+          },
+          "trace_id": "29",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_balance",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-paid-probe\",\"balance_milli\":\"500\",\"owned_items\":[\"crown\"]}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-paid-probe",
+        "balance_milli": "500",
+        "owned_items": [
+          "crown"
+        ]
+      }
+    },
+    "data": {
+      "keeper": "item-paid-probe",
+      "balance_milli": "500",
+      "owned_items": [
+        "crown"
+      ]
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_equip",
+    "arguments": {
+      "slot": "head",
+      "item": "crown"
+    },
+    "is_error": false,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"keeper\":\"item-paid-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"crown\",\"hand\":\"book\",\"base\":\"dish_silver\"}}",
+            "status": "ok",
+            "tool": "keeper_candle_equip"
+          },
+          "trace_id": "30",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_equip",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"keeper\":\"item-paid-probe\",\"changed\":false,\"equipment\":{\"face\":\"bare_face\",\"neck\":\"bare_neck\",\"head\":\"crown\",\"hand\":\"book\",\"base\":\"dish_silver\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "keeper": "item-paid-probe",
+        "changed": false,
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "crown",
+          "hand": "book",
+          "base": "dish_silver"
+        }
+      }
+    },
+    "data": {
+      "keeper": "item-paid-probe",
+      "changed": false,
+      "equipment": {
+        "face": "bare_face",
+        "neck": "bare_neck",
+        "head": "crown",
+        "hand": "book",
+        "base": "dish_silver"
+      }
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "crown"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-paid-probe already owns crown",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "31",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-paid-probe already owns crown"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "already_owned",
+        "error": "item-paid-probe already owns crown"
+      }
+    },
+    "data": {
+      "error_code": "already_owned",
+      "error": "item-paid-probe already owns crown"
+    }
+  },
+  {
+    "server_generation": 2,
+    "name": "keeper_candle_purchase",
+    "arguments": {
+      "item": "medal"
+    },
+    "is_error": true,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.49.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "item-paid-probe has 500 milli-Candle; this item costs 700",
+            "status": "error",
+            "tool": "keeper_candle_purchase"
+          },
+          "trace_id": "32",
+          "agent_id": "item-paid-probe",
+          "tool": "keeper_candle_purchase",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-30T06:43:22Z",
+          "failure_class": "workflow_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "item-paid-probe has 500 milli-Candle; this item costs 700"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "error_code": "insufficient_balance",
+        "error": "item-paid-probe has 500 milli-Candle; this item costs 700"
+      }
+    },
+    "data": {
+      "error_code": "insufficient_balance",
+      "error": "item-paid-probe has 500 milli-Candle; this item costs 700"
+    }
+  }
+]

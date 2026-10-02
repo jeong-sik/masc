@@ -324,10 +324,12 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
                     assert not any(b"no connectors registered" in row
                                    for row in screen(output).values()), screen(output)
             if leave:
-                # The roster is applied only after workspace discovery settles.
-                h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha",
+                # Observe the applied identity read without selecting a chat.
+                h.wait_for_output(process, fd, output, b"[connected]",
                                   start=start, timeout=3.0)
                 h.drain_until_quiet(process, fd, output)
+                assert any(b"Choose a Keeper before writing" in row
+                           for row in screen(output).values()), screen(output)
                 assert count(h.CONNECTORS_PATH) == 0, requests
             else:
                 # A deliberate refresh remains available after either outcome.

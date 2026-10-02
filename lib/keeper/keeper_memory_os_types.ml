@@ -58,8 +58,7 @@ type wire_reason =
       ; unexpected : string list
       }
   | Unknown_token of string
-      (** A closed vocabulary (category, origin kind, basis kind, source kind)
-          does not contain this token. *)
+      (** A vocabulary token is unknown or has a non-canonical name. *)
   | Blank_string
   | Not_a_memory_id of string
   | Not_a_board_post_id of string
@@ -328,9 +327,11 @@ let dropped_statement_of_json = function
     wire_here Expected_object
 ;;
 
-(* The librarian taxonomy as a closed sum. The LLM emits one exact category
-   token; anything outside this vocabulary is rejected. Categories are model
-   context only: no variant grants retention, expiry, or promotion authority. *)
+(* Categories label memory content; they grant no retention or mutation
+   authority. Familiar labels have presentation styles; new topics retain
+   their own validated name. *)
+type category_name = string
+
 type category =
   | Code_change
   | Fact
@@ -340,6 +341,7 @@ type category =
   | Constraint
   | Validated_approach
   | Lesson
+  | Custom of category_name
 
 let category_to_string = function
   | Code_change -> "code_change"
@@ -350,6 +352,7 @@ let category_to_string = function
   | Constraint -> "constraint"
   | Validated_approach -> "validated_approach"
   | Lesson -> "lesson"
+  | Custom name -> name
 ;;
 
 let all_categories =
@@ -374,7 +377,18 @@ let category_of_string s =
   | "constraint" -> Some Constraint
   | "validated_approach" -> Some Validated_approach
   | "lesson" -> Some Lesson
-  | _ -> None
+  | _ ->
+    let letter = function 'a' .. 'z' -> true | _ -> false in
+    let word_char c = letter c || (c >= '0' && c <= '9') in
+    let length = String.length s in
+    let rec valid index after_separator =
+      if index = length then not after_separator
+      else if word_char s.[index] then valid (index + 1) false
+      else if s.[index] = '_' && not after_separator then valid (index + 1) true
+      else false
+    in
+    if length > 0 && letter s.[0] && valid 1 false
+    then Some (Custom s) else None
 ;;
 
 (* Row-level provenance, declared in the row itself. [Authored]: an explicit

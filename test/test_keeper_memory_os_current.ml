@@ -2811,10 +2811,34 @@ let test_absorbed_record_codec () =
      | _ -> fail "record_to_json is an object")
 ;;
 
+let test_dynamic_category_roundtrip () =
+  let category = match Types.category_of_string "architecture_decision" with
+    | Some category -> category
+    | None -> fail "new category rejected" in
+  with_temp_keepers @@ fun keepers_dir ->
+  let row = { (fact ()) with category } in
+  (match replace ~keepers_dir ~facts:[row] () with
+   | Ok _ -> () | Error detail -> fail detail);
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+   | Ok (Some {Current.facts = [stored]; _}) ->
+     check string "persisted category retains its name" "architecture_decision"
+       (Types.category_to_string stored.category);
+     check string "category does not alter memory identity"
+       (Types.memory_id (fact ())) (Types.memory_id stored)
+   | Ok _ -> fail "stored fact missing"
+   | Error detail -> fail detail);
+  List.iter (fun raw ->
+    check bool ("malformed category rejected: " ^ raw) true
+      (Types.category_of_string raw = None))
+    [""; "_topic"; "topic_"; "two__words"; "topic-name"; "topic\n"; "1topic"; "Topic"]
+;;
+
 let () =
   run
     "keeper_memory_os_current"
-    [ ( "commit"
+    [ ( "dynamic categories", [test_case "new category survives persistence" `Quick
+          test_dynamic_category_roundtrip] )
+    ; ( "commit"
       , [ test_case "a commit parses and prints on the pool" `Quick
             test_a_commit_parses_and_prints_on_the_pool
         ] )

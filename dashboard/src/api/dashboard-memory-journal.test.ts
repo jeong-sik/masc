@@ -87,6 +87,19 @@ function payload(entries: unknown[], undecodable = 0) {
 }
 
 describe('memory journal', () => {
+  it('retains a dynamically named category in the pass journal', async () => {
+    stubFetch(payload([{
+      ...committed,
+      change: {
+        ...committed.change,
+        added: [{ ...committed.change.added[0], category: 'architecture_decision' }],
+      },
+    }]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.added[0]?.category).toBe('architecture_decision')
+  })
   it('keeps a commit and a failure as different members', async () => {
     stubFetch(payload([committed, failed]))
     const journal = await fetchKeeperMemoryJournal('exampleorg')

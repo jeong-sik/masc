@@ -54,7 +54,7 @@ def run(executable, no_color):
                     start=h.end_of_needle(output, b"ROUTE / PROBE", clear), timeout=3)
                 visible = screen(output)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                status = "ready / reach" if columns == 30 else "ready / reachable"
+                status = "us…nown / reacha…" if columns == 30 else "usa…nknown / reachable"
                 candidate_rows = [row for row in visible.splitlines()
                                   if suffix in row and status in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)

@@ -307,7 +307,9 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         os.write(fd, b"r")
         seen("b-booting", lambda text: b"booting" in text and no_currency(text))
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        assert no_currency(screen(output)), screen(output)
+        assert help_candle_diagnostic(screen(output),
+            "Candle unavailable: live keeper status unavailable: server booting"), screen(output)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")

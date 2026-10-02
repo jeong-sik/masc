@@ -602,6 +602,10 @@ let test_historical_never_started_leaves_no_binding () =
     state.startup_available := true;
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id never_started);
+    let retained = unwrap (Store.bindings store)
+      |> List.find (fun value -> text "instance_id" value = old_id) in
+    check int "never-started fixture has no retained observations" 0
+      (number "observation_seq" retained);
     let has_binding () =
       unwrap (Store.bindings store)
       |> List.exists (function

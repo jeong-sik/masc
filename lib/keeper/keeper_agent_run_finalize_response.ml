@@ -30,6 +30,7 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
    checkpoint and no receipt yet, so nothing raised here may escape except a
    cancellation. After a failure the next line's span covers both turns. *)
 let record_turn_boundary
+      ~task_context
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn_ref
@@ -89,7 +90,7 @@ let record_turn_boundary
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
-          Keeper_turn_boundaries.Turn_ended { turn_ref; history_at_start; position }
+          Keeper_turn_boundaries.Turn_ended { turn_ref; task_context; history_at_start; position }
       }
     in
     (match
@@ -112,6 +113,7 @@ let record_turn_boundary
    assistant text, so the line is [No_atom_history] and the round reads the
    input and the tool observations. *)
 let record_errored_official_turn_boundary
+      ~task_context
       ~config
       ~meta
       ~turn_ref
@@ -121,6 +123,7 @@ let record_errored_official_turn_boundary
       ~restart_notice_pending
   =
   record_turn_boundary
+    ~task_context
     ~config
     ~meta
     ~turn_ref
@@ -133,6 +136,7 @@ let record_errored_official_turn_boundary
 ;;
 
 let finalize
+    ~task_context
     ~config
     ~meta
     ~publication_recovery
@@ -399,6 +403,7 @@ let finalize
   in
   let* saved_checkpoint = saved_checkpoint_result in
     record_turn_boundary
+      ~task_context
       ~config
       ~meta
       ~turn_ref

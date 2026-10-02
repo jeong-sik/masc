@@ -290,9 +290,12 @@ let resource_contents_of_body ~request_id body =
    [reason] and a non-empty [handoff_context.summary]. The one operator-typed
    reason serves as both, and this stays a pure function so the test suite can
    pin the contract without a transport. *)
-let task_cancel_arguments ~task_id ~reason =
+let task_cancel_arguments ~task_id ~reason ~expected_workspace =
   [ ("task_id", `String task_id)
   ; ("action", `String "cancel")
   ; ("reason", `String reason)
   ; ("handoff_context", `Assoc [ ("summary", `String reason) ])
+  ; ("expected_workspace", `Assoc
+       [ ("base_path", `String expected_workspace.Tui_decode.sid_base_path)
+       ; ("masc_root", `String expected_workspace.sid_masc_root) ])
   ]

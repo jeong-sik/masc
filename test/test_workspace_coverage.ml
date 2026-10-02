@@ -3021,6 +3021,91 @@ let test_gc_archives_a_finished_task_over_its_stale_orphan_copy () =
       (List.length (Workspace.read_orphaned_nonterminal_tasks config)))
 ;;
 
+(* The Memory backend uses the same per-path cooperative backlog/archive
+   locks, without filesystem lease retries. Wait for the actual queued lock
+   claimant rather than choosing a sleep duration for the interleaving. *)
+let gc_wait_for_lock_waiter path =
+  let rec wait () =
+    if File_lock_eio.For_testing.holders_and_waiters ~lock_path:path < 2 then begin
+      Eio.Fiber.yield ();
+      wait ()
+    end
+  in
+  wait ()
+;;
+
+let with_gc_memory_env f =
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let root = Filename.temp_dir "masc-gc-serialization-" "" in
+    let original = Workspace.default_config root in
+    let config =
+      { original with
+        backend = Workspace_utils.Memory (Backend.Memory.create ()) }
+    in
+    ignore (Workspace.init config ~agent_name:None);
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Workspace.reset config);
+        Unix.rmdir root)
+      (fun () -> f config))
+;;
+
+(* A GC queued behind a competing pass must read the orphan snapshot after
+   acquiring the backlog lock. The competing pass replaces the stale orphan
+   with its terminal row and removes it from the backlog while holding that
+   lock. A pre-lock snapshot would resurrect the stale row and drop the
+   terminal archive record. *)
+let test_gc_queued_pass_preserves_new_terminal_archive () =
+  with_gc_memory_env (fun config ->
+    let stale = gc_make_task ~id:"task-942" ~created_at:gc_ancient_ts
+        ~status:Masc_domain.Todo in
+    append_archive config [ stale ];
+    write_tasks config [ gc_done_task "task-942" ];
+    let lock_path = Workspace_backlog.backlog_lock_path config in
+    Eio.Switch.run (fun sw ->
+      Workspace_utils.with_file_lock config lock_path (fun () ->
+        Eio.Fiber.fork ~sw (fun () -> ignore (Workspace.gc config ~days:1 ()));
+        gc_wait_for_lock_waiter lock_path;
+        append_archive config [ gc_done_task "task-942" ];
+        write_tasks config []));
+    Alcotest.(check bool) "queued GC does not resurrect the stale obligation"
+      false (gc_backlog_has config "task-942");
+    let archived = archived_task config "task-942" in
+    Alcotest.(check bool) "queued GC preserves the terminal archive row"
+      true (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* Block restore cleanup at the archive lock. The backlog commit has settled,
+   but the GC must retain its backlog lock until the stale archive copy is
+   gone; otherwise another pass can archive a newer row before cleanup. *)
+let test_gc_restore_holds_backlog_lock_through_archive_cleanup () =
+  with_gc_memory_env (fun config ->
+    let orphan = gc_make_task ~id:"task-943" ~created_at:gc_ancient_ts
+        ~status:Masc_domain.Todo in
+    append_archive config [ orphan ];
+    let archive_path = Workspace_utils_paths_backend.archive_path config in
+    let backlog_path = Workspace_backlog.backlog_lock_path config in
+    let committed, resolve_committed = Eio.Promise.create () in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      Eio.Promise.resolve resolve_committed ());
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () ->
+        Eio.Switch.run (fun sw ->
+          Workspace_utils.with_file_lock config archive_path (fun () ->
+            Eio.Fiber.fork ~sw (fun () -> ignore (Workspace.gc config ~days:1 ()));
+            Eio.Promise.await committed;
+            gc_wait_for_lock_waiter archive_path;
+            Alcotest.(check int) "GC retains backlog lock while cleanup waits"
+              1 (File_lock_eio.For_testing.holders_and_waiters ~lock_path:backlog_path))));
+    Alcotest.(check bool) "restored obligation stays live" true
+      (gc_backlog_has config "task-943");
+    Alcotest.(check bool) "cleanup removes the stale archive copy" false
+      (List.mem 943 (Workspace.read_archive_task_ids config)))
+;;
+
 (* A missing archive is an empty one: the first append creates it. *)
 let test_append_archive_tasks_creates_the_archive () =
   with_test_env (fun config ->
@@ -3789,6 +3874,14 @@ let () =
             "archives a finished task over its stale orphan copy"
             `Quick
             test_gc_archives_a_finished_task_over_its_stale_orphan_copy
+        ; Alcotest.test_case
+            "queued GC preserves a newly terminal archive row"
+            `Quick
+            test_gc_queued_pass_preserves_new_terminal_archive
+        ; Alcotest.test_case
+            "restore holds backlog lock through archive cleanup"
+            `Quick
+            test_gc_restore_holds_backlog_lock_through_archive_cleanup
         ] )
     ; (* === Task ID Parsing === *)
       ( "task_id"

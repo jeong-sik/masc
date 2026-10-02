@@ -355,15 +355,21 @@ let render_overview (state : state) =
               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
                 (Terminal_text.single_line line))
             |> List.map (fun line -> None, " " ^ line) in
-          let notice_rows = if Option.is_some state.opening_notice then 1 else 0 in
+          let notice_rows =
+            (if Option.is_some state.opening_notice then 1 else 0)
+            + (if Option.is_some state.home_decision_receipt then 1 else 0) in
           let candle_fits = spare >= 2 + notice_rows + List.length candle in
           let health = if candle_fits then health else
             match Masc_tui_candle.compact_status state.candle_observation with
             | None -> health
             | Some status -> " " ^ status ^ " · " ^ health in
           let readings =
-            [ (None, health); (Some (Theme.recede ()), work) ]
-            @ if candle_fits then candle else []
+            (match state.home_decision_receipt with
+             | None -> []
+             | Some (_, receipt) ->
+                 [None, " Last decision receipt · " ^ Terminal_text.single_line receipt])
+            @ [ (None, health); (Some (Theme.recede ()), work) ]
+            @ (if candle_fits then candle else [])
           in
           match state.opening_notice with
           | None -> readings
@@ -10096,14 +10102,14 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some value ->
               ("  " ^ label ^ " (producer-redacted JSON)")
-              :: (document_markdown ~width:(max 1 (cols - 6))
+              :: (document_markdown ~width:(max 1 (cols - 7))
                     ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
           | None -> ["  " ^ label ^ ": not carried"]
           | Some text ->
               ("  " ^ label ^ " (producer-redacted preview)")
-              :: (document_markdown ~width:(max 1 (cols - 6))
+              :: (document_markdown ~width:(max 1 (cols - 7))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
         [""; "  INPUT / OUTPUT OBSERVATIONS"]
@@ -10391,7 +10397,7 @@ let render_acting (state : state) =
     | Actions | Everything -> Acting_selection (scroll, cursor) in
   finish_surface state ~clamped ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
-let provider_history_lines (state : state) =
+let provider_history_lines ~cols (state : state) =
   match state.provider_history with
   | Provider_history_unread ->
       [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
@@ -10422,9 +10428,13 @@ let provider_history_lines (state : state) =
       in
       let chart (row : Masc_tui_usage_trend.row) =
         let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") row.limit_id in
-        Printf.sprintf "   %s · %s%s  %s  %d/%d UTC days reported"
-          (label row.scope_id) (Terminal_text.single_line limit)
-          (Terminal_text.single_line row.kind) row.marks row.reported_days days
+        let width = max 1 (cols - 7) in
+        let heading = Masc_tui_message_layout.fit_middle width (label row.scope_id) in
+        let window = Terminal_text.single_line limit ^ Terminal_text.single_line row.kind in
+        ("   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset)
+        :: List.map (fun line -> "   " ^ line)
+             (Masc_tui_message_layout.wrap_words ~max_cells:width window)
+        @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
       in
       (Printf.sprintf
          " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report"
@@ -10439,7 +10449,7 @@ let provider_history_lines (state : state) =
                   count (if count = 1 then "" else "s") ])
       @ (match trend.rows with
          | [] -> [ "   No reports recorded in this window" ]
-         | rows -> List.map chart rows)
+         | rows -> List.concat_map chart rows)
 
 let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
@@ -10471,7 +10481,7 @@ let usage_lines ~cols (state : state) =
         (Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
            kuw_window_minutes freshness)
         :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
-            else List.map
+            else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens =
                   Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
@@ -10486,12 +10496,19 @@ let usage_lines ~cols (state : state) =
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
                 in
-                Printf.sprintf
-                  "   %s · %d turns · tokens %s (%d reported, %d missing) · cost %s (%d reported, %d missing) · %s"
-                  (Terminal_text.single_line row.kur_name)
-                  row.kur_turn_samples tokens row.kur_tokens_reported
-                  row.kur_tokens_missing cost row.kur_cost_reported
-                  row.kur_cost_missing coverage)
+                let width = max 1 (cols - 7) in
+                let heading = Masc_tui_message_layout.fit_middle width
+                    (Terminal_text.single_line row.kur_name) in
+                [ "   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset ]
+                @ List.concat_map
+                    (fun line -> List.map (fun text -> "   " ^ text)
+                        (Masc_tui_message_layout.wrap_words ~max_cells:width line))
+                    [ Printf.sprintf "%d turns · %s" row.kur_turn_samples coverage
+                    ; Printf.sprintf "Tokens  %s · %d reported, %d missing"
+                        tokens row.kur_tokens_reported row.kur_tokens_missing
+                    ; Printf.sprintf "Cost    %s · %d reported, %d missing"
+                        cost row.kur_cost_reported row.kur_cost_missing
+                    ; "" ])
               kuw_rows)
   in
   let transport =
@@ -10502,25 +10519,30 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  let lines = scopes @ [ "" ] @ provider_history_lines state
-    @ [ "" ] @ keepers @ [ "" ] @ transport in
-  (* Wrap before the scroll window is counted. Coverage and missing samples
-     are evidence, so a narrow terminal must keep them as reachable rows. *)
-  List.concat_map
-    (fun line ->
-      if String.equal line "" then [ "" ]
-      else if Message_layout.display_width line <= framed_inner_width cols then [line]
-      else
-        let rec leading index =
-          if index < String.length line && Char.equal line.[index] ' '
-          then leading (index + 1) else index in
-        let indent_cells = leading 0 in
-        let indent = String.make indent_cells ' ' in
-        let body = String.sub line indent_cells (String.length line - indent_cells) in
-        Message_layout.split_styled_cells
-          ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
-        |> List.map (fun text -> indent ^ text))
-    lines
+  let wrap_evidence lines =
+    (* Wrap before the scroll window is counted. Coverage and missing samples
+       remain reachable rows on narrow terminals. *)
+    List.concat_map
+      (fun line ->
+        if String.equal line "" then [ "" ]
+        else if Message_layout.display_width line <= framed_inner_width cols then [line]
+        else
+          let rec leading index =
+            if index < String.length line && Char.equal line.[index] ' '
+            then leading (index + 1) else index in
+          let indent_cells = leading 0 in
+          let indent = String.make indent_cells ' ' in
+          let body = String.sub line indent_cells (String.length line - indent_cells) in
+          Message_layout.split_styled_cells
+            ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+          |> List.map (fun text -> indent ^ text))
+      lines
+  in
+  match state.usage_section with
+  (* Plan cards already have a cell-sized border and wrapped contents. *)
+  | Usage_plan -> scopes
+  | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
+  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -10555,8 +10577,20 @@ let render_metrics (state : state) =
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
       else begin
+        let pill section label =
+          if state.usage_section = section then Ansi.reverse ^ " " ^ label ^ " " ^ Ansi.reset
+          else Theme.recede () ^ " " ^ label ^ " " ^ Ansi.reset
+        in
+        let navigation_rows = if budget >= 3 then 1 else 0 in
+        let spacing_rows = if budget >= 6 then 1 else 0 in
+        if navigation_rows > 0 then
+          c.push (pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
+                  ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view");
+        if spacing_rows > 0 then c.push "";
         let lines = usage_lines ~cols state in
-        let height = max 0 (budget - 1) in
+        let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
+        let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
+        let height = content_budget - overflow_rows in
         let max_scroll = max 0 (List.length lines - height) in
         let scroll = min max_scroll (max 0 state.metrics_scroll) in
         drawn_metrics_scroll := scroll;
@@ -10564,7 +10598,7 @@ let render_metrics (state : state) =
           (fun index line ->
             if index >= scroll && index < scroll + height then c.push line)
           lines;
-        if List.length lines > height then
+        if overflow_rows > 0 then
           c.push (Printf.sprintf " [rows %s · j/k to scroll]"
                     (Masc_tui_scroll.window_text ~scroll ~height
                        (List.length lines)))
@@ -11698,7 +11732,7 @@ let render_config_models (state : state) =
              if i < detail_height
              then (
                let line =
-                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 6))
+                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 7))
                in
                if i = 0
                then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
@@ -11879,10 +11913,14 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
+     let caret = if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏" in
+     let input =
+       Message_layout.input_viewport
+         ~max_cells:(max 0 (framed_inner_width cols - 4 - Message_layout.display_width caret))
+         (Terminal_text.single_line session.vws_input)
+     in
      box_line head cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
-             (Terminal_text.single_line session.vws_input)) Ansi.reset
-          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold input Ansi.reset caret));
   (match session.vws_step with
    | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
    | Voice_wizard.Model | Voice_wizard.Voice ->
@@ -11937,8 +11975,8 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    reader has to keep apart. *)
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
-  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
+  let head = Buffer.create 256 in
   let selector label items cursor draw =
     let position =
       if items = [] then "0/0"

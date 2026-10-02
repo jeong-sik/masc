@@ -1053,6 +1053,7 @@ let exact_input_payload
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "goal_context", Keeper_librarian.goal_context_to_json inp.goal_context
+    ; "historical_task_contexts", Keeper_librarian_task_context.to_json inp.historical_task_contexts
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "prompt", prompt_material_payload ~key:prompt_key prompt_material
     ; ( "rendered_prompt_variables"

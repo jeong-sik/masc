@@ -158,6 +158,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
   const spec = item.declared_spec
   if (!spec) return null
   const caps = spec.model?.capabilities
+  const declaredContext = spec.binding?.max_context ?? spec.provider?.max_context ?? spec.model?.max_context
   const samplingConfig = nonEmptyParts([
     typeof spec.model?.top_p === 'number' ? `top_p:${spec.model.top_p}` : null,
     typeof spec.model?.top_k === 'number' ? `top_k:${spec.model.top_k}` : null,
@@ -211,7 +212,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     typeof spec.provider?.connect_timeout_s === 'number' ? `connect:${spec.provider.connect_timeout_s}s` : null,
     typeof spec.provider?.exact_body_timeout_s === 'number' ? `Exact timeout:${spec.provider.exact_body_timeout_s}s` : null,
     behaviorParts.length > 0 ? `behavior:${behaviorParts.join(',')}` : null,
-    typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
+    typeof declaredContext === 'number' ? `ctx:${declaredContext}` : null,
     typeof spec.model?.temperature === 'number' ? `temp:${spec.model.temperature}` : null,
     typeof spec.model?.tools_support === 'boolean' ? `tools:${spec.model.tools_support ? 'on' : 'off'}` : null,
     typeof spec.model?.streaming === 'boolean' ? `stream:${spec.model.streaming ? 'on' : 'off'}` : null,

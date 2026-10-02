@@ -58,8 +58,14 @@ let classify_rejected_slot (slot : rejected_slot) ~declared_target_rejected ~con
     | None -> Unknown_to_both_registries)
 ;;
 
+type runtime_observation =
+  { candidate : Runtime_candidate_backpressure.candidate
+  ; quota_scope : Runtime_quota_window.scope
+  }
+
 type t =
-  { resolver_snapshot : Exact_output.resolver_snapshot
+  { runtime_observations : (string * runtime_observation) list
+  ; resolver_snapshot : Exact_output.resolver_snapshot
   ; declared_lanes : Runtime_schema.exact_output_lane_decl list
   ; exact_output_lanes : admitted_lane list
   ; rejected_slots : rejected_slot list
@@ -107,6 +113,7 @@ type publication_error =
 type selected_slot =
   { slot_id : string
   ; admitted_target : Exact_output.admitted_target
+  ; runtime_observation : runtime_observation option
   }
 
 type resolved_lane =
@@ -317,7 +324,7 @@ let check_publication ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes 
   |> Result.map (fun (_admitted_lanes, _rejected_slots) -> ())
 ;;
 
-let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
@@ -327,7 +334,8 @@ let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_s
       admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
     in
     let registry =
-      { resolver_snapshot
+      { runtime_observations
+      ; resolver_snapshot
       ; declared_lanes = lanes
       ; exact_output_lanes
       ; rejected_slots
@@ -368,7 +376,7 @@ let reserve candidate =
    targets the process started on, while the save reported the change applied
    (#38779). Handles admitted against the previous snapshot are never reused,
    because they carry that snapshot's binding. *)
-let prepare_replacement ~lanes ~excused_lane_ids ~load_resolver_snapshot =
+let prepare_replacement ~runtime_observations ~lanes ~excused_lane_ids ~load_resolver_snapshot =
   let base = Atomic.get published in
   match base, lanes with
   | None, [] -> Ok { base; candidate = None }
@@ -390,7 +398,8 @@ let prepare_replacement ~lanes ~excused_lane_ids ~load_resolver_snapshot =
       { base
       ; candidate =
           Some
-            { resolver_snapshot
+            { runtime_observations
+            ; resolver_snapshot
             ; declared_lanes = lanes
             ; exact_output_lanes
             ; rejected_slots
@@ -557,7 +566,8 @@ let resolve_lane registry ~lane_id =
                    enable_thinking
                | None -> admitted_target
              in
-             ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
+             ({ slot_id = slot.slot_id; admitted_target;
+                runtime_observation = List.assoc_opt slot.slot_id registry.runtime_observations } : selected_slot))
           lane.slots
       in
       Ok { selected_slots; cli_slots = lane.cli_slots }

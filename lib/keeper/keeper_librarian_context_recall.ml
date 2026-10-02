@@ -97,11 +97,23 @@ let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~k
     match current.pockets with
     | [] -> Some empty_notice
     | _ :: _ ->
-      match read (path ~keepers_dir ~keeper_name) with
-      | Ok None -> unavailable "working context recall index is absent"
+      let repair () =
+        (* The index is a projection, not authority. Repair it without a new
+           model pass, even when pending inputs have not changed. Publication
+           rechecks generation/revision under the owner lock. *)
+        Result.bind (publish ~base_path ~keepers_dir ~keeper_name current) (fun () ->
+          match read (path ~keepers_dir ~keeper_name) with
+          | Ok (Some repaired) when Context.version current = (repaired.generation, repaired.revision) -> Ok repaired
+          | Ok _ -> Error "working context changed during artifact repair"
+          | Error detail -> Error detail)
+      in
+      let current_index = match read (path ~keepers_dir ~keeper_name) with
+        | Ok (Some index) when Context.version current = (index.generation, index.revision) -> Ok index
+        | Ok None | Ok (Some _) | Error _ -> repair ()
+      in
+      match current_index with
       | Error detail -> unavailable detail
-      | Ok (Some index)
-        when Context.version current = (index.generation, index.revision) ->
+      | Ok index ->
         before_retain ();
         let store = Tool_blob_store.create ~base_path in
         let readable = match Tool_blob_store.fetch store ~sha256:index.artifact.sha256 with
@@ -118,13 +130,7 @@ let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~k
                   | Ok _ -> Error "working context index changed before retention"
                   | Error detail -> Error detail)))
           | Ok None | Error _ ->
-            (* Rebuild from the exact authority; publish rechecks its version
-               under lock, so a late repair cannot replace newer context. *)
-            Result.bind (publish ~base_path ~keepers_dir ~keeper_name current) (fun () ->
-              match read (path ~keepers_dir ~keeper_name) with
-              | Ok (Some repaired) when Context.version current = (repaired.generation, repaired.revision) -> Ok repaired
-              | Ok _ -> Error "working context changed during artifact repair"
-              | Error detail -> Error detail) in
+            repair () in
         (match readable with
          | Error detail -> unavailable detail
          | Ok index ->
@@ -133,11 +139,6 @@ let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~k
           index.revision index.pocket_count index.source_count index.artifact.sha256
           (Tool_output.encode_for_agent_core
              (Tool_output.Stored (Tool_output.with_preview index.artifact "Organized working context; source revalidation required")))))
-      | Ok (Some index) ->
-        let generation, revision = Context.version current in
-        unavailable (Printf.sprintf
-          "index owner version is stale index_generation=%s index_revision=%d owner_generation=%s owner_revision=%d"
-          index.generation index.revision generation revision)
 
   with
   | Eio.Cancel.Cancelled _ as error -> raise error

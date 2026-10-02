@@ -8152,3 +8152,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_continuity_admission)))
+
+(test
+ (name test_server_keeper_build_maintenance)
+ (modules test_server_keeper_build_maintenance)
+ (libraries alcotest masc masc_server masc_test_deps unix))

@@ -215,6 +215,81 @@ let test_a_rework_rerun_ends_every_admitted_login () =
   check (Alcotest.list Alcotest.string) "no other keeper keeps one either" []
     (held_expectations state "B")
 
+let test_late_callback_is_observed_after_authority_recovery () =
+  let state = identity_state () in
+  let origin = workspace_identity ~base_path:"/w/a" ~masc_root:"/r" in
+  let keeper : Decode.keeper =
+    { k_origin = Decode.Persisted_keeper
+    ; k_name = "A"
+    ; k_paused = false
+    ; k_identity =
+        Ok
+          { k_trace_id = "trace-A"
+          ; k_created_at = "2026-09-01T00:00:00Z"
+          ; k_updated_at = "2026-09-05T12:00:00Z"
+          }
+    ; k_activity = None
+    }
+  in
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  state.keepers <- [ keeper ];
+  state.view <- Masc_tui_types.Keepers Masc_tui_types.Keeper_detail;
+  state.detail_tab <- Masc_tui_types.Detail_identity;
+  let request =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:"A"
+      ~provider_id:"slack"
+  in
+  Masc_tui_identity_updates.login_started state request
+    ~report:(fun _ _ -> ())
+    ~notice:(fun ~keeper_name:_ _ -> ())
+    (Masc_tui_identity_model.Login_started
+       { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent" });
+  check (Alcotest.list Alcotest.string) "consent was presented"
+    [ "https://auth/A/consent" ] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "the wait was recorded" [ "slack" ]
+    (held_expectations state "A");
+
+  state.server_identity <- None;
+  Masc_tui_types.withdraw_identity_readings state;
+  check (Alcotest.list Alcotest.string) "unread hides the consent" []
+    (pending_urls state "A");
+  check Alcotest.bool "unread workspace cannot poll" false
+    (Masc_tui_types.identity_login_recovery_poll_ready state "A");
+
+  state.server_identity <- Some origin;
+  let recovery_read =
+    Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
+      ~keeper:"A" ~now_ns:1L
+  in
+  check Alcotest.bool "pending recovery read blocks a second read" false
+    (Masc_tui_types.identity_login_recovery_poll_ready state "A");
+  Masc_tui_identity_updates.providers_loaded state recovery_read
+    (Ok [ declared "slack" "Slack" ]);
+  check (Alcotest.list Alcotest.string)
+    "incomplete provider read keeps the browser wait" [ "slack" ]
+    (held_expectations state "A");
+  check Alcotest.bool "the next tick can re-read the same workspace" true
+    (Masc_tui_types.identity_login_recovery_poll_ready state "A");
+
+  let late_callback_read =
+    Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
+      ~keeper:"A" ~now_ns:2L
+  in
+  Masc_tui_identity_updates.providers_loaded state late_callback_read
+    (Ok [ declared ~tools:[ "postMessage" ] "slack" "Slack" ]);
+  check Alcotest.bool "the attached provider is visible" true
+    (match state.identity_view with
+     | Some
+         ( "A"
+         , [ Masc_tui_identity_model.Identity_declared
+               { idp_id = "slack"; idp_tools = Some _; _ } ] ) -> true
+     | _ -> false);
+  check (Alcotest.list Alcotest.string) "the completed wait retires" []
+    (held_expectations state "A");
+  check Alcotest.bool "the tick stops after attachment" false
+    (Masc_tui_types.identity_login_recovery_poll_ready state "A")
+
 let test_workspace_withdrawal_retires_identity_consent () =
   let state = identity_state () in
   Masc_tui_types.remember_identity_login state
@@ -760,5 +835,7 @@ let () =
             test_a_rework_rerun_ends_every_admitted_login;
           Alcotest.test_case "a workspace change keeps only its own expectations"
             `Quick test_a_workspace_change_keeps_only_its_own_expectations;
+          Alcotest.test_case "late callback is observed after authority recovery"
+            `Quick test_late_callback_is_observed_after_authority_recovery;
         ] );
     ]

@@ -11001,19 +11001,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        && state.detail_tab = Detail_identity
      then
        match selected_keeper state with
-       | Some keeper when Option.is_none
-             (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
-                ~keeper:keeper.k_name) ->
-           let recoverable expectation =
-             Option.is_some state.server_identity
-             && Masc_tui_types.identity_expectation_workspace_matches
-                  ~origin:expectation.Masc_tui_types.ile_origin state
-           in
-           if
-             List.exists recoverable
-               (Masc_tui_types.identity_expectations_for_keeper state
-                  keeper.k_name)
-           then Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+       | Some keeper
+         when Masc_tui_types.identity_login_recovery_poll_ready state keeper.k_name ->
+           Masc_tui_identity_requests.launch_view state ~host:server_peer_host
              ~deliver:(workspace_enqueue state mailbox) keeper.k_name
        | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the

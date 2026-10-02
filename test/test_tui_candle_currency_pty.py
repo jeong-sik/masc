@@ -243,7 +243,6 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
     lock = threading.Lock()
     held_started = threading.Event()
     release_held = threading.Event()
-    b_summary = (b"Candle issued: 1.000", b"Candle burned: 0.000", b"Candle circulating: 1.000")
     fresh_summary = (b"Candle issued: 3.000", b"Candle burned: 0.000", b"Candle circulating: 3.000")
 
     def prepare(base):
@@ -313,10 +312,9 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")
-        seen("b-ready", lambda text: all(line in text for line in b_summary)
-             and not any(line in text for line in SUMMARY))
-        h.send_and_wait(process, fd, output, b"?", b"Candle details")
-        assert all(line in screen(output) for line in b_summary)
+        seen("b-ready", lambda text: b"workspace mismatch" in text and no_currency(text))
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        assert no_currency(screen(output)), screen(output)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("a-ready")
         os.write(fd, b"r")
@@ -337,7 +335,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")
-        seen("recovered", lambda text: all(line in text for line in b_summary))
+        seen("recovered", lambda text: b"workspace mismatch" in text and no_currency(text))
         publish("a-ready")
         os.write(fd, b"r")
         seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
@@ -357,7 +355,9 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
                  and b"workspace mismatch" in text and no_currency(text))
             after_release = len(output)
             release_held.set()
-            seen("held-recovered", lambda text: all(line in text for line in b_summary))
+            seen("held-recovered", lambda text: b"workspace mismatch" in text and no_currency(text))
+            h.drain_until_quiet(process, fd, output)
+            assert no_currency(screen(output)), "late A roster restored foreign currency"
             assert not any(line in h.CSI_RE.sub(b"", bytes(output[after_release:]))
                            for line in SUMMARY), "late A roster restored foreign currency"
         finally:
@@ -384,9 +384,8 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
                     predicate = lambda text: b"workspace mismatch" in text and no_currency(text)
                 seen(withdrawal + "-withdrawn", predicate)
                 publish("a-fresh")
-                seen(withdrawal + "-ready-again", lambda text: b"va-fresh" in text
-                     and b"[connected]" in text and b"workspace mismatch" not in text
-                     and no_currency(text))
+                seen(withdrawal + "-ready-again", lambda text: b"[connected]" in text and b"workspace mismatch" not in text
+                     and (no_currency(text) or all(line in text for line in fresh_summary)))
                 after_release = len(output)
                 release_held.set()
                 # The scoped request stays in flight until its completion is

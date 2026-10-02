@@ -18,12 +18,12 @@ def run(executable: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC Workspace")
-        h.wait_for_output(process, fd, output, ERROR, start=0, timeout=10)
         h.resize_and_wait(
             process, fd, output, rows=30, columns=140,
-            needle=ERROR, controls=(h.FULL_REDRAW,),
+            needle=b"MASC Workspace", controls=(h.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
+        h.wait_for_output(process, fd, output, ERROR, start=0, timeout=10)
         screen = h.screen_text(bytes(output))
         if screen.count(ERROR) != 1:
             raise AssertionError(f"Workspace lost or repeated the cause: {screen!r}")

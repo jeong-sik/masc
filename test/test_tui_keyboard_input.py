@@ -6461,6 +6461,7 @@ def escape_to_keeper_detail(
     *,
     name: bytes,
     presses: int = 4,
+    destination: bytes | None = None,
 ) -> None:
     """Leave a keeper's chat for its detail, however many Escapes that takes.
 
@@ -6479,7 +6480,7 @@ def escape_to_keeper_detail(
     The bound is here so a surface that never leaves fails as a test rather
     than hangs. Arriving is the assertion; the number of presses is not.
     """
-    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    title = destination if destination is not None else b"Keepers \xe2\x96\xb8 \x1b[1m" + name
     for _ in range(presses):
         start = len(output)
         os.write(master_fd, b"\x1b")
@@ -9404,7 +9405,7 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"alpha"))
         os.write(master_fd, b"q")
 
     return interact
@@ -9734,12 +9735,11 @@ def run_tools_request_identity_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/tools?keeper=beta"] = inventory("beta", "keeper_beta_current")
     async_calls = 0
     async_lock = threading.Lock()
-    settled = {n: threading.Event() for n in range(1, 5)}
+    settled = {n: threading.Event() for n in range(1, 3)}
 
     def async_read() -> HttpResponse:
         nonlocal async_calls
-        # launch_tools_load enqueues Tools_loaded before this sequential GET.
-        # This is a response-settlement barrier, not an arbitrary sleep.
+        # Only the current inventory request launches this observation GET.
         with async_lock:
             async_calls += 1
             event = settled.get(async_calls)
@@ -9784,20 +9784,23 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 if async_calls != 1:
                     raise AssertionError("held alpha request settled before its fixture response")
             alpha_late.release.set()
-            await_event(settled[2], "late alpha response did not settle")
+            await_event(alpha_late.completed, "late alpha response did not return")
             assert_current(b"keeper_beta_current", columns=119)
 
             fixtures["/api/v1/dashboard/tools?keeper=beta"] = beta_refresh_error
             os.write(master_fd, b"r")
             await_event(beta_refresh_error.requested, "older beta refresh did not start")
             send_and_wait(process, master_fd, output, b"r", b"keeper_beta_newest")
-            await_event(settled[3], "newer beta refresh did not settle")
+            await_event(settled[2], "newer beta refresh did not settle")
             with async_lock:
-                if async_calls != 3:
+                if async_calls != 2:
                     raise AssertionError("held beta error settled before its fixture response")
             beta_refresh_error.release.set()
-            await_event(settled[4], "obsolete same-keeper error did not settle")
+            await_event(beta_refresh_error.completed, "obsolete same-keeper error did not return")
             assert_current(b"keeper_beta_newest", columns=120)
+            with async_lock:
+                if async_calls != 2:
+                    raise AssertionError("stale inventory launched an async observation read")
             captured = bytes(output)
             end = captured.rfind(FRAME_END) + len(FRAME_END)
             redraw = captured.rfind(FULL_REDRAW, 0, end)

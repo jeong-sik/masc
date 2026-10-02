@@ -3552,6 +3552,9 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some identity ->
+  match keeper_item_revision state keeper_name with
+  | Error detail -> state.item_account_error <- Some detail
+  | Ok _ ->
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -13661,7 +13664,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
-         && item_authority_ready state then
+         && item_authority_ready state
+         && Result.is_ok (keeper_item_revision state request.drr_keeper) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

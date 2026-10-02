@@ -324,9 +324,9 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
                     assert not any(b"no connectors registered" in row
                                    for row in screen(output).values()), screen(output)
             if leave:
-                # The roster is applied only after workspace discovery settles.
-                h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha",
-                                  start=start, timeout=3.0)
+                # Discovery can settle without selecting a conversation.
+                assert h.wait_for_fixture_event(process, fd, output,
+                    health.completed, timeout=3.0)
                 h.drain_until_quiet(process, fd, output)
                 assert count(h.CONNECTORS_PATH) == 0, requests
             else:

@@ -118,7 +118,8 @@ def run(executable):
             h.drain_until_quiet(process, master_fd, output)
             assert not any(b"MASC Answering" in row for row in current_rows(output)), current_rows(output)
             # In chat q belongs to the draft. Leave chat before asking to quit.
-            h.escape_to_keeper_detail(process, master_fd, output, name=target)
+            h.escape_to_keeper_detail(process, master_fd, output, name=target,
+                                      destination=b"MASC Keepers")
             os.write(master_fd, b"q")
 
         h.run_terminal_scenario(executable,

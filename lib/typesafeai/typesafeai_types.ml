@@ -311,7 +311,30 @@ let option_of_label set label =
 
 let decode_choice set = function
   | Choice_answer { choice; probabilities; confidence } ->
-    let* choice = option_of_label set choice in
+    let* selected = option_of_label set choice in
+    let* confidence = confidence_value ~field:"choice confidence" confidence in
+    let labels = List.map fst probabilities in
+    let expected = List.map set.label set.options in
+    let* () =
+      if List.length labels <> List.length (List.sort_uniq String.compare labels)
+      then Error "typesafeai: duplicate choice probability option"
+      else if List.sort String.compare labels <> List.sort String.compare expected
+      then Error "typesafeai: probabilities must cover every declared choice option"
+      else Ok () in
+    let* () =
+      if List.for_all (fun (_, probability) ->
+          Float.is_finite probability && probability >= 0.0 && probability <= 1.0) probabilities
+      then Ok () else Error "typesafeai: choice probabilities must be finite and in [0, 1]" in
+    let sum = List.fold_left (fun sum (_, probability) -> sum +. probability) 0.0 probabilities in
+    (* The protocol requires a unit sum. Bounded unit-interval additions may
+       accumulate one machine epsilon per term; this allows representation
+       roundoff, not a model-confidence or semantic acceptance threshold. *)
+    let roundoff = float_of_int (List.length probabilities) *. epsilon_float in
+    let* () = if abs_float (sum -. 1.0) <= roundoff then Ok ()
+      else Error "typesafeai: choice probabilities must sum to 1" in
+    let selected_probability = List.assoc choice probabilities in
+    let* () = if List.for_all (fun (_, probability) -> probability <= selected_probability) probabilities
+      then Ok () else Error "typesafeai: choice must have maximal probability" in
     let rec decode_probabilities acc = function
       | [] -> Ok (List.rev acc)
       | (label, probability) :: rest ->
@@ -319,7 +342,7 @@ let decode_choice set = function
         decode_probabilities ((option, probability) :: acc) rest
     in
     let* probabilities = decode_probabilities [] probabilities in
-    Ok ({ choice; probabilities; confidence } : _ decoded_choice)
+    Ok ({ choice = selected; probabilities; confidence } : _ decoded_choice)
   | Score_answer _ -> Error "typesafeai: expected a choice answer, got a score answer"
   | Noul_answer _ -> Error "typesafeai: expected a choice answer, got a noul answer"
 ;;

@@ -2,7 +2,7 @@
 
 ## 공통 헤더
 
-- 날짜(ISO8601): 2026-10-02T07:05:00Z
+- 날짜(ISO8601): 2026-10-02T07:07:44Z
 - 작성자: Codex
 - 결정 ID: tui-face-icons-20261002
 - 적용 대상: native TUI, parent d9fac602750b971b78681152cd6884eb046f6b6d / PR #40810
@@ -14,7 +14,7 @@ Info/chat now use a face-centred identity thumbnail: 16×8 Mosaic cells or four 
 
 - 항목: smaller readable faces, distinct preview cache, unchanged navigation/composer and outfit inspection
 - 출처: repo wrapper build, native unit/PTY commands below, [capture manifest](face-32/manifest.json)
-- 확인일시: 2026-10-02T07:05:00Z
+- 확인일시: 2026-10-02T07:07:44Z
 - 신뢰도: High for recorded synthetic fixtures
 - 제한조건: isolated fixture PTY/browser; no installed or production session was used
 

@@ -16,6 +16,18 @@ def screen(output):
     return h.screen_text(raw[:end + len(h.FRAME_END)]).decode("utf-8", errors="strict")
 
 
+def cell_slice(text, start, end):
+    position = 0
+    selected = []
+    for char in text:
+        width = (0 if unicodedata.combining(char) else
+                 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1)
+        if start <= position < end:
+            selected.append(char)
+        position += width
+    return "".join(selected).strip()
+
+
 def represents_label(shown, label):
     if shown == label:
         return True
@@ -66,7 +78,10 @@ def run(executable, no_color):
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
                 # Clipping budgets change with the frame width. Both facts must
                 # still identify their source labels on this candidate row.
-                status = candidate_rows[0].split(suffix, 1)[1].strip()
+                header = next(row for row in visible.splitlines() if "ROUTE / PROBE" in row)
+                status_start = header.index("ROUTE / PROBE")
+                status_end = header.index("DETAIL") if "DETAIL" in header else columns
+                status = cell_slice(candidate_rows[0], status_start, status_end)
                 route, probe = status.split(" / ", 1)
                 assert represents_label(route, "usage unknown"), (columns, route)
                 assert represents_label(probe, "reachable"), (columns, probe)

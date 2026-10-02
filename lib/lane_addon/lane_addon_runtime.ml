@@ -688,7 +688,6 @@ let backend ~store () = match !override with
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
       start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
-<<<<<<< HEAD
         let* sampling_handler = prepare_sampling_handler
           ~sw ~store ~instance_id ~package ~binding in
         let wrap worker = {

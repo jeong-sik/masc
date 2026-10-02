@@ -68,8 +68,14 @@ python3 scripts/item-http-acceptance.py \
   --source-sha FULL_SOURCE_SHA --output /new/temp/evidence --capture-browser
 ```
 
-A failed run is not a passing receipt. Inspect the workflow step and server
-log before interpreting the artifact.
+Once Chromium has started, a browser validation failure retains a receipt
+with `passed: false`, the last validation stage, API paths/statuses and
+screenshot hashes. Launch failures occur before this receipt handling. It attempts to capture the
+actual failed page as `item-server-failure.png`; a closed or unresponsive page
+may prevent that capture. Storage, tokens, headers, request bodies, DOM dumps
+and raw error text are excluded from this receipt. The original error still
+fails the process. A failed run is not a passing receipt. Inspect the workflow
+step and server log before interpreting the artifact.
 
 The transaction stage also rejects an owned face item in the head slot and checks that duplicate, insufficient and wrong-slot refusals leave the ledger unchanged. Both the original and equipped PNG must have valid dimensions, chunks and decoded image data.
 

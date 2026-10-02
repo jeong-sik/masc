@@ -1328,7 +1328,9 @@ let test_codex_cancelled_hooks_only_report_committed_rows () =
              else
                invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
                  invocation; tool_name="Read"; input=`Assoc [];
-                 output=Error "read refused"; result_bytes=12; duration_ms=1. })) with
+                 output=Error { Agent_core.Types.message = "read refused";
+                   recoverable = false; error_class = Some Agent_core.Types.Deterministic };
+                 result_bytes=12; duration_ms=1. })) with
              | () -> fail "post hook swallowed cancellation"
              | exception Eio.Cancel.Cancelled _ -> ());
             check int "only committed interrupted hooks emit a receipt"

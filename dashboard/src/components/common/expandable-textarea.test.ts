@@ -92,6 +92,17 @@ describe('ExpandableTextarea draft synchronization', () => {
     expect(onChange).toHaveBeenLastCalledWith('Before expansion')
   })
 
+  it('keeps a parent reset when fullscreen editing is cancelled', async () => {
+    act(() => { editor('Original instructions') })
+    act(() => host!.querySelector('button')!.click())
+    act(() => input(host!.querySelectorAll('textarea')[1]!, 'Local modal draft'))
+    act(() => { editor('New parent value') })
+    const cancel = Array.from(host!.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === '취소')!
+    act(() => cancel.click())
+    expect(host!.querySelector('textarea')!.value).toBe('New parent value')
+  })
+
   it('confirms the current fullscreen draft', async () => {
     const onChange = vi.fn()
     editor('Original instructions', onChange)

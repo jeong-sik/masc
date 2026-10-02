@@ -39,19 +39,25 @@ export function ExpandableTextarea({
   const [local, setLocal] = useState(value)
   const [expanded, setExpanded] = useState(false)
   const expandedOriginal = useRef(value)
+  const lastNotifiedValue = useRef(value)
 
   // Apply parent resets before the editor accepts input. A delayed effect
   // can overwrite text entered immediately after mounting or a parent reset.
   useLayoutEffect(() => {
+    // Live-input echoes keep the cancellation baseline; external resets replace it.
+    if (value !== lastNotifiedValue.current) expandedOriginal.current = value
+    lastNotifiedValue.current = value
     setLocal(value)
   }, [value])
 
   function commit(next: string) {
+    lastNotifiedValue.current = next
     setLocal(next)
     onChange(next)
   }
 
   function input(next: string) {
+    lastNotifiedValue.current = next
     setLocal(next)
     onInput?.(next)
   }

@@ -1421,6 +1421,8 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
                 "expected_workspace": expected_workspace,
                 "title": "workspace-a-fresh-task"})], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
+                                      destination=b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             release_initialize.set()

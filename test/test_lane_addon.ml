@@ -594,8 +594,12 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     let captured = instance config id |> Yojson.Safe.Util.to_assoc in
     let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-    let before = `Assoc released in
-    unwrap (Store.save_binding store ~instance_id:id before);
+    unwrap (Store.save_binding store ~instance_id:id (`Assoc released));
+    (* Store.bindings reconciles observation_seq at the front of the object.
+       Compare the same read projection on both sides of runtime recognition. *)
+    let before = match unwrap (Store.bindings store) with
+      | [binding] -> binding
+      | _ -> fail "expected exactly one released binding before recognition" in
     let binding_path = Filename.concat (Store.root store)
       (Filename.concat "bindings" (Store.digest id ^ ".json")) in
     let before_bytes = Fs_compat.load_file binding_path in

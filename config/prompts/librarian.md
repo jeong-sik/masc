@@ -304,3 +304,5 @@ Task가 없다는 뜻입니다.
 큐 원본 정리인 `working_contexts`와는 별도이며, 새 실행이나 완료 선언이 아닙니다.
 
 {{continuity}}
+
+`task_context.kind=admission_not_recorded`는 해당 턴의 Task/Goal 진입 관측이 기록되지 않았다는 뜻입니다. Task가 없었다고 해석하거나 현재 Task로 채우지 마세요. 대화와 턴 위치 증거는 그대로 정리합니다.

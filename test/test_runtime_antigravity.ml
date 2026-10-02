@@ -433,6 +433,45 @@ let test_answer_pieces_name_their_step () =
    surface. The projection completes a paragraph break in front of the second
    step: agy already ended the first with "\n", so one more. Nothing repeats,
    and the result adds nothing because the steps carried the text. *)
+let test_keeper_preserves_final_suffix_after_partial_steps () =
+  let events = ref [] in
+  with_fixture [init (); step ~state:"ACTIVE" ~text_delta:"PO" ();
+      result ~response:"PONG\n" ()] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ ->
+      let texts = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+        |> List.filter_map (function
+          | Agent_core.Types.ContentBlockDelta {index=0; delta=TextDelta text} -> Some text
+          | _ -> None) in
+      check (list string) "final reply contributes only its unstreamed suffix" ["PO"; "NG\n"] texts)
+;;
+
+let test_keeper_reconciles_four_response_steps_and_new_final () =
+  List.iter (fun response ->
+    let events = ref [] in
+    with_fixture [init (); step ~index:0 ~text_delta:"ZERO\n" ();
+        step ~index:1 ~text_delta:"ONE\n" (); step ~index:2 ~text_delta:"TWO\n" ();
+        step ~index:3 ~state:"ACTIVE" ~text_delta:"TH" (); result ~response ()]
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ ->
+            let pieces = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+              |> List.filter_map (function
+                | Agent_core.Types.ContentBlockDelta {index=0; delta=TextDelta text} -> Some text
+                | _ -> None) in
+            let tail = List.hd (List.rev pieces) in
+            let expected = if response = "ZERO\nONE\nTWO\nTHREE\n" then "REE\n"
+              else if response = "ONE\n" then "\nTH" else "\n\nDONE\n" in
+            check string "raw provider response reconciles across four displayed steps" expected tail;
+            let shown = "ZERO\n\nONE\n\nTWO\n\nTH" in
+            let expected_text = if response = "ZERO\nONE\nTWO\nTHREE\n" then shown ^ "REE\n"
+              else if response = "ONE\n" then shown else shown ^ "\n\nDONE\n" in
+            check string "four steps and final appear exactly once" expected_text (String.concat "" pieces)))
+    ["ZERO\nONE\nTWO\nTHREE\n"; "DONE\n"; "ONE\n"]
+;;
+
 let test_keeper_streams_two_response_steps_apart () =
   let events = ref [] in
   with_fixture two_response_steps (fun path ->
@@ -1551,7 +1590,11 @@ let () =
   run
     "runtime_antigravity"
     [ ( "stream-json"
-      , [ test_case
+      , [ test_case "four response steps reconcile final text" `Quick
+            test_keeper_reconciles_four_response_steps_and_new_final
+        ; test_case "partial steps retain final reply suffix" `Quick
+            test_keeper_preserves_final_suffix_after_partial_steps
+        ; test_case
             "successful official-client turn"
             `Quick
             test_successful_official_client_turn

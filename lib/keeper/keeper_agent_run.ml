@@ -1936,6 +1936,12 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_tool_execution:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id ~execution_id ->
+                              observe (Keeper_hooks_agent_core.Official_tool_result
+                                { block_index; tool_call_id; execution_id }))
+                           on_tool_stream_observation)
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:

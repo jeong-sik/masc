@@ -184,6 +184,31 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   prepare_source ?end_atom ~config ~keeper_name ~trace_id ()
   |> Result.map (function Ready prepared -> Some prepared | No_source _ -> None)
 let messages prepared = prepared.unread
+(* Use all frozen cuts before clipping: a selected unit may end inside its
+   covering turn, or an exact receipt may cover several turns. *)
+let source_spans prepared =
+  let module H = Keeper_librarian_task_context in
+  let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
+      ~messages:prepared.messages prepared.range
+    |> List.sort (fun (a : R.atom_cut) (b : R.atom_cut) ->
+        compare (a.cut_end_atom, a.cut_line) (b.cut_end_atom, b.cut_line)) in
+  let _, reversed = List.fold_left (fun (start_atom, reversed) (cut : R.atom_cut) ->
+    let end_atom = min prepared.end_atom cut.cut_end_atom in
+    if end_atom <= start_atom then start_atom, reversed else
+    let boundary = match List.assoc_opt cut.cut_line prepared.lines with
+      | Some (Ok boundary) -> Some boundary | Some (Error _) | None -> None in
+    let scopes = H.atom_spans ~trace_id:prepared.trace_id ~messages:prepared.messages
+      ~start_atom ~end_atom ~boundary in
+    let spans = List.map (fun scope ->
+      let messages = match scope.H.source with
+        | H.Atom_span {start_atom;end_atom;_} ->
+          R.slice prepared.messages {prepared.range with R.start_atom;end_atom}
+        | H.Boundary_only | H.Official_turn -> [] in
+      scope, messages) scopes in
+    end_atom, List.rev_append spans reversed)
+    (prepared.start_atom, []) cuts in
+  List.rev reversed
+
 type turn_window = { after : float option; through : float }
 (* A unit that stops inside its turn carries no window; the unit that
    finishes the turn carries the whole turn's, from the turn-end line at or

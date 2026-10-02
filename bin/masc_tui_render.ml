@@ -1649,6 +1649,34 @@ let schedule_delivery_word (row : schedule_row) =
   | None -> Masc_tui_theme.Glyph.no_value
   | Some status -> cut status
 
+(* What the last occurrence came to, for a row that has one line to say it.
+
+   A wake that did not succeed is the outcome. A succeeded wake hands the
+   column to the furthest step the ledger recorded -- the reading that
+   separates a wake merely taken from one that finished a turn. No wake at
+   all is no outcome: the reaction evidence beside it belongs to the
+   occurrence before (a held occurrence has no wake of its own, and a
+   projection between occurrences still carries the last one's reading), so
+   drawing it would pair a dash in the trigger column with a word about a
+   different occurrence in this one. The word is the server's own, cut of
+   its [matched_] prefix, and the caller sanitises it the way it sanitises
+   every other reading from this projection. *)
+let schedule_outcome_word (row : schedule_row) =
+  match row.sch_last_wake_status with
+  | Some Schedule_contract_values.Wake_succeeded ->
+      schedule_delivery_word row
+  | Some other -> schedule_wake_word other
+  | None -> Masc_tui_theme.Glyph.no_value
+
+(* Whether a status word names a schedule that can still act. The word is
+   the projection's own; a word this build does not name stays with the live
+   rows rather than being buried under the closed rule -- the same promise
+   the word itself makes by rendering as itself. *)
+let schedule_status_is_terminal word =
+  match Schedule_domain.schedule_status_of_string word with
+  | Ok status -> Schedule_domain.is_terminal status
+  | Error _ -> false
+
 let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -5894,25 +5922,142 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ Layout.automation_schedule_lines ~inner_width:inner
-                ~status_cells:schedule_status_word_cells
-                ~clock_cells:schedule_requested_clock_cells
-                (List.map
-                (fun (row : schedule_row) ->
-                   (* The requested clock disambiguates repeated one-shot
-                      requests. The pure layout keeps each payload summary in
-                      the main row; a long recurrence gets a continuation
-                      rather than consuming every row's summary space. *)
-                   ({ Layout.status = Terminal_text.single_line row.sch_status
-                    ; requested_clock =
-                        Terminal_text.short_timestamp row.sch_requested_at_iso
-                    ; recurrence =
-                        Terminal_text.single_line row.sch_recurrence_summary
-                    ; summary =
-                        Terminal_text.single_line
-                          (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
-                    } : Layout.automation_schedule_row))
-                rows)
+            @ (let outcome_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line (schedule_outcome_word row))
+                   rows
+               in
+               let by_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line row.sch_requested_by)
+                   rows
+               in
+               (* Every line carries a two-cell lead before the table, so the
+                  table is fitted to what the lead leaves -- the same reserve
+                  the Schedules list makes, without which the frame cuts the
+                  last column's tail on every row. *)
+               let table_inner = max 1 (inner - 2) in
+               let layout =
+                 Render_schedule.kauto_layout ~inner_width:table_inner
+                   ~status_width:schedule_status_word_cells
+                   ~clock_width:schedule_requested_clock_cells
+                   ~outcome_width:
+                     (Render_schedule.schedule_delivery_width outcome_words)
+                   ~by_width:(Render_schedule.kauto_by_width by_words)
+               in
+               let header = Render_schedule.kauto_header_row ~layout in
+               (* The rule under the names runs the header's own width, so a
+                  pane narrower than the table does not draw a rule longer
+                  than the rows under it. The closed rule below ends at the
+                  same cell, so the two rules read as one margin. *)
+               let rule_cells =
+                 min table_inner (Message_layout.display_width header) in
+               let occurrence_clock = function
+                 | Some iso -> Terminal_text.short_timestamp iso
+                 | None -> Masc_tui_theme.Glyph.no_value
+               in
+               let row_line (row : schedule_row) =
+                 (* The mark and the state word wear one colour, the state's
+                    own; the outcome wears the outcome's, so a failed wake
+                    reads red beside a state still reading live. *)
+                 let status_style = schedule_status_color row.sch_status in
+                 (* A held occurrence has no wake of its own, and the wake and
+                    ledger fields on the row still describe the occurrence
+                    before it (#38205): while the hold holds, the three
+                    occurrence cells draw nothing rather than the previous
+                    occurrence's clocks beside a state that reads due-now.
+                    Why it holds is the Schedules list's own reading -- its
+                    row carries the hold tag -- which this tab's capped-page
+                    line already points the reader to. *)
+                 let held = Option.is_some row.sch_runner_hold in
+                 let occurrence_clock value =
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else occurrence_clock value
+                 in
+                 let outcome =
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else Terminal_text.single_line (schedule_outcome_word row)
+                 in
+                 "  "
+                 ^ Render_schedule.kauto_row ~layout
+                     ~styles:
+                       ({ kstyle_mark = status_style
+                        ; kstyle_status = status_style
+                        ; kstyle_outcome = semantic_status_color outcome
+                        ; kstyle_recurrence = Ansi.dim
+                        ; kstyle_by = Theme.recede ()
+                        } : Render_schedule.kauto_row_styles)
+                     { Render_schedule.krow_mark =
+                         Render_schedule.kauto_status_mark row.sch_status
+                     ; krow_status = Terminal_text.single_line row.sch_status
+                     ; krow_triggered =
+                         occurrence_clock row.sch_last_wake_started_at_iso
+                     ; krow_outcome = outcome
+                     ; krow_received =
+                         occurrence_clock row.sch_stimulus_recorded_at_iso
+                     ; krow_recurrence =
+                         Terminal_text.single_line row.sch_recurrence_summary
+                     ; krow_by = Terminal_text.single_line row.sch_requested_by
+                     ; krow_requested =
+                         Terminal_text.short_timestamp row.sch_requested_at_iso
+                     ; krow_what =
+                         Terminal_text.single_line
+                           (Option.value ~default:row.sch_schedule_id
+                              row.sch_payload_summary)
+                     }
+               in
+               (* The page's live rows, then its closed ones under a labelled
+                  rule. The server sends live-first; the partition keeps each
+                  group's order and makes the grouping this pane's own rather
+                  than the server's sort happening to be right. *)
+               let live, closed =
+                 List.partition
+                   (fun (row : schedule_row) ->
+                      not (schedule_status_is_terminal row.sch_status))
+                   rows
+               in
+               let closed_rule =
+                 if closed = [] || live = [] then []
+                 else
+                   let words =
+                     List.map
+                       (fun (row : schedule_row) -> row.sch_status)
+                       closed
+                   in
+                   let rec first_seen acc = function
+                     | [] -> List.rev acc
+                     | word :: rest ->
+                         if List.mem word acc then first_seen acc rest
+                         else first_seen (word :: acc) rest
+                   in
+                   let label =
+                     Render_schedule.kauto_group_label ~title:"closed"
+                       (List.map
+                          (fun word ->
+                             Printf.sprintf "%d %s"
+                               (List.length
+                                  (List.filter (String.equal word) words))
+                               (Terminal_text.single_line word))
+                          (first_seen [] words))
+                   in
+                   let lead = "  \xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+                   let rest_cells =
+                     max 0
+                       (min (2 + rule_cells) inner
+                          - Message_layout.display_width lead)
+                   in
+                   [ Theme.recede () ^ lead ^ draw_hline rest_cells
+                     ^ Ansi.reset
+                   ]
+               in
+               [ Theme.recede () ^ "  " ^ header ^ Ansi.reset
+               ; Theme.recede () ^ "  " ^ draw_hline rule_cells ^ Ansi.reset
+               ]
+               @ List.map row_line live
+               @ closed_rule
+               @ List.map row_line closed)
       | Some _ | None ->
           if error_lines <> [] then []
           else [ tab_loading_row "loading this Keeper's schedules" ]
@@ -7874,9 +8019,21 @@ let render_repository_list (state : state) =
       let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
       if split then begin
         let height = max (List.length listing) (List.length detail) in
-        for index = 0 to min budget height - 1 do
-          c.push (fit_width (Option.value (List.nth_opt listing index) ~default:"") list_width
-            ^ "  " ^ fit_width (Option.value (List.nth_opt detail index) ~default:"") detail_width)
+        let count = min budget height in
+        (* Both panels through the list-window helper the scroll panes read:
+           one array per panel, each row reads its own cells. No row of the
+           loop walks either list to find itself -- the walk is what #40177's
+           for-shaped zip left here, and it survives a [List.init] reshape,
+           so the guard going green on that reshape would have been the
+           shape leaving, not the walk. *)
+        let left = Rows.of_list ~first:0 ~height:count listing in
+        let right = Rows.of_list ~first:0 ~height:count detail in
+        for index = 0 to count - 1 do
+          c.push
+            (fit_width (Option.value (Rows.at left index) ~default:"") list_width
+            ^ "  "
+            ^ fit_width (Option.value (Rows.at right index) ~default:"")
+                detail_width)
         done
       end else begin
         List.iter c.push listing;

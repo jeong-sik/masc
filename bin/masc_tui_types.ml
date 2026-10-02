@@ -6068,6 +6068,7 @@ type state = {
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  mutable msg_unconfirmed_workspace: workspace_input_identity option;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -8420,6 +8421,7 @@ let create_state
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
+  msg_unconfirmed_workspace = None;
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = ("", [], [], None);

@@ -553,7 +553,9 @@ let save_message_draft ?workspace state =
   | Some keeper_name ->
       let workspace = match workspace with
         | Some workspace -> workspace
-        | None -> workspace_input_identity_of_server state.server_identity in
+        | None -> (match state.msg_unconfirmed_workspace with
+            | Some _ as workspace -> workspace
+            | None -> workspace_input_identity_of_server state.server_identity) in
       let key = workspace, keeper_name in
       let others = List.remove_assoc key state.msg_drafts in
       let draft = { kcd_text = Buffer.contents state.msg_input;
@@ -570,7 +572,10 @@ let restore_message_draft state keeper_name =
   state.msg_attachments <- [];
   state.msg_references <- [];
   state.msg_attachments_since <- None;
-  match List.assoc_opt (workspace_input_identity_of_server state.server_identity, keeper_name) state.msg_drafts with
+  let workspace = match state.msg_unconfirmed_workspace with
+    | Some _ as workspace -> workspace
+    | None -> workspace_input_identity_of_server state.server_identity in
+  match List.assoc_opt (workspace, keeper_name) state.msg_drafts with
   | None -> ()
   | Some draft ->
       Buffer.add_string state.msg_input draft.kcd_text;
@@ -836,6 +841,8 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     restore_keeper_chat_page state keeper_name;
   end;
   state.msg_target_keeper_name <- Some keeper_name;
+  if state.workspace_identity <> Workspace_identity_unread then
+    state.msg_unconfirmed_workspace <- None;
   state.opening_notice <- None;
   (if remember_home_chat then
        (match Keeper_id.Keeper_name.of_string keeper_name with
@@ -10202,6 +10209,10 @@ let apply_server_identity_reading state reading =
   in
   if not same_item_authority then withdraw_keeper_items state;
   let previous = state.workspace_identity in
+  let chat_workspace = match state.msg_unconfirmed_workspace with
+    | Some _ as workspace -> workspace
+    | None -> previous_input_workspace
+  in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
@@ -10263,7 +10274,47 @@ let apply_server_identity_reading state reading =
     (* A failed local reload may retain only rows from that same authority. *)
     state.keepers <- [];
     state.keepers_error <- None;
-    withdraw_keeper_workspace_presentation state ~previous:previous_input_workspace
+    let preserve_chat =
+      state.view = Keepers Keeper_message
+      && Option.is_some state.msg_target_keeper_name
+      && match chat_workspace, state.workspace_identity with
+         | Some _, Workspace_identity_unread -> true
+         | Some origin, Workspace_identity_match ->
+             Some origin = workspace_input_identity_of_server state.server_identity
+         | None, _ | Some _, Workspace_identity_mismatch _ -> false
+    in
+    let target = state.msg_target_keeper_name in
+    let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
+    let attachments = state.msg_attachments and references = state.msg_references in
+    let since = state.msg_attachments_since and queue = state.msg_queued in
+    let focused = state.composer_focused in
+    let withdrawn_workspace = match state.msg_unconfirmed_workspace with
+      | Some _ -> chat_workspace
+      | None -> previous_input_workspace
+    in
+    withdraw_keeper_workspace_presentation state ~previous:withdrawn_workspace;
+    if preserve_chat then begin
+      state.msg_target_keeper_name <- target;
+      state.view <- Keepers Keeper_message;
+      state.composer_focused <- focused;
+      Buffer.clear state.msg_input;
+      Buffer.add_string state.msg_input draft;
+      state.msg_attachments <- attachments;
+      state.msg_references <- references;
+      state.msg_attachments_since <- since;
+      state.msg_queued <- queue;
+      state.keeper_interactive_waiting <- Chat_queue.waiting queue
+        |> List.filter_map (fun (item : Chat_queue.item) -> match item.intent with
+           | Chat_queue.Next -> None
+           | Chat_queue.Steer_after_interrupt ->
+               Some (item.request.keeper_name, item.request.request_id, Retained_after_stop));
+      state.suspended_keeper_inputs <- List.remove_assoc withdrawn_workspace
+        state.suspended_keeper_inputs;
+      state.msg_unconfirmed_workspace <-
+        (match state.workspace_identity with
+         | Workspace_identity_unread -> chat_workspace
+         | Workspace_identity_match | Workspace_identity_mismatch _ -> None)
+    end else state.msg_unconfirmed_workspace <- None
   end;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->

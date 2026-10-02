@@ -1043,9 +1043,8 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert old not in frame(output)
             if leave or fallback_exit:
                 if fallback_exit:
-                    # Recovery's failed roster falls back to the list while
-                    # the separate focus intent remains pending. Esc here is
-                    # a deliberate exit, not a command-palette transition.
+                    # Failed roster recovery retains suspended detail focus.
+                    # Leave that detail before leaving the Keeper list.
                     metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
                     original_metadata = metadata.read_bytes()
                     metadata.write_text("{invalid fixture metadata")
@@ -1059,8 +1058,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
                             timeout=10,
                         ), "failed roster decode was not observed"
                         assert h.wait_for_fixture_state(process, fd, output,
-                            lambda: b"MASC Keepers" in frame(output), timeout=10)
+                            lambda: b"No keeper selected" in frame(output), timeout=10)
                         assert reads == [True], "failed roster resumed detail"
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
                     finally:
                         metadata.write_bytes(original_metadata)

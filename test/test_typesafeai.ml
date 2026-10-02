@@ -321,6 +321,22 @@ let test_answer_outside_the_set_is_an_error () =
     (T.Score_answer { score = 1.0; probabilities = []; confidence = 0.9 })
 ;;
 
+let test_choice_protocol_before_effect_authority () =
+  List.iter (fun (name, probabilities) ->
+    Alcotest.(check bool) name true
+      (Result.is_error (T.decode_choice (teams ())
+        (choice_answer ~choice:"backend" ~probabilities))))
+    ["missing option", ["backend", 1.];
+     "duplicate option", ["frontend", 0.; "backend", 1.; "backend", 0.];
+     "out of bounds", ["frontend", -1.; "backend", 2.];
+     "non-unit sum", ["frontend", 0.8; "backend", 0.8];
+     "choice contradicts distribution", ["frontend", 1.; "backend", 0.];
+     "nonfinite probability", ["frontend", nan; "backend", 1.]];
+  let tied = T.Choice_answer {choice="backend"; confidence=0.; probabilities=["frontend",0.5;"backend",0.5]} in
+  Alcotest.(check bool) "ties and zero confidence are protocol-valid" true
+    (Result.is_ok (T.decode_choice (teams ()) tied))
+;;
+
 let test_choice_set_rejects_no_options_and_shared_labels () =
   let describe _ = None in
   (match T.choice_set ~options:[] ~label:team_label ~describe with
@@ -613,6 +629,8 @@ let () =
             "choice set builds the request and decodes the answer"
             `Quick
             test_choice_set_builds_request_and_decodes_answer
+        ; Alcotest.test_case "Choice protocol precedes effect authority" `Quick
+            test_choice_protocol_before_effect_authority
         ; Alcotest.test_case
             "an answer outside the choice set is an error"
             `Quick

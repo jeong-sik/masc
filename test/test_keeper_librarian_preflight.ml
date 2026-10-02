@@ -21,6 +21,12 @@ let generated = Yojson.Safe.to_string (`Assoc
       ; "supersedes", `Null; "absorbs", `List [] ]]
   ; "dropped", `List []; "working_contexts", `List []; "working_state", `Null ])
 
+let malformed_choice probabilities = Yojson.Safe.to_string (`Assoc
+  ["model", `String "fixture-jev";
+   "answers", `Assoc ["memory_change", `Assoc
+     ["type", `String "choice"; "choice", `String "keep_current";
+      "confidence", `Float 1.; "probabilities", `Assoc probabilities]]])
+
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ?(context_only = false) ?(with_context = false) ~name ~status ~body
     ~expected_jev ~expected_llm () =
@@ -128,6 +134,16 @@ let () =
       case "needs-generation" `OK (answer "needs_generation") 1 1;
       case "uncertain" `OK (answer "uncertain") 1 1;
       case "invalid-answer" `OK {|{"model":"fixture","answers":{}}|} 1 1;
+      case "missing-probability" `OK
+        (malformed_choice ["keep_current", `Float 1.]) 1 1;
+      case "out-of-range-probability" `OK
+        (malformed_choice ["keep_current", `Float (-1.); "needs_generation", `Float 2.; "uncertain", `Float 0.]) 1 1;
+      case "inconsistent-choice" `OK
+        (malformed_choice ["keep_current", `Float 0.; "needs_generation", `Float 1.; "uncertain", `Float 0.]) 1 1;
+      case "non-unit-probability-sum" `OK
+        (malformed_choice ["keep_current", `Float 0.8; "needs_generation", `Float 0.8; "uncertain", `Float 0.]) 1 1;
+      case "duplicate-probability" `OK
+        (malformed_choice ["keep_current", `Float 1.; "keep_current", `Float 0.; "needs_generation", `Float 0.; "uncertain", `Float 0.]) 1 1;
       case "provider-failed" `Service_unavailable {|{"error":"fixture unavailable"}|} 1 1;
       case ~enabled:false "opt-out" `OK (answer "keep_current") 0 1;
       case ~excluded:true "excluded" `OK (answer "keep_current") 0 1;

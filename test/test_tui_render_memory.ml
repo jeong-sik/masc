@@ -1637,6 +1637,7 @@ let test_category_rail_wrapped_range_and_overflow () =
       ()
   in
   state.memory_facts_category <- cat_filter;
+  state.memory_facts_categories_open <- true;
   let render ~budget cols =
     Masc_tui_hit.reset Masc_tui_press.press_marks;
     let lines = ref [] in
@@ -1665,9 +1666,12 @@ let test_category_rail_wrapped_range_and_overflow () =
       target = Masc_tui_press.Press_memory_category cat_filter)
       (Masc_tui_hit.to_list zones_small));
   let title =
-    live_title
-      ~filter_label:(Types.memory_category_filter_label state.memory_facts_category)
-      ()
+    Render_memory.facts_title ~cols:140 ~screen:" MASC Memory"
+      ~keeper:(Render_memory.facts_keeper_label (Some "*"))
+      ~reading:(Render_memory.Facts_loaded
+        {total = 1; filter_label = Types.memory_category_filter_label state.memory_facts_category;
+         query_label = ""})
+      ~timestamp:"23:41:50" ~badge:"HTTP"
   in
   check bool "accessible overflow: facts_title renders full category label unconditionally" true
     (contains long_cat_name title)

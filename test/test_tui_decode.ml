@@ -9973,7 +9973,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
   let with_after commit added =
-    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true with
+    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
     | `Assoc ["run", `Assoc fields] ->
       let output = List.assoc "output" fields in
       let output = match output with `Assoc fields -> `Assoc

@@ -5550,8 +5550,16 @@ let decode_librarian_preflight output =
         let+ model = required_string_field preflight "model" in Some model
       | _ -> optional_string_field preflight "model" in
     let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
-    let* () = if lp_full_llm_skipped && Option.is_some lp_domain_rejection
-      then Error "accepted preflight cannot also report domain rejection" else Ok () in
+    let* () = match lp_status, lp_generation_path, lp_domain_rejection with
+      | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},
+        Generation_full_lane, Some _ -> Ok ()
+      | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},
+        Generation_full_lane, None ->
+        Error "fallback to full lane on Keep_current requires domain rejection"
+      | _, _, Some _ ->
+        Error "domain rejection is only valid when Keep_current falls back to full lane"
+      | _ -> Ok ()
+    in
     Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
 
 type lane_run_detail =

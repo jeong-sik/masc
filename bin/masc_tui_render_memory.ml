@@ -1512,12 +1512,24 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let label = memory_category_filter_label category ^ " (" ^ count ^ ")" in
         Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line label)
         |> List.map (fun text -> category, text)) categories in
-    let selected = entries |> List.mapi (fun index (category, _) -> index, category)
-      |> List.find_opt (fun (_, category) -> category = state.memory_facts_category)
-      |> Option.map fst |> Option.value ~default:0 in
+    let selected_indices =
+      entries
+      |> List.mapi (fun index (category, _) -> index, category)
+      |> List.filter (fun (_, category) -> category = state.memory_facts_category)
+      |> List.map fst in
+    let start_row, end_row = match selected_indices with
+      | [] -> 0, 0
+      | first :: _ -> first, List.hd (List.rev selected_indices) in
+    let span = end_row - start_row + 1 in
     let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
     let height = max 0 (budget - List.length header) in
-    let scroll = Masc_tui_scroll.ensure_visible ~cursor:selected ~height:(max 1 height) 0 in
+    let scroll =
+      if span <= height then
+        let s = Masc_tui_scroll.ensure_visible ~cursor:end_row ~height:(max 1 height) 0 in
+        Masc_tui_scroll.ensure_visible ~cursor:start_row ~height:(max 1 height) s
+      else
+        start_row
+    in
     let rail = header @
       (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
        |> List.map (fun (category, text) ->

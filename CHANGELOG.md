@@ -32,6 +32,12 @@
 - Restore the pre-expansion Keeper prompt draft when fullscreen editing is cancelled, closed, or dismissed through its backdrop; confirmed edits and live save protection remain available. (#40764)
 - Preserve a cleaner stop request issued before its spawned worker acquires the service lease; only a new start clears an earlier stop request. (#40764)
 
+### Latest main integration
+
+- Show Keeper automation status, actual wake and stimulus times, outcomes and request context in a responsive table. (#40753)
+- Reclaim deleted Keeper work-volume blocks on Apple VMs and run build-output maintenance through the server lifecycle. (#40734, #40751)
+- Resolve the workspace consistently for local voice and Lane probes. (#40729)
+
 ### Complete change record
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.

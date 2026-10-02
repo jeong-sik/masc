@@ -8124,6 +8124,8 @@
 
 (include stanzas/test_tui_candle_currency_pty.inc)
 
+(include stanzas/test_item_http_redirects.inc)
+
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
 

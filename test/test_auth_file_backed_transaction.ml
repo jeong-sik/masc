@@ -294,12 +294,13 @@ let test_unstable_bearers_refuse_without_effects () =
 let test_fifo_authority_refuses_without_blocking () =
   (* Fork outside an Eio environment. The bounded child proves actual Auth
      calls refuse a FIFO with no writer; an older blocking open fails finitely. *)
+  List.iter (fun raw_fifo ->
   match Unix.fork () with
   | 0 ->
       Sys.set_signal Sys.sigalrm Sys.Signal_default;
       let _previous_alarm_seconds = Unix.alarm 5 in
       (try
-         List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
+         (with_workspace @@ fun base_path ->
            let _old = seed_keeper base_path in
            let named = Auth.credential_file base_path "keeper" in
            let raw_path = Auth.raw_token_file base_path "keeper" in
@@ -314,7 +315,7 @@ let test_fifo_authority_refuses_without_blocking () =
            check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
            Unix.unlink occupied;
            let _issued_pair = auth_ok (ensure base_path) in
-           check_pair base_path "keeper") [ false; true ];
+           check_pair base_path "keeper");
          exit 0
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -328,7 +329,7 @@ let test_fifo_authority_refuses_without_blocking () =
           reaped := true;
           match status with Unix.WEXITED 0 -> ()
           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-              fail "FIFO authority must refuse without waiting for a writer")
+              fail "FIFO authority must refuse without waiting for a writer")) [ false; true ]
 
 let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun base_path ->
   let _old = seed_keeper base_path in

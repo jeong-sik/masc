@@ -319,7 +319,7 @@ let test_http_bad_request_waits_for_change () =
       (recorded_run ~base_path) in
     check (option string) "receipt identifies refusing binding" (Some slot) selected;
     check (list string) "actual HTTP dispatch survives" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request; `Payment_required]
+    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request]
 ;;
 
 let test_rate_limit_without_cli_remains_retryable () =

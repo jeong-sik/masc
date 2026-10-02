@@ -186,6 +186,9 @@ boundaries as they land. See [`docs/TUI-GUIDE.md`](TUI-GUIDE.md).
 
 ## The daily loop
 
+For targeted task lookup and compact census reads, see
+[Reading tasks without scanning the backlog](guides/KEEPER-TASK-QUERIES.md).
+
 A task moves through `todo`, `in_progress`, `awaiting_verification`, and then
 `done`, `dropped`, or `blocked`.
 

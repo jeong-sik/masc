@@ -8,6 +8,7 @@ type filter =
   { status : string option
   ; include_done : bool
   ; projection : string
+  ; selection : Keeper_tasks_list_query.t
   }
 
 type t =
@@ -36,6 +37,7 @@ let filter_to_yojson filter =
     [ "status", (match filter.status with None -> `Null | Some status -> `String status)
     ; "include_done", `Bool filter.include_done
     ; "projection", `String filter.projection
+    ; "selection", Keeper_tasks_list_query.to_yojson filter.selection
     ]
 ;;
 
@@ -64,11 +66,15 @@ let field name = function
 ;;
 
 let filter_of_yojson json =
-  match field "status" json, field "include_done" json, field "projection" json with
-  | Some status, Some (`Bool include_done), Some (`String projection) ->
+  let selection =
+    Option.bind (field "selection" json)
+      (fun value -> Result.to_option (Keeper_tasks_list_query.of_args value))
+  in
+  match field "status" json, field "include_done" json, field "projection" json, selection with
+  | Some status, Some (`Bool include_done), Some (`String projection), Some selection ->
     (match status with
-     | `Null -> Some { status = None; include_done; projection }
-     | `String status -> Some { status = Some status; include_done; projection }
+     | `Null -> Some { status = None; include_done; projection; selection }
+     | `String status -> Some { status = Some status; include_done; projection; selection }
      | _ -> None)
   | _ -> None
 ;;
@@ -84,6 +90,7 @@ let filter_equal left right =
   Option.equal String.equal left.status right.status
   && Bool.equal left.include_done right.include_done
   && String.equal left.projection right.projection
+  && Keeper_tasks_list_query.equal left.selection right.selection
 ;;
 
 let of_string ~call raw =

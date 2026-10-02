@@ -16,7 +16,7 @@ let boundary ?(trace = trace_id) ?(turn = 1) ?(fresh = true) messages =
   let position = match B.position_of_messages messages with
     | Ok position -> position | Error detail -> fail detail in
   Ok { B.recorded_at = 1.; event = B.Turn_ended
-    { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+    { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
     ; history_at_start = if fresh then B.Fresh_history else B.Continued_history
     ; position } }
 ;;
@@ -28,7 +28,7 @@ let official_client_turn ?(turn = 2) messages =
   match B.position_of_messages messages with
   | Ok (B.Atom_history { end_atom; last_atom_digest }) ->
     Ok { B.recorded_at = 2.; event = B.Turn_ended
-      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
       ; history_at_start =
           B.Continued_history_from { start_atom = end_atom; start_atom_digest = last_atom_digest }
       ; position = B.No_atom_history } }

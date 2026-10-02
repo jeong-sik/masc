@@ -16,6 +16,7 @@ type saved_history =
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
   { meta : keeper_meta
+  ; task_context : Keeper_turn_task_context.t
   ; temperature : float
   ; context_injector : Agent_core.Hooks.context_injector
   ; shared_context : Agent_core.Context.t
@@ -59,7 +60,8 @@ let prepare_run_context
   =
   let ( let* ) = Result.bind in
   let receipt_started_at = Masc_domain.now_iso () in
-  let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
+  let meta, observed_task = Keeper_current_task_reconcile.sync_current_task_id_with_observation ~config meta in
+  let task_context = Keeper_turn_task_context.capture ~config observed_task in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with
@@ -149,6 +151,7 @@ let prepare_run_context
     | None -> 0
   in
   Ok { meta
+  ; task_context
   ; temperature
   ; context_injector
   ; shared_context

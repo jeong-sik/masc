@@ -895,7 +895,7 @@ let test_empty_history_keeps_a_fitting_summary ?max_prompt_bytes ~oversized () =
   let lines = [ 1, Ok
     { Keeper_turn_boundaries.recorded_at = 1.
     ; event = Keeper_turn_boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
         ; history_at_start = Fresh_history; position }
     } ] in
   let snapshot = match Librarian_continuity_snapshot.capture

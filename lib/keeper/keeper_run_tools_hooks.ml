@@ -977,9 +977,10 @@ let assemble_hooks
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
-                   Never scan a growing queue or serialize all pockets while
-                   the user is waiting for the first model request. Only offer
-                   a reference when its in-process reader is on this surface. *)
+                   Ordinary recall reads this index without scanning the queue;
+                   damaged derived artifacts are repaired on this IO worker
+                   from authoritative context. Only offer a reference when
+                   its in-process reader is on this surface. *)
                 let working_context_recall = if not post_tool_round
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->

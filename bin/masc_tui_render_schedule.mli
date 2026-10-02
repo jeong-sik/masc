@@ -322,7 +322,7 @@ type kauto_row_values = {
   krow_status : string;
   krow_triggered : string;
   krow_outcome : string;
-  krow_consumed : string;
+  krow_received : string;
   krow_recurrence : string;
   krow_by : string;
   krow_requested : string;
@@ -349,7 +349,7 @@ type kauto_column =
   | Kauto_status
   | Kauto_triggered
   | Kauto_outcome
-  | Kauto_consumed
+  | Kauto_received
   | Kauto_recurrence
   | Kauto_by
   | Kauto_requested

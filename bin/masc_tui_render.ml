@@ -5963,8 +5963,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                     own; the outcome wears the outcome's, so a failed wake
                     reads red beside a state still reading live. *)
                  let status_style = schedule_status_color row.sch_status in
+                 (* A held occurrence has no wake of its own, and the wake and
+                    ledger fields on the row still describe the occurrence
+                    before it (#38205): while the hold holds, the three
+                    occurrence cells draw nothing rather than the previous
+                    occurrence's clocks beside a state that reads due-now.
+                    Why it holds is the Schedules list's own reading -- its
+                    row carries the hold tag -- which this tab's capped-page
+                    line already points the reader to. *)
+                 let held = Option.is_some row.sch_runner_hold in
+                 let occurrence_clock value =
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else occurrence_clock value
+                 in
                  let outcome =
-                   Terminal_text.single_line (schedule_outcome_word row)
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else Terminal_text.single_line (schedule_outcome_word row)
                  in
                  "  "
                  ^ Render_schedule.kauto_row ~layout
@@ -5981,7 +5995,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ; krow_triggered =
                          occurrence_clock row.sch_last_wake_started_at_iso
                      ; krow_outcome = outcome
-                     ; krow_consumed =
+                     ; krow_received =
                          occurrence_clock row.sch_stimulus_recorded_at_iso
                      ; krow_recurrence =
                          Terminal_text.single_line row.sch_recurrence_summary

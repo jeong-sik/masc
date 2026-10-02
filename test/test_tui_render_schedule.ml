@@ -1306,7 +1306,7 @@ let kauto_probe : Schedule.kauto_row_values =
   ; krow_status = "an-overlong-status-word"
   ; krow_triggered = "2026-10-02 02:09:54"
   ; krow_outcome = "turn_finished"
-  ; krow_consumed = "2026-10-02 02:09:54"
+  ; krow_received = "2026-10-02 02:09:54"
   ; krow_recurrence = String.concat "" (List.init 6 (fun _ -> "every 300s "))
   ; krow_by = "a-keeper-name-longer-than-its-column (automated_actor)"
   ; krow_requested = "2026-09-24 03:55:20"
@@ -1318,7 +1318,7 @@ let kauto_empty : Schedule.kauto_row_values =
   ; krow_status = ""
   ; krow_triggered = ""
   ; krow_outcome = ""
-  ; krow_consumed = ""
+  ; krow_received = ""
   ; krow_recurrence = ""
   ; krow_by = ""
   ; krow_requested = ""
@@ -1337,7 +1337,7 @@ let kauto_every_column =
     ; Kauto_status
     ; Kauto_triggered
     ; Kauto_outcome
-    ; Kauto_consumed
+    ; Kauto_received
     ; Kauto_recurrence
     ; Kauto_by
     ; Kauto_requested
@@ -1384,7 +1384,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
   check bool "at 68 only the four facts and the summary remain" true
     (at 68
      = Schedule.
-         [ Kauto_mark; Kauto_status; Kauto_triggered; Kauto_consumed; Kauto_what
+         [ Kauto_mark; Kauto_status; Kauto_triggered; Kauto_received; Kauto_what
          ]);
   check bool "at 81 the recurrence returns" true
     (at 81
@@ -1392,7 +1392,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
          [ Kauto_mark
          ; Kauto_status
          ; Kauto_triggered
-         ; Kauto_consumed
+         ; Kauto_received
          ; Kauto_recurrence
          ; Kauto_what
          ]);
@@ -1403,7 +1403,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
          ; Kauto_status
          ; Kauto_triggered
          ; Kauto_outcome
-         ; Kauto_consumed
+         ; Kauto_received
          ; Kauto_recurrence
          ; Kauto_what
          ]);
@@ -1414,7 +1414,7 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
          ; Kauto_status
          ; Kauto_triggered
          ; Kauto_outcome
-         ; Kauto_consumed
+         ; Kauto_received
          ; Kauto_recurrence
          ; Kauto_requested
          ; Kauto_what
@@ -1432,8 +1432,8 @@ let test_a_narrow_kauto_page_gives_up_columns_in_its_order () =
       (Printf.sprintf "inner %d: TRIGGERED stays named" inner_width)
       true (holds "TRIGGERED" header);
     check bool
-      (Printf.sprintf "inner %d: CONSUMED stays named" inner_width)
-      true (holds "CONSUMED" header)
+      (Printf.sprintf "inner %d: RECEIVED stays named" inner_width)
+      true (holds "RECEIVED" header)
   done
 
 (* A valid comma-list cron is much wider than its column. It folds inside

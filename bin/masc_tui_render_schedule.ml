@@ -781,11 +781,16 @@ let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
 
    So the row tells the occurrence's story left to right: the state's mark
    and word, when the last wake started, what became of that wake, when the
-   ledger saw the stimulus arrive. Then the schedule's own identity: how it
-   repeats, what it asks for. The storage context -- who asked and when --
-   rides the last two named columns, because "why does this exist" is a
-   question the tab could not answer before even though the projection
-   carried both facts on every row.
+   ledger saw the stimulus arrive. RECEIVED, not consumed: the clock is the
+   arrival the ledger recorded, and the queue's acknowledgement of the same
+   stimulus is a later, separate fact the detail surfaces -- the two part
+   company exactly when the keeper sat on a wake before taking it, and a
+   column that named one while reading the other would misdate the other.
+   Then the schedule's own identity: how it repeats, what it asks for. The
+   storage context -- who asked and when -- rides the last two named
+   columns, because "why does this exist" is a question the tab could not
+   answer before even though the projection carried both facts on every
+   row.
 
    The mark is one cell of the vocabulary the Fusion pipeline already draws
    (done, active, waiting, failed), so a page of rows reads by shape before
@@ -812,7 +817,7 @@ type kauto_row_values = {
   krow_status : string;
   krow_triggered : string;
   krow_outcome : string;
-  krow_consumed : string;
+  krow_received : string;
   krow_recurrence : string;
   krow_by : string;
   krow_requested : string;
@@ -824,7 +829,7 @@ let kauto_no_values =
   ; krow_status = ""
   ; krow_triggered = ""
   ; krow_outcome = ""
-  ; krow_consumed = ""
+  ; krow_received = ""
   ; krow_recurrence = ""
   ; krow_by = ""
   ; krow_requested = ""
@@ -857,7 +862,7 @@ type kauto_column =
   | Kauto_status
   | Kauto_triggered
   | Kauto_outcome
-  | Kauto_consumed
+  | Kauto_received
   | Kauto_recurrence
   | Kauto_by
   | Kauto_requested
@@ -868,7 +873,7 @@ let kauto_columns =
   ; Kauto_status
   ; Kauto_triggered
   ; Kauto_outcome
-  ; Kauto_consumed
+  ; Kauto_received
   ; Kauto_recurrence
   ; Kauto_by
   ; Kauto_requested
@@ -911,7 +916,7 @@ let kauto_layout ~inner_width ~status_width ~clock_width ~outcome_width
   let width = function
     | Kauto_mark -> kauto_mark_width
     | Kauto_status -> status_width
-    | Kauto_triggered | Kauto_consumed | Kauto_requested -> clock_width
+    | Kauto_triggered | Kauto_received | Kauto_requested -> clock_width
     | Kauto_outcome -> outcome_width
     | Kauto_recurrence -> kauto_minimum_recurrence_width
     | Kauto_by -> by_width
@@ -941,9 +946,9 @@ let kauto_cell ~styles ~(layout : kauto_layout) values = function
   | Kauto_outcome ->
       Table.cell ~style:styles.kstyle_outcome ~header:"OUTCOME"
         ~width:layout.k_outcome_width values.krow_outcome
-  | Kauto_consumed ->
-      Table.cell ~header:"CONSUMED" ~width:layout.k_clock_width
-        values.krow_consumed
+  | Kauto_received ->
+      Table.cell ~header:"RECEIVED" ~width:layout.k_clock_width
+        values.krow_received
   | Kauto_recurrence ->
       Table.cell ~style:styles.kstyle_recurrence ~header:"RECURRENCE"
         ~width:kauto_minimum_recurrence_width values.krow_recurrence

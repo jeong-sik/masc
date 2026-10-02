@@ -10,6 +10,7 @@ import hashlib
 import copy
 import threading
 import json
+import time
 import re
 import sys
 from collections.abc import Callable
@@ -437,6 +438,96 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         terminal_cols=COLUMNS,
     )
 
+def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    identity = {"base": None, "matched_reads": 0}
+    held = threading.Event()
+    release = threading.Event()
+    served = threading.Event()
+    held_at = [None]
+    arm = [False]
+    balance = ["12500"]
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "owned_items": [],
+             "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                         for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["matched_reads"] += 1
+        base = identity["base"] or ""
+        return 200, {"paths": {"effective_base_path": base,
+                               "effective_masc_root": os.path.join(base, ".masc")}}
+
+    def account():
+        value = balance[0]
+        if arm[0]:
+            arm[0] = False
+            held_at[0] = time.monotonic()
+            held.set()
+            if not release.wait(timeout=30):
+                return 504, {"error": "held fixture read timeout"}
+            def send_held_body():
+                # The fixture server resumes this generator only after its
+                # write and flush succeeded. A callable-return event alone
+                # would fire before any HTTP body reached the socket.
+                yield json.dumps(dict(ready, balance_milli=value)).encode()
+                served.set()
+            return h.StreamingHttpResponse(send_held_body)
+        return 200, dict(ready, balance_milli=value)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = account
+
+    def await_frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), \
+            f"workspace boundary did not settle: {last_frame_rows(output)!r}"
+
+    def interact(process, fd, _slave, output, base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 12.500 Candle" in frame)
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10)
+            identity["base"] = str(base) + "-other-workspace"
+            await_frame(process, fd, output, lambda frame: "▸Items".encode() not in frame
+                        and b"Balance 12.500 Candle" not in frame)
+            previous_reads = identity["matched_reads"]
+            identity["base"] = str(base)
+            # Two serial full-refresh probes prove the first matching result
+            # was admitted before its successor could start.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            balance[0] = "13000"
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 13.000 Candle" in frame)
+            # Masc_tui_http.default_timeout_sec is 10 seconds. Releasing
+            # after that would test a timeout instead of a late successful read.
+            assert held_at[0] is not None and time.monotonic() - held_at[0] < 10
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3), \
+                "held HTTP response was not written and flushed"
+            assert time.monotonic() - held_at[0] < 10, "held read exceeded the TUI HTTP timeout"
+            previous_reads = identity["matched_reads"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output, quiet=0.05), "late response did not settle"
+            frame = b"\n".join(last_frame_rows(output).values())
+            assert b"Balance 13.000 Candle" in frame and b"Balance 12.500 Candle" not in frame
+            capture_item_screen(output, "workspace-authority-return")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item detail tokens are withdrawn across a different workspace identity",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(base)),
+                            refresh=0.2)
+
+
 def item_account_follows_private_changes(binary: str) -> None:
     # Public discovery stays unchanged while the private account changes.
     fixtures = item_roster_fixtures()
@@ -852,6 +943,131 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
                             refresh=0.2)
 
 
+def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs: bool = False, leave: bool = False, fallback_exit: bool = False) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    reads = []
+    old = b"instructions-obsolete-runtime"
+    current = b"instructions-current-runtime"
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def config():
+        reads.append(True)
+        marker = old if len(reads) == 1 else current
+        # The actual config-view projection reads this nested runtime field.
+        value = ({"state": "no_local_stream", "backend": None, "instances": [],
+                  "tail": 200, "reason": marker.decode()} if sandbox_logs else
+                 {"name": "alpha", "execution": {"selected_runtime_id": marker.decode()},
+                  "prompt": {"instructions": "Synthetic Instructions recovery fixture"}})
+        if len(reads) != 1:
+            return 200, value
+        held.set()
+        assert release.wait(timeout=30), "held Instructions response was not released"
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures[("/api/v1/gate/keeper-sandbox-logs" if sandbox_logs else
+              "/api/v1/keepers/alpha/config")] = config
+
+    def wait_refreshes(process, fd, output):
+        before = identity["probes"]
+        # Full refreshes are serial: the following probe starts after applying
+        # the preceding identity response, so this crosses the state boundary.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= before + 2, timeout=10)
+
+    def frame(output):
+        return b"\n".join(last_frame_rows(output).values())
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=45, columns=COLUMNS, needle=INFO_TAB)
+            # Enter Instructions, or Sandbox plus its separate initial log
+            # read. Endpoint arrival confirms the request actually started.
+            os.write(fd, b"]]o" if sandbox_logs else b"]]]")
+            assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
+            identity["unread"] = True
+            wait_refreshes(process, fd, output)
+            # A manual read during revocation must not create a new token
+            # that would admit an answering but unverified endpoint.
+            os.write(fd, b"o" if sandbox_logs else b"r")
+            wait_refreshes(process, fd, output)
+            assert reads == [True], "unread authority restarted the held detail read"
+            assert old not in frame(output)
+            if leave or fallback_exit:
+                if fallback_exit:
+                    # Failed roster recovery retains suspended detail focus.
+                    # Leave that detail before leaving the Keeper list.
+                    metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
+                    original_metadata = metadata.read_bytes()
+                    metadata.write_text("{invalid fixture metadata")
+                    try:
+                        identity["unread"] = False
+                        wait_refreshes(process, fd, output)
+                        report = f"[masc-tui] decode failed for {metadata}:"
+                        assert h.wait_for_fixture_state(
+                            process, fd, output,
+                            lambda: report in h.exit_reason_log(_base),
+                            timeout=10,
+                        ), "failed roster decode was not observed"
+                        assert h.wait_for_fixture_state(process, fd, output,
+                            lambda: b"No keeper selected" in frame(output), timeout=10)
+                        assert reads == [True], "failed roster resumed detail"
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+                    finally:
+                        metadata.write_bytes(original_metadata)
+                else:
+                    h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+                    identity["unread"] = False
+                wait_refreshes(process, fd, output)
+                release.set()
+                wait_refreshes(process, fd, output)
+                h.drain_until_quiet(process, fd, output)
+                assert b"MASC Dashboard" in frame(output), "recovery stole navigation"
+                assert reads == [True], "left detail restarted its suspended read"
+                assert old not in frame(output) and current not in frame(output)
+                os.write(fd, b"q")
+                return
+            identity["unread"] = False
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: current in frame(output), timeout=10), "Instructions did not recover automatically"
+            assert len(reads) == 2, "authority recovery duplicated its detail read"
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_event(process, fd, output, served, timeout=3)
+            wait_refreshes(process, fd, output)
+            assert h.drain_until_quiet(process, fd, output), "late Instructions response did not settle"
+            assert current in frame(output) and old not in frame(output)
+            assert old not in output[start:], "obsolete Instructions callback replaced the recovery"
+            assert len(reads) == 2, "ordinary full/scoped refresh relaunched the settled detail"
+            capture_item_screen(output, "sandbox-log-authority-recovery" if sandbox_logs else "instructions-authority-recovery")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary,
+        description=("Esc from recovery fallback list retires suspended focus" if fallback_exit else
+                     "Leaving revoked Instructions retires suspended focus" if leave else
+                     "Held Sandbox logs are revoked and resumed on authority recovery" if sandbox_logs else
+                     "Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery"),
+        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+        prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())), refresh=0.2)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -859,7 +1075,7 @@ if __name__ == "__main__":
         captures = Path(artifact_root) / "keeper-items-tui"
         captures.mkdir(parents=True, exist_ok=True)
         (captures / "manifest.json").write_text(json.dumps({
-            "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+            "scope": "synthetic Item account, Instructions and Sandbox log authority-recovery HTTP responses through the real TUI in a PTY",
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "source_sha": os.environ.get("GITHUB_SHA"),
             "columns": COLUMNS, "item_rows": SHORT_ROWS,
@@ -875,4 +1091,9 @@ if __name__ == "__main__":
     item_account_refuses_an_unobserved_server_workspace(binary)
     item_account_withdraws_unread_authority(binary)
     item_account_withdraws_unread_authority(binary, boundary="roster")
-    print("tui keeper portrait: PASS (11 scenarios)")
+    item_account_is_withdrawn_at_workspace_boundary(binary)
+    instructions_read_recovers_workspace_authority(binary)
+    instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
+    instructions_read_recovers_workspace_authority(binary, leave=True)
+    instructions_read_recovers_workspace_authority(binary, fallback_exit=True)
+    print("tui keeper portrait: PASS (16 scenarios)")

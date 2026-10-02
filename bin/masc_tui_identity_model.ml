@@ -312,13 +312,17 @@ type identity_login_started =
     This is what ends the tick's re-asking. A poll with no end condition is a
     poll that runs for the life of the process, so the condition is named
     here and tested rather than being a line inside the message handler. *)
-let identity_login_landed ~providers ~login =
+let identity_provider_attached ~providers ~provider_id =
   List.exists
     (function
       | Identity_declared { idp_id; idp_tools = Some _; _ } ->
-        String.equal idp_id login.ils_provider
+        String.equal idp_id provider_id
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
+;;
+
+let identity_login_landed ~providers ~login =
+  identity_provider_attached ~providers ~provider_id:login.ils_provider
 ;;
 
 type identity_login_result =

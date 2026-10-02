@@ -3344,19 +3344,16 @@ let render_exact_lane_provider_editor (state : state) editor =
    | Masc_tui_types.Lane_write_rereading _ ->
      box_line_styled buf cols ~style:(Theme.info ()) "  Reloading saved candidate order..."
    | Masc_tui_types.Lane_write_idle -> ());
-  (match Masc_tui_types.runtime_picker_projection state with
+  (match Masc_tui_types.runtime_picker_projection
+     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows) state with
    | Some picker ->
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
        | _ -> "Add fallback candidate", "Enter add" in
      box_line_styled buf cols ~style:(Theme.info ())
-       (Printf.sprintf "  %s · %s · %s"
-          (fst action)
-          picker.Masc_tui_types.rlp_summary
-          (Masc_tui_types.runtime_picker_keys (snd action)
-             picker.Masc_tui_types.rlp_filter));
+       ("  " ^ fst action);
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Type model + effort, e.g. luna medium · arrows select · Esc clears search";
+       ("  " ^ picker.Masc_tui_types.rlp_summary);
      if picker.Masc_tui_types.rlp_choices = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
          (Masc_tui_types.runtime_picker_empty_note picker)
@@ -3376,10 +3373,10 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
                  then ">" else " ")
                 bracket
-                (Masc_tui_types.runtime_model_picker_label runtime)
+                (Masc_tui_types.runtime_model_picker_title runtime)
                 note
             in
-            match
+            (match
               Masc_tui_types.runtime_pick_availability
                 picker.Masc_tui_types.rlp_pick runtime
             with
@@ -3389,10 +3386,28 @@ let render_exact_lane_provider_editor (state : state) editor =
               box_line_styled buf cols ~style:(Theme.recede ())
                 (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
             | Masc_tui_types.Pick_available ->
-              box_line buf cols
+              (if picker.rlp_selected_row = Some offset
+               then box_line_selected buf cols
+               else box_line buf cols)
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
-                    then "  (already declared)" else "")))
+                    then "  (already declared)" else "")));
+            box_line_styled buf cols ~style:(Theme.recede ())
+              (Printf.sprintf "      Account %s · %s context"
+                (Masc_tui_message_layout.fit_middle (max 1 (cols - 32))
+                   (Terminal_text.single_line runtime.ro_provider_id))
+                (format_context_tokens runtime.ro_effective_max_context)));
+     (match picker.rlp_selected_row with
+      | Some offset ->
+        (match List.nth_opt picker.rlp_choices offset with
+         | Some runtime ->
+           box_line_styled buf cols ~style:(Theme.recede ())
+             ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16))
+                (Terminal_text.single_line runtime.ro_id))
+         | None -> ())
+      | None -> ());
+     box_line_styled buf cols ~style:(Theme.info ())
+       ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
@@ -3436,7 +3451,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
                      String.equal runtime.ro_id row.Masc_tui_types.sr_slot) state.runtime_catalog with
-                   | Some runtime -> Masc_tui_types.runtime_model_picker_label runtime
+                   | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
                    | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
                    else "  (not admitted)")

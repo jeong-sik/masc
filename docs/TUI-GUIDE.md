@@ -630,6 +630,9 @@ On Lanes, select a lane and press `s` to edit its model order. Arrow keys or
 type a configured model and reasoning effort such as `luna medium`, select
 with arrows and press Enter. The choices show the declared reasoning effort,
 account provider ID and context. Unset reasoning is shown as `default`.
+The picker uses the terminal height and gives each model two lines: model
+and reasoning first, account and context below. The selected runtime ID is
+shown separately rather than crowding the model name.
 Replacing a candidate selects another configured runtime; it does not change
 the shared model's settings in other lanes.
 

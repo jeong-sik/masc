@@ -20774,6 +20774,8 @@ and is loaded on demand through keeper_skill.
             with
             | None -> ()
             | Some action ->
+                let terminal_rows, _ = get_terminal_size () in
+                let page = Masc_tui_types.runtime_exact_picker_page state ~terminal_rows in
                 let already, _providers, catalog =
                   Masc_tui_types.runtime_picker_rows state pick
                 in
@@ -20783,7 +20785,7 @@ and is loaded on demand through keeper_skill.
                       (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
                         Masc_tui_pick_list.Dismissed
                     | _ -> Masc_tui_pick_list.apply
-                     ~page:Masc_tui_types.runtime_picker_page
+                     ~page
                      ~label:(Masc_tui_types.runtime_picker_label_for pick) catalog
                      list action)
                  with

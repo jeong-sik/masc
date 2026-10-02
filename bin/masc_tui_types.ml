@@ -9870,11 +9870,29 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
-let runtime_picker_projection (state : state) =
+let runtime_exact_picker_page (state : state) ~terminal_rows =
+  match state.view, state.slot_editor with
+  | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
+    let extra =
+      (if Option.is_some state.lanes_action_error then 1 else 0)
+      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + List.length (runtime_lane_stale_lines state)
+      + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
+    (* Two lines per model, after the frame, search, selected ID and keys. *)
+    max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
+  | _ -> runtime_picker_page
+
+let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
+  let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
+      runtime.Tui_decode.ro_declared_reasoning_effort in
+  Masc.Tui_terminal_text.sanitize_terminal_text
+    (Printf.sprintf "%s %s" runtime.Tui_decode.ro_model effort)
+
+let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
   Option.map (fun (pick, list) ->
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
-      Masc_tui_pick_list.view ~page:runtime_picker_page
+      Masc_tui_pick_list.view ~page
         ~window:Masc_tui_pick_list.Opens_at_cursor ~label:(runtime_picker_label_for pick)
         catalog list
     in

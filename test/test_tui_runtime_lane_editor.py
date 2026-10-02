@@ -1168,6 +1168,15 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError(f"promotion posted {posted[-1]!r}")
         if store.exact_declared_cli["librarian_exact"] != [replacement, backup]:
             raise AssertionError("promotion lost or reordered other candidates")
+        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        h.resize_and_wait(process, fd, output, rows=40, columns=131,
+                          needle=b"Account", controls=(h.FULL_REDRAW,))
+        screen = h.screen_text(bytes(output))
+        if screen.count(b"context") <= 3:
+            raise AssertionError("a tall terminal still shows only three model choices")
+        if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
+            raise AssertionError("expanded model choices are not visible")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 

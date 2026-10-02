@@ -7430,7 +7430,8 @@ let selected_keeper (state : state) =
 let remember_keeper_detail_focus state =
   match state.detail_focus_recovery, state.view, state.workspace_identity,
         state.server_identity, selected_keeper state with
-  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper ->
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
       state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
   | _ -> ()
 

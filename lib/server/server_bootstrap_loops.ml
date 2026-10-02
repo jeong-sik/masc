@@ -374,6 +374,8 @@ let mention_transcript_settled = function
 let append_workspace_message_to_recipient ~base_path ~sender_authority
     (delivery : Workspace_broadcast.broadcast_delivery) ~keeper_name =
   let open Result.Syntax in
+  let* recipient = Validation.Id_shape.validate keeper_name in
+  let keeper_name = Validation.Id_shape.to_string recipient in
   let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
   let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
   let* speaker = match sender_authority with

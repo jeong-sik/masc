@@ -1078,8 +1078,9 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
        add_summary_if_fits trend;
        let backlog_summary = Buffer.create 256 in
-       box_line backlog_summary cols
-         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
+       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog)
+       |> List.iter (box_line backlog_summary cols);
        if not cards_fit then add_summary_if_fits backlog_summary;
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)

@@ -5,6 +5,7 @@ import re
 import shlex
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 import test_tui_keyboard_input as h
@@ -34,6 +35,24 @@ def screen(output):
 
 def compact(text):
     return b"".join(h.unwrapped(text).split())
+
+
+def detail_text(output):
+    rows = screen(output).decode().splitlines()
+    title = next(row for row in rows if "title: TITLEHEAD" in row)
+    prefix = title[:title.index("title: TITLEHEAD")]
+    start = sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+                for char in prefix)
+    # Read each detail row independently of the neighboring roster pane.
+    result = []
+    for row in rows:
+        cell = 0
+        for index, char in enumerate(row):
+            if cell >= start:
+                result.append(row[index:])
+                break
+            cell += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+    return compact("\n".join(result).encode())
 
 
 def window(output):
@@ -127,7 +146,7 @@ def run(executable):
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
-                    all_text = compact(screen(output))
+                    all_text = detail_text(output)
                     for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
                                   "reclaim policy: block_reclaim",
                                   ("handoff reclaim policy allow_reclaim" if width == 30

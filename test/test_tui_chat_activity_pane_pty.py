@@ -73,8 +73,8 @@ def output_handoff_scenario(executable):
             continuation_at = h.screen_row_of(rows, "한글 진행 내용".encode())
             if continuation_at <= excerpt_at:
                 raise AssertionError(f"multiline output lost its separate row: {rows!r}")
-            activity_at = h.screen_row_of(rows, b"Esc stops it")
-            if excerpt_at >= activity_at:
+            activity_at = h.screen_row_of(rows, b"Esc:")
+            if activity_at < 0 or excerpt_at >= activity_at:
                 raise AssertionError(f"output is outside conversation: {rows!r}")
             text = b"\n".join(rows.values())
             if text.count(b"FIRST_PROGRESS_LINE") != 1 or b"Latest output:" in text:
@@ -82,12 +82,12 @@ def output_handoff_scenario(executable):
             if "최근 출력 발췌".encode() not in text:
                 raise AssertionError(f"incomplete preview not labelled: {rows!r}")
             h.send_and_wait(process, fd, output, b"queued-question-preserved", b"queued-question-preserved")
-            h.send_and_wait(process, fd, output, b"\r", b"WAITING TO START")
+            h.send_and_wait(process, fd, output, b"\r", "내 메시지 1건 대기".encode())
             phase["tail"] = "SECOND_PROGRESS_LINE"
             h.wait_for_output(process, fd, output, b"SECOND_PROGRESS_LINE", start=len(output), timeout=12)
             rows = screen(process, fd, output)
             text = b"\n".join(rows.values())
-            for marker in (b"SECOND_PROGRESS_LINE", b"queued-question-preserved", b"WAITING TO START"):
+            for marker in (b"SECOND_PROGRESS_LINE", b"queued-question-preserved", "내 메시지 1건 대기".encode()):
                 if marker not in text:
                     raise AssertionError(f"running output or queued input lost {marker!r}: {rows!r}")
             if b"FIRST_PROGRESS_LINE" in text or b"Latest output:" in text:

@@ -1025,6 +1025,7 @@ val append_exact_output_lane_slot :
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
       (** Which way {!move_exact_output_lane_slot} walks a slot through the
           declared order, which is the order the lane walks. *)
 
@@ -1055,6 +1056,14 @@ val move_exact_output_lane_slot :
     {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
     into the other one. Refused when the lane declares no such slot, and when
     the slot is already at the end of its list the move heads for. *)
+
+val replace_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane -> slot:string -> replacement:string -> unit ->
+  (config_commit_receipt, string) result
+(** Replace one declared candidate at its current position under the write
+    lock. The replacement must belong to the same HTTP/CLI group and must
+    not already occur in the lane. Other candidates are preserved. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

@@ -432,7 +432,7 @@ let test_search_follows_the_runtime_mode () =
   state.runtime_surface <- Some snapshot;
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
-      (Some expected) (surface_row_texts state Runtime);
+      (Some expected) (Masc_tui_surface_search.surface_row_texts state Runtime);
     match runtime_scrolled ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
@@ -441,12 +441,12 @@ let test_search_follows_the_runtime_mode () =
   state.runtime_mode <- Runtime_all;
   expect_rows ["unassigned"; "assigned"];
   Alcotest.(check (option int)) "unassigned runtime is searchable" (Some 1)
-    (surface_search_count state Runtime ~query:"unassigned");
+    (Masc_tui_surface_search.surface_search_count state Runtime ~query:"unassigned");
   Alcotest.(check (option int)) "hidden lane does not contribute" (Some 0)
-    (surface_search_count state Runtime ~query:"lane-only");
+    (Masc_tui_surface_search.surface_search_count state Runtime ~query:"lane-only");
   state.runtime_detail_target <- Some (Runtime_catalog_entry {runtime_id = "assigned"});
   Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
-    (surface_row_texts state Runtime)
+    (Masc_tui_surface_search.surface_row_texts state Runtime)
 
 (* Opening a detail, then receiving a reordered listing, must not turn an
    Enter/Right press in the reader into a selection of the hidden cursor. *)

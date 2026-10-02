@@ -1,0 +1,10 @@
+id = "fusion-results"
+run_id = "fusion-report"
+manifest_path = "../../../addons/fusion-results/lane.toml"
+
+[binding]
+[[binding.sources]]
+source_id = "fusion"
+kind = "snapshot_file"
+# Place an exported capture here, or change to its resolved file path.
+path = "fusion-snapshot.json"

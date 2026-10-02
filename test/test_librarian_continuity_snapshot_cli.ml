@@ -35,7 +35,7 @@ let turn keepers_dir number messages =
   let position = match B.position_of_messages messages with
     | Ok value -> value | Error detail -> fail detail in
   append keepers_dir (B.Turn_ended
-    { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:number
+    { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:number
     ; history_at_start = (if number = 1 then B.Fresh_history else B.Continued_history)
     ; position })
 

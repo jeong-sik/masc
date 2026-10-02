@@ -87,7 +87,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
      execution_basis = Some "current-progress"} in
   let input : Keeper_librarian.input =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
-     goal_context = Keeper_librarian.No_task;
+     historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
      keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions = "Preserve pending approval.";
      current = Some {facts = seeded.facts}; working_context;

@@ -997,13 +997,17 @@ let run
          let result =
            try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
            | Eio.Cancel.Cancelled _ as exn ->
-             Option.iter
-               (fun abort ->
-                  Option.iter
-                    (fun id -> abort ~evaluation_id:id `Cancelled)
-                    evaluation_id)
-               on_evaluation_aborted;
-             raise exn
+             let backtrace = Printexc.get_raw_backtrace () in
+             (* The payload write precedes the registry's protected lock.
+                Settle the whole terminal callback in the cancelled context. *)
+             Eio.Cancel.protect (fun () ->
+               Option.iter
+                 (fun abort ->
+                    Option.iter
+                      (fun id -> abort ~evaluation_id:id `Cancelled)
+                      evaluation_id)
+                 on_evaluation_aborted);
+             Printexc.raise_with_backtrace exn backtrace
            | exn ->
              Option.iter
                (fun abort ->

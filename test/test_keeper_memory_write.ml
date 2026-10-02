@@ -1378,6 +1378,30 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             |> Yojson.Safe.from_string in
         Alcotest.(check (list string)) "search returns only revalidated source claims"
           ["claim about " ^ unchanged] (match_texts search);
+        Alcotest.(check string) "partial search reports incomplete verification" "incomplete"
+          (string_field "status" (json_field "source_verification" search));
+        List.iter (fun scope ->
+          let result = Runtime.keeper_memory_search_json ~config ~meta
+              ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+              ~args:(`Assoc ["query", `String unreadable;
+                            "source", `String scope; "limit", `Int 10])
+              |> Yojson.Safe.from_string in
+          Alcotest.(check (list string)) "unverified-only search supplies no claim" []
+            (match_texts result);
+          Alcotest.(check bool) "unverified-only search is not a definitive miss" true
+            (json_field "no_match" result = `Null);
+          Alcotest.(check string) "current and all expose incomplete verification" "incomplete"
+            (string_field "status" (json_field "source_verification" result));
+          Alcotest.(check bool) "deferred identity does not leak withheld claim" false
+            (contains ~needle:("claim about " ^ unreadable) (Yojson.Safe.to_string result)))
+          ["current"; "all"];
+        let unrelated = Runtime.keeper_memory_search_json ~config ~meta
+            ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+            ~args:(`Assoc ["query", `String "no matching astronomy"; "limit", `Int 10])
+            |> Yojson.Safe.from_string in
+        Alcotest.(check bool) "unselected unreadable sources do not make a lookup incomplete" true
+          (json_field "source_verification" unrelated = `Null
+           && json_field "no_match" unrelated = `Bool true);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
   match revalidated with

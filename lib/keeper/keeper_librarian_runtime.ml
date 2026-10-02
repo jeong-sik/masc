@@ -579,21 +579,16 @@ type not_committed =
   ; walk_shows_size : bool
   }
 
-(* One official-client slot's failure. A slot that names the limit it refused
-   at is answered by [fit_continuity], not here. Of the rest, an answer that
-   came back unusable is a refused output, which RFC-librarian-lifecycle §4.3
-   counts among the failures reading less answers; an id this module cannot
-   run is a configuration error; and a client that simply failed does not say
-   why -- its quota and its input limit arrive in the same constructor -- so it
-   is no evidence either way. Reading less on it would let a CLI quota storm
-   walk the width down to one atom. *)
+(* Only typed input-capacity evidence makes an execution failure about size.
+   A quota or an unclassified transport failure cannot narrow the source. *)
 let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
   | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
   | Keeper_lane_cli_oneshot.Unknown_runtime _
-  | Keeper_lane_cli_oneshot.Not_an_official_client _
-  | Keeper_lane_cli_oneshot.Execution_failed _ -> false
+  | Keeper_lane_cli_oneshot.Not_an_official_client _ -> false
+  | Keeper_lane_cli_oneshot.Execution_failed _ ->
+    Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
 ;;
 
 (* Whether anything this pass met says the range's size stopped it. A failure
@@ -628,9 +623,19 @@ let rec extraction_shows_size = function
    its caller with the size verdict above instead. *)
 let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
-    (match List.rev failures with
-     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
-     | [] -> None)
+    (* Every refusal belongs to its runtime; a later quota must not erase
+       an earlier measured limit. Fit to the largest actual CLI boundary,
+       so a more restrictive fallback cannot unnecessarily narrow input
+       that another measured slot can take. Ties retain walk order. *)
+    List.fold_left
+      (fun selected failure ->
+        match selected, Keeper_lane_cli_oneshot.input_capacity failure with
+        | None, observed -> observed
+        | Some _, None -> selected
+        | Some previous, Some observed ->
+          if observed.capacity.max_chars > previous.capacity.max_chars
+          then Some observed else selected)
+      None failures
   | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared

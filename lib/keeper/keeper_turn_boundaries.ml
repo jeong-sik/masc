@@ -268,7 +268,20 @@ let record_of_json (json : Yojson.Safe.t) =
     let* kind = W.wire_string_field field_kind assoc in
     if String.equal kind kind_turn_ended
     then (
-      let* () = W.exact_field_names_result turn_ended_fields assoc in
+      (* Position evidence and admission evidence are independent. An absent
+         admission observation must not erase a valid position witness; it
+         remains explicit, while malformed or unknown fields are rejected. *)
+      let* task_context, expected_fields =
+        match List.assoc_opt field_task_context assoc with
+        | None ->
+          Ok (Keeper_turn_task_context.Admission_not_recorded,
+              List.filter (fun field -> field <> field_task_context) turn_ended_fields)
+        | Some json ->
+          let* context = W.wire_at (W.Wire_field field_task_context)
+            (Keeper_turn_task_context.of_json json) in
+          Ok (context, turn_ended_fields)
+      in
+      let* () = W.exact_field_names_result expected_fields assoc in
       let* recorded_at = W.wire_number_field field_recorded_at assoc in
       let* turn_ref_text = W.wire_string_field field_turn_ref assoc in
       let* turn_ref =
@@ -283,9 +296,6 @@ let record_of_json (json : Yojson.Safe.t) =
       let* position =
         W.wire_at (W.Wire_field field_position) (position_of_json position_json)
       in
-      let* task_context_json = W.wire_json_field field_task_context assoc in
-      let* task_context = W.wire_at (W.Wire_field field_task_context)
-        (Keeper_turn_task_context.of_json task_context_json) in
       validate { recorded_at; event = Turn_ended { turn_ref; task_context; history_at_start; position } })
     else if String.equal kind kind_history_restarted
     then (
@@ -482,6 +492,10 @@ let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
            | Error (_ : read_error) -> found
            | Ok record ->
              let witness turn_ref = Some (line, record.recorded_at, turn_ref) in
+             let ended_at, started_at =
+               if restarts_history ~trace_id record then None, None
+               else ended_at, started_at
+             in
              let ended_at =
                match
                  is_position ~end_atom ~last_atom_digest
@@ -489,9 +503,6 @@ let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
                with
                | Some turn_ref -> witness turn_ref
                | None -> ended_at
-             in
-             let started_at =
-               if restarts_history ~trace_id record then None else started_at
              in
              let started_at =
                match

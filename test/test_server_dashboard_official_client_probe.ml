@@ -47,7 +47,7 @@ let claude_fixture () =
      ^ "\n")
 ;;
 
-let runtime_toml ~codex_cli ~claude_cli =
+let runtime_toml ~codex_cli ~claude_cli ~unavailable_cli =
   Printf.sprintf
     "[providers.codex]\n\
      protocol = \"codex-app-server\"\n\
@@ -55,6 +55,11 @@ let runtime_toml ~codex_cli ~claude_cli =
      is-non-interactive = true\n\
      \n\
      [providers.claude]\n\
+     protocol = \"claude-code\"\n\
+     command = %S\n\
+     is-non-interactive = true\n\
+     \n\
+     [providers.unavailable]\n\
      protocol = \"claude-code\"\n\
      command = %S\n\
      is-non-interactive = true\n\
@@ -72,6 +77,10 @@ let runtime_toml ~codex_cli ~claude_cli =
      api-name = \"claude-fixture\"\n\
      max-context = 200000\n\
      \n\
+     [models.unavailable]\n\
+     api-name = \"claude-unavailable\"\n\
+     max-context = 200000\n\
+     \n\
      [models.missing]\n\
      api-name = \"claude-missing\"\n\
      max-context = 200000\n\
@@ -79,11 +88,13 @@ let runtime_toml ~codex_cli ~claude_cli =
      [codex.codex]\n\
      [claude.claude]\n\
      [missing.missing]\n\
+     [unavailable.unavailable]\n\
      \n\
      [runtime]\n\
      default = \"codex.codex\"\n"
     codex_cli
     claude_cli
+    unavailable_cli
 ;;
 
 let json_string path json =
@@ -109,9 +120,13 @@ let probe runtime_id =
 let with_probe_runtime ?(provider_managed = false) f =
   let codex_cli = codex_fixture ~provider_managed () in
   let claude_cli = claude_fixture () in
+  (* Keep the program present: missing executables are Invalid_config,
+     while this failed exec still exercises the CLI-unavailable boundary. *)
+  let unavailable_cli = write_executable "masc-dashboard-unavailable-" "#!/bin/sh\nexit 97\n" in
+  Unix.chmod unavailable_cli 0o600;
   let config_path = Filename.temp_file "masc-dashboard-official-probe-" ".toml" in
   let output = open_out_bin config_path in
-  output_string output (runtime_toml ~codex_cli ~claude_cli);
+  output_string output (runtime_toml ~codex_cli ~claude_cli ~unavailable_cli);
   close_out output;
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -119,7 +134,7 @@ let with_probe_runtime ?(provider_managed = false) f =
       Runtime.For_testing.restore snapshot;
       List.iter
         (fun path -> if Sys.file_exists path then Sys.remove path)
-        [ codex_cli; claude_cli; config_path ])
+        [ codex_cli; claude_cli; unavailable_cli; config_path ])
     (fun () ->
       match Runtime.init_default ~config_path with
       | Error detail -> fail detail
@@ -210,7 +225,7 @@ let test_request_shape_is_exact () =
 
 let test_cli_unavailable_is_measured_login_evidence () =
   with_probe_runtime (fun () ->
-    let response = probe "missing.missing" in
+    let response = probe "unavailable.unavailable" in
     check string
       "login status"
       "cli_unavailable"
@@ -220,12 +235,25 @@ let test_cli_unavailable_is_measured_login_evidence () =
       false
       (json_bool [ "login"; "authenticated" ] response);
     check bool
-      "missing executable identity remains unverified"
+      "unexecutable CLI identity remains unverified"
       false
       (json_bool [ "login"; "identity_verified" ] response);
     check string
       "execution remains unknown"
       "not_measured"
+      (json_string [ "execution"; "status" ] response))
+;;
+
+let test_missing_cli_is_invalid_configuration () =
+  with_probe_runtime (fun () ->
+    let response = probe "missing.missing" in
+    check string "missing executable is invalid configuration" "invalid_config"
+      (json_string [ "login"; "status" ] response);
+    check bool "not authenticated" false
+      (json_bool [ "login"; "authenticated" ] response);
+    check bool "identity remains unverified" false
+      (json_bool [ "login"; "identity_verified" ] response);
+    check string "execution remains unknown" "not_measured"
       (json_string [ "execution"; "status" ] response))
 ;;
 
@@ -243,6 +271,8 @@ let () =
             "CLI unavailable is measured"
             `Quick
             test_cli_unavailable_is_measured_login_evidence
+        ; test_case "missing CLI is invalid configuration" `Quick
+            test_missing_cli_is_invalid_configuration
         ] )
     ]
 ;;

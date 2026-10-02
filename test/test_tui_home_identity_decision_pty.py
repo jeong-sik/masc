@@ -12,7 +12,8 @@ import sys
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_approvals as approvals
 
 SOURCE_MODULES = (
     "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
@@ -34,7 +35,7 @@ def foreign_decision(executable, kind):
             "pending": [cards.held(label.decode(), "foreign held decision")],
         })
     elif kind == "gate":
-        gate = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
+        gate = copy.deepcopy(approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
         gate[1]["approval_queue"][0].update(
             id=label.decode(), phase="human_required", tool_name="foreign gate decision",
         )
@@ -45,7 +46,7 @@ def foreign_decision(executable, kind):
                     payload={"reason": "foreign operator decision"})
         fixtures[cards.OPERATOR_PATH] = h.approval_selection_snapshot([item])
     elif kind == "ask":
-        ask = copy.deepcopy(h.keeper_asks_response())
+        ask = copy.deepcopy(approvals.keeper_asks_response())
         ask[1]["asks"][0].update(ask_id=label.decode(), context="foreign ask decision")
         fixtures[h.KEEPER_ASKS_PATH] = ask
     else:

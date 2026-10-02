@@ -14,7 +14,9 @@ import threading
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_approvals as approvals
+import tui_keyboard_chat as chat
 
 SOURCE_MODULES = (
     "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
@@ -176,11 +178,11 @@ def background_ask_keeps_beta_draft(executable):
     fixtures[cards.OPERATOR_PATH] = h.approval_selection_snapshot([])
     requests = []
     ask_arrives = threading.Event()
-    ask = copy.deepcopy(h.keeper_asks_response())
+    ask = copy.deepcopy(approvals.keeper_asks_response())
     ask[1]["asks"][0].update(ask_id="ask-home-bg", context="background-alpha-question")
     empty = (200, {"keeper": None, "open_count": 0, "asks": []})
     fixtures[h.KEEPER_ASKS_PATH] = lambda: copy.deepcopy(ask if ask_arrives.is_set() else empty)
-    fixtures[CHAT_PATH] = h.RequestHttpResponse(h.keeper_chat_succeeded_response)
+    fixtures[CHAT_PATH] = h.RequestHttpResponse(chat.keeper_chat_succeeded_response)
     for name in ("alpha", "beta"):
         fixtures[f"/api/v1/keepers/{name}/chat/history"] = (200, [])
     draft = "beta first line\nbeta second line\nbeta final line"
@@ -188,7 +190,7 @@ def background_ask_keeps_beta_draft(executable):
 
     def prepare(base):
         home.seed_goals(base)
-        h.seed_image_workspace(base)
+        chat.seed_image_workspace(base)
 
     def interact(process, fd, _slave, output, base):
         h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
@@ -199,7 +201,7 @@ def background_ask_keeps_beta_draft(executable):
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
         cards.select_home(process, fd, output, b"Continue with beta", destinations=2)
         h.send_and_wait(process, fd, output, b"\r", b"Esc:Dashboard")
-        image = Path(base, h.IMAGE_NAME)
+        image = Path(base, chat.IMAGE_NAME)
         h.send_and_wait(process, fd, output, f"/attach {image}\r".encode(), b"attached ")
         h.send_and_wait(process, fd, output, f"/ref {reference}\r".encode(), b"reference(s)")
         h.write_all(fd, output, b"\x1b[200~" + draft.encode() + b"\x1b[201~")

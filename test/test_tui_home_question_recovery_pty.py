@@ -12,7 +12,8 @@ import threading
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_approvals as approvals
 
 SOURCE_MODULES = (
     "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
@@ -46,7 +47,7 @@ def reader_frame(process, fd, output, needle):
 
 def recovery_journey(executable, *, submit):
     fixtures = cards.fixtures_with_held([])
-    status, snapshot = copy.deepcopy(h.keeper_asks_response(long_question=True))
+    status, snapshot = copy.deepcopy(approvals.keeper_asks_response(long_question=True))
     ask = snapshot["asks"][0]
     ask.update(ask_id=ASK_ID, context=CONTEXT.decode())
     ask["questions"][1]["choices"][0]["label"] = "explain instead"
@@ -63,7 +64,7 @@ def recovery_journey(executable, *, submit):
             current[0] = copy.deepcopy(response)
 
     fixtures[h.KEEPER_ASKS_PATH] = listing
-    fixtures[h.KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+    fixtures[approvals.KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
 
     def no_posts():
         home.assert_no_decision_posts(requests)
@@ -130,7 +131,7 @@ def recovery_journey(executable, *, submit):
             no_posts()
             h.send_and_wait(process, fd, output, b"\r", b"Answered alpha:")
             sent = [json.loads(body) for path, body in requests
-                    if path == h.KEEPER_ASK_ANSWER_PATH]
+                    if path == approvals.KEEPER_ASK_ANSWER_PATH]
             assert sent == [{
                 "name": "alpha", "ask_id": ASK_ID,
                 "answers": [
@@ -162,10 +163,10 @@ def recovery_journey(executable, *, submit):
         prepare_workspace=home.seed_goals, refresh=1.0,
     )
     answer_posts = [(path, body) for path, body in requests
-                    if path == h.KEEPER_ASK_ANSWER_PATH]
+                    if path == approvals.KEEPER_ASK_ANSWER_PATH]
     assert len(answer_posts) == int(submit), answer_posts
     home.assert_no_decision_posts([(path, body) for path, body in requests
-                                  if path != h.KEEPER_ASK_ANSWER_PATH])
+                                  if path != approvals.KEEPER_ASK_ANSWER_PATH])
 
 
 if __name__ == "__main__":

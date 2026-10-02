@@ -15,7 +15,7 @@ import time
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
     "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",

@@ -528,8 +528,8 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
        | Ok result ->
          check int "no MASC dynamic calls" 0 result.dynamic_tool_calls;
          let open Runtime_codex_app_server in
-         match List.rev !stream_events with
-          | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+          match List.rev !stream_events with
+         | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
            ; Native_tool_started
                { identity = Some (Runtime_native_tools.Call_id "native-command-1")
                ; tool_name = Some "commandExecution"
@@ -2668,7 +2668,7 @@ let test_sleep_item_outlasting_the_idle_window_completes () =
          check string "turn completes after the sleep" "MASC_SUBSCRIPTION_OK" turn.text;
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
-         | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+          | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()

@@ -1886,6 +1886,50 @@ let test_promoted_queue_request_keeps_its_user_in_transcript () =
 
 (* Exercise the actual frame, not only the delta fold: a promoted request
    used to collect every delta correctly while the renderer hid its block. *)
+let test_live_gutter_clock_matches_its_causal_frontier () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> () in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (70, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let start = 1_790_053_724. in
+    let frontier = start +. 240. in
+    let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:start [] in
+    let request_id = entry.sent_request.request_id in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_inflight <- [entry];
+    state.msg_live <- Some entry.log;
+    state.msg_history <-
+      [chat_entry ~request_id
+         ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+         ~text:"CLOCK_INPUT" ~at:start ();
+       chat_entry ~request_id ~turn_phase:Tui_types.Turn_progress
+         ~role:Tui_types.Message_status ~text:"CLOCK_FRONTIER" ~at:frontier ()];
+    Tui_types.turn_log_add ~now:start entry.log ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:frontier entry.log ~seq:(Some 1) (Live.Text "CLOCK_OUTPUT");
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let clock = Masc_tui_render_chat.keeper_message_clock frontier in
+    check bool "keeper heading uses frontier clock" true
+      (List.exists (fun line ->
+        Astring.String.is_infix ~affix:"alpha" line
+        && Astring.String.is_suffix ~affix:clock (String.trim line)) plain);
+    let old_clock = Masc_tui_render_chat.keeper_message_clock start in
+    check bool "keeper heading does not revert to dispatch clock" false
+      (List.exists (fun line ->
+        Astring.String.is_infix ~affix:"alpha" line
+        && Astring.String.is_suffix ~affix:old_clock (String.trim line)) plain);
+    check bool "dispatch time remains in running span" true
+      (List.exists (Astring.String.is_infix ~affix:(old_clock ^ "→")) plain))
+;;
+
 let test_promoted_live_output_survives_settlement_and_replay () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -4959,6 +5003,8 @@ let () =
             test_absolute_turn_sequence_breaks_equal_clock_ties
         ; test_case "running turn shares displayed time" `Quick
             test_running_turn_does_not_escape_the_displayed_time_axis
+        ; test_case "live gutter follows causal frontier" `Quick
+            test_live_gutter_clock_matches_its_causal_frontier
         ; test_case "uncommitted live shares visible clock" `Quick
             test_uncommitted_live_turn_inserts_on_the_visible_clock_axis
         ; test_case "live uses latest committed causal frontier" `Quick

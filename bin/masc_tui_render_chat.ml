@@ -2612,16 +2612,8 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
-      (* The block's clock stays the dispatch moment. Drawing the span here
-         ("16:38→" running, "16:38→16:41" settled) needs a pane-level clock
-         column: the gutter's width is fixed at [chat_clock_column] cells and
-         is what the body's wrap width is taken from, so a wider span clock
-         wrapped this block's body narrower than the rows around it and, on
-         a tight pane, truncated to an open arrow over a settled turn. The
-         transcript already records the settle instant (settled_at); the
-         span display returns with the clock-column work (task-1516). The
-         2026-09-10 misread it answers: a 16:38 turn drawn under a 16:41
-         reply read as out-of-order. *)
+      (* The gutter follows the block's causal timeline position. The body
+         span separately preserves dispatch and settlement times. *)
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -2651,7 +2643,7 @@ let render_keeper_message (state : state) =
                     { keeper_name; request_id; entry_index }
                 in
                 let span_clock =
-                  (* The block's clock stays the dispatch moment. The span
+                  (* The dispatch-to-settlement span
                      ("16:38→" running, "16:38→16:41" settled) rides in the
                      entry's [span_clock], which the layout folds into the
                      body *before* wrapping: it consumes body budget like any
@@ -2675,7 +2667,7 @@ let render_keeper_message (state : state) =
                      call trims what the first had already fitted. *)
                   Some
                     ({ style;
-                       timestamp = keeper_message_clock started_at;
+                       timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
                        span_clock;
                        speaker = Option.value speaker ~default:role_label;

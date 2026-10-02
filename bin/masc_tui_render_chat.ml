@@ -2248,6 +2248,7 @@ type log_block = {
   lb_log : Masc_tui_types.turn_log;
   lb_request_id : string;
   lb_insertion : int;
+  lb_timeline_at : float option;
   lb_entries : Message_layout.entry list;
 }
 
@@ -2612,16 +2613,8 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
-      (* The block's clock stays the dispatch moment. Drawing the span here
-         ("16:38→" running, "16:38→16:41" settled) needs a pane-level clock
-         column: the gutter's width is fixed at [chat_clock_column] cells and
-         is what the body's wrap width is taken from, so a wider span clock
-         wrapped this block's body narrower than the rows around it and, on
-         a tight pane, truncated to an open arrow over a settled turn. The
-         transcript already records the settle instant (settled_at); the
-         span display returns with the clock-column work (task-1516). The
-         2026-09-10 misread it answers: a 16:38 turn drawn under a 16:41
-         reply read as out-of-order. *)
+      (* The gutter follows the block's causal timeline position. The body
+         span separately preserves dispatch and settlement times. *)
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -2651,7 +2644,7 @@ let render_keeper_message (state : state) =
                     { keeper_name; request_id; entry_index }
                 in
                 let span_clock =
-                  (* The block's clock stays the dispatch moment. The span
+                  (* The dispatch-to-settlement span
                      ("16:38→" running, "16:38→16:41" settled) rides in the
                      entry's [span_clock], which the layout folds into the
                      body *before* wrapping: it consumes body budget like any
@@ -2675,7 +2668,7 @@ let render_keeper_message (state : state) =
                      call trims what the first had already fitted. *)
                   Some
                     ({ style;
-                       timestamp = keeper_message_clock started_at;
+                       timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
                        span_clock;
                        speaker = Option.value speaker ~default:role_label;
@@ -2745,7 +2738,7 @@ let render_keeper_message (state : state) =
                     entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)
       in
-      { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
+      { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion; lb_timeline_at = timeline_at;
         lb_entries = entries }
     in
     (* One projection per held log per change of its inputs, settled or
@@ -2808,22 +2801,9 @@ let render_keeper_message (state : state) =
        corners onto rows that never close. *)
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
-      |> List.filter (fun settled -> match state.msg_live with
-        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name ->
-          Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
-        | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
       |> List.map (held_projection ~committed:true)
       |> List.filter (fun block -> block.lb_entries <> [])
-    in
-    let live_block =
-      match state.msg_live with
-      | Some live
-        when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name -> (
-          match log_projection ~committed:false live with
-          | { lb_entries = []; _ } -> None
-          | block -> Some block)
-      | Some _ | None -> None
     in
     (* Turns running that this pane did not open, drawn from the journal
        reads that feed their logs ([observed_logs_for_keeper]). Projected
@@ -2860,38 +2840,39 @@ let render_keeper_message (state : state) =
           { block with lb_entries = entries })
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    (* A new queued request takes msg_live while the previous subscription
-       still runs. Keep those request-owned logs on screen as well. Batch
-       members share one execution, so retain one block per execution. *)
+    (* Classify the same selected pool that history suppression reads. *)
     let other_live_blocks =
-      List.rev state.msg_inflight
-      |> List.filter (fun entry ->
-          String.equal entry.sent_request.keeper_name keeper_name)
-      |> List.map (fun entry -> held_projection ~committed:false entry.log)
+      Masc_tui_types.selected_source_logs_for_keeper state keeper_name
+      |> List.filter (fun log ->
+          not (Masc_tui_types.turn_log_holds_the_turn log)
+          && (not (List.exists (( == ) log) state.msg_settled_logs)
+              || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
+                   state.msg_inflight))
+      |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
-      |> List.fold_left (fun selected block ->
-          let execution_id = Masc_tui_types.turn_log_execution_id block.lb_log in
-          let already_drawn = List.exists (fun drawn ->
-              String.equal execution_id
-                (Masc_tui_types.turn_log_execution_id drawn.lb_log))
-              (settled_blocks @ observed_blocks @ Option.to_list live_block @ selected) in
-          if already_drawn then selected else selected @ [block]) []
+    in
+    let blocks =
+      settled_blocks @ observed_blocks @ other_live_blocks
+      |> List.stable_sort (fun left right ->
+          let by_position = Int.compare left.lb_insertion right.lb_insertion in
+          if by_position <> 0 then by_position
+          else match left.lb_timeline_at, right.lb_timeline_at with
+            | Some left_at, Some right_at -> Float.compare left_at right_at
+            | Some _, None -> -1
+            | None, Some _ -> 1
+            | None, None -> 0)
     in
     let open_blocks =
       List.filter (fun block ->
         not (Masc_tui_types.observed_log_has_ended state block.lb_log)
-        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log))
-        observed_blocks @ other_live_blocks @ Option.to_list live_block
+        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log)) blocks
     in
-    let blocks = settled_blocks @ observed_blocks @ other_live_blocks @ Option.to_list live_block in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
     in
-    (* Each block at its own place in the committed timeline. Blocks that
-       land on the same index keep their order -- settled turns in the order
-       they settled, the live one last -- and a block placed past the end
-       follows everything. *)
+    (* Blocks sharing an insertion slot follow their causal timeline clocks.
+       Equal clocks preserve source order; unknown clocks follow known ones. *)
     let merge_blocks () =
       let placed =
         List.map

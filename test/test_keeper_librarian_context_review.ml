@@ -231,7 +231,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
     Alcotest.(check int) "queue-triggered conversation still commits Memory" (seeded.revision + 1) current.revision;
     Alcotest.(check int) "conversation evidence applies its disposition" 0 (List.length current.facts));
-  let run = match List.filter (fun (r : Runs.run) -> r.actor = keeper_id) (Runs.list_runs registry) with
+  let run = match Fixture.librarian_pass_runs registry ~keeper_id with
     | [run] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "expected one run" in
   let output = match run.status with Runs.Completed {output; _} -> output

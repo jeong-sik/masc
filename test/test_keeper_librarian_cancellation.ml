@@ -125,7 +125,8 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
       match List.find_opt (fun (run : Runs.run) ->
         run.actor = keeper_id && match run.status with
           | Runs.Completed _ -> true
-          | Runs.Running | Runs.Completion_persistence_failed _ -> false) (Runs.list_runs registry) with
+          | Runs.Running | Runs.Completion_persistence_failed _ -> false)
+          (Fixture.librarian_pass_runs registry ~keeper_id) with
       | None -> ()
       | Some run ->
         completed_before_cancellation := Runs.get registry ~run_id:run.run_id;
@@ -171,8 +172,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     commits_memory !memory_committed;
   Alcotest.(check bool) "Memory changes only after its actual commit"
     commits_memory (after_bytes <> before_bytes);
-  let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
-      (Runs.list_runs registry) with
+  let run = match Fixture.librarian_pass_runs registry ~keeper_id with
     | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "one Librarian run must be retained" in
   Alcotest.(check string) "the live registry retains the actual terminal outcome" expected_status

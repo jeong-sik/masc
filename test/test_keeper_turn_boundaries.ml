@@ -41,7 +41,7 @@ let record
   { Boundaries.recorded_at = 200.0
   ; event =
       Boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
         ; history_at_start
         ; position
         }
@@ -95,13 +95,14 @@ let record_equal (left : Boundaries.record) (right : Boundaries.record) =
   &&
   match left.event, right.event with
   | ( Boundaries.Turn_ended
-        { turn_ref = left_ref; history_at_start = left_start; position = left_position }
+        { turn_ref = left_ref; history_at_start = left_start; position = left_position; task_context = left_context }
     , Boundaries.Turn_ended
-        { turn_ref = right_ref; history_at_start = right_start; position = right_position }
+        { turn_ref = right_ref; history_at_start = right_start; position = right_position; task_context = right_context }
     ) ->
     Ids.Turn_ref.equal left_ref right_ref
     && left_start = right_start
     && left_position = right_position
+    && left_context = right_context
   | ( Boundaries.History_restarted { trace_id = left_trace }
     , Boundaries.History_restarted { trace_id = right_trace } ) ->
     String.equal left_trace right_trace
@@ -139,15 +140,15 @@ let test_every_position_kind_round_trips () =
    the two tokens a reader branches on. *)
 let test_the_line_a_turn_writes () =
   check string "a continued turn that ended an atom history"
-    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"continued","position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"}}|}
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"continued","position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"},"task_context":{"kind":"no_task"}}|}
     (Yojson.Safe.to_string (Boundaries.record_to_json (record atom_history)));
   check string "a fresh turn whose save was a stale no-op"
-    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"fresh","position":{"kind":"stale_noop"}}|}
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"fresh","position":{"kind":"stale_noop"},"task_context":{"kind":"no_task"}}|}
     (Yojson.Safe.to_string
        (Boundaries.record_to_json
           (record ~history_at_start:Boundaries.Fresh_history Boundaries.Stale_noop)));
   check string "a continued turn that states its start position"
-    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":{"kind":"continued_from","start_atom":2,"start_atom_digest":"digest"},"position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"}}|}
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":{"kind":"continued_from","start_atom":2,"start_atom_digest":"digest"},"position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"},"task_context":{"kind":"no_task"}}|}
     (Yojson.Safe.to_string
        (Boundaries.record_to_json
           (record
@@ -235,7 +236,7 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
     ~reason:
       (Wire.Field_set_mismatch
          { missing = [ "trace_id" ]
-         ; unexpected = [ "history_at_start"; "position"; "turn_ref" ]
+         ; unexpected = [ "history_at_start"; "position"; "task_context"; "turn_ref" ]
          })
     (with_fields (replacing "kind" (`String "history_restarted")) (record atom_history));
   check_rejection "a restart line that does not name its trace"
@@ -646,7 +647,8 @@ let started_trace = "trace-started"
 let with_workspace f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Eio_main.run
-  @@ fun _env ->
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "turn-start-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
@@ -782,7 +784,8 @@ let test_the_line_that_states_a_position () =
       (Boundaries.witness_line ?through ~trace_id ~end_atom:2 ~last_atom_digest:digest lines)
   in
   check (option int) "the latest line that states it" (Some 6) (found ());
-  check (option int) "only among the lines counted" (Some 1) (found ~through:5 ());
+  check (option int) "a restart invalidates the earlier end witness" None (found ~through:5 ());
+  check (option int) "before the restart the end witness is live" (Some 1) (found ~through:2 ());
   check (option int) "none counted, none found" None (found ~through:0 ());
   check (option int) "another digest is another position" None (found ~digest:"other" ());
   check (option int) "another trace has its own lines" (Some 2) (found ~trace_id:"other" ());
@@ -834,6 +837,14 @@ let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
   in
   check (option int) "a start state before a restart names a history that is gone" None
     (witness restarted_after ~end_atom:5 ~digest:"d5");
+  let repeated_after_restart =
+    [ 1, Ok (record ~turn:1 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" }))
+    ; 2, Ok (history_restarted ())
+    ; 3, Ok (record ~turn:3 ~history_at_start:from_five Boundaries.No_atom_history)
+    ]
+  in
+  check (option int) "only the new history can witness a repeated position" (Some 3)
+    (witness repeated_after_restart ~end_atom:5 ~digest:"d5");
   let later_turn_ended_there =
     official_after_a_failed_save
     @ [ 4, Ok (record ~turn:4 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" })) ]
@@ -848,10 +859,132 @@ let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
           (record ~history_at_start:Boundaries.Fresh_history ended_at_two)))
 ;;
 
+module Task_context = Masc.Keeper_turn_task_context
+
+let test_admission_context_survives_task_and_goal_changes () =
+  with_workspace @@ fun ~config ~keepers_dir ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let seed task_id =
+    let task : Masc_domain.task =
+      { id = task_id; title = "work"; description = "work";
+        task_status = Claimed { assignee = keeper_id; claimed_at = "2026-10-02T00:00:00Z" };
+        priority = 3; files = []; created_at = "2026-10-02T00:00:00Z";
+        created_by = None; predecessor_task_id = None; contract = None;
+        handoff_context = None; cycle_count = 0; reclaim_policy = None;
+        execution_links = Masc_domain.no_execution_links; do_not_reclaim_reason = None; skills = [] }
+    in
+    Workspace_backlog.write_backlog config
+      { tasks = [task]; task_deletion_receipts = []; pending_completion_rejections = [];
+        last_updated = "2026-10-02T00:00:00Z"; version = 1 }
+  in
+  let goal target_value =
+    match Goal_store.upsert_goal config ~id:"goal-history" ~title:"Historical criterion"
+      ~metric:"count" ~target_value () with
+    | Ok (goal, _) -> goal
+    | Error e -> fail (Goal_store.write_error_to_string e)
+  in
+  seed "task-a";
+  let original_goal = goal "1" in
+  Workspace_goal_index.write_goal_task_links config [original_goal.id, ["task-a"]];
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_id; "trace_id", `String "trace";
+      "current_task_id", `String "task-a"]) with
+    | Ok meta -> meta | Error e -> fail e in
+  let _, observed = Masc.Keeper_current_task_reconcile.sync_current_task_id_with_observation ~config meta in
+  let captured = Task_context.capture ~config observed in
+  (match captured with
+   | Task_context.Task { task_id; goals = Ok [goal] } ->
+     check string "admitted Task A" "task-a" (Keeper_id.Task_id.to_string task_id);
+     check bool "original Goal criterion" true (goal.criterion = Goal_store.criterion_of_goal original_goal)
+   | _ -> fail "admission did not observe Task A and its Goal");
+  seed "task-b";
+  let edited_goal = goal "2" in
+  check bool "criterion actually changed" false
+    (Goal_store.criterion_of_goal original_goal = Goal_store.criterion_of_goal edited_goal);
+  let _, next_observed = Masc.Keeper_current_task_reconcile.sync_current_task_id_with_observation ~config meta in
+  (match next_observed with
+   | Ok (Some id) -> check string "current selection now B" "task-b" (Keeper_id.Task_id.to_string id)
+   | _ -> fail "current Task did not change");
+  List.iteri (fun index position ->
+    let written = { Boundaries.recorded_at = 200.; event = Boundaries.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:(index + 1);
+        history_at_start = Boundaries.Fresh_history; position; task_context = captured } } in
+    match Boundaries.append ~keepers_dir ~keeper_id written with
+    | Ok () -> () | Error e -> fail (Boundaries.append_error_to_string e))
+    [atom_history; Boundaries.No_atom_history];
+  let lines = read_lines ~keepers_dir in
+  check int "both runtime boundary forms" 2 (List.length lines);
+  List.iter (function
+    | _, { Boundaries.event = Boundaries.Turn_ended {task_context; _}; _ } ->
+      check bool "durable historical admission unchanged" true (task_context = captured)
+    | _ -> fail "unexpected restart") lines
+;;
+
+let test_admission_context_strict_and_goalless () =
+  with_workspace @@ fun ~config ~keepers_dir ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let path = Goal_store.goals_path config in
+  let oc = open_out path in output_string oc "invalid"; close_out oc;
+  let id = match Keeper_id.Task_id.of_string "task-unlinked" with Ok id -> id | Error e -> fail e in
+  let context = Task_context.capture ~config (Ok (Some id)) in
+  (match context with Task_context.Task {goals = Ok []; _} -> ()
+   | _ -> fail "unrelated unreadable Goals obscured known empty links");
+  Workspace_goal_index.write_goal_task_links config ["goal-unreadable", ["task-unlinked"]];
+  let unavailable_goal = Task_context.capture ~config (Ok (Some id)) in
+  (match unavailable_goal with
+   | Task_context.Task {goals = Error (Task_context.Goal_source_unavailable _); _} -> ()
+   | _ -> fail "unreadable linked Goal not preserved");
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_id; "trace_id", `String "trace";
+      "current_task_id", `String "task-a"]) with
+    | Ok meta -> meta | Error e -> fail e in
+  let oc = open_out (Workspace_backlog.backlog_path config) in
+  output_string oc "invalid backlog"; close_out oc;
+  let _, observed = Masc.Keeper_current_task_reconcile.sync_current_task_id_with_observation ~config meta in
+  let unavailable_task = Task_context.capture ~config observed in
+  (match unavailable_task with
+   | Task_context.Task_source_unavailable _ -> ()
+   | _ -> fail "unreadable backlog became prior Task A or No_task");
+  let written = { Boundaries.recorded_at = 200.; event = Boundaries.Turn_ended
+    {turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1;
+     history_at_start = Boundaries.Fresh_history; position = Boundaries.No_atom_history;
+     task_context = unavailable_task} } in
+  (match Boundaries.append ~keepers_dir ~keeper_id written with
+   | Ok () -> () | Error e -> fail (Boundaries.append_error_to_string e));
+  (match read_lines ~keepers_dir with
+   | [_, decoded] -> check record_t "unavailable admission persisted" written decoded
+   | _ -> fail "missing unavailable boundary");
+  List.iter (fun context -> match Task_context.of_json (Task_context.to_json context) with
+    | Ok decoded -> check bool "typed context roundtrip" true (context = decoded)
+    | Error e -> fail (Wire.wire_error_to_string e))
+    [context; Task_context.No_task; Task_context.Admission_not_recorded; unavailable_task; unavailable_goal];
+  let json = Boundaries.record_to_json (record atom_history) in
+  let json = match json with `Assoc fields -> `Assoc (List.remove_assoc "task_context" fields) | _ -> assert false in
+  (match Boundaries.record_of_json json with
+   | Ok { Boundaries.event = Boundaries.Turn_ended {task_context; position; _}; _ } ->
+     check bool "absent admission is explicit" true (task_context = Task_context.Admission_not_recorded);
+     check bool "position evidence preserved" true (position = atom_history)
+   | Ok _ -> fail "turn boundary changed kind"
+   | Error e -> fail (Wire.wire_error_to_string e));
+  let malformed = match json with
+    | `Assoc fields -> `Assoc (("task_context", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json malformed with
+   | Error _ -> () | Ok _ -> fail "malformed admission accepted");
+  let unknown = match json with
+    | `Assoc fields -> `Assoc (("unknown", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json unknown with
+   | Error _ -> () | Ok _ -> fail "unknown boundary field accepted")
+;;
+
 let () =
   run
     "keeper_turn_boundaries"
-    [ ( "codec"
+    [ ( "admission context", [
+        test_case "Task and Goal changes preserve admission" `Quick test_admission_context_survives_task_and_goal_changes;
+        test_case "strict context and independent goalless observation" `Quick test_admission_context_strict_and_goalless ])
+    ; ( "codec"
       , [ test_case "every position kind round trips" `Quick
             test_every_position_kind_round_trips
         ; test_case "the line a turn writes" `Quick test_the_line_a_turn_writes

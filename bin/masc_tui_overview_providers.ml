@@ -16,10 +16,6 @@ let pad_right text cells =
   let gap = cells - cells_of text in
   if gap > 0 then text ^ String.make gap ' ' else text
 
-let pad_left text cells =
-  let gap = cells - cells_of text in
-  if gap > 0 then String.make gap ' ' ^ text else text
-
 (* ---- meter ------------------------------------------------------------ *)
 
 let eighths_per_cell = 8
@@ -255,11 +251,9 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
        | distinct -> Some (Terminal_text.single_line (String.concat ", " distinct)))
   | Types.Account_emails_unread | Types.Account_emails_failed _ -> None
 
-(* The name column of a window row: the account's name on its first row, its
-   email on the row under it, and nothing on the rest. *)
+(* The first window opens its account card; subsequent windows share it. *)
 type name_cell =
   | Account_name of string
-  | Account_email of string
   | No_name
 
 type row =
@@ -274,9 +268,7 @@ type row =
           because the runtime catalogue observed its quota exhausted: that
           tag explains a stuck Keeper. *)
   | Email_row of string
-      (** An account's email on a row of its own: the account draws one row,
-          or its email is wider than the name column. It is not held to that
-          column. *)
+      (** Account identity metadata, separate from window measurements. *)
 
 (* Exhausted accounts first: a short budget cuts the section from the bottom,
    and the rows it keeps should be the ones that explain a stuck Keeper. Then
@@ -316,34 +308,14 @@ let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage
              Window_row { name = No_name; window; heard; tag = None })
            rest
 
-let widest cells_of_row rows =
-  List.fold_left (fun widest row -> max widest (cells_of_row row)) 0 rows
-
-(* An email row is not held to the name column, so it does not widen it. *)
-let name_cells = function
-  | Window_row { name = Account_name text | Account_email text; _ } | Silent_row { name = text; _ } ->
-      cells_of text
-  | Window_row { name = No_name; _ } | Email_row _ -> 0
-
-(* The name column is as wide as the widest account name. An email that fits
-   it goes under the name on the account's next window row; otherwise, or when
-   the account draws one row, it takes a row of its own. So an email never
-   narrows the meters. *)
-let place_email ~name_w email rows =
-  match email, rows with
-  | None, _ -> rows
-  | Some email, first :: Window_row ({ name = No_name; _ } as next) :: rest
-    when cells_of email <= name_w ->
-      first :: Window_row { next with name = Account_email email } :: rest
-  | Some email, _ -> rows @ [ Email_row email ]
+let place_email email rows =
+  match email with None -> rows | Some email -> rows @ [ Email_row email ]
 
 (* The value column prints whole percents; past this many cells (192
    eighths) a wider meter adds ink, not resolution. *)
 let meter_max_cells = 24
 
-(* Below this many cells (80 eighths) two accounts a few percent apart draw
-   the same bar, so the hearing age gives way before the meter shrinks
-   further (#38611). *)
+(* A meter narrower than ten cells gives the label its own row. *)
 let meter_min_cells = 10
 
 (* A window that counts something a model call does not need never alarms:
@@ -356,101 +328,98 @@ let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
       if at_or_past_full window.puw_utilization then Some (Theme.bad ())
       else None
 
-(* Columns left to right by what a narrow row can least afford to lose: the
-   box cuts a row from the right, so the observed exhaustion tag sits beside
-   the value, and the hearing age, the least of them, comes last. *)
+let role_text = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls -> "Model call limit"
+  | Masc.Tui_decode_usage.Role_counts_other_use -> "Other use · does not block model calls"
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> "Unclassified limit"
+
+(* An account owns its heading and metadata. A long catalogue explanation
+   never consumes the meter columns of every other account. *)
 let draw_rows ~now ~width rows =
-  let name_w = widest name_cells rows in
-  let window_cells f =
-    widest
-      (function
-        | Window_row { window; _ } -> cells_of (f window)
-        | Silent_row _ | Email_row _ -> 0)
-      rows
+  let module Text = Masc_tui_message_layout in
+  let groups =
+    List.fold_left
+      (fun groups row ->
+        match row, groups with
+        | Window_row { name = Account_name name; _ }, _
+        | Silent_row { name; _ }, _ -> (name, [ row ]) :: groups
+        | (Window_row { name = No_name; _ } | Email_row _), (name, held) :: rest ->
+            (name, row :: held) :: rest
+        | (Window_row { name = No_name; _ } | Email_row _), [] ->
+            [ ("Usage", [ row ]) ])
+      [] rows
+    |> List.rev
+    |> List.map (fun (name, held) -> name, List.rev held)
   in
-  let label_w = window_cells window_label in
-  let value_w =
-    window_cells (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
-        utilization_text window.puw_utilization)
+  let gutter = 2 in
+  (* Each side keeps enough cells for a 20-cell label and a useful meter. *)
+  let minimum_card_cells = 64 in
+  let paired = width >= 2 * minimum_card_cells + gutter in
+  let card_width = if paired then (min width 180 - gutter) / 2 else width in
+  let inner = max 1 (card_width - 4) in
+  let quiet = Theme.recede () in
+  let style tone text = match tone with
+    | None -> text | Some tone -> tone ^ text ^ Ansi.reset
   in
-  let reset_w =
-    window_cells (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
-        snd (reset_text ~now window.puw_resets_at))
+  let wrap ?tone text =
+    Text.wrap_words ~max_cells:inner text |> List.map (style tone)
   in
-  let gap = "  " in
-  let tag_cells = function
-    | None -> 0
-    | Some tag -> cells_of gap + cells_of tag
+  let window_lines window heard =
+    let label = window_label window in
+    let value = "Used " ^ utilization_text window.Masc.Tui_decode_usage.puw_utilization in
+    let label_cells = min 20 (max 6 (inner / 3)) in
+    let value_cells = Text.display_width value in
+    let room = inner - label_cells - value_cells - 4 in
+    let meter_cells = max 1 (min meter_max_cells room) in
+    let gauge = meter_open ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
+                ^ meter_close ^ " " ^ value in
+    let first =
+      if room >= meter_min_cells && Text.display_width label <= label_cells then
+        [ pad_right label label_cells ^ " " ^ style (window_tone window) gauge ]
+      else wrap label @ wrap ?tone:(window_tone window) gauge
+    in
+    let reset_tone, reset = reset_text ~now window.puw_resets_at in
+    let report = match window.puw_resets_at with
+      | Some at when at <= now ->
+          " · Last report " ^ clock_text ~now window.puw_observed_at
+      | None | Some _ -> ""
+    in
+    let metadata = "Reset " ^ reset ^ report
+      ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
+    first @ wrap (role_text window.puw_role) @ wrap ?tone:reset_tone metadata
   in
-  let tag_w =
-    widest
-      (function
-        | Window_row { tag; _ } -> tag_cells tag
-        | Silent_row { tag; _ } -> tag_cells (Some tag)
-        | Email_row _ -> 0)
-      rows
+  let render (name, held) =
+    let blocked = List.exists (function
+      | Window_row { tag = Some _; _ } | Silent_row _ -> true
+      | Window_row { tag = None; _ } | Email_row _ -> false) held in
+    let color = if blocked then Theme.bad () else Theme.info () in
+    let body = List.concat_map (function
+      | Email_row email -> wrap ~tone:quiet email
+      | Silent_row { tag; _ } -> wrap "no usage data" @ wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag)
+      | Window_row { window; heard; tag; _ } ->
+          window_lines window heard
+          @ (match tag with None -> [] | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))) held in
+    let title = Text.fit_middle (max 1 (card_width - 4)) name in
+    let top = color ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ title ^ Ansi.reset ^ color
+      ^ " " ^ draw_hline (max 0 (card_width - Text.display_width title - 4)) ^ Ansi.box_tr ^ Ansi.reset in
+    let line content = quiet ^ Ansi.box_v ^ Ansi.reset ^ " "
+      ^ Text.fit_width content inner ^ Ansi.reset ^ " " ^ quiet ^ Ansi.box_v ^ Ansi.reset in
+    let bottom = quiet ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset in
+    top :: List.map line body @ [ bottom ]
   in
-  let heard_w =
-    widest
-      (function
-        | Window_row { heard = Some heard; _ } -> cells_of gap + cells_of heard
-        | Window_row { heard = None; _ } | Silent_row _ | Email_row _ -> 0)
-      rows
+  let rec arrange = function
+    | [] -> []
+    | left :: right :: rest when paired ->
+        let left = render left and right = render right in
+        let height = max (List.length left) (List.length right) in
+        let row lines index = match List.nth_opt lines index with
+          | Some line -> Text.fit_width line card_width
+          | None -> String.make card_width ' ' in
+        List.init height (fun i -> row left i ^ String.make gutter ' ' ^ row right i)
+        @ [ "" ] @ arrange rest
+    | card :: rest -> render card @ [ "" ] @ arrange rest
   in
-  (* Every cell of a window row but the meter and the hearing age: leading
-     space, name, gap, label, space, the meter's two edges, space, value,
-     tag, gap, reset. *)
-  let columns =
-    1 + name_w + cells_of gap + label_w + 1 + cells_of meter_open
-    + cells_of meter_close + 1 + value_w + tag_w + cells_of gap + reset_w
-  in
-  let draws_heard = width - columns - heard_w >= meter_min_cells in
-  let meter_cells =
-    let room = width - columns - (if draws_heard then heard_w else 0) in
-    max meter_min_cells (min meter_max_cells room)
-  in
-  let tag_part = function
-    | None -> ""
-    | Some tag -> gap ^ Theme.bad () ^ tag ^ Ansi.reset
-  in
-  let styled style text =
-    match style with
-    | None -> text
-    | Some style -> style ^ text ^ Ansi.reset
-  in
-  let name_part = function
-    | Account_name name -> pad_right name name_w
-    | Account_email email -> styled (Some Ansi.dim) (pad_right email name_w)
-    | No_name -> pad_right "" name_w
-  in
-  List.map
-    (function
-      | Email_row email -> " " ^ styled (Some Ansi.dim) email
-      | Silent_row { name; tag } ->
-          " " ^ pad_right name name_w ^ gap
-          ^ styled (Some Ansi.dim) "no usage data"
-          ^ tag_part (Some tag)
-      | Window_row { name; window; heard; tag } ->
-          let tone = window_tone window in
-          let reset_tone, reset = reset_text ~now window.puw_resets_at in
-          let heard_part =
-            match heard with
-            | Some heard when draws_heard -> gap ^ styled (Some Ansi.dim) heard
-            | Some _ | None -> ""
-          in
-          let tag_pad = String.make (tag_w - tag_cells tag) ' ' in
-          " " ^ name_part name ^ gap
-          ^ pad_right (window_label window) label_w
-          ^ " "
-          ^ styled tone
-              (meter_open
-              ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
-              ^ meter_close ^ " "
-              ^ pad_left (utilization_text window.puw_utilization) value_w)
-          ^ tag_part tag ^ tag_pad ^ gap
-          ^ styled reset_tone (pad_right reset reset_w)
-          ^ heard_part)
-    rows
+  arrange groups
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
@@ -485,11 +454,10 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             | rows -> Some (account, rows))
           ordered
       in
-      let name_w = widest name_cells (List.concat_map snd accounts) in
       let rows =
         List.concat_map
           (fun (account, rows) ->
-            place_email ~name_w (account_email ~account_emails account) rows)
+            place_email (account_email ~account_emails account) rows)
           accounts
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the

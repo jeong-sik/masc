@@ -9,8 +9,10 @@
 
     The step runs under the Goal lock, as the [before_proof_commit] step of
     {!Workspace_goals.commit_verifier_decision}. Without a [candle.toml], or
-    while Candle is disabled, it writes nothing and lets the transition
-    through. While Candle is enabled, a Snapshot that cannot be written refuses
+    while configuration or ledger recovery disables Candle, it writes nothing
+    and lets the transition through. Appraiser availability is not consulted:
+    a busy or unpublished lane must not discard the inputs to a later payout.
+    While Candle policy is enabled, a Snapshot that cannot be written refuses
     the transition: the verifier keeps the request pending, so nothing that a
     later payout needs is lost. *)
 

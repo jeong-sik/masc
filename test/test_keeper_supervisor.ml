@@ -387,7 +387,7 @@ let seed_durable_librarian_baseline
     { recorded_at = 1.0
     ; event =
         Librarian_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
           ; history_at_start = Librarian_boundaries.Continued_history
           ; position
           }

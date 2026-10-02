@@ -195,10 +195,17 @@ type tool_stream_observation =
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
       (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Official_tool_result of
+      { block_index : int
+      ; tool_call_id : string
+      ; execution_id : Ids.Execution_id.t
+      }
+      (** The producer bound this active block to its host invocation before
+          execution; its tool log is committed. Independent of whole-turn sealing. *)
   | Turn_closed_without_sources of { turn : int }
       (** A producer without a pre-admission sidecar completed the turn. Its
-          streamed calls stay delivery-only; no ordinal or provider-id guess
-          is allowed to attach a canonical execution. *)
+          calls without an explicit producer receipt stay delivery-only;
+          no ordinal or provider-id guess may attach a canonical execution. *)
 
 (** [observation_token] is captured for registry callbacks. Omission disables
     registry turn observation; it never adopts a currently active turn. *)

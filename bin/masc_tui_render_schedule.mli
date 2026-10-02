@@ -142,6 +142,8 @@ val memory_row :
 (** {1 Workspace repository columns} *)
 
 val workspace_minimum_path_width : int
+val workspace_minimum_width : int
+(** Width of all repository columns at their floors, including table gaps. *)
 
 type workspace_row_values = {
   wrow_name : string;
@@ -312,6 +314,98 @@ val schedule_row :
     to name one of its six columns and name it inside the row -- "wake:" on the
     wake's word, a dot before the delivery's -- and leave the other five for the
     reader to work out. *)
+
+(** {1 Keeper automation tab columns} *)
+
+type kauto_row_values = {
+  krow_mark : string;
+  krow_status : string;
+  krow_triggered : string;
+  krow_outcome : string;
+  krow_received : string;
+  krow_recurrence : string;
+  krow_by : string;
+  krow_requested : string;
+  krow_what : string;
+}
+
+(** What a row wears whatever it says: the recurrence and the storage context
+    recede. The mark, the state word and the outcome change with the reading
+    and are the row's own. *)
+type kauto_row_styles = {
+  kstyle_mark : string;
+  kstyle_status : string;
+  kstyle_outcome : string;
+  kstyle_recurrence : string;
+  kstyle_by : string;
+}
+
+(** The tab's columns, named so a narrow pane can say which it gives up: the
+    storage context (BY, then REQUESTED), then the outcome word, then the
+    recurrence. The mark, the state, the two clocks and the summary never
+    go. *)
+type kauto_column =
+  | Kauto_mark
+  | Kauto_status
+  | Kauto_triggered
+  | Kauto_outcome
+  | Kauto_received
+  | Kauto_recurrence
+  | Kauto_by
+  | Kauto_requested
+  | Kauto_what
+
+val kauto_minimum_by_width : int
+val kauto_maximum_by_width : int
+
+val kauto_by_width : string list -> int
+(** Cells the BY column needs for the actors on the page: the widest of
+    them, never under {!kauto_minimum_by_width} and never over
+    {!kauto_maximum_by_width}. *)
+
+(** The columns the tab draws and the widths it drew them at. Only
+    {!kauto_layout} makes one, so the header and every row are drawn from the
+    widths the columns were fitted with. *)
+type kauto_layout = private {
+  k_columns : kauto_column Masc_tui_table.layout;
+  k_status_width : int;
+  k_clock_width : int;
+  k_outcome_width : int;
+  k_by_width : int;
+}
+
+val kauto_layout :
+  inner_width:int ->
+  status_width:int ->
+  clock_width:int ->
+  outcome_width:int ->
+  by_width:int ->
+  kauto_layout
+(** The columns the tab draws in [inner_width], given the status width
+    (measured from the contract's own word list), the clock width (from the
+    stamp format) and the outcome and actor widths measured from the page. *)
+
+val kauto_plain_styles : kauto_row_styles
+
+val kauto_header_row : layout:kauto_layout -> string
+
+val kauto_row :
+  styles:kauto_row_styles ->
+  layout:kauto_layout ->
+  kauto_row_values ->
+  string
+(** One automation, on the same columns as {!kauto_header_row}. *)
+
+val kauto_status_mark : string -> string
+(** The mark a status word draws: the Fusion pipeline's vocabulary, one cell
+    -- waiting, active, done, failed. A word this build does not name keeps
+    the middot, saying the pane did not classify it; a cancelled or expired
+    schedule keeps the waiting mark, inert beside the word that names
+    it. *)
+
+val kauto_group_label : title:string -> string list -> string
+(** The label on the rule parting the live rows from the closed ones: the
+    title alone when there are no parts, the parts after it when there are. *)
 
 (** {1 Lane run columns} *)
 

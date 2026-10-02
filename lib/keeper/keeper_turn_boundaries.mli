@@ -156,6 +156,11 @@ type event =
       { turn_ref : Ids.Turn_ref.t
             (** The finished turn. Its trace id is the keeper trace id, which
                 is also the session id of the checkpoint. *)
+      ; task_context : Keeper_turn_task_context.t
+          (** Immutable admission observation for this turn reference only.
+              It does not describe earlier turns covered by a history span.
+              Absent observation is [Admission_not_recorded], never [No_task].
+              Position evidence remains readable; present malformed context fails. *)
       ; history_at_start : history_at_start
       ; position : position
       }
@@ -284,6 +289,8 @@ val states_position
     most [through] count: the lines a position has taken in, its
     [boundary_lines_seen] ({!Keeper_librarian_progress}). A line that cannot
     be decoded, a restart line and a turn with no atom position state none.
+    A restart of [trace_id] discards both end and start witnesses from the
+    preceding history; restarts of another trace do not affect this lookup.
 
     A position no line ends at is stated by the first line whose turn
     started from it ({!start_position_stated}) after the last restart of

@@ -209,8 +209,8 @@ let approval_item_needs_person = function
   | Keeper_tool_row _ | Operator_row _ -> true
   | Gate_row (pending : Tui_decode.gate_pending) ->
       match pending.gp_phase with
-      | Gate_human_required -> true
-      | Gate_queued | Gate_judging | Gate_blocked -> false
+      | Gate_human_required | Gate_blocked -> true
+      | Gate_queued | Gate_judging -> false
 
 let approvals_human_pending (state : state) =
   List.length (List.filter approval_item_needs_person (approval_items state))

@@ -141,8 +141,3 @@ let decode ~keeper_name json =
       then Error "owned Item is absent from catalog"
       else Ok (revision, Ready { balance_milli; owned_items; catalog })
     | _ -> Error ("unknown Item account status " ^ status)
-
-let match_revision ~expected_revision (revision, account) =
-  let* expected_revision = expected_revision in
-  if revision = expected_revision then Ok account
-  else Error "Item account observation changed; refresh the Keeper roster before reading this account"

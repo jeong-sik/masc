@@ -1321,6 +1321,9 @@ function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtoco
 }
 
 export type DashboardOfficialClientRecoveryFailure =
+  | 'owner_stopped_turn'
+  | 'input_rejected_bootstrap_floor_exceeded'
+  | 'input_rejected_effect_fenced'
   | 'pre_dispatch_failed'
   | 'transient_spawn_failed'
   | 'transport_interrupted'
@@ -1462,6 +1465,9 @@ export interface DashboardOfficialClientProbeResponse {
 }
 
 const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
+  'owner_stopped_turn',
+  'input_rejected_bootstrap_floor_exceeded',
+  'input_rejected_effect_fenced',
   'pre_dispatch_failed',
   'transient_spawn_failed',
   'transport_interrupted',

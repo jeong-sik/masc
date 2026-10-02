@@ -7,6 +7,27 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_identity.ml",
+    "bin/masc_tui_render_identity.mli",
+    "bin/masc_tui_render_github.ml",
+    "bin/masc_tui_render_github.mli",
+    "bin/masc_tui_github_ui.ml",
+    "bin/masc_tui_github_ui.mli",
+    "bin/masc_tui_github_requests.ml",
+    "bin/masc_tui_github_requests.mli",
+    "bin/masc_tui_identity_input.ml",
+    "bin/masc_tui_identity_input.mli",
+    "bin/masc_tui_identity_model.ml",
+    "bin/masc_tui_identity_model.mli",
+    "bin/masc_tui_identity_requests.ml",
+    "bin/masc_tui_identity_requests.mli",
+    "bin/masc_tui_identity_updates.ml",
+    "bin/masc_tui_identity_updates.mli",
+
+    "bin/masc_tui_approvals_model.ml",
+    "bin/masc_tui_approvals_model.mli",
+    "bin/masc_tui_surface_navigation.ml",
+    "bin/masc_tui_surface_navigation.mli",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render_prim.mli",
     "bin/masc_tui_render_code.ml",
@@ -19,6 +40,8 @@ SOURCE_MODULES = (
     "lib/tui_terminal_text.mli",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_message_layout.ml",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
     "bin/masc_tui_next_request_band.ml",
 )
 

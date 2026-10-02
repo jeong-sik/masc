@@ -129,6 +129,8 @@ val restart_line_owed_at_finalize
   -> bool
 
 val turn_progress_callbacks :
+  preview:Keeper_turn_preview.writer option ->
+  observation_token:Keeper_turn_observation_token.t option ->
   config:Workspace.config ->
   keeper_name:string ->
   downstream:(Agent_core.Types.sse_event -> unit) option ->

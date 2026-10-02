@@ -315,6 +315,8 @@ let initial_tool_calls
 ;;
 
 let prepare_agent_setup
+      ?preview
+      ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -393,9 +395,10 @@ let prepare_agent_setup
            notify ~tool_call_id ~turn ~planned_index ~execution_id
          | Some Runtime_execution.Official_client ->
            (* Official clients execute dynamic tools without an Agent Core
-              pre-admission source sidecar. Keep those persisted chat rows
-              delivery-only. The owner comes from the exact resolved candidate
-              attempt, including heterogeneous lane fallbacks. *)
+              pre-admission source sidecar. This callback cannot join them.
+              Codex separately emits its producer-bound Official_tool_result.
+              The owner comes from the exact resolved candidate attempt,
+              including heterogeneous lane fallbacks. *)
            ()
          | None ->
            failwith
@@ -971,6 +974,8 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
+    ?preview
+    ?observation_token
     ?dynamic_context_for_tools
     ?repetition_execution
     ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context

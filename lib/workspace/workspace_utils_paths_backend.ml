@@ -19,6 +19,34 @@ let masc_root_dir config =
     ~base_path:config.base_path
     ~cluster_name:config.backend_config.Backend_types.cluster_name
 
+type expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+(* The same admission check is used by HTTP operator writes and the TUI's
+   MCP task cancellation. Compare canonical roots against the config captured
+   by the receiving request, before any durable operation is dispatched. *)
+let validate_expected_workspace ~config args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key "expected_workspace") fields with
+     | [] -> Ok args
+     | [_, `Assoc expected] when List.length expected = 2 ->
+       (match List.assoc_opt "base_path" expected, List.assoc_opt "masc_root" expected with
+        | Some (`String base), Some (`String root)
+          when base <> "" && root <> ""
+               && not (Filename.is_relative base) && not (Filename.is_relative root) ->
+          let matches =
+            try String.equal base (Unix.realpath config.base_path)
+                && String.equal root (Unix.realpath (masc_root_dir config))
+            with Unix.Unix_error _ -> false
+          in
+          if matches then Ok (`Assoc (List.remove_assoc "expected_workspace" fields))
+          else Error Workspace_precondition_failed
+        | _ -> Error Invalid_workspace_precondition)
+     | _ -> Error Invalid_workspace_precondition)
+  | _ -> Error Invalid_workspace_precondition
+
 (** Default-cluster shortcut for callers that only have a [base_path]
     string and are in the default-cluster code path (no multi-cluster
     awareness). Equivalent to

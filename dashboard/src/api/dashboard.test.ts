@@ -5625,6 +5625,27 @@ describe('official-client session API', () => {
     },
   )
 
+  it.each(['owner_stopped_turn', 'input_rejected_bootstrap_floor_exceeded', 'input_rejected_effect_fenced'])(
+    'preserves %s in current recovery and resolution history', async (failure) => {
+      const resolution = {
+        recovery_id: recoveryPayload.session.phase.recovery_id,
+        failure,
+        resolution: { kind: 'retry_previous' },
+        resolved_by: 'operator',
+        resolved_at: 1_786_230_001,
+      }
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        ...recoveryPayload,
+        session: { ...recoveryPayload.session,
+          phase: { ...recoveryPayload.session.phase, failure },
+          last_recovery_resolution: resolution },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      const result = await fetchOfficialClientSession('sangsu')
+      expect(result.session?.phase).toEqual({ ...recoveryPayload.session.phase, failure })
+      expect(result.session?.last_recovery_resolution).toEqual(resolution)
+    },
+  )
+
   it('reads exact measured recovery evidence for one Keeper', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(recoveryPayload), {

@@ -809,7 +809,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              | Tui_decode.Declared_keeper requirements ->
                "아직 시작하지 않음 · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
-             | Persisted_keeper -> status ^ " · —"
+             | Persisted_keeper | Remote_keeper -> status ^ " · —"
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
@@ -1870,6 +1870,69 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   in
   pending
 
+(* Autonomous turns have no operation journal to follow. Their polled tail
+   is an excerpt, never an append-only transcript: render it in the same
+   scrollable pane, replace it on refresh, and let durable history take over
+   after settlement. Do not invent a request id or save the excerpt as a reply.
+   A working direct operation or journal text already draws the real output. *)
+let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
+  let live_text_drawn =
+    match state.msg_live with
+    | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name ->
+        List.exists
+          (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+            match item.drawn with
+            | Masc_tui_keeper_chat_transcript.Drawn_text _
+            | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
+            | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+            | Masc_tui_keeper_chat_transcript.Drawn_skill _
+            | Masc_tui_keeper_chat_transcript.Drawn_tools _
+            | Masc_tui_keeper_chat_transcript.Drawn_status _ -> false)
+          (Masc_tui_keeper_chat_transcript.drawn live.tl_transcript)
+    | Some _ | None -> false
+  in
+  if Option.is_some (Masc_tui_types.working_chat_for_keeper state keeper_name)
+     || live_text_drawn
+  then []
+  else
+    match List.find_opt
+      (fun (row : Tui_decode.keeper_turn_row) ->
+         String.equal row.ktr_keeper_name keeper_name)
+      state.keeper_turns with
+    | Some { ktr_state = Tui_decode.Keeper_turn_running
+        { lane; preview = Some preview; _ }; _ }
+      when String.trim preview.ktp_text_tail <> ""
+           && (match lane with
+               | Tui_decode.Turn_lane_chat_operation ->
+                   not (Masc_tui_types.observed_turn_text_drawn state keeper_name)
+               | Tui_decode.Turn_lane_autonomous | Tui_decode.Turn_lane_maintenance -> true) ->
+        let style = Message_layout.Keeper in
+        let label = keeper_name in
+        let note =
+          match state.keeper_turns_error with
+          | None -> "진행 중"
+          | Some _ -> "마지막 관측, 갱신 실패"
+        in
+        [ ({ style
+           ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
+           ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
+           ; span_clock = None
+           ; speaker = label
+           ; role_label =
+               Message_layout.align_role_label ~column:role_label_column ~style label
+           ; role_label_mark_cells =
+               Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
+           ; request_label = ""
+           ; body = Printf.sprintf "%s · %s · 최근 출력 발췌\n%s"
+               note (Masc_tui_answering.lane_word lane)
+               (Masc.Tui_terminal_text.sanitize_terminal_lines preview.ktp_text_tail)
+           ; journal = []
+           ; markdown_source = Message_layout.Markdown_streaming
+           ; turn_rail = Message_layout.Rail_none
+           ; action = Message_layout.Action_none
+           } : Message_layout.entry) ]
+    | Some _ | None -> []
+
 (* One conversation's layout entries, reused per message across a change of
    the conversation.
 
@@ -2772,11 +2835,40 @@ let render_keeper_message (state : state) =
        journal read lands, not on every frame. *)
     let observed_blocks =
       Masc_tui_types.observed_logs_for_keeper state keeper_name
-      |> List.map (held_projection ~committed:false)
+      |> List.map (fun log ->
+          let ended = Masc_tui_types.observed_log_has_ended state log in
+          let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
+          let block = held_projection ~committed:(ended || unavailable) log in
+          let entries =
+            if ended || unavailable then
+              List.map (fun (entry : Message_layout.entry) ->
+                { entry with span_clock = None }) block.lb_entries
+            else block.lb_entries
+          in
+          let entries =
+            match unavailable, List.rev entries with
+            | true, last :: _ ->
+                let style = Message_layout.Status in
+                entries @
+                [{ last with style; speaker = "STATUS";
+                   role_label = Message_layout.align_role_label
+                     ~column:role_label_column ~style "STATUS";
+                   role_label_mark_cells = Message_layout.role_label_mark_cells
+                     ~column:role_label_column ~style ();
+                   body = "저널 갱신 불가 · 받은 기록을 유지합니다";
+                   markdown_source = Message_layout.Markdown_streaming }]
+            | false, _ | true, [] -> entries
+          in
+          { block with lb_entries = entries })
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    let open_blocks = observed_blocks @ Option.to_list live_block in
-    let blocks = settled_blocks @ open_blocks in
+    let open_blocks =
+      List.filter (fun block ->
+        not (Masc_tui_types.observed_log_has_ended state block.lb_log)
+        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log))
+        observed_blocks @ Option.to_list live_block
+    in
+    let blocks = settled_blocks @ observed_blocks @ Option.to_list live_block in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
@@ -2871,15 +2963,15 @@ let render_keeper_message (state : state) =
           match !merged_blocks_memo with
           | Some memo
             when memo.mbm_committed == committed_layout_entries
-                 && List.length memo.mbm_blocks = List.length settled_blocks
-                 && List.for_all2 ( == ) memo.mbm_blocks settled_blocks ->
+                 && List.length memo.mbm_blocks = List.length blocks
+                 && List.for_all2 ( == ) memo.mbm_blocks blocks ->
               memo.mbm_merged
           | Some _ | None ->
               let merged = merge_blocks () in
               merged_blocks_memo :=
                 Some
                   { mbm_committed = committed_layout_entries;
-                    mbm_blocks = settled_blocks;
+                    mbm_blocks = blocks;
                     mbm_merged = merged;
                   };
               merged)
@@ -2901,6 +2993,7 @@ let render_keeper_message (state : state) =
        move a pin the reader set. *)
     let layout_entries =
       layout_entries
+      @ polled_turn_output_entries state ~keeper_name ~role_label_column
       @ chat_tail_entries state ~keeper_name ~role_label_column
     in
     let inner_width = max 1 (framed_inner_width chat_cols) in
@@ -3045,18 +3138,30 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let room =
-          framed_inner_width chat_cols - 2
-          - Message_layout.display_width row.lead
-          - Message_layout.display_width row.keys
-        in
+        let keys = match state.msg_tool_visibility, state.msg_live with
+          | (Tools_compact | Tools_results), Some live
+            when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
+              && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
+                   ~now:(Unix.gettimeofday ()) > 0 ->
+              row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
+          | (Tools_full | Tools_compact | Tools_results), _ -> row.keys in
+        let lead_room = max 0 (framed_inner_width chat_cols - 2
+          - Message_layout.display_width keys) in
+        let lead =
+          if Message_layout.display_width row.lead <= lead_room then row.lead
+          else fit_width row.lead lead_room in
+        let room = lead_room - Message_layout.display_width lead in
         let rest =
           if Message_layout.display_width row.rest <= room then row.rest
           else fit_width row.rest (max 0 room)
         in
         box_line chat_buf chat_cols
-          (Printf.sprintf "  %s%s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
-             (Theme.recede ()) rest row.keys Ansi.reset))
+          (Printf.sprintf "  %s%s%s%s%s%s%s"
+             (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
+              | Tools_compact | Tools_results ->
+                  if Masc_tui_types.keeper_message_activity_needs_attention state
+                  then Theme.warn () else Theme.recede ()) lead Ansi.reset
+             (Theme.recede ()) rest keys Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
@@ -3161,7 +3266,9 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Buffer.length state.msg_input > 0 then
-             " · Enter queues your line; it sends when this turn ends"
+             (match send_disposition state ~keeper_name with
+              | Updates _ -> " · Enter:send update; Ctrl-T:queue"
+              | Sends -> " · Enter:send")
            else ""
          in
          (* The gate and the prompt describe the same held call. Drawn apart,
@@ -3314,7 +3421,9 @@ let render_keeper_message (state : state) =
             "  Keeper roster is unavailable; draft retained; Esc to choose another"
         | None ->
             Printf.sprintf
-              "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+              (if state.keeper_creation_awaiting_roster = Some keeper_name then
+                 "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
+               else "  Keeper %s is no longer registered; draft retained; Esc to choose another")
               display_keeper_name
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
@@ -3395,9 +3504,11 @@ let render_keeper_message (state : state) =
             match pending_count with
             | 0 -> "Enter:send update"
             | waiting ->
-                Printf.sprintf
-                  "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
-                  waiting)
+                if state.msg_tool_visibility = Tools_full then
+                  Printf.sprintf
+                    "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
+                    waiting
+                else "Enter:send update  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
       in
       match disposition with
       | Updates _ -> queue_hint ()
@@ -3560,11 +3671,21 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
       let portrait =
-        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-        | Keeper_control.Present runtime ->
-            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
-              ~rows:pane_rows ~cols:keeper_roster_pane_cols
-        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+        match List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers with
+        | None -> None
+        | Some keeper ->
+          (match (keeper_reading state keeper).Keeper_control.liveness with
+           | Keeper_control.Present runtime ->
+             (match runtime.kr_portrait with
+              | Tui_decode.Ready equipment ->
+                Masc_tui_chat_portrait.shown ~name:keeper_name
+                  ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
+              | Tui_decode.Unavailable _ -> None)
+           | Keeper_control.Unobserved | Keeper_control.Absent
+           | Keeper_control.Invalid _ -> None)
       in
       let roster_rows = match portrait with
         | None -> pane_rows

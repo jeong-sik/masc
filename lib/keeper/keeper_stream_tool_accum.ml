@@ -34,9 +34,7 @@ type turn_binding =
   }
 
 type execution_binding =
-  { turn : int
-  ; planned_index : int
-  ; occurrence : Keeper_chat_events.tool_stream_occurrence
+  { occurrence : Keeper_chat_events.tool_stream_occurrence
   ; execution_id : Ids.Execution_id.t
   }
 
@@ -68,6 +66,8 @@ type t = {
   mutable current_scope_progress_seen : bool;
   mutable stream_phase : stream_phase;
   mutable invalid_scopes : int list;
+  mutable failed_scopes : int list;
+  mutable official_executions : Keeper_chat_events.tool_stream_occurrence list;
   mutable runtime_attempt_seen : bool;
   (* Agent Core seals a streamed scope with the exact admission mapping before
      execution. Provider ids remain correlation data and never select a row. *)
@@ -92,6 +92,8 @@ let create () =
   ; current_scope_progress_seen = false
   ; stream_phase = Accepting_content
   ; invalid_scopes = []
+  ; failed_scopes = []
+  ; official_executions = []
   ; runtime_attempt_seen = false
   ; turns = []
   ; unmapped_turns = []
@@ -127,6 +129,7 @@ let invalidate_current_scope t =
 
 let current_scope_is_invalid t =
   List.mem t.current_stream_scope t.invalid_scopes
+  || List.mem t.current_stream_scope t.failed_scopes
 ;;
 
 let advance_to_empty_scope t =
@@ -152,7 +155,9 @@ let scope_is_sealed t stream_scope =
 let current_scope_is_sealed t = scope_is_sealed t t.current_stream_scope
 
 let fail_current_scope t =
-  if not (current_scope_is_sealed t) then invalidate_current_scope t
+  if not (current_scope_is_sealed t)
+     && not (List.mem t.current_stream_scope t.failed_scopes)
+  then t.failed_scopes <- t.current_stream_scope :: t.failed_scopes
 ;;
 
 let start_runtime_attempt t =
@@ -592,25 +597,8 @@ let occurrence_equal
   && left.block_index = right.block_index
 ;;
 
-let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
+let record_occurrence_execution_id t ~stream_scope ~block_index ~tool_call_id ~execution_id =
   let ( let* ) = Result.bind in
-  let* binding =
-    match List.assoc_opt turn t.turns with
-    | Some binding -> Ok binding
-    | None when List.mem_assoc turn t.unmapped_turns ->
-      Error (Printf.sprintf "Agent Core turn %d closed without exact tool sources" turn)
-    | None -> Error (Printf.sprintf "Agent Core turn %d was not sealed" turn)
-  in
-  let* block_index =
-    match List.assoc_opt planned_index binding.sources with
-    | Some block_index -> Ok block_index
-    | None ->
-      Error
-        (Printf.sprintf
-           "Agent Core turn %d has no planned_index %d"
-           turn planned_index)
-  in
-  let stream_scope = binding.stream_scope in
   if List.mem (stream_scope, block_index) t.quarantined
   then Error "tool result names a quarantined streamed occurrence"
   else
@@ -637,8 +625,8 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
       else
         Error
           (Printf.sprintf
-             "tool result provider id conflicts at turn=%d planned_index=%d"
-             turn planned_index)
+             "tool result provider id conflicts at scope=%d block_index=%d"
+             stream_scope block_index)
     in
     let execution_is_available target_occurrence =
       match
@@ -648,9 +636,7 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
       with
       | None -> Ok ()
       | Some owner
-        when owner.turn = turn
-             && owner.planned_index = planned_index
-             && occurrence_equal owner.occurrence target_occurrence ->
+        when occurrence_equal owner.occurrence target_occurrence ->
         Ok ()
       | Some _ ->
         Error "canonical execution_id already belongs to another streamed occurrence"
@@ -660,13 +646,11 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
         not
           (List.exists
              (fun owner ->
-                owner.turn = turn
-                && owner.planned_index = planned_index
-                && occurrence_equal owner.occurrence target_occurrence)
+                occurrence_equal owner.occurrence target_occurrence)
              t.executions)
       then
         t.executions <-
-          { turn; planned_index; occurrence = target_occurrence; execution_id }
+          { occurrence = target_occurrence; execution_id }
           :: t.executions;
       Ok target_occurrence
     in
@@ -703,14 +687,53 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
     | [], [] ->
       Error
         (Printf.sprintf
-           "tool result names no collected occurrence: turn=%d planned_index=%d"
-           turn planned_index)
+           "tool result names no collected occurrence: scope=%d block_index=%d"
+           stream_scope block_index)
     | open_matches, finalized_matches ->
       Error
         (Printf.sprintf
-           "tool result occurrence turn=%d planned_index=%d matched %d open and %d finalized calls"
-           turn planned_index (List.length open_matches)
+           "tool result occurrence scope=%d block_index=%d matched %d open and %d finalized calls"
+           stream_scope block_index (List.length open_matches)
            (List.length finalized_matches))
+
+let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
+  let ( let* ) = Result.bind in
+  let* binding =
+    match List.assoc_opt turn t.turns with
+    | Some binding -> Ok binding
+    | None when List.mem_assoc turn t.unmapped_turns ->
+      Error (Printf.sprintf "Agent Core turn %d closed without exact tool sources" turn)
+    | None -> Error (Printf.sprintf "Agent Core turn %d was not sealed" turn)
+  in
+  let* block_index =
+    match List.assoc_opt planned_index binding.sources with
+    | Some block_index -> Ok block_index
+    | None ->
+      Error
+        (Printf.sprintf
+           "Agent Core turn %d has no planned_index %d"
+           turn planned_index)
+  in
+  let stream_scope = binding.stream_scope in
+  record_occurrence_execution_id t ~stream_scope ~block_index ~tool_call_id ~execution_id
+;;
+
+let record_official_execution_id t ~block_index ~tool_call_id ~execution_id =
+  let ( let* ) = Result.bind in
+  if current_scope_is_invalid t || List.mem t.current_stream_scope t.failed_scopes
+  then Error "official tool result arrived in an invalid or failed scope"
+  else
+    let* occurrence =
+      record_occurrence_execution_id t ~stream_scope:t.current_stream_scope
+        ~block_index ~tool_call_id ~execution_id
+    in
+    (* The producer emitted complete arguments before admitting this invocation.
+       Persist the committed row even if cancellation wins before its block stop. *)
+    finalize_block t block_index;
+    if not (List.exists (occurrence_equal occurrence) t.official_executions)
+    then t.official_executions <- occurrence :: t.official_executions;
+    Ok occurrence
+;;
 
 (* [sse_event_is_deliverable_progress_signal] answers a [content_type = "tool_use"]
    check alone (agent_core's [Streaming.sse_event_is_deliverable_progress_signal]),
@@ -755,6 +778,8 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
 ;;
 
 let on_event t (evt : Agent_core.Types.sse_event) =
+  if List.mem t.current_stream_scope t.failed_scopes then ()
+  else begin
   if scope_is_sealed t t.current_stream_scope then advance_to_empty_scope t;
   (match evt with
    | Agent_core.Types.MessageStart { id; model; usage } ->
@@ -992,12 +1017,19 @@ let on_event t (evt : Agent_core.Types.sse_event) =
         t.finalized
   | Agent_core.Types.Connected
   | Agent_core.Types.Ping -> ()
+  end
 ;;
 
 let to_tool_calls t =
   t.finalized
   |> List.filter (fun (_, (finalized : finalized_block)) ->
     (not (List.mem finalized.stream_scope t.invalid_scopes))
+    && (not (List.mem finalized.stream_scope t.failed_scopes)
+        || List.exists
+             (fun (occurrence : Keeper_chat_events.tool_stream_occurrence) ->
+                occurrence.stream_scope = finalized.stream_scope
+                && occurrence.block_index = finalized.block_index)
+             t.official_executions)
     && not (List.mem (finalized.stream_scope, finalized.block_index) t.quarantined))
   |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
   |> List.map (fun (_, finalized) -> finalized.call)

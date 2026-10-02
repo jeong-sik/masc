@@ -400,6 +400,30 @@ let test_refresh_preserves_selected_token () =
   check int "negative cursor is normalized" 0
     (reconcile ~current_tokens:[ "A" ] ~cursor:(-1) [ "A" ])
 
+let test_workspace_withdrawal_releases_only_its_owner () =
+  let old_order, old_ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial in
+  let old_flow, old_action = match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok started -> started
+    | Error `Already_inflight -> fail "initial action must be available" in
+  let withdrawn = Projection.Flow.invalidate old_flow in
+  check bool "withdrawal releases action" false (Projection.Flow.action_inflight withdrawn);
+  let current, current_action = match Projection.Flow.begin_action withdrawn with
+    | Ok started -> started
+    | Error `Already_inflight -> fail "new workspace action must be available" in
+  let still_current, stale_owned = Projection.Flow.finish_action current old_action in
+  check bool "old completion cannot settle successor" false stale_owned;
+  check bool "successor remains pending" true (Projection.Flow.action_inflight still_current);
+  let _, stale_listing = Projection.Listing_order.admit old_order still_current old_ticket in
+  check bool "old listing cannot replace successor workspace" false stale_listing;
+  let current_order, current_ticket = Projection.Listing_order.dispatch old_order still_current in
+  let _, admitted = Projection.Listing_order.admit current_order still_current current_ticket in
+  check bool "fresh listing is accepted" true admitted;
+  let finished, owned = Projection.Flow.finish_action still_current current_action in
+  check bool "successor completion owns its action" true owned;
+  check bool "successor completion releases it" false (Projection.Flow.action_inflight finished)
+
 let () =
   run "tui_operator_projection"
     [ ( "operator approvals"
@@ -413,6 +437,8 @@ let () =
             test_deny_response_fails_closed
         ; test_case "stale request generations" `Quick
             test_approval_flow_rejects_stale_results
+        ; test_case "workspace withdrawal isolates action and listing ownership" `Quick
+            test_workspace_withdrawal_releases_only_its_owner
         ; test_case "second action blocked while inflight" `Quick
             test_second_action_blocked_while_inflight
         ; test_case "listing keeps the newest answer" `Quick

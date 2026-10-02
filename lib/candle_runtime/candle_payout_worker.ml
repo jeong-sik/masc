@@ -10,6 +10,7 @@ type owner = {
 type runtime = {
   config : Workspace_utils_backend_setup.config;
   appraise : Candle_appraisal.runner;
+  appraiser_declaration_changed : unit -> bool;
   wake : Eio.Condition.t;
   pending : bool Atomic.t;
   event : bool Atomic.t;
@@ -44,7 +45,7 @@ let launch ~sw runtime owner =
        | Candle_appraise.Superseded _ -> Hashtbl.remove runtime.owners owner.waiting.goal_id
        | Candle_appraise.Rejected _ -> owner.rejected <- true
        | Candle_appraise.Retry_later _ -> owner.rejected <- false);
-      (* Only an event can release semantic rejection. A pulse received during
+      (* Only an event can release semantic or execution rejection. A pulse received during
          the call cannot turn a later rejection into an immediate retry loop. *)
       if owner.event_queued then request_pass runtime Event);
     `Stop_daemon)
@@ -52,6 +53,12 @@ let pass ~sw runtime reason =
   match Candle_status.current ~base_path:runtime.config.base_path with
   | Candle_config.Off | Candle_config.Disabled _ -> ()
   | Candle_config.Enabled _ ->
+    (* Retain recovery on each existing owner before fallible ledger reads.
+       An in-flight refusal must not consume a changed declaration's event. *)
+    if runtime.appraiser_declaration_changed () then
+      Hashtbl.iter (fun _ owner ->
+        if owner.in_flight then owner.event_queued <- true
+        else owner.rejected <- false) runtime.owners;
     let reason = match Candle_candidates.drain_once ~now:Time_compat.now runtime.config with
       | Error detail -> Log.Misc.warn "candle: preparation could not read ledger: %s" detail; reason
       | Ok outcomes -> if List.exists (function Candle_candidates.Wrote_unattributed _ -> true
@@ -84,9 +91,10 @@ let run ~sw runtime : [ `Stop_daemon ] =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Log.Misc.error "candle: payout scheduling failed: %s" (Printexc.to_string exn)));
     None)
-let start ~sw ~appraise ~(config : Workspace_utils_backend_setup.config) =
+let start ?(appraiser_declaration_changed = fun () -> false)
+    ~sw ~appraise ~(config : Workspace_utils_backend_setup.config) () =
   Eio.Switch.check sw;
-  let runtime = {config;appraise;wake=Eio.Condition.create ();pending=Atomic.make true;
+  let runtime = {config;appraise;appraiser_declaration_changed;wake=Eio.Condition.create ();pending=Atomic.make true;
     event=Atomic.make true;scanning=false;owners=Hashtbl.create 16} in
   let owner = Some runtime in
   if Atomic.compare_and_set active None owner then (

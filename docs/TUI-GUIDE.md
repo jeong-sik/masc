@@ -917,8 +917,18 @@ the column blank and keeps its width. `Ctrl-F` walks the axis: a full
 timestamp heading, then the bare clock-free gutter, then back. The
 header names the two stops away from rest as `metadata:full` or
 `metadata:off`. A streaming
-row uses its actual start clock rather than the word `live`; the active-turn
-status below the history carries the live state and elapsed time. When
+row uses its actual start clock rather than the word `live`. In compact and
+results modes, one quiet status below the history summarizes current work,
+your waiting messages, and their observed delivery or priority receipts.
+Waiting for confirmation and confirmed acceptance remain distinct. If a priority
+reply is unavailable, the status says confirmation is unavailable and retains
+the diagnostic detail; it does not claim the priority change was refused. Full mode
+(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
+time, individual queue states, and priority receipt details. Failures, approval
+requests, and explicit stop targets remain visible in the concise modes.
+Auto-next requests priority for your message; current work continues until it
+finishes or yields. Use the explicit interrupt controls to stop current work.
+When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.
@@ -2229,6 +2239,16 @@ Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.
 
+A Home-origin operator decision retains its last receipt in the Home context.
+A confirmation accepted with execution deferred remains labelled deferred;
+request presence is determined by the current source read. This session receipt
+does not prove application or survive restart. Creation retries retain their
+original return destination alongside the authored declaration. If the lifecycle
+accepts creation before its roster appears, the named draft remains available
+while sending waits for a reliable roster observation. Creation refuses an
+existing name and preserves the declaration; a reconfiguration response is
+reported as reconfiguration rather than opening a first-assignment composer.
+
 `p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
@@ -2246,6 +2266,16 @@ Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc
 and keeps its draft through the existing per-Keeper draft store.
+
+If a previously matched server workspace becomes unreadable, Home shows the
+remembered conversation as unavailable with choose-Keeper guidance. It offers
+no history shortcut until workspace identity matches. Existing conversation
+drafts remain stored. New messages and waiting messages stay unsent;
+Goal confirmation and Task changes require a matching workspace reading. Refresh
+to read the server workspace again. A matching reading restores send authority and resumes already-authorized
+waiting messages once the Keeper roster is reliable. Unsent composer drafts
+remain drafts. A transient question read failure also preserves partial answers;
+submission waits for a successful read.
 
 Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
 an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its

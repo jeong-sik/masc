@@ -147,6 +147,13 @@ type boot_preflight =
   | Boot_meta_read_failed of string
   | Boot_model_setup_required of Runtime_startup_state.reason
 
+type up_workspace_error = Workspace.expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+let validate_up_workspace ~(config : Workspace.config) args =
+  Workspace.validate_expected_workspace ~config args
+
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
   let req_path = Http.Request.path req in
@@ -279,6 +286,15 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     | Error msg ->
         respond_error ~ok:false reqd msg
     | Ok args ->
+      (* Use the same captured workspace config for admission and dispatch;
+         never resolve the global current workspace again between them. *)
+      match (if String.equal action "up" then validate_up_workspace ~config args else Ok args) with
+      | Error Invalid_workspace_precondition ->
+        respond_error ~request:req ~ok:false reqd "invalid expected_workspace precondition"
+      | Error Workspace_precondition_failed ->
+        respond_error ~status:`Conflict ~request:req ~ok:false reqd
+          "workspace changed since identity probe; Keeper was not created"
+      | Ok args ->
         let started_at = Eio.Time.now clock in
         let duration_ms () =
           (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float

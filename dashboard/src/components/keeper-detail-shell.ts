@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact'
 import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
-import { keepers, candleObservation } from '../store'
+import { keepers, candleObservation, executionWorkspaceAuthority } from '../store'
 import { KeeperCandleBalance } from './candle-economy'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperBadge } from './keeper-badge'
@@ -82,7 +82,7 @@ export function KeeperDetailHeaderInfo({
           ? html`<span aria-hidden="true">${keeper.emoji}</span>`
           : html`<${KeeperPortrait}
               name=${keeper.name}
-              reading=${keeper.portrait ?? { state: 'unavailable', reason: 'Portrait observation not yet read' }}
+              accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: 'Portrait observation not yet read' }}
               sizePx=${HEADER_PORTRAIT_PX}
               fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
             />`}
@@ -97,7 +97,10 @@ export function KeeperDetailHeaderInfo({
             phaseEnteredAtSec=${phaseEnteredAtSec}
           />
         </div>
-        <${KeeperCandleBalance} reading=${candleObservation.value} amount=${keeper.candle_balance_milli} />
+        <${KeeperCandleBalance}
+          reading=${executionWorkspaceAuthority.value ? candleObservation.value : { status: 'unavailable', reason: 'Workspace authority is being verified' }}
+          amount=${executionWorkspaceAuthority.value ? keeper.candle_balance_milli : undefined}
+        />
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
             ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}

@@ -53,6 +53,7 @@ let candidates_row ~at (waiting : Candle_payout.waiting) tasks (decided : Candle
         ; tasks
         ; candidate_task_ids = decided.candidate_task_ids
         ; candidate_keepers = decided.candidate_keepers
+        ; candidate_task_keepers = decided.candidate_task_keepers
         }
   }
 ;;

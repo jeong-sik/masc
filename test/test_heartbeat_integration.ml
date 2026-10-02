@@ -3577,7 +3577,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        with
        | Error _ -> fail "could not stage a paused lane for the chat-lane check"
        | Ok () ->
-         R.mark_turn_started
+         R.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
            ~base_path:config.base_path
            ~wake:Masc.Keeper_registry_types.Chat_request
            persisted.name;

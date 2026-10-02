@@ -712,6 +712,50 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
      "cancelled-index-failure",Ok {S.role=Assistant;content=Text {type_="text";text="exact answer"};
        model="actual-model";stop_reason=Some "endTurn";_meta=None},true])
 
+let test_sampling_response_bound_and_directory_durability () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "first-use") in
+  List.iter (fun relative ->
+    let fail_parent = Filename.dirname (Filename.concat (Store.root store) relative) |> Filename.dirname in
+    let syncs = ref [] in
+    let write fail_sync = Store.For_testing.write store relative "{}" ~sync_parent:(fun path ->
+      syncs := path :: !syncs;
+      if fail_sync && path = fail_parent then raise (Unix.Unix_error (Unix.EIO,"fsync",path))) in
+    check bool "first-use ancestor failure refuses persistence" true (Result.is_error (write true));
+    check bool "no receipt published before ancestor sync" false
+      (Sys.file_exists (Filename.concat (Store.root store) relative));
+    syncs := [];
+    (match write false with Ok () -> () | Error detail -> fail detail);
+    check bool "retry syncs the existing newly-created ancestor" true (List.mem fail_parent !syncs))
+    ["evidence/fixture.json";"sampling/worker/fixture.json";"sampling-outcomes/worker/fixture.json"];
+  let store = Store.create ~root:(Filename.concat dir "response-limit") in
+  let answer : S.create_message_result = {role=Assistant;content=Text {type_="text";text="answer"};
+    model="model";stop_reason=Some "endTurn";_meta=None} in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=65536}} in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let run p =
+    let broker = match Sampling.create ~store ~package:p ~instance_id:"w" ~route:"r"
+      ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with Ok value -> value | Error detail -> fail detail in
+    let handler = match Sampling.for_worker broker ~package:p ~instance_id:"w" with
+      | Ok value -> value | Error detail -> fail detail in handler params in
+  let first = match run p with Ok value -> value | Error detail -> fail detail in
+  let size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson first)) in
+  let bounded = {p with resources={p.resources with max_reply_bytes=size-1}} in
+  let result = run bounded in
+  check bool "host reply including receipt metadata obeys package envelope" true (Result.is_error result);
+  (match result with
+   | Error detail -> check bool "overflow refusal also fits without echoing receipt metadata" true
+       (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes)
+   | Ok _ -> fail "oversized answer accepted");
+  let indexes = match sampling_requests store ~instance_id:"w" with Ok xs -> xs | Error detail -> fail detail in
+  check int "both actual outcomes remain durably indexed" 2 (List.length indexes);
+  check bool "response-bound refusal preserves known finished result" true
+    (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") indexes))
+
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
@@ -733,6 +777,7 @@ let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _
   check int "complete scan still visits every retained request" 128 !count)
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;

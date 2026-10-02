@@ -98,6 +98,7 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val save_action : sync_parent:(string -> unit) -> t -> instance_id:string ->
     request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

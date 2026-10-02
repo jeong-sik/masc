@@ -130,7 +130,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     match outcome with
     | Answer answer ->
         let answer = package_response answer in
-        Ok {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])}
+        let response = {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])} in
+        let* () = Eio_unix.run_in_systhread (fun () ->
+          encode_bounded ~max_bytes:package.resources.max_reply_bytes
+            (S.create_message_result_to_yojson response) |> Result.map (fun _ -> ()))
+          |> Result.map_error (fun _ -> "sampling response exceeds package byte envelope; retained outcome remains indexed") in
+        Ok response
     | Host_error detail ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "host_error";
           "error",`String detail;"evidence",references]))

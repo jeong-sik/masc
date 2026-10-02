@@ -12,10 +12,25 @@ let protect f =
   | Unix.Unix_error (error, call, path) ->
       Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
-let write t relative bytes = protect (fun () ->
+(* Also sync existing ancestors: they may have been created by a preceding
+   attempt whose parent sync failed. A retry must establish the entire path. *)
+let sync_parent_directory parent =
+  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let rec durable_directory ~sync_parent directory =
+  let parent = Filename.dirname directory in
+  if parent <> directory then (
+    durable_directory ~sync_parent parent;
+    (try Unix.mkdir directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "retained evidence parent is not a directory"));
+    sync_parent parent)
+let write_with ~sync_parent t relative bytes = protect (fun () ->
   let path = Filename.concat t.root relative in
-  Fs_compat.mkdir_p (Filename.dirname path);
+  durable_directory ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
+let write = write_with ~sync_parent:sync_parent_directory
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
 let blob_reference bytes =
   let hash = digest bytes in
@@ -142,25 +157,11 @@ let remove_binding t ~instance_id = protect (fun () ->
   Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
-(* Also sync existing ancestors: they may have been created by a preceding
-   attempt whose parent sync failed. A retry must establish the entire path. *)
-let sync_action_parent parent =
-  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
-let rec durable_action_directory ~sync_parent directory =
-  let parent = Filename.dirname directory in
-  if parent <> directory then (
-    durable_action_directory ~sync_parent parent;
-    (try Unix.mkdir directory 0o700 with
-     | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
-           raise (Sys_error "action receipt parent is not a directory"));
-    sync_parent parent)
 let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
-  durable_action_directory ~sync_parent (Filename.dirname path);
+  durable_directory ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
-let save_action = save_action_with ~sync_parent:sync_action_parent
+let save_action = save_action_with ~sync_parent:sync_parent_directory
 let broadcast_path ~instance_id ~request_id =
   Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
@@ -613,6 +614,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let write = write_with
   let save_action = save_action_with
   let load_action = load_action_with
   let append_observation = append_observation_with

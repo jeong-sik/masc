@@ -28,9 +28,11 @@ Captured fixed binary SHA-256: `96c0836bbd3addfddfa1eb4606c3f8954692405528a3a759
 - Capture helper Ruff passes. Currency helper has the same four Ruff and 36 Pyright diagnostics as its unchanged baseline. `git diff --check` passes.
 - 재현 결과: Full currency PTY suite still fails ready-to-booting Help authority withdrawal. The same focused authority scenario fails on the parent. Recorded at https://github.com/jeong-sik/masc/issues/40598#issuecomment-5947660316 . This is not a full-suite pass.
 
+Further verification on committed implementation head `309cae280bd14bc390454781e8f2adb0164b13f8`: focused native rebuild and scope PTY passed. Resources PTY also passed. Home viewport audit emitted six unread-state frames but then timed out waiting for populated approval count, identically on the parent binary. This broader Home scenario remains unresolved; see checks/ logs. Subsequent evidence-only commits do not change this implementation, but are not themselves execution-tested heads.
+
 ## 불확실성 (Uncertainty)
 
-- 미확인 항목: exact committed-head execution, installed/production behavior, remaining sub-tabs and overlays
+- 미확인 항목: installed/production behavior, remaining sub-tabs and overlays
 - 영향: whole layout goal #40806 remains active; no release readiness claim
 - 추가 확인 필요: broader boundary audit and integrated evidence
 

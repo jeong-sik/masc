@@ -989,6 +989,12 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
                     try:
                         identity["unread"] = False
                         wait_refreshes(process, fd, output)
+                        report = f"[masc-tui] decode failed for {metadata}:"
+                        assert h.wait_for_fixture_state(
+                            process, fd, output,
+                            lambda: report in h.exit_reason_log(_base),
+                            timeout=10,
+                        ), "failed roster decode was not observed"
                         assert h.wait_for_fixture_state(process, fd, output,
                             lambda: b"MASC Keepers" in frame(output), timeout=10)
                         assert reads == [True], "failed roster resumed detail"

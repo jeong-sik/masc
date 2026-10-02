@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--ttyd', default='ttyd', help='ttyd executable name on PATH or explicit path')
     parser.add_argument('--board-only', action='store_true')
     parser.add_argument('--rows', type=int, default=32)
+    parser.add_argument('--workspace-currency', action='store_true')
     parser.add_argument('--author', default='wkbl-layout-reviewer-with-long-name')
     args = parser.parse_args()
     out = ROOT / args.out
@@ -94,6 +95,12 @@ def main():
     fixtures.update(h.row_budget_http_fixtures())
     fixtures["/api/v1/gate/keepers?detailed=true"] = h.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
     fixtures["/api/v1/runtime/config/raw"] = (503, {"error": "runtime config load failed: fixture configuration unavailable"})
+    if args.workspace_currency:
+        _, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
+        roster["candle"] = {"status": "ready", "issued_milli": "100000", "burned_milli": "10000", "circulating_milli": "90000"}
+        for keeper in roster["keepers"]:
+            keeper["candle_balance_milli"] = "12500"
+            keeper["candle_account_revision"] = "a" * 64
     fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
     goal = h.planning_goal('goal-audit-ready', 'Audit goal')
     goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
@@ -150,7 +157,7 @@ def main():
             }''')
             text = page.evaluate(SCREEN_JS)
             if not all(marker in text for marker in markers):
-                raise RuntimeError(f'fixture readiness changed before capture: {stem}')
+                raise RuntimeError(f'fixture readiness changed before capture: {stem}: {text}')
             text_path, image_path = out / (stem + '.txt'), out / (stem + '.png')
             text_path.write_text('\n'.join(line.rstrip() for line in text.splitlines()) + '\n')
             page.locator('.xterm-screen').screenshot(path=str(image_path))
@@ -201,6 +208,16 @@ def main():
                                     board_list(page)
                                 elif not c.goto_surface(page, query, title):
                                     raise RuntimeError((query, c.screen_text(page)))
+                                if name == 'usage' and args.workspace_currency:
+                                    for _ in range(3):
+                                        if 'Candle · workspace supply' in page.evaluate(SCREEN_JS):
+                                            break
+                                        expected = ('Candle · workspace supply'
+                                                    if 'Quota scope trend' in page.evaluate(SCREEN_JS)
+                                                    else 'Quota scope trend')
+                                        page.keyboard.press('v')
+                                        wait_ready(page, [expected])
+                                    ready = ['Candle · workspace supply', 'Candle circulating: 90.000']
                                 shot(page, f'{name}-{width}', ready)
                                 if name == 'keepers':
                                     page.keyboard.press('Home')

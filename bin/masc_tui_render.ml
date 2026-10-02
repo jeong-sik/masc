@@ -5534,19 +5534,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | None -> Masc_tui_theme.Glyph.no_value));
       add_empty ();
 
-      (* The short Overview names only the reading's state. Info retains
-         every diagnostic and exact supply amount, wrapped and scrollable. *)
-      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
-      if candle_lines <> [] then (
-        add_section "Candle details";
-        List.iter
-          (fun line ->
-            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
-              (Terminal_text.single_line line)
-            |> List.iter (fun line -> add_line ("  " ^ line)))
-          candle_lines;
-        add_empty ());
-
       (* Timestamps section *)
       add_section "Timestamps";
       (match k.k_identity with
@@ -10740,14 +10727,6 @@ let usage_lines ~cols (state : state) =
                     ; "" ])
               kuw_rows)
   in
-  let transport =
-    match state.transport with
-    | None -> [ " Transport · not observed" ]
-    | Some reading ->
-        [ " Transport · queue pressure "
-          ^ Masc.Transport_metrics.queue_pressure_kind_to_string
-              reading.th_queue_pressure ]
-  in
   let wrap_evidence lines =
     (* Wrap before the scroll window is counted. Coverage and missing samples
        remain reachable rows on narrow terminals. *)
@@ -10771,7 +10750,15 @@ let usage_lines ~cols (state : state) =
   (* Plan cards already have a cell-sized border and wrapped contents. *)
   | Usage_plan -> scopes
   | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
-  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
+  | Usage_keepers ->
+      let currency = match Masc_tui_candle.summary_lines state.candle_observation with
+        | [] -> []
+        | lines ->
+            [ " " ^ Ansi.bold ^ "Candle · workspace supply" ^ Ansi.reset ]
+            @ List.map (fun line -> "   " ^ Terminal_text.single_line line) lines
+            @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
+      in
+      wrap_evidence (currency @ keepers)
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

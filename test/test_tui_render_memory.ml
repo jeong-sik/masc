@@ -2223,6 +2223,18 @@ let test_memory_state_tracks_current_pass_not_history () =
     (Types.memory_state { recovered with H.mkh_snapshot_present = false } = Types.Memory_no_current);
   check bool "store read error overrides a recovered pass" true
     (Types.memory_state { recovered with H.mkh_read_error = Some "EACCES" } = Types.Memory_read_error);
+  let empty_recovered = { recovered with H.mkh_snapshot_present = false } in
+  let source_only = { empty_recovered with H.mkh_source_snapshot_present = true } in
+  let stopped_empty = { stopped with H.mkh_snapshot_present = false } in
+  List.iter (fun (keeper, expected) ->
+    check (option int) "fleet count follows current row state" (Some expected)
+      (Types.current_memory_starving_count (make_fleet_health keeper)))
+    [empty_recovered, 0; source_only, 0; stopped_empty, 1];
+  check bool "failure-history alert does not color current memory as an error" true
+    (H.memory_alert_is_history H.Librarian_starvation
+     && H.memory_alert_is_history H.Librarian_failures);
+  check bool "current store read errors retain error semantics" false
+    (H.memory_alert_is_history H.Snapshot_read_error);
   check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
 ;;
 

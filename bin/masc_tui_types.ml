@@ -3384,14 +3384,22 @@ let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   else if
     List.exists
       (fun alert ->
-        match alert.Masc.Tui_decode_memory_health.ma_code with
-        | Masc.Tui_decode_memory_health.Librarian_failures -> false
-        | code -> match Masc.Tui_decode_memory_health.memory_alert_severity code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"

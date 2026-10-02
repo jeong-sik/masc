@@ -469,7 +469,8 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
   let server_error =
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.ma_code then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Error -> true
         | `Warn -> false)
       k.mkh_alerts

@@ -1,5 +1,7 @@
 # Keeper layout: first implementation and rendered audit
 
+## 공통 헤더
+
 - 날짜(ISO8601): 2026-10-02T06:43:33Z
 - 작성자: Codex
 - 결정 ID: tui-layout-identity-20261002

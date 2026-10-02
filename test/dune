@@ -7329,7 +7329,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif))
+ (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
 (include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)

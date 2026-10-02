@@ -82,7 +82,7 @@ let encode_bounded ~max_bytes json =
   try value json; Ok (Yojson.Safe.to_string json)
   with Evidence_too_large -> Error "sampling evidence exceeds package byte envelope"
 
-let package_response (answer : S.create_message_result) = {answer with _meta=None}
+let package_response (answer : S.create_message_result) = answer
 
 let validate_response answer =
   try S.create_message_result_of_yojson (S.create_message_result_to_yojson answer) with
@@ -164,7 +164,11 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     match outcome with
     | Answer answer ->
         let answer = package_response answer in
-        let response = {answer with _meta=Some (`Assoc ["masc.lane_sampling",references])} in
+        let metadata = match answer._meta with
+          | Some (`Assoc fields) -> fields
+          | Some _ | None -> [] in
+        let response = {answer with _meta=Some (`Assoc
+          (("masc.lane_sampling",references) :: List.remove_assoc "masc.lane_sampling" metadata))} in
         let* () = Eio_unix.run_in_systhread (fun () ->
           encode_bounded ~max_bytes:package.resources.max_reply_bytes
             (S.create_message_result_to_yojson response) |> Result.map (fun _ -> ()))

@@ -246,7 +246,7 @@ let test_invalid_sampling_route_is_stable_until_runtime_update () =
     Fs_compat.remove_tree root);
   let config = Workspace.default_config root in
   let masc = Workspace.masc_dir config in
-  Unix.mkdir masc 0o700;
+  if not (Sys.file_exists masc) then Unix.mkdir masc 0o700;
   let config_root = Filename.concat masc "config" in Unix.mkdir config_root 0o700;
   let directory = Filename.concat config_root "lane-addons" in Unix.mkdir directory 0o700;
   let store = Store.create ~root:(Filename.concat masc "lane-addons") in

@@ -49,10 +49,37 @@ let retained_address (reference : evidence) =
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
 let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
-let read_blob t reference = protect (fun () ->
+type read_budget = { mutable remaining : int }
+type bounded_read_error = Read_limit_exceeded | Read_failed of string
+let read_budget ~max_bytes = { remaining = max 0 max_bytes }
+let bounded_protect f =
+  match protect (fun () -> Ok (f ())) with
+  | Ok result -> result | Error detail -> Error (Read_failed detail)
+let read_file_bounded ~budget path = bounded_protect (fun () ->
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let size = in_channel_length channel in
+    if size > budget.remaining then Error Read_limit_exceeded
+    else begin
+      budget.remaining <- budget.remaining - size;
+      try Ok (really_input_string channel size)
+      with End_of_file -> Error (Read_failed "retained file changed during read")
+    end))
+let read_blob_bounded ~budget t reference =
+  let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
+  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
+  let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
+  if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch")
+let read_blob ?max_bytes t reference = protect (fun () ->
   let* kind, hash = retained_address reference in
   let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
-  let bytes = Fs_compat.load_file (Filename.concat t.root relative) in
+  let path = Filename.concat t.root relative in
+  let bytes = match max_bytes with
+    | Some limit ->
+        let stat = Unix.stat path in
+        if stat.Unix.st_size > limit then raise (Sys_error "retained blob exceeds read envelope");
+        Fs_compat.load_file path
+    | None -> Fs_compat.load_file path in
   if digest bytes = hash then Ok bytes else Error "evidence digest mismatch")
 
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
@@ -288,6 +315,28 @@ let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = pr
             if same_file parent_stat (Unix.stat parent) then Ok bytes
             else Error "retained file parent changed during sync"))))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
+let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
+  let path_in directory = Filename.concat t.root
+    (Filename.concat (directory instance_id) (digest request_id ^ ".json")) in
+  let outcome_path = path_in sampling_outcome_directory in
+  let path = match Fs_compat.exact_path_kind outcome_path with
+    | Fs_compat.Exact_missing -> path_in sampling_directory
+    | _ -> outcome_path in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error (Read_failed "retained file is not a regular file")
+      else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
+      else begin
+        budget.remaining <- budget.remaining - stat.Unix.st_size;
+        let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
+          ~max_bytes:stat.Unix.st_size path |> Result.map_error (fun detail -> Read_failed detail) in
+        try Ok (Some (Yojson.Safe.from_string bytes))
+        with Yojson.Json_error detail -> Error (Read_failed detail)
+      end)
+let load_sampling_request_bounded =
+  load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
   match Fs_compat.exact_path_kind path with
@@ -655,6 +704,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let write = write_with
   let save_action = save_action_with
   let load_action = load_action_with

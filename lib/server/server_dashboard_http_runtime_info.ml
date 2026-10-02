@@ -1965,6 +1965,7 @@ let runtime_admission_json (rt : Runtime_instance.t) =
     `Assoc
       [ "scope", `String "process_endpoint_credential"
       ; "declared_max", Json_util.int_opt_to_json config.max_concurrent_requests
+      ; "enforced_for_runtime", `Bool (Option.is_some config.max_concurrent_requests)
       ; "snapshot",
         (match snapshot with
          | None -> `Null

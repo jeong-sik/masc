@@ -92,7 +92,14 @@ def checked_frame(output: bytearray) -> dict[int, bytes]:
         raise AssertionError(f"Held row lost suppressed occurrence cells: {held!r}")
     if any(value in held for value in (b"14:10", b"14:12", b"succeeded", b"19:59")):
         raise AssertionError(f"Held row reused previous occurrence: {held!r}")
-    closed_rule = h.screen_row_of(rows, b"closed")
+    closed_rule = next(
+        (
+            index
+            for index, line in rows.items()
+            if line.lstrip().startswith("── closed ·".encode())
+        ),
+        -1,
+    )
     if not (
         max(positions["failure-proof"], positions["held-proof"])
         < closed_rule
@@ -128,10 +135,10 @@ def run(executable: str, frame_path: str | None = None) -> None:
             start=h.end_of_needle(output, b"held-proof", before),
             timeout=5,
         )
-        checked_frame(output)
         if frame_path is not None:
             Path(frame_path).write_bytes(h.screen_text(bytes(output)))
             Path(frame_path + ".ansi").write_bytes(bytes(output))
+        checked_frame(output)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

@@ -1673,7 +1673,7 @@ let test_category_rail_wrapped_range_and_overflow () =
          query_label = ""})
       ~timestamp:"23:41:50" ~badge:"HTTP"
   in
-  check bool "accessible overflow: facts_title renders full category label unconditionally" true
+  check bool "wide facts title includes the selected category label" true
     (contains long_cat_name title)
 
 (* The category row is the shared strip: the key first, then the entries

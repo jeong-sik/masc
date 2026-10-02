@@ -1792,6 +1792,34 @@ let test_history_search_reports_read_errors ~malformed () =
     [ "history"; "all" ]
 ;;
 
+let test_short_acronym_search_does_not_select_word_interiors () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "short-acronym-search" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let noise = ["source revalidation"; "SRC policy"; "city notes"] in
+  let useful = ["RC는 보류한다"; "RC-12 release"; "CI가 끝났다"] in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name
+    (List.map fact (noise @ useful));
+  let ctx_work = List.fold_left (fun context text ->
+    Masc.Keeper_context_runtime.append context
+      (Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]))
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"") (noise @ useful) in
+  List.iter (fun source ->
+    let search query = Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+      ~args:(`Assoc ["query", `String query; "source", `String source; "limit", `Int 10])
+      |> Yojson.Safe.from_string |> match_texts in
+    let rc = search "RC" in
+    Alcotest.(check bool) (source ^ " finds Korean suffixed acronym") true
+      (List.mem "RC는 보류한다" rc);
+    Alcotest.(check bool) (source ^ " finds punctuated release identifier") true
+      (List.mem "RC-12 release" rc);
+    List.iter (fun unrelated ->
+      Alcotest.(check bool) (source ^ " excludes " ^ unrelated) false (List.mem unrelated rc)) noise;
+    Alcotest.(check bool) (source ^ " CI excludes city") false (List.mem "city notes" (search "CI")))
+    ["current"; "history"; "all"]
+;;
+
 let test_search_keeps_exact_matches_in_store_order () =
   with_temp_dir
   @@ fun base_path ->
@@ -3618,6 +3646,8 @@ let () =
             (test_history_search_reports_read_errors ~malformed:true)
         ; Alcotest.test_case "history search reports unreadable files" `Quick
             (test_history_search_reports_read_errors ~malformed:false)
+        ; Alcotest.test_case "short acronym search keeps Korean suffixes and excludes word interiors" `Quick
+            test_short_acronym_search_does_not_select_word_interiors
         ; Alcotest.test_case
             "search keeps exact matches in store order"
             `Quick

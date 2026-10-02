@@ -553,7 +553,9 @@ let save_message_draft ?workspace state =
   | Some keeper_name ->
       let workspace = match workspace with
         | Some workspace -> workspace
-        | None -> workspace_input_identity_of_server state.server_identity in
+        | None -> (match state.msg_unconfirmed_workspace with
+            | Some _ as workspace -> workspace
+            | None -> workspace_input_identity_of_server state.server_identity) in
       let key = workspace, keeper_name in
       let others = List.remove_assoc key state.msg_drafts in
       let draft = { kcd_text = Buffer.contents state.msg_input;
@@ -570,7 +572,10 @@ let restore_message_draft state keeper_name =
   state.msg_attachments <- [];
   state.msg_references <- [];
   state.msg_attachments_since <- None;
-  match List.assoc_opt (workspace_input_identity_of_server state.server_identity, keeper_name) state.msg_drafts with
+  let workspace = match state.msg_unconfirmed_workspace with
+    | Some _ as workspace -> workspace
+    | None -> workspace_input_identity_of_server state.server_identity in
+  match List.assoc_opt (workspace, keeper_name) state.msg_drafts with
   | None -> ()
   | Some draft ->
       Buffer.add_string state.msg_input draft.kcd_text;

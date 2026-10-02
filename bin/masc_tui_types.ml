@@ -5230,6 +5230,8 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  (* Polling intent contains no consent URL or presentation from the old read. *)
+  mutable identity_login_intents: (Tui_decode.server_identity * string * string) list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -6216,6 +6218,9 @@ let reconcile_detail_intent_origins (state : state) reading =
                    && String.equal (canonical_path origin.sid_masc_root)
                         (canonical_path current.sid_masc_root))
         in
+        state.identity_login_intents <- List.filter
+          (fun (origin, _, _) -> not (foreign (Some origin)))
+          state.identity_login_intents;
         (match state.detail_focus_recovery with
          | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
          | Some _ | None -> ());
@@ -6246,6 +6251,16 @@ let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
+
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun (origin, keeper, _) ->
+       String.equal keeper keeper_name
+       && server_workspace_matches ~expected:(Some origin)
+            (match state.server_identity with Some current -> Ok current | None -> Error "unread"))
+       state.identity_login_intents
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -6278,6 +6293,10 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider) ->
+      not (String.equal keeper keeper_name && String.equal provider provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6288,9 +6307,19 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       state.identity_login_intents <-
+         (origin, login.ils_keeper, login.ils_provider) :: state.identity_login_intents
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider_id) ->
+      not (String.equal keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -8011,6 +8040,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_intents = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;

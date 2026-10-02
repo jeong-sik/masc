@@ -52,14 +52,24 @@ process, not an OS startup service; restart it explicitly after a host reboot.
 
 ## Guest space versus host disk space
 
-Deleting guest files does not immediately release their allocated sparse-image
-blocks on the host. Keeper guests have no `CAP_SYS_ADMIN`, so live `fstrim`
-fails. MASC already runs its isolated trim helper at the safe boot boundary,
+Volumes mounted without ext4 discard retain deleted blocks in their sparse
+host images. Keeper guests have no `CAP_SYS_ADMIN`, so live `fstrim` fails.
+At the safe boot boundary MASC's isolated helper now enables ext4's persistent
+default `discard` option and trims existing free blocks,
 after removing the previous guest and before mounting the work volume again
-(`keeper_turn_sandbox_runtime.ml`, `reclaim_work_volume_space`). This cleaner
+(`keeper_turn_sandbox_runtime.ml`, `reclaim_work_volume_space`). Subsequent guest
+deletes return their blocks automatically, without extra guest capabilities.
+Existing running guests take the default on their next safe volume mount;
+merging a change does not change their active mount. This cleaner
 does not stop a Keeper or mount its live volume in a second VM to force trimming.
 
-Source contracts: [Dune targeted clean and native lock](https://github.com/ocaml/dune/blob/3.24.2/bin/clean.ml),
+The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs`, and
+`/usr/sbin/fstrim`. A missing utility reports a reclaim failure; existing runtime
+policy permits boot only after helper removal has been confirmed.
+
+Source contracts: [ext4 persistent discard default](https://kernel.org/doc/html/next/filesystems/ext4/super.html),
+[tune2fs defaults](https://man7.org/linux/man-pages/man8/tune2fs.8.html),
+[Dune targeted clean and native lock](https://github.com/ocaml/dune/blob/3.24.2/bin/clean.ml),
 [Dune lock implementation](https://github.com/ocaml/dune/blob/3.24.2/otherlibs/stdune/src/global_lock.ml),
 [Apple volume mounts](https://github.com/apple/container/blob/main/docs/volumes.md).
 Confirmed against the installed CLI and a real Dune 3.24.2 Keeper guest on

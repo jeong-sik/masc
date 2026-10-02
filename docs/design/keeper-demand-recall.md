@@ -14,9 +14,9 @@ Every notice marks previous Recall blocks and retrieved claims as historical and
 
 Search continues to use the existing whole-query and SQLite FTS ranking. No new word heuristic, importance score, TTL, top-N auto injection, or cumulative runtime budget is introduced. The model makes the relevance choice through its tool invocation. Standing identity, constraints and role instructions remain in the runtime prompt/configuration; a remembered fact is not promoted to a standing instruction by its category.
 
-## Planned source validation efficiency
+## Source validation efficiency
 
-The follow-up stack unit will choose query-matching source candidates from stored claims before reading files. Revalidate those exact path/digest identities under the source-store lock. Unselected or concurrently replaced identities remain stored and unverified and cannot become returned claims. Changed/missing selected sources become durable invalidations; transient unreadability withholds the claim without deleting it. Apply the existing search result bound after validation so a stale candidate cannot crowd out a valid successor. Broad queries may select many sources; this is an explicit retrieval request, not work repeated by every turn.
+Choose query-matching source candidates from stored claims before reading files. Revalidate those exact path/digest identities under the source-store lock. Unselected or concurrently replaced identities remain stored and unverified and cannot become returned claims. Changed/missing selected sources become durable invalidations; transient unreadability withholds the claim without deleting it. Apply the existing search result bound after validation so a stale candidate cannot crowd out a valid successor. Broad queries may select many sources; this is an explicit retrieval request, not work repeated by every turn.
 
 ## Evidence boundaries
 

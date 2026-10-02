@@ -779,6 +779,86 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
     (String.equal before (Fs_compat.load_file source_file))
 ;;
 
+let test_search_revalidates_query_sources_only () =
+  let module Source = Masc.Keeper_memory_source_current in
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "selective-source-search" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let write path claim =
+    Fs_compat.save_file (Filename.concat sandbox_root path) "original";
+    let output = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) in
+    Alcotest.(check bool) "source write succeeds" true
+      (json_field "ok" (Yojson.Safe.from_string output.raw_output) = `Bool true) in
+  write "unrelated.txt" "The unrelated astronomy claim.";
+  write "stale.txt" "Deployment stale candidate.";
+  write "valid.txt" "Deployment valid candidate.";
+  Fs_compat.save_file (Filename.concat sandbox_root "unrelated.txt") "changed";
+  Fs_compat.save_file (Filename.concat sandbox_root "stale.txt") "changed";
+  let read () = match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "source snapshot absent"
+    | Error detail -> Alcotest.fail detail in
+  let before = read () in
+  let search query limit = Runtime.keeper_memory_search_json ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc ["query", `String query; "limit", `Int limit])
+      |> Yojson.Safe.from_string in
+  Alcotest.(check (list string)) "stale match does not crowd out valid successor"
+    ["Deployment valid candidate."] (match_texts (search "Deployment" 1));
+  let after = read () in
+  Alcotest.(check (list string)) "only selected changed source is invalidated"
+    ["stale.txt"] (List.map (fun (i : Source.invalidation) -> i.source_path) after.invalidations);
+  Alcotest.(check bool) "unrelated stored claim survives without being read" true
+    (List.exists (fun (fact : Source.fact) -> fact.source.path = "unrelated.txt") after.facts);
+  let saved = Fs_compat.load_file (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
+  ignore (search "no matching celestial word" 5);
+  Alcotest.(check string) "no-match search does not invalidate unrelated source"
+    saved (Fs_compat.load_file (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name));
+  Alcotest.(check int) "selected invalidation is one durable revision" (before.revision + 1) after.revision;
+  ignore (search "astronomy" 5);
+  Alcotest.(check bool) "later relevant lookup invalidates the unrelated changed source" true
+    (List.exists (fun (i : Source.invalidation) -> i.source_path = "unrelated.txt") (read ()).invalidations)
+;;
+
+let test_selected_source_rebound_digest_stays_unverified () =
+  let module Source = Masc.Keeper_memory_source_current in
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "rebound-source-query" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let path = "config.txt" in
+  let host_path = Filename.concat sandbox_root path in
+  Fs_compat.save_file host_path "first bytes";
+  let write claim = Runtime.keeper_memory_write_with_outcome ~config ~meta
+      ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) |> ignore in
+  let read () = match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "missing snapshot"
+    | Error detail -> Alcotest.fail detail in
+  write "Original selected source claim.";
+  let selected = (List.hd (read ()).facts).source in
+  Fs_compat.save_file host_path "second bytes";
+  write "Replacement source claim.";
+  let file = Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  let before = Fs_compat.load_file file in
+  Fs_compat.save_file host_path "third bytes";
+  let projection = match Source.revalidate ~scope:(Source.Selected_sources [selected])
+      ~config ~meta ~keepers_dir ~now:200. () with
+    | Ok projection -> projection
+    | Error detail -> Alcotest.fail detail in
+  Alcotest.(check (list string)) "old query cannot verify replacement identity" [path]
+    projection.unverified_paths;
+  Alcotest.(check string) "replacement identity is not read or invalidated" before
+    (Fs_compat.load_file file);
+  Alcotest.(check int) "replacement stays stored" 1 (List.length projection.facts)
+;;
+
 let test_recall_artifacts_follow_history_retention () =
   with_temp_dir @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -3461,6 +3541,10 @@ let () =
             test_recall_artifacts_follow_history_retention
         ; Alcotest.test_case "demand recall avoids bulk artifact and source work" `Quick
             test_demand_recall_does_not_materialize_or_verify_all_memory
+        ; Alcotest.test_case "source search validates query candidates only" `Quick
+            test_search_revalidates_query_sources_only
+        ; Alcotest.test_case "selected source replacement is not verified by an old query" `Quick
+            test_selected_source_rebound_digest_stays_unverified
         ; Alcotest.test_case
             "source change discards stale claim until recreation"
             `Quick

@@ -4,6 +4,8 @@ module R = Keeper_librarian_range
 module Window = Runtime_model_input_tail_window
 module Canonical_tool = Agent_core.Canonical_tool
 module String_map = Map.Make (String)
+module Line_map = Map.Make (Int)
+module Historical = Keeper_librarian_task_context
 
 module O = Keeper_librarian_official_progress
 
@@ -1118,39 +1120,64 @@ let consume_one_with_extent
       | Some (range, _, _, _, _) -> range.R.start_atom
       | None -> 0
     in
-    let _, selected_messages_rev, observations_rev =
+    (* Join selected line identities against the same frozen boundary read.
+       Earlier text covered by an end line is not automatically that turn's. *)
+    let boundaries = List.fold_left (fun acc (line, decoded) ->
+      match decoded with Ok record -> Line_map.add line record acc | Error _ -> acc)
+      Line_map.empty lines in
+    let _, _, _, selected_messages_rev, observations_rev, historical_rev =
       List.fold_left
-        (fun (prev_end, messages_rev, observations_rev) step ->
+        (fun (prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev) step ->
            match step with
-           | Atoms { end_atom; _ } ->
+           | Atoms { line; end_atom; _ } ->
              (match atom with
-              | None -> prev_end, messages_rev, observations_rev
+              | None -> prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev
               | Some (range, _, _, _, _) ->
-                let slice =
-                  R.slice messages { range with R.start_atom = prev_end; end_atom }
-                in
-                ( end_atom
-                , List.rev_append slice messages_rev
-                , List.rev_append (tool_observations slice) observations_rev ))
-           | Official { R.turn_ref; _ } ->
+                let scopes = Historical.atom_spans ~trace_id ~messages
+                    ~start_atom:prev_end ~end_atom ~boundary:(Line_map.find_opt line boundaries) in
+                let message_count, tool_count, messages_rev, observations_rev, historical_rev =
+                  List.fold_left (fun (count, tool_count, messages_rev, observations_rev, contexts) scope ->
+                    let slice = match scope.Historical.source with
+                      | Historical.Atom_span {start_atom;end_atom;_} ->
+                        R.slice messages {range with R.start_atom;end_atom}
+                      | Historical.Boundary_only | Historical.Official_turn -> [] in
+                    let after_message = count + List.length slice in
+                    let observations = tool_observations slice in
+                    let after_tool_observation = tool_count + List.length observations in
+                    let context : Historical.t = {scope;first_message=count;after_message;
+                      first_tool_observation=tool_count;after_tool_observation} in
+                    after_message, after_tool_observation, List.rev_append slice messages_rev,
+                    List.rev_append observations observations_rev, context :: contexts)
+                    (message_count, tool_count, messages_rev, observations_rev, historical_rev) scopes in
+                end_atom, message_count, tool_count, messages_rev, observations_rev, historical_rev)
+           | Official { R.line; turn_ref; _ } ->
              let official_trace = Ids.Turn_ref.trace_id turn_ref in
              let of_trace =
                match String_map.find_opt official_trace fragments with
                | Some lines -> lines
-               | None -> []
-             in
-             List.fold_left
-               (fun (prev_end, messages_rev, observations_rev) fragment ->
-                  match fragment with
-                  | Keeper_turn_fragments.Message { message; _ } ->
-                    prev_end, message :: messages_rev, observations_rev
-                  | Keeper_turn_fragments.Tool_observation { observation; _ } ->
-                    prev_end, messages_rev, observation :: observations_rev)
-               (prev_end, messages_rev, observations_rev)
-               (Keeper_turn_fragments.of_turn turn_ref of_trace))
-        (start_atom, [], [])
-        steps
+               | None -> [] in
+             let count, after_tools, messages_rev, observations_rev =
+               List.fold_left
+                 (fun (count, tools, messages_rev, observations_rev) fragment ->
+                    match fragment with
+                    | Keeper_turn_fragments.Message { message; _ } ->
+                      count + 1, tools, message :: messages_rev, observations_rev
+                    | Keeper_turn_fragments.Tool_observation { observation; _ } ->
+                      count, tools + 1, messages_rev, observation :: observations_rev)
+                 (message_count, tool_count, messages_rev, observations_rev)
+                 (Keeper_turn_fragments.of_turn turn_ref of_trace) in
+             let attribution = match Line_map.find_opt line boundaries with
+               | Some {B.event=B.Turn_ended {turn_ref;task_context;_};_} ->
+                 Historical.Observed {turn_ref;task_context}
+               | Some _ | None -> Historical.Unattributed in
+             let context : Historical.t =
+               {scope={source=Historical.Official_turn;attribution};
+                first_message=message_count;after_message=count;
+                first_tool_observation=tool_count;after_tool_observation=after_tools} in
+             prev_end, count, after_tools, messages_rev, observations_rev, context :: historical_rev)
+        (start_atom, 0, 0, [], [], []) steps
     in
+    let historical_task_contexts = List.rev historical_rev in
     let selected_messages = List.rev selected_messages_rev in
     let observations = List.rev observations_rev in
     let first_step, last_step =
@@ -1300,10 +1327,9 @@ let consume_one_with_extent
       let input : Keeper_librarian.input =
         { turn_ref
         ; keeper_id
-        (* Turn boundaries do not carry historical task identity. The current
-           task can belong to a later turn, so borrowing it would attach an old
-           range to an unrelated Goal. Exact historical identity must be added
-           at the same durable boundary before this can become [Task_goals]. *)
+        (* Current queue context is separate from the selected turns' admission
+           evidence; neither uses the batch's final turn to label earlier text. *)
+        ; historical_task_contexts
         ; goal_context = Keeper_librarian.No_task
         ; keeper_instructions = meta.instructions
         ; current

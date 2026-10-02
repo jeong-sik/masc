@@ -189,7 +189,7 @@ let test_tui_render_asks_the_theme_for_a_categorical_hue () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -213,7 +213,7 @@ let test_tui_status_colors_use_theme_tokens () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -498,10 +498,11 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
             (Ast_grep.count_string_literals ~module_path ~needle))
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_code.ml"
     ; "bin/masc_tui_render_resources.ml"
-    ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_approvals.ml"
+    ; "bin/masc_tui_render_fusion.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"
@@ -1308,7 +1309,7 @@ let test_tui_current_projection_wiring () =
        ~callee:"load_selected_keeper_logs");
   check int "Board list success uses shared post replacement" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_list_load"
        ~callee:"replace_board_posts");
   (* Detail success deliberately does *not* go through the shared replacement.
      That helper reranks the list, and reranking on a detail response made rapid
@@ -1317,15 +1318,15 @@ let test_tui_current_projection_wiring () =
      that putting the call back has to come with a new answer for that. *)
   check int "Board detail success does not rerank the list" 0
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_post_load"
        ~callee:"replace_board_posts");
   check int "Board post replacement reconciles selection once" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"replace_board_posts"
        ~callee:"Board_selection.reconcile_cursor");
   check int "Board detail starts through the generation-aware projection" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
+       ~module_path:"bin/masc_tui_board_requests.ml"
        ~binding_name:"start_board_post_refresh"
        ~callee:"Board_detail.start");
   (* Two identity comparisons, and both have to stay. The guard refuses a
@@ -1335,11 +1336,11 @@ let test_tui_current_projection_wiring () =
      either one goes. *)
   check int "Board detail success compares the post identity twice" 2
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~module_path:"bin/masc_tui_board_updates.ml" ~binding_name:"apply_board_post_load"
        ~callee:"String.equal");
   check int "Board detail completion remains valid away from the Board tab" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
+       ~module_path:"bin/masc_tui_board_updates.ml"
        ~binding_name:"board_detail_request_still_current" ~callees:[]
        ~fields:[ "view" ]);
   (* [board_read_pane], not [render_board_read]: #30255 split the surface the
@@ -1725,9 +1726,9 @@ let test_planning_refresh_reconciles_navigation_identity () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
        ~fields:[ "view" ]);
-  check int "scoped HTTP application owns one planning apply" 1
+  check int "HTTP dataset application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_http_scoped_surfaces"
+       ~binding_name:"apply_http_scoped_data"
        ~callee:"apply_planning_load");
   (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
      lookups from the key loop: the loop re-derived the Planning selection from
@@ -1840,7 +1841,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int (module_path ^ " performs no direct flushes") 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");

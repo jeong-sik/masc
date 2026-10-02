@@ -1168,7 +1168,7 @@ function writeAssistantThinkingText(
   meta: { agentCoreBlockIndex?: number } = {},
   mode: 'append' | 'snapshot',
 ): void {
-  if (!text.trim()) return
+  if (text.length === 0) return
   const agentCoreBlockIndex = meta.agentCoreBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
@@ -1187,7 +1187,7 @@ function writeAssistantThinkingText(
         ? mode === 'append'
           ? `${last.text}${text}`
           : text
-        : text.trimStart()
+        : text
     const traceSteps: ChatTraceStep[] =
       sameThinkingBlock
         ? [

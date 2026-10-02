@@ -699,14 +699,14 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
       (fun content (keeper_name, _) ->
         if List.mem_assoc keeper_name assignments
         then content
-        else Runtime.remove_runtime_assignment_text content ~keeper_name)
+        else Runtime_config_text.remove_runtime_assignment_text content ~keeper_name)
       content
       current_assignments
   in
   let content =
     List.fold_left
       (fun content (keeper_name, runtime_id) ->
-        Runtime.update_runtime_assignment_text content ~keeper_name ~runtime_id)
+        Runtime_config_text.update_runtime_assignment_text content ~keeper_name ~runtime_id)
       content
       assignments
   in

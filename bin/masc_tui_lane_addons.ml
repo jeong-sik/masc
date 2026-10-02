@@ -1007,6 +1007,7 @@ let detail_lines ~width view =
                 | S.Lane_output {installation_id;output_id;_} ->
                     "Input: " ^ installation_id ^ "/" ^ Option.value ~default:"*" output_id
                 | S.Snapshot_file {id;path} -> "Input: " ^ id ^ " · " ^ path
+                | S.Fusion_run {id;run_id} -> "Input: " ^ id ^ " · Fusion " ^ run_id
                 | S.Msx_capture {id} | S.Dos_capture {id}
                 | S.Browser_document {id;_} -> "Input: " ^ id) sources in
           sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs

@@ -2239,6 +2239,16 @@ Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.
 
+A Home-origin operator decision retains its last receipt in the Home context.
+A confirmation accepted with execution deferred remains labelled deferred;
+request presence is determined by the current source read. This session receipt
+does not prove application or survive restart. Creation retries retain their
+original return destination alongside the authored declaration. If the lifecycle
+accepts creation before its roster appears, the named draft remains available
+while sending waits for a reliable roster observation. Creation refuses an
+existing name and preserves the declaration; a reconfiguration response is
+reported as reconfiguration rather than opening a first-assignment composer.
+
 `p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
@@ -2256,6 +2266,16 @@ Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc
 and keeps its draft through the existing per-Keeper draft store.
+
+If a previously matched server workspace becomes unreadable, Home shows the
+remembered conversation as unavailable with choose-Keeper guidance. It offers
+no history shortcut until workspace identity matches. Existing conversation
+drafts remain stored. New messages and waiting messages stay unsent;
+Goal confirmation and Task changes require a matching workspace reading. Refresh
+to read the server workspace again. A matching reading restores send authority and resumes already-authorized
+waiting messages once the Keeper roster is reliable. Unsent composer drafts
+remain drafts. A transient question read failure also preserves partial answers;
+submission waits for a successful read.
 
 Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
 an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its

@@ -467,7 +467,7 @@ let awaiting_approval_notice (state : state) =
    other surfaces continue to consult their live row projection.
 
    "n/N" appears only where those keys do something. They ask
-   [surface_row_texts] the same question and return without moving when it
+   [Masc_tui_surface_search.surface_row_texts] the same question and return without moving when it
    answers [None], so a detail pane or a cursorless surface that printed the
    suffix would be naming keys that are not there. It is also a key hint, so
    hints off drops it and keeps the query and its count.
@@ -478,7 +478,7 @@ let awaiting_approval_notice (state : state) =
 let search_marker (state : state) =
   let marker query ~settled =
     let has_query = surface_search_query state.view query <> "" in
-    let reached = Masc_tui_types.surface_search_count state state.view ~query in
+    let reached = Masc_tui_surface_search.surface_search_count state state.view ~query in
     let found =
       match reached with
       | None -> ""
@@ -1819,17 +1819,6 @@ let keeper_lane_idle_text seconds =
   else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
-
-
-(** Render one backlog task in full, from the same load the Overview list was
-    projected from. The dispatch falls back to the Overview when the row is no
-    longer in the backlog, so the task argument always exists here. *)
-(* What a boxed surface spends on chrome before any row of content: the top
-   border, its title and rule, the closing rule and border, the selected-row
-   detail, and the key hints. Five surfaces subtracted the literal 10 from the
-   terminal height; naming it is what makes a sixth reader able to check the
-   arithmetic instead of trusting it. *)
-let boxed_surface_chrome_rows = 10
 
 
 (* Long question, choice, and reason text was cut to one line with a trailing
@@ -5045,7 +5034,9 @@ let keeper_deletions_hints (state : state) ~scrollable =
    held call is the one thing that needs answering now, and the wakes recede
    the same way they do on the strip. *)
 let answering_lines (state : state) =
+  let _, cols = get_terminal_size () in
   Masc_tui_answering.overlay
+    ~width:(max 0 (framed_inner_width cols - 2))
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error
@@ -5057,7 +5048,7 @@ let answering_lines (state : state) =
 (* The overlay ends in a fixed preview panel (divider + two lines): always
    drawn, so the list height never shifts with what the cursor is on — the
    fixed-chrome rule, applied before the panel exists rather than patched
-   after (see boxed_surface_chrome_rows for the precedent). *)
+   after. *)
 let answering_preview_rows = 3
 
 (* The two-pane surfaces -- Code and Resources -- opened on their list pane's

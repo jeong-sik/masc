@@ -43,23 +43,23 @@ No claim that the model would discover its desired IDs without other work.
 - 1차: source review of both implementation commits passed
 - 2차: relevant production and endpoint test objects compiled
 - 3차: production query/cursor/serializer fixture executable passed
-- 재현 결과: payload/query assertions passed; full endpoint execution blocked by base issue #40650
+- 재현 결과: payload/query assertions passed; full endpoint execution passed after rebasing onto current origin/main
 
 1. `opam exec --switch=5.5.1 -- scripts/dune-local.sh build lib/.masc.objs/byte/masc__Keeper_tool_task_runtime.cmo lib/.masc.objs/byte/masc__Keeper_tasks_list_query.cmo lib/.masc.objs/byte/masc__Keeper_tasks_list_cursor.cmo test/.test_keeper_task_outcomes.eobjs/byte/dune__exe__Test_keeper_task_outcomes.cmo` — PASS.
 2. `opam exec --switch=5.5.1 -- scripts/dune-local.sh build scripts/benchmarks/keeper-task-query-replay/probe.exe` and `_build/default/scripts/benchmarks/keeper-task-query-replay/probe.exe RAW_TRACE.jsonl` — production-module replay. The Dune harness copies the production query/cursor sources and links the production domain serializer, without replacing dependencies with stubs. Assertions check exact-ID selection, combined Goal/performer/text predicates, rejected malformed inputs, cursor filter mismatch, and completion notes retained only in full output.
-3. Full focused endpoint executable build failed on unchanged base `75d3e6716d`: `lane_addon_subscription.For_testing.handle` has an interface label-order mismatch. Tracked in [#40650](https://github.com/jeong-sik/masc/issues/40650). The new endpoint tests compile but have NOT executed; they cover complete page traversal, 101 completed-task rows, selection and Goal-registry corruption.
+3. After rebasing onto `origin/main` `59d7be7de2`, the focused endpoint executable linked and ran from the `test/` directory: `24 tests run`, `Test Successful in 0.509s` (run ID `9RVDT8H7`). Running from the repository root still misses the fixture because the existing test uses the relative path `fixtures/verifier-images/page.png`; running from `test/` is the declared fixture-root invocation. The old #40650 interface mismatch is therefore a stale-base blocker, not a current failure.
 4. Independent source reviews: PASS for `b131d2bdb0ee0038503821d1c3208a420d10da67` (payload change) and `7004bd73d830350df97fe1e4e099518d76853379` (query delta). Source review is not runtime proof or a GitHub approval.
 
 ## 불확실성 (Uncertainty)
 
 - 미확인 항목: deployed Keeper behavior, end-to-end test execution, model A/B
 - 영향: measured bytes do not establish task quality, latency or billing improvement
-- 추가 확인 필요: repair #40650, execute endpoint tests, then compare live task outcomes
+- 추가 확인 필요: compare live task outcomes and provider usage after deployment
 
 No deployment, live Keeper turn, model A/B experiment, token-cost reduction,
 or end-to-end speedup is claimed. The replay retains the endpoint's production
-query/serialization code but does not exercise the endpoint's I/O assembly;
-the compiled endpoint tests still need the base build repaired. There is no
+query/serialization code, and the focused endpoint suite now exercises the
+assembled tool path. There is no
 new updated-at filter: task creation/state-transition timestamps would not
 prove the last edit time. Artifact extraction and TUI outcome correlation
 were diagnosed earlier but are not implemented by these two PRs.

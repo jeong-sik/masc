@@ -506,6 +506,7 @@ type typesafeai =
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
+  ; librarian_preflight : bool
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]
@@ -539,6 +540,7 @@ let default_typesafeai =
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false
+  ; librarian_preflight = false
   ; excluded_keepers = []
   }
 ;;

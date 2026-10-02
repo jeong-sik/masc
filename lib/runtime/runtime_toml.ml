@@ -2984,6 +2984,7 @@ let typesafeai_keys =
   ; "absorb_gate"
   ; "context_review"
   ; "skill_applicability"
+  ; "librarian_preflight"
   ; "excluded_keepers"
   ]
 ;;
@@ -3175,6 +3176,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
+    let librarian_preflight =
+      typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
+        ~default:d.librarian_preflight
+    in
     (match
        ( unknown
        , enabled
@@ -3184,6 +3189,7 @@ let parse_typesafeai (toml : Otoml.t)
        , absorb_gate
        , context_review
        , skill_applicability
+       , librarian_preflight
        , excluded_keepers )
      with
      | ( []
@@ -3194,6 +3200,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
+       , Ok librarian_preflight
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3203,6 +3210,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; absorb_gate
          ; context_review
          ; skill_applicability
+         ; librarian_preflight
          ; excluded_keepers
          }
      | _ ->
@@ -3215,6 +3223,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability
+          @ result_errors librarian_preflight
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")
 ;;

@@ -350,6 +350,7 @@ let policy
       ?(absorb_gate = false)
       ?(context_review = false)
       ?(skill_applicability = false)
+      ?(librarian_preflight = false)
       ?(excluded_keepers = [])
       ()
   : Runtime_schema.typesafeai
@@ -361,6 +362,7 @@ let policy
   ; absorb_gate
   ; context_review
   ; skill_applicability
+  ; librarian_preflight
   ; excluded_keepers
   }
 ;;

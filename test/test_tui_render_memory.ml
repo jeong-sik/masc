@@ -1587,6 +1587,34 @@ let three_kinds_state ?(keeper = "alpha") () =
   state.memory_facts_cursor <- 0;
   state
 
+let test_category_rail_keeps_click_targets_and_frame_width () =
+  let state = three_kinds_state () in
+  state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
+  let render cols =
+    Masc_tui_hit.reset Masc_tui_press.press_marks;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_memory.render_memory_facts_body ~cols ~budget:24 state ~push
+      ~push_styled:(fun ~style line -> push (style ^ line))
+      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    List.rev !lines
+    |> List.mapi (fun row line -> Masc_tui_hit.extract_line Masc_tui_press.press_marks ~row line)
+  in
+  let wide = render 140 in
+  check bool "Category rail visible" true
+    (List.exists (fun (line, _) -> contains "CATEGORIES" line) wide);
+  check bool "Category counts visible" true
+    (List.exists (fun (line, _) -> contains "preference  (1)" line) wide);
+  check bool "frame width preserved" true
+    (List.for_all (fun (line, _) -> Layout.display_width line <= 140) wide);
+  check bool "selected Category has clickable rail target" true
+    (List.exists (fun (_, zones) -> List.exists (fun (zone : _ Masc_tui_hit.zone) ->
+      zone.first < Masc_tui_roster_pane.pane_cols &&
+      zone.target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference)) zones) wide);
+  let narrow = render 80 in
+  check bool "narrow frame keeps full fact width" false
+    (List.exists (fun (line, _) -> contains "CATEGORIES" line) narrow)
+
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
    pills before, a third shape for a strip on one screen. *)
@@ -2264,6 +2292,8 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "Category rail keeps counts, click targets and frame width" `Quick
+            test_category_rail_keeps_click_targets_and_frame_width
         ; test_case "a failed facts read does not say loading" `Quick
             test_a_failed_facts_read_does_not_say_loading
         ; test_case "a failed facts refresh keeps the facts" `Quick

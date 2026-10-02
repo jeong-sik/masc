@@ -5483,6 +5483,75 @@ type lane_run_answer_source =
       ; endpoint : string
       }
 
+type librarian_preflight_status =
+  | Preflight_awaiting
+  | Preflight_not_called of string
+  | Preflight_failed of string
+  | Preflight_invalid of string
+  | Preflight_judged of
+      Typesafeai_librarian_preflight.decision Typesafeai_types.decoded_choice
+type librarian_generation_path = Generation_not_entered | Generation_full_lane | Generation_jev_no_change
+type librarian_preflight_reading =
+  { lp_status : librarian_preflight_status
+  ; lp_generation_path : librarian_generation_path
+  ; lp_full_llm_skipped : bool
+  ; lp_elapsed_s : float option
+  ; lp_model : string option
+  ; lp_domain_rejection : string option
+  }
+
+let decode_librarian_preflight output =
+  let ( let+ ) result f = Result.map f result in
+  match Json_util.assoc_member_opt "jev_preflight" output with
+  | None -> Ok None
+  | Some preflight ->
+    let* status = required_string_field preflight "status" in
+    let* lp_status = match status with
+      | "awaiting_answer" -> Ok Preflight_awaiting
+      | "skipped" | "ineligible" | "question_unavailable" ->
+        let+ reason = required_string_field preflight "reason" in Preflight_not_called reason
+      | "failed" ->
+        let+ failure = required_member preflight "failure" in
+        Preflight_failed (Yojson.Safe.to_string failure)
+      | "invalid_answer" ->
+        let+ reason = required_string_field preflight "reason" in Preflight_invalid reason
+      | "judged" ->
+        let* decision = required_member preflight "decision" in
+        let* confidence = required_member preflight "confidence" in
+        let* probabilities = required_member preflight "probabilities" in
+        let+ judgment = Typesafeai_librarian_preflight.decode_judgment
+          (`Assoc ["type", `String "choice"; "choice", decision;
+                   "confidence", confidence; "probabilities", probabilities]) in
+        Preflight_judged judgment
+      | _ -> Error ("unknown Librarian preflight status " ^ status)
+    in
+    let* path = required_string_field output "generation_path" in
+    let* lp_generation_path = match path with
+      | "not_entered" -> Ok Generation_not_entered
+      | "full_lane" -> Ok Generation_full_lane
+      | "jev_no_change" -> Ok Generation_jev_no_change
+      | _ -> Error ("unknown Librarian generation path " ^ path)
+    in
+    let* lp_full_llm_skipped = required_bool_field output "full_llm_skipped" in
+    let* () = match lp_generation_path, lp_full_llm_skipped, lp_status with
+      | Generation_jev_no_change, true,
+        Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _} -> Ok ()
+      | (Generation_not_entered | Generation_full_lane), false, _ -> Ok ()
+      | _ -> Error "Librarian preflight decision and generation path disagree"
+    in
+    let* lp_elapsed_s = optional_float_field preflight "elapsed_s" in
+    let* () = match lp_elapsed_s with
+      | Some elapsed when not (Float.is_finite elapsed) -> Error "nonfinite preflight elapsed time"
+      | _ -> Ok () in
+    let* lp_model = match lp_status with
+      | Preflight_judged _ | Preflight_invalid _ ->
+        let+ model = required_string_field preflight "model" in Some model
+      | _ -> optional_string_field preflight "model" in
+    let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
+    let* () = if lp_full_llm_skipped && Option.is_some lp_domain_rejection
+      then Error "accepted preflight cannot also report domain rejection" else Ok () in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection})
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -5499,6 +5568,7 @@ type lane_run_detail =
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
+  ; lrd_librarian_preflight : librarian_preflight_reading option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
@@ -5685,6 +5755,10 @@ let decode_lane_run_detail json =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
+  let* lrd_librarian_preflight = match summary.lrs_lane, lrd_output with
+    | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
+    | _, _ -> Ok None
+  in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with
     | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
@@ -5737,6 +5811,7 @@ let decode_lane_run_detail json =
     ; lrd_input_availability
     ; lrd_output_availability
     ; lrd_output
+    ; lrd_librarian_preflight
     ; lrd_tool_evidence
     ; lrd_skill_evidence
     ; lrd_gate_judgment

@@ -3482,8 +3482,10 @@ def keeper_detail_overscroll_interaction(
                 b"\r",
                 b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
-            top = window(1)
-            if top not in beta:
+            # Each Keeper owns its detail content length. Beta can have a
+            # different total than alpha; only the reset position is shared.
+            beta_indicators = WINDOW_TEXT_RE.findall(CSI_RE.sub(b"", beta))
+            if not beta_indicators or int(beta_indicators[-1][0]) != 1:
                 raise AssertionError(
                     f"new Keeper detail did not reset to the top: {beta!r}"
                 )
@@ -9405,7 +9407,9 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"alpha"))
+        # The palette targets alpha without moving the beta roster cursor.
+        # Esc returns to that roster selection, not the chat target's row.
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
     return interact
@@ -20501,7 +20505,9 @@ def run_fusion_history_regression(executable: str) -> None:
     ])
 
     def interact(process, master_fd, slave_fd, output, base_path):
-        palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
+        # The surface title precedes the asynchronous list response. Wait
+        # for the historical entry that Enter will actually open.
+        palette_go(process, master_fd, output, b"go fusion", b"Fusion evidence for history-701")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
         read_available(master_fd, output)
         before_resize = len(output)

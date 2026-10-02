@@ -270,11 +270,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
        [ "Friday is the beta service's deployment day."
        ; "Tuesday is the alpha service's deployment day." ]
        (List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) current.facts));
-     let statuses = Runs.list_runs registry
-       |> List.filter (fun (r : Runs.run) ->
-         r.actor = keeper_id && match r.input with
-         | Runs.Exact_input (`Assoc fields) -> List.mem_assoc "actual_input" fields
-         | Runs.Exact_input _ -> false)
+     let statuses = Fixture.librarian_pass_runs registry ~keeper_id
        |> List.map (fun (r : Runs.run) -> Runs.status_label r.status)
        |> List.sort String.compare in
      Alcotest.(check (list string)) "both attempts have terminal evidence"

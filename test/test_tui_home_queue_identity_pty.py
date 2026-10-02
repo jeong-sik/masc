@@ -105,8 +105,10 @@ def queue_identity_journey(executable):
             os.write(fd, b"\x15")
             h.drain_until_quiet(process, fd, output, cap=1)
             fixture.release.set()
-            h.wait_for_output(process, fd, output, b"reply-preceding-turn",
-                              start=0, timeout=10)
+            # Identity withdrawal cancels the old workspace reader. Settle the
+            # fixture's server turn, but do not demand that its late reply be
+            # presented without verified workspace authority.
+            assert fixture.turns()[1]["keepers"][0]["turn"] is None
             inspect_local()  # The retained request ID is verified at recovery admission.
             assert len(fixture.received) == 1, "queued input posted while identity was unread"
 

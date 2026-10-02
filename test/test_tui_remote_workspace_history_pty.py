@@ -1113,10 +1113,15 @@ def connector_workspace_withdrawal(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_channels(marker):
+            h.drain_until_quiet(process, fd, output)
             title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Channels" in text]
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
+            # The selected detail tab survives a workspace withdrawal. If
+            # Channels already shows the fresh reading, clicking it again
+            # produces no changed cells for send_and_wait to observe.
+            if marker not in screen(output):
+                h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
             await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
                          "fresh connector targets are not visible")
         try:
@@ -1132,8 +1137,9 @@ def connector_workspace_withdrawal(binary: str) -> None:
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"a-Discord" not in text,
                          "workspace B did not withdraw A's connector projection")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.current" in text, "B roster not ready")
+            # Authority withdrawal already returns detail to the roster.
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.current" in text,
+                         "B roster not ready")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"b-Discord")
@@ -1146,8 +1152,8 @@ def connector_workspace_withdrawal(binary: str) -> None:
                          "returning authority did not retire the held connector write")
             released.set()
             assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text, "returned roster not ready")
+            await_screen(lambda text: b"MASC Keepers" in text and b"a.returned" in text,
+                         "returned roster not ready")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"a-returned-Discord")

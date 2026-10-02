@@ -3559,9 +3559,13 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some identity ->
-  match keeper_item_revision state keeper_name with
-  | Error detail -> state.item_account_error <- Some detail
-  | Ok _ ->
+  (* The read-state Item endpoint owns account authority. Public roster
+     currency observations require CanAdmin and may legitimately be absent;
+     only current Keeper presence is required before this authenticated read. *)
+  match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+  | Unobserved | Invalid _ | Absent ->
+    state.item_account_error <- Some "Keeper is not observed in the current roster"
+  | Present _ ->
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -13716,7 +13720,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && item_authority_ready state
-         && Result.is_ok (keeper_item_revision state request.drr_keeper) then
+         && (match Keeper_control.liveness_of_roster state.keeper_roster request.drr_keeper with
+             | Present _ -> true
+             | Unobserved | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

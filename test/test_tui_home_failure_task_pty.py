@@ -204,6 +204,8 @@ def full_http_loss_retains_local_work_and_draft(executable):
         h.send_and_wait(process, fd, output, b"\r", draft)
         assert draft in h.screen_text(bytes(output)), "the original workspace did not restore its draft"
         assert_no_chat_delivery()
+        # Leave the composer before requesting exit: q is draft text in chat.
+        h.send_and_wait(process, fd, output, b"\x1b", b"Continue with beta")
         os.write(fd, b"q")
 
     cards.run(executable, "Home full HTTP loss hides the history shortcut and retains local Goal Tasks and unsent draft",
@@ -253,6 +255,10 @@ def task_cancel_editor_replacement(executable):
 
         def interact(process, fd, _slave, output, base):
             original = backlog(base).read_bytes()
+            # The mismatch footer includes both workspace identity and the
+            # action refusal. Give this exact-reason assertion room for both.
+            h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                              needle=b"MASC Dashboard")
             h.wait_for_output(process, fd, output, TASK_A.encode(), start=0, timeout=10)
             cards.select_home(process, fd, output, TASK_A.encode(), destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")
@@ -266,7 +272,7 @@ def task_cancel_editor_replacement(executable):
             start = len(output)
             (editor_root / "release").write_text("1")
             h.wait_for_output(process, fd, output,
-                              b"workspace changed before the action completed",
+                              b"Workspace identity changed or is unavailable; request withdrawn",
                               start=start, timeout=10)
             assert backlog(base).read_bytes() == original
             assert not [body for path, body in requests if path == "/mcp"
@@ -349,6 +355,8 @@ def task_cancel_previous_workspace_receipt(executable):
 
         def interact(process, fd, _slave, output, _base):
             try:
+                h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                                  needle=b"MASC Dashboard")
                 h.wait_for_output(process, fd, output, TASK_A.encode(), start=0, timeout=10)
                 cards.select_home(process, fd, output, TASK_A.encode(), destinations=4)
                 h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")

@@ -48,6 +48,37 @@ class BenchmarkScripts(unittest.TestCase):
                     self.assertIn('MASC_URL', done.stderr)
                     self.assertIn('9400', done.stderr)
 
+    def test_patterns_reject_unsupported_before_session_or_result_creation(self):
+        supported = ('session', 'read', 'workspace-collaboration', 'runtime', 'all')
+        for pattern in ('a2a', 'unknown', *supported):
+            with self.subTest(pattern=pattern), tempfile.TemporaryDirectory() as scratch:
+                root = Path(scratch)
+                benchmark_dir = root / 'benchmarks'
+                benchmark_dir.mkdir()
+                script = benchmark_dir / 'benchmark.sh'
+                shutil.copyfile(SCRIPTS[1], script)
+                (root / 'scripts').symlink_to(ROOT / 'scripts', target_is_directory=True)
+                bin_dir = root / 'bin'
+                bin_dir.mkdir()
+                curl_calls = root / 'curl-calls'
+                curl = bin_dir / 'curl'
+                curl.write_text(f'#!/bin/sh\necho called >> "{curl_calls}"\nexit 7\n')
+                curl.chmod(0o755)
+                env = dict(os.environ, MASC_URL='http://benchmark.invalid/mcp',
+                           PATH=os.pathsep.join([str(bin_dir), os.environ['PATH']]))
+                done = subprocess.run([BASH, str(script), pattern, '1'], env=env,
+                                      capture_output=True, text=True, timeout=60)
+                self.assertNotEqual(done.returncode, 0)
+                self.assertNotIn('Benchmark complete!', done.stdout)
+                if pattern in supported:
+                    self.assertTrue(curl_calls.exists(), done.stderr)
+                else:
+                    self.assertFalse(curl_calls.exists(), done.stderr)
+                    self.assertFalse((benchmark_dir / 'results').exists())
+                    self.assertIn(f'Unsupported pattern: {pattern}', done.stderr)
+                    self.assertIn('Available: session, read, workspace-collaboration, runtime, all',
+                                  done.stderr)
+
     def test_every_tool_a_script_calls_has_a_definition(self):
         registered = {path.stem for path in TOOL_DEFINITIONS.glob('masc_*.toml')}
         self.assertTrue(registered, 'config/tools has no masc_ definitions; the lookup is broken')

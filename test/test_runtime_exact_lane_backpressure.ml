@@ -41,7 +41,7 @@ let candidate runtime_id =
   | Some (runtime : Runtime_instance.t) -> runtime.candidate_backpressure
   | None -> failf "runtime %s is not in the catalog" runtime_id
 
-let with_lane f =
+let with_lane_config ?(runtime_text = runtime_toml) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -60,7 +60,7 @@ let with_lane f =
     Fs_compat.remove_tree root) @@ fun () ->
   Llm_provider.Model_catalog.clear_global ();
   let path = Filename.concat root "runtime.toml" in
-  Fs_compat.save_file path runtime_toml;
+  Fs_compat.save_file path runtime_text;
   Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
   Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
   let registry = Registry.current () |> require_ok "published registry" in
@@ -74,7 +74,9 @@ let with_lane f =
   List.iter
     (fun runtime_id -> Backpressure.note_candidate_success ~candidate:(candidate runtime_id))
     [ primary; secondary ];
-  f resolved
+  f ~path resolved
+
+let with_lane f = with_lane_config (fun ~path:_ resolved -> f resolved)
 
 let slot_ids (resolved : Registry.resolved_lane) =
   List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots
@@ -144,6 +146,77 @@ let test_every_slot_resting_keeps_declared_order () =
     declared
     (slot_ids (Lane.order_at ~now:(noted_at +. 1.0) resolved))
 
+let test_unchanged_save_shares_pressure_cell () =
+  with_lane_config @@ fun ~path _resolved ->
+  let original = candidate primary in
+  Runtime.save_config_text ~runtime_config_path:path runtime_toml
+    |> require_ok "save unchanged binding" |> ignore;
+  let current = candidate primary in
+  let registry = Registry.current () |> require_ok "replacement registry" in
+  let resolved = Registry.resolve_lane registry ~lane_id:"board_attention_exact"
+    |> require_ok "replacement lane" in
+  let slot = List.hd resolved.Registry.selected_slots in
+  let observation = match slot.runtime_observation with
+    | Some observation -> observation
+    | None -> fail "runtime binding must carry an observation" in
+  check bool "unchanged binding keeps original pressure" true (original == current);
+  check bool "replacement registry shares live Keeper pressure" true
+    (observation.candidate == current);
+  check int "full replacement catalog cannot inherit runtime cells" 0
+    (List.length (Runtime.exact_output_runtime_observations
+      ~origin:(Runtime.Replacement_catalog_targets { path = "fixture" })
+      (fst (Runtime.runtimes_and_media_failover ()))))
+
+let test_rebound_account_observation env ~rate_limited () =
+  let module Exact = Agent_core.Exact_output in
+  let module Fixture = Exact_output_fixture in
+  Eio.Switch.run @@ fun sw ->
+  let behavior =
+    if rate_limited then
+      Fixture.Reply_with (fun _ _ -> `Too_many_requests, "{\"error\":{\"message\":\"rate limited\"}}")
+    else Fixture.Reply (Fixture.openai_response (`Assoc ["ok", `Bool true]))
+  in
+  let server = Fixture.start_server ~sw ~net:env#net ~clock:env#clock behavior in
+  let runtime_text =
+    String.concat server.base_url
+      (Str.split_delim (Str.regexp_string "https://openrouter.ai/api/v1") runtime_toml)
+  in
+  with_lane_config ~runtime_text @@ fun ~path resolved ->
+  let old_candidate = candidate primary in
+  let slot = List.hd resolved.Registry.selected_slots in
+  let first = Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
+    |> require_ok "freeze old candidate" in
+  let requirement = Exact.make_output_requirement
+    ~schema:(`Assoc ["type", `String "object"]) ~minimum_guarantee:Exact.Json_syntax in
+  let snapshot = Exact.snapshot_flow ~first ~rest:[]
+    ~messages:[Agent_core.Types.user_msg "return JSON"] requirement
+    |> require_ok "freeze old flow" in
+  let attempt = Exact.start_flow snapshot |> require_ok "start old flow" in
+  Masc_test_deps.with_process_env "OPENROUTER_API_KEY" (Some "synthetic-rebound-account")
+    (fun () -> Runtime.save_config_text ~runtime_config_path:path runtime_text
+      |> require_ok "rebind same runtime ID" |> ignore);
+  let new_candidate = candidate primary in
+  check bool "changed account owns a different pressure cell" false
+    (old_candidate == new_candidate);
+  if not rate_limited then (
+    Backpressure.note_rate_limit ~candidate:old_candidate ~retry_after:(Some 30.0);
+    Backpressure.note_rate_limit ~candidate:new_candidate ~retry_after:(Some 30.0));
+  let result = Exact.execute_flow_once ~net:env#net ~clock:env#clock
+    ~before_measurement_dispatch:(fun _ -> Ok ())
+    ~on_measurement_terminal:(fun _ -> Ok ()) ~before_dispatch:(fun _ -> Ok ())
+    ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+    ~validate:(fun _ -> Exact.Accept ()) attempt in
+  check bool "fixture returned expected outcome" (not rate_limited) (Result.is_ok result);
+  Lane.observe ~resolved result;
+  let limited candidate =
+    match Backpressure.candidate_backpressure ~now:(Unix.gettimeofday ()) ~candidate with
+    | Some { Backpressure.rate_limit = Some _; _ } -> true
+    | Some { Backpressure.rate_limit = None; _ } | None -> false
+  in
+  check bool "old result updates original account" rate_limited (limited old_candidate);
+  check bool "old result preserves new account" (not rate_limited) (limited new_candidate);
+  check int "one real generation request" 1 (Atomic.get server.posts)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -158,4 +231,11 @@ let () =
           test_provider_hint_outlives_the_fallback_cap;
         test_case "an answer clears the rest" `Quick test_answer_clears_the_rest;
         test_case "every slot resting keeps the declared order" `Quick
-          test_every_slot_resting_keeps_declared_order ] ]
+          test_every_slot_resting_keeps_declared_order ];
+      "account rebind", [
+        test_case "unchanged save preserves shared registry pressure" `Quick
+          test_unchanged_save_shares_pressure_cell;
+        test_case "old refusal does not rate-limit new account" `Quick
+          (test_rebound_account_observation env ~rate_limited:true);
+        test_case "old success does not clear new account rest" `Quick
+          (test_rebound_account_observation env ~rate_limited:false) ] ]

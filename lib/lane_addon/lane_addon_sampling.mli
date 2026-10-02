@@ -2,7 +2,9 @@
     model handler, and keep terminal evidence distinct from generated text.
     An [invoke] error is recorded as [host_error], without inferring a policy
     rejection. Invocation exceptions are [outcome_unknown]. Invalid responses
-    retain the actual supplied response under [invalid_response]. *)
+    retain the actual supplied response under [invalid_response] when it can be
+    serialized safely; encoding failures retain a terminal diagnostic. Host-only
+    diagnostic strings are never returned to packages. *)
 type t
 (** A broker retains its exact package and installation identity. *)
 val for_worker : t -> package:Lane_addon_types.package -> instance_id:string ->

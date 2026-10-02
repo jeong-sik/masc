@@ -1,13 +1,18 @@
 name = "keeper_tasks_list"
 description = """
 List backlog tasks. Rows carry id, title, priority, created_at, status, \
-assignee; projection=full adds description, files, contract, \
+assignee and lifecycle timestamps; projection=full adds completion notes, description, files, contract, \
 handoff_context, execution_links. awaiting_verification means the task \
 awaits the completion-authority verdict and no Keeper can claim it; \
 never Read producer sandbox paths. Rows are ordered by priority, then \
 created_at, then id. When truncated is true the response carries \
 next_cursor; pass it as cursor with the same status, include_done and \
-projection to read the rows after that page. The last page has none."""
+projection to read the rows after that page. The last page has none. \
+new_tasks highlights recent off-page rows only on the first page; \
+continuation pages do not repeat that discovery window. Narrow by task_ids, \
+assignee, goal_id or a literal query before paging; all supplied filters \
+are ANDed and must stay the same on continuation pages. Use task_ids with \
+projection=full for known tasks instead of scanning the whole backlog."""
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."
@@ -17,7 +22,29 @@ key_constraints = [
   "When truncated is true, pass next_cursor as cursor with the same filter to read the rest; the last page carries no next_cursor.",
 ]
 details_markdown = "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body."
-examples = ["status='todo' include_done=false limit=20", "status='todo' limit=20 cursor=<next_cursor from the previous page>"]
+examples = ["task_ids=['task-123'] projection='full' include_done=true", "goal_id='goal-123' projection='compact'", "query='release' status='todo' limit=20", "status='todo' limit=20 cursor=<next_cursor from the previous page>"]
+
+[[params]]
+name = "task_ids"
+type = "array"
+items = { type = "string" }
+min_items = 1
+description = "Exact task IDs to retrieve in one call. Existing status/include_done rules still apply; use status=done or include_done=true for completed tasks, status=cancelled for cancelled tasks."
+
+[[params]]
+name = "assignee"
+type = "string"
+description = "Exact performer handle: includes claimed, in_progress, awaiting_verification and done tasks allowed by the status filter. Does not match a canceller or unassigned task."
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Exact Goal ID from the authoritative task-to-Goal link registry. No links returns an empty list; an unreadable registry returns an error."
+
+[[params]]
+name = "query"
+type = "string"
+description = "Non-blank literal substring in title or description, ASCII case-insensitive. No regex, semantic ranking, notes or receipt search."
 
 [[params]]
 name = "status"

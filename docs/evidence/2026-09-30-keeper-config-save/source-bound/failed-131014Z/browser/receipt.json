@@ -1,0 +1,50 @@
+{
+  "scope": "Real KeeperConfigPanel source in Chromium with isolated synthetic API; not installed server acceptance.",
+  "passed": false,
+  "error": "page.waitForFunction: Timeout 30000ms exceeded.\n    at /masc-work/jazz-developer/masc/.worktrees/31173-draft-fence/docs/evidence/2026-09-30-keeper-config-save/browser.mjs:101:14",
+  "posts": [
+    {
+      "skills": {
+        "names": [
+          "first-skill"
+        ]
+      },
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    },
+    {
+      "skills": {
+        "names": [
+          "second-skill"
+        ]
+      },
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "name": "skills-pending",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n4\nLIVE READ\nVerify gate\nGET /api/v1/keepers/:name/config execution.verify\nread-only execution policy projection\nGET config · 1 config field · missing 1 config field\nLIVE WRITE\nActivation mode\nGET /api/v1/keepers/:name/config activation_mode\nPATCH /api/v1/keepers/:name/config activation_mode\nGET config · PATCH config#activation_mode · 2 config fields · missing 1 config field\nLIVE WRITE\nKeeper Skills\nGET /api/v1/keepers/:name/config skills.names\nPATCH /api/v1/keepers/:name/config skills\nGET config · PATCH config#skills.names · 1 config field\nLIVE WRITE\nVoice gate bypass\nGET /api/v1/keepers/:name/config voice_always_allow\nPATCH /api/v1/keepers/:name/config voice_always_allow\nGET config · PATCH config#voice_always_allow · 1 config field\n검증\n검증OFF\n☠ 제거됨 · Handoff_triggered 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.\n실행 방식\n수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행\n수동 시작\n요청 시 실행\n자율 실행\n음성 승인 생략\n음성 합성 발화 시 게이트 승인 대기 없이 즉시 재생\nKEEPER SKILLS\n\nKeeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.\n\nSkill 선택\n전체 또는 정확한 이름 목록\n모든 공개 Skill\n이름으로 선택\n한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음\n실행 정책 · save-probe\n변경된 Keeper 설정\n초기화하기\n저장 중..."
+    },
+    {
+      "name": "skills-preserved",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n4\nLIVE READ\nVerify gate\nGET /api/v1/keepers/:name/config execution.verify\nread-only execution policy projection\nGET config · 1 config field · missing 1 config field\nLIVE WRITE\nActivation mode\nGET /api/v1/keepers/:name/config activation_mode\nPATCH /api/v1/keepers/:name/config activation_mode\nGET config · PATCH config#activation_mode · 2 config fields · missing 1 config field\nLIVE WRITE\nKeeper Skills\nGET /api/v1/keepers/:name/config skills.names\nPATCH /api/v1/keepers/:name/config skills\nGET config · PATCH config#skills.names · 1 config field\nLIVE WRITE\nVoice gate bypass\nGET /api/v1/keepers/:name/config voice_always_allow\nPATCH /api/v1/keepers/:name/config voice_always_allow\nGET config · PATCH config#voice_always_allow · 1 config field\n검증\n검증OFF\n☠ 제거됨 · Handoff_triggered 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.\n실행 방식\n수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행\n수동 시작\n요청 시 실행\n자율 실행\n음성 승인 생략\n음성 합성 발화 시 게이트 승인 대기 없이 즉시 재생\nKEEPER SKILLS\n\nKeeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.\n\nSkill 선택\n전체 또는 정확한 이름 목록\n모든 공개 Skill\n이름으로 선택\n한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음\n실행 정책 · save-probe\n변경된 Keeper 설정\n초기화하기\nKeeper 설정 저장"
+    }
+  ],
+  "errors": []
+}

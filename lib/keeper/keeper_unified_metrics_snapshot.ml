@@ -22,6 +22,7 @@ let latency_runtime_profile runtime_id =
 
 let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(keeper_turn_id : int)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(usage_resolution : Keeper_usage_resolution.t)
     ~(turn_cost : float)
@@ -30,7 +31,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(message_count : int)
     () : unit =
   let now_ts = Time_compat.now () in
-  let _observation = observation in
   let turn_mode = turn_mode_of_result result in
   let usage_trust =
     classify_usage_trust
@@ -117,6 +117,13 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("channel", `String (Keeper_world_observation.channel_to_string channel));
         ("name", `String meta.name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+        ("keeper_turn_id", `Int keeper_turn_id);
+        ( "backlog_observation_authoritative"
+        , `Bool (Option.is_some observation.backlog_revision) );
+        ("unclaimed_task_count", `Int observation.unclaimed_task_count);
+        ( "claimable_task_count"
+        , `Int (Keeper_world_observation.claimable_task_count observation) );
+        ("backlog_revision", Json_util.int_opt_to_json observation.backlog_revision);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);

@@ -819,9 +819,19 @@ let test_durable_fleet_recipient_projection_is_idempotent () =
   check bool "same workspace message retry is accepted idempotently" true (Result.is_ok (append ()));
   check int "repeated recipient attempt stores one transcript row" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"beta" ~request_id);
-  check bool "invalid recipient does not become accepted" true
-    (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
-      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender message ~keeper_name:"../outside"))
+  List.iter (fun keeper_name ->
+    check bool "invalid recipient does not become accepted" true
+      (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
+        ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+        message ~keeper_name));
+    check int "invalid recipient gets no transcript row" 0
+      (count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id))
+    ["../outside"; ""; "bad/name"];
+  persist_meta config "edgar.a.poe";
+  check bool "dotted Keeper recipient remains valid" true
+    (Result.is_ok (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+      message ~keeper_name:"edgar.a.poe"))
 ;;
 
 let test_deferred_keeper_identity_matches_ordinary_projection () =

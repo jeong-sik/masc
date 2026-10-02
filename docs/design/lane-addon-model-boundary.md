@@ -70,9 +70,13 @@ Successful sampling responses carry request/outcome references under
 the string-error callback cannot establish whether an error was a policy refusal
 or a provider failure. Unexpected invocation exceptions are `outcome_unknown`.
 Error responses expose that status inline because a container cannot read the
-host's evidence store. Cancellation propagates and preserves its pending request.
-If terminal retention fails after invocation, the error identifies the retained
-request and explicitly reports uncertainty, never a claim that no call happened.
+host's evidence store. Cancellation propagates after a returned outcome has
+been validated and indexed; interrupted invocations retain their pending request.
+If terminal retention fails after invocation, package replies expose only a neutral
+status. Host recovery indexes preserve the request and any terminal outcome; their
+retained evidence is authoritative about whether the call returned. The first
+terminal index includes exact outcome bytes before blob publication, allowing
+recovery to restore an interrupted blob write without repeating the model call.
 
 The package's existing byte envelope bounds request and outcome retention.
 A request that cannot be retained is not invoked. Host filesystem writes are

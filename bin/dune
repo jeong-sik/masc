@@ -272,6 +272,7 @@
  (package masc)
  (libraries
   masc
+  masc.config
   masc.masc_process
   masc.prompt_registry
   masc.server
@@ -563,7 +564,7 @@
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
- (libraries masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_acting)
@@ -1866,6 +1867,7 @@
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
+  masc_cli_keeper_create
   masc_tui_voice_wizard_session
   masc_tui_kept_reads
   masc_tui_account_login

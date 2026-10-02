@@ -14,6 +14,13 @@ type file_source =
   ; sha256 : string
   }
 
+type revalidation_scope =
+  | All_sources
+  | Selected_sources of file_source list
+      (** Exact path/digest identities admitted by a retrieval query. Other
+          sources remain stored and unverified, including a selected path
+          whose stored digest changed before the lock was acquired. *)
+
 type fact =
   { claim : string
   ; first_seen : float
@@ -47,7 +54,8 @@ type projection =
           not be read ([Source_io_failed]); the one whose endpoint did not
           answer ([Source_endpoint_unanswered]) and every fact after it in
           the pass, which is not asked. A recall renders them as
-          unverified. *)
+          unverified. This also includes deliberately unselected identities
+          when [revalidate] is called with [Selected_sources]. *)
   }
 
 (** Why a source file could not be read. All but [Source_io_failed] and
@@ -135,7 +143,7 @@ val upsert_file_fact :
   -> unit
   -> (t, write_error) result
 
-(** Re-read every current source under the same sandbox resolver used by the
+(** Re-read current sources in [scope] (default [All_sources]) under the same sandbox resolver used by the
     write path. Unchanged facts remain current. A source that answered as
     changed, missing or unusable is atomically removed and replaced by a
     pending invalidation. One whose file could not be read
@@ -148,9 +156,11 @@ val upsert_file_fact :
     survive subsequent turns until [upsert_file_fact] recreates that path.
     Revalidation takes only the source-store lock: its invalidation rendering
     is strictly shorter than the fact it replaces, so it cannot overcommit the
-    aggregate byte reservation. *)
+    aggregate byte reservation. Unselected identities are preserved and
+    reported in [unverified_paths], never read or invalidated by this pass. *)
 val revalidate :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  ?scope:revalidation_scope
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string

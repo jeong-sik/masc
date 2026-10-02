@@ -4,6 +4,8 @@ import importlib.util
 import inspect
 import io
 import json
+import os
+import subprocess
 import re
 import sys
 import tempfile
@@ -161,22 +163,100 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         server_profiles = tuple(re.findall(r'"([^"]+)"', match.group(1)))
         self.assertEqual(acceptance.SANDBOX_PROFILES, server_profiles)
 
-    def test_every_keeper_up_call_uses_the_configured_profile_and_never_local(self):
-        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
-        self.assertNotIn('"sandbox_profile": "local"', module_source)
-        self.assertNotIn("ALLOW_LOCAL_PLAYGROUND", module_source)
-        keeper_up_calls = module_source.count('"masc_keeper_up"')
-        self.assertEqual(keeper_up_calls, 2)
-        self.assertEqual(
-            module_source.count('"sandbox_profile": self.sandbox_profile'), keeper_up_calls
-        )
-        for method in (
-            acceptance.MissionRun.create_fleet,
-            acceptance.MissionRun.restart_and_recall,
-        ):
-            source = inspect.getsource(method)
-            self.assertIn('"sandbox_profile": self.sandbox_profile', source)
-            self.assertNotIn('"local"', source)
+    def test_fresh_fleet_sends_the_complete_selected_declaration(self):
+        schema = tomllib.loads((REPO_ROOT / "config/tools/masc_keeper_up.toml").read_text())
+        allowed = {parameter["name"] for parameter in schema["params"]}
+        cases = [
+            ("docker", "chosen-image", None, None),
+            ("microvm", "chosen-image", "apple_container", None),
+            ("remote_ssh", None, None, "chosen-endpoint"),
+        ]
+        for profile, image, backend, endpoint in cases:
+            declaration = acceptance.fresh_sandbox_declaration(profile, image, backend, endpoint)
+            run = unittest.mock.Mock()
+            run.roles = {"coordinator": "fresh-fixture"}
+            run.sandbox_declaration = declaration
+            run.role_instructions.return_value = "fixture instructions"
+            run.runtime_for_role.return_value = "fixture.runtime"
+            acceptance.MissionRun.create_fleet(run)
+            args = run.call.call_args.args[2]
+            self.assertEqual(set(args) - allowed, set())
+            expected = {"sandbox_profile": profile}
+            for key, value in [("sandbox_image", image), ("microvm_backend", backend),
+                               ("remote_endpoint", endpoint)]:
+                if value is not None:
+                    expected[key] = value
+            sandbox_keys = {"sandbox_profile", "sandbox_image", "microvm_backend", "remote_endpoint"}
+            self.assertEqual({key: args[key] for key in sandbox_keys if key in args}, expected)
+            self.assertEqual(args["runtime_id"], "fixture.runtime")
+            run.declare_unattended.assert_called_once_with("coordinator")
+
+    def test_invalid_fresh_declaration_stops_before_preflight(self):
+        cases = [
+            (["--sandbox-profile", "docker"], "--sandbox-image"),
+            (["--sandbox-profile", "microvm", "--sandbox-image", "chosen"], "--microvm-backend"),
+            (["--sandbox-profile", "remote_ssh"], "--remote-endpoint"),
+            (["--sandbox-profile", "docker", "--sandbox-image", "chosen", "--remote-endpoint", "ssh"], "not applicable"),
+            (["--sandbox-profile", "microvm", "--sandbox-image", "chosen", "--microvm-backend", "unknown"], "must be"),
+        ]
+        for extra, detail in cases:
+            with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run", *extra]):
+                with unittest.mock.patch.object(acceptance, "preflight") as preflight:
+                    with unittest.mock.patch.object(acceptance, "read_token") as read_token:
+                        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                            code = acceptance.main()
+            self.assertEqual(code, 2)
+            self.assertIn(detail, stderr.getvalue())
+            preflight.assert_not_called()
+            read_token.assert_not_called()
+
+    def test_retained_restart_does_not_overwrite_saved_sandbox(self):
+        class CapturedRestart(Exception):
+            pass
+
+        run = unittest.mock.Mock()
+        run.roles = {"coordinator": "retained-fixture"}
+        run.sandbox_declaration = {"sandbox_profile": "docker", "sandbox_image": "different-image"}
+        run.runtime_for_role.return_value = "fixture.runtime"
+        run.read_status.return_value = {"keepalive_running": False, "runtime": {"shutdown_admission_fence": False}}
+        captured = []
+
+        def call(_label, tool, arguments):
+            if tool == "masc_keeper_up":
+                captured.append(arguments)
+                raise CapturedRestart
+
+        run.call.side_effect = call
+        with self.assertRaises(CapturedRestart):
+            acceptance.MissionRun.restart_and_recall(run, "unused-board")
+        self.assertEqual(captured, [{"name": "retained-fixture", "runtime_id": "fixture.runtime"}])
+
+    def test_shell_wrapper_forwards_selected_sandbox_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_python = Path(directory) / "python3"
+            fake_python.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+            fake_python.chmod(0o755)
+            env = {"PATH": directory + os.pathsep + os.defpath,
+                   "KEEPER_COLLAB_ACCEPTANCE_MODE": "preflight",
+                   "KEEPER_COLLAB_SANDBOX_PROFILE": "microvm",
+                   "KEEPER_COLLAB_SANDBOX_IMAGE": "chosen-image",
+                   "KEEPER_COLLAB_MICROVM_BACKEND": "apple_container"}
+            result = subprocess.run(["bash", str(SCRIPT_PATH.with_suffix(".sh"))],
+                                    env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            argv = result.stdout.splitlines()
+            for flag, value in [("--sandbox-profile", "microvm"), ("--sandbox-image", "chosen-image"),
+                                ("--microvm-backend", "apple_container")]:
+                self.assertEqual(argv[argv.index(flag) + 1], value)
+            env["KEEPER_COLLAB_SANDBOX_PROFILE"] = "remote_ssh"
+            env["KEEPER_COLLAB_REMOTE_ENDPOINT"] = "chosen-endpoint"
+            del env["KEEPER_COLLAB_SANDBOX_IMAGE"]
+            del env["KEEPER_COLLAB_MICROVM_BACKEND"]
+            result = subprocess.run(["bash", str(SCRIPT_PATH.with_suffix(".sh"))],
+                                    env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            argv = result.stdout.splitlines()
+            self.assertEqual(argv[argv.index("--remote-endpoint") + 1], "chosen-endpoint")
 
     def test_every_keeper_up_is_followed_by_the_unattended_stance(self):
         module_source = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -372,7 +452,8 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             acceptance.MissionRun.read_board_thread(Stub(), "p-1")
 
     def test_run_refuses_to_start_without_a_turn_settle_budget(self):
-        argv = ["acceptance", "--run", "--sandbox-profile", "microvm"]
+        argv = ["acceptance", "--run", "--sandbox-profile", "microvm",
+                "--sandbox-image", "chosen-image", "--microvm-backend", "apple_container"]
         with unittest.mock.patch.object(sys, "argv", argv):
             with contextlib.redirect_stderr(io.StringIO()) as stderr:
                 code = acceptance.main()
@@ -1187,6 +1268,8 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 str(tmp / "proof.mjs"),
                 "--runtime-id",
                 "runtime-a",
+                "--sandbox-image",
+                "chosen-image",
             ]
 
             def without(flag, has_value=True):

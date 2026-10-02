@@ -159,7 +159,8 @@ type event =
       ; task_context : Keeper_turn_task_context.t
           (** Immutable admission observation for this turn reference only.
               It does not describe earlier turns covered by a history span.
-              Missing context is malformed, never [No_task]. *)
+              Absent observation is [Admission_not_recorded], never [No_task].
+              Position evidence remains readable; present malformed context fails. *)
       ; history_at_start : history_at_start
       ; position : position
       }

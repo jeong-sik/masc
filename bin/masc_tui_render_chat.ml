@@ -2812,15 +2812,6 @@ let render_keeper_message (state : state) =
       |> List.map (held_projection ~committed:true)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    let live_block =
-      match state.msg_live with
-      | Some live
-        when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name -> (
-          match log_projection ~committed:false live with
-          | { lb_entries = []; _ } -> None
-          | block -> Some block)
-      | Some _ | None -> None
-    in
     (* Turns running that this pane did not open, drawn from the journal
        reads that feed their logs ([observed_logs_for_keeper]). Projected
        the way the live block is placed -- uncommitted, so the block sits
@@ -2856,44 +2847,18 @@ let render_keeper_message (state : state) =
           { block with lb_entries = entries })
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    (* A new queued request takes msg_live while the previous subscription
-       still runs. Keep those request-owned logs on screen as well. Batch
-       members share one execution, so retain one block per execution. *)
+    (* Classify the same selected pool that history suppression reads. *)
     let other_live_blocks =
-      List.rev state.msg_inflight
-      |> List.filter (fun entry ->
-          String.equal entry.sent_request.keeper_name keeper_name)
-      |> List.map (fun entry -> held_projection ~committed:false entry.log)
+      Masc_tui_types.selected_source_logs_for_keeper state keeper_name
+      |> List.filter (fun log ->
+          not (Masc_tui_types.turn_log_holds_the_turn log)
+          && (not (List.exists (( == ) log) state.msg_settled_logs)
+              || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
+                   state.msg_inflight))
+      |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    (* All batch members carry the same journal sequence. A newly selected
-       subscriber may lag behind another member; select by retained journal
-       coverage, with a complete turn authoritative over a partial stream.
-       Equal coverage keeps the earlier source, avoiding selection churn. *)
-    let prefer candidate held =
-      let candidate_complete = Masc_tui_types.turn_log_holds_the_turn candidate.lb_log in
-      let held_complete = Masc_tui_types.turn_log_holds_the_turn held.lb_log in
-      if candidate_complete <> held_complete then candidate_complete
-      else
-        match Masc_tui_keeper_chat_log.resume_position candidate.lb_log.tl_log,
-              Masc_tui_keeper_chat_log.resume_position held.lb_log.tl_log with
-        | Masc.Keeper_chat_event_log.After_seq candidate_seq,
-          Masc.Keeper_chat_event_log.After_seq held_seq -> candidate_seq > held_seq
-        | After_seq _, Whole_turn -> true
-        | Whole_turn, (After_seq _ | Whole_turn) -> false
-    in
-    let blocks =
-      settled_blocks @ observed_blocks @ other_live_blocks @ Option.to_list live_block
-      |> List.fold_left (fun selected block ->
-          let same_execution other =
-            String.equal (Masc_tui_types.turn_log_execution_id block.lb_log)
-              (Masc_tui_types.turn_log_execution_id other.lb_log) in
-          match List.find_opt same_execution selected with
-          | None -> selected @ [block]
-          | Some held when prefer block held ->
-              List.map (fun other -> if same_execution other then block else other) selected
-          | Some _ -> selected) []
-    in
+    let blocks = settled_blocks @ observed_blocks @ other_live_blocks in
     let open_blocks =
       List.filter (fun block ->
         not (Masc_tui_types.observed_log_has_ended state block.lb_log)

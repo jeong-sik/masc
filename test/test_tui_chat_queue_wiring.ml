@@ -2929,7 +2929,7 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
       [ Live.Run_started; Live.Text "shared answer" ]
   in
   let execution_id = live.sent_request.request_id in
-  Tui_types.turn_log_add ~now:11. live.log ~seq:None
+  Tui_types.turn_log_add ~now:11. live.log ~seq:(Some 2)
     (Live.Batch_bound { operation_id = execution_id; execution_id });
   state.msg_live <- Some live.log;
   state.msg_inflight <- [ live ];
@@ -2959,6 +2959,9 @@ let test_hidden_partial_reply_cannot_remove_the_durable_reply () =
   let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
       [Live.Run_started; Live.Text "still catching up"] in
   let execution_id = live.sent_request.request_id in
+  (* This follower is hidden because the live stream has greater coverage,
+     not merely because both are bound to the same execution. *)
+  Tui_types.turn_log_add ~now:110. live.log ~seq:(Some 3) (Live.Text "");
   let follower = Tui_types.turn_log_create ~keeper_name:"alpha"
       ~request_id:"hidden-follower" ~started_at:100. in
   List.iteri
@@ -4212,6 +4215,128 @@ let test_old_queued_watcher_does_not_rearm_esc () =
     (Tui_types.working_chat_interrupt_action ~now_ns state "alpha" working = Masc_tui_esc_interrupt.Launch_interrupt)
 ;;
 
+(* Four subscriptions may retain different portions of one execution. Source
+   selection must happen before settled/observed classification, and changing
+   the selected subscriber cannot rewind the transcript. *)
+let test_batch_source_selection_preserves_four_request_history () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (60, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let n = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
+    let execution_id = n.sent_request.request_id in
+    let bind (entry : Tui_types.inflight) = Tui_types.turn_log_add ~now:2. entry.Tui_types.log ~seq:(Some 2)
+        (Live.Batch_bound {operation_id=entry.sent_request.request_id; execution_id}) in
+    bind n;
+    Tui_types.turn_log_add ~now:2. n.log ~seq:(Some 20) (Live.Text "PARTIAL_CANONICAL");
+    let next = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [Live.Run_started] in
+    bind next;
+    Tui_types.turn_log_add ~now:3. next.log ~seq:(Some 80) (Live.Text "RICH_OBSERVED_OUTPUT");
+    let n2 = inflight_with_log ~keeper_name:"alpha" ~started_at:3.
+        [Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None}] in
+    let n3 = inflight_with_log ~keeper_name:"alpha" ~started_at:4.
+        [Live.Run_started; Live.Text "INDEPENDENT_OUTPUT"] in
+    let beta = inflight_with_log ~keeper_name:"beta" ~started_at:5. [Live.Run_started] in
+    bind beta;
+    Tui_types.turn_log_add ~now:5. beta.log ~seq:(Some 100) (Live.Text "BETA_ONLY_OUTPUT");
+    Log.commit next.log.tl_log;
+    Tui_types.hold_settled_log state next.log;
+    Log.commit beta.log.tl_log;
+    Tui_types.hold_settled_log state beta.log;
+    state.msg_inflight <- [n3; n2; n];
+    state.msg_live <- Some n.log;
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+    let contains needle = Astring.String.is_infix ~affix:needle (screen ()) in
+    check (list string) "seq80 observed sibling survives seq20 live subscriber"
+      [next.sent_request.request_id]
+      (List.map Tui_types.turn_log_request_id (Tui_types.observed_logs_for_keeper state "alpha"));
+    check bool "richer held output drawn" true (contains "RICH_OBSERVED_OUTPUT");
+    check bool "weaker live output omitted" false (contains "PARTIAL_CANONICAL");
+    check bool "independent fourth execution retained" true (contains "INDEPENDENT_OUTPUT");
+    check bool "different Keeper cannot win same execution selection" false (contains "BETA_ONLY_OUTPUT");
+    Tui_types.turn_log_add ~now:5. n.log ~seq:(Some 85) (Live.Text "LIVE_CAUGHT_UP");
+    check (list string) "caught-up live subscriber now dominates the partial observer" []
+      (List.map Tui_types.turn_log_request_id (Tui_types.observed_logs_for_keeper state "alpha"));
+    check bool "late live coverage is selected" true (contains "LIVE_CAUGHT_UP");
+    Tui_types.turn_log_add ~now:6. next.log ~seq:(Some 81) (visible_reply "COMPLETED_SIBLING_REPLY");
+    Tui_types.turn_log_add ~now:6. next.log ~seq:(Some 82) Live.Run_finished;
+    Tui_types.hold_settled_log state next.log;
+    Tui_types.settle_turn_log state n;
+    state.msg_inflight <- [n3; n2];
+    check (list string) "complete sibling wins over partial canonical after settle"
+      [next.sent_request.request_id]
+      (List.map Tui_types.turn_log_request_id (Tui_types.settled_logs_for_keeper state "alpha"));
+    check bool "completed reply remains drawn" true (contains "COMPLETED_SIBLING_REPLY");
+    state.msg_history <- [chat_entry ~request_id:execution_id
+      ~role:Tui_types.Message_keeper ~text:"COMPLETED_SIBLING_REPLY" ~at:6. ()];
+    check bool "durable canonical reply suppressed by selected complete sibling" false
+      (List.exists (fun (row : Tui_types.msg_entry) -> row.me_role = Tui_types.Message_keeper)
+         (Tui_types.chat_rows_for state "alpha"));
+    Tui_types.turn_log_add ~now:7. n.log ~seq:(Some 90) (Live.Text "LATE_PARTIAL_UPDATE");
+    Tui_types.hold_settled_log state n.log;
+    check bool "higher partial seq cannot displace authoritative ending" false (contains "LATE_PARTIAL_UPDATE");
+    check bool "authoritative ending survives late partial update" true (contains "COMPLETED_SIBLING_REPLY");
+    state.msg_target_keeper_name <- Some "beta";
+    state.msg_live <- None;
+    check bool "other Keeper retains its own held source" true (contains "BETA_ONLY_OUTPUT"))
+;;
+
+let test_history_and_renderer_share_all_inflight_candidates () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (60, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let n = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
+    let execution_id = n.sent_request.request_id in
+    let bind (entry : Tui_types.inflight) =
+      Tui_types.turn_log_add ~now:2. entry.log ~seq:(Some 2)
+        (Live.Batch_bound {operation_id=entry.sent_request.request_id; execution_id}) in
+    let observed = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [Live.Run_started] in
+    bind observed;
+    Tui_types.turn_log_add ~now:3. observed.log ~seq:(Some 80) (visible_reply "SAVED_FINAL");
+    Log.commit observed.log.tl_log;
+    Tui_types.hold_settled_log state observed.log;
+    let competitor = inflight_with_log ~keeper_name:"alpha" ~started_at:3. [Live.Run_started] in
+    bind competitor;
+    Tui_types.turn_log_add ~now:4. competitor.log ~seq:(Some 90) (Live.Text "GAPPED_PROGRESS");
+    let n3 = inflight_with_log ~keeper_name:"alpha" ~started_at:4.
+        [Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None}] in
+    state.msg_live <- Some n3.log;
+    state.msg_inflight <- [n3; competitor; n];
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_loaded <- [chat_entry ~request_id:execution_id ~role:Tui_types.Message_keeper
+        ~text:"SAVED_FINAL" ~at:5. ()];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+    let final_count () = List.length (Astring.String.cuts ~sep:"SAVED_FINAL" (screen ())) - 1 in
+    check int "losing observed reply cannot suppress durable final" 1 (final_count ());
+    let before = Tui_types.chat_rows_for state "alpha" in
+    check int "durable final retained beside selected gapped inflight" 1 (List.length before);
+    Tui_types.turn_log_add ~now:6. competitor.log ~seq:(Some 80) (visible_reply "SAVED_FINAL");
+    let after = Tui_types.chat_rows_for state "alpha" in
+    check bool "selected inflight revision invalidates history memo" false (before == after);
+    check int "selected inflight reply owns durable suppression" 0 (List.length after);
+    check int "late lower-seq reply draws exactly once" 1 (final_count ());
+    Tui_types.turn_log_add ~now:7. observed.log ~seq:(Some 100) (Live.Text "OBSERVED_CAUGHT_UP");
+    Tui_types.hold_settled_log state observed.log;
+    check int "candidate catch-up preserves one final reply" 1 (final_count ()))
+;;
+
 let test_batch_watchers_render_one_shared_settled_turn () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let make request_id execution_id =
@@ -4622,6 +4747,10 @@ let () =
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc
+        ; test_case "four request batch source selection" `Quick
+            test_batch_source_selection_preserves_four_request_history
+        ; test_case "history and renderer share inflight candidates" `Quick
+            test_history_and_renderer_share_all_inflight_candidates
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "every request of a held batch is held for journal reads" `Quick
             test_every_request_of_a_held_batch_is_held_for_journal_reads

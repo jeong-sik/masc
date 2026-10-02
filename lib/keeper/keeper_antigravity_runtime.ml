@@ -424,7 +424,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             Option.iter (fun remainder ->
               emit (Agent_core.Types.ContentBlockDelta
                 {index=0; delta=Agent_core.Types.TextDelta remainder}))
-              (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+              (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
             emit
               (Agent_core.Types.MessageDelta
                  { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

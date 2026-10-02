@@ -1290,23 +1290,33 @@ let run_best_effort
             ~destinations
             ~state
             ~questions =
+          let started_at = Time_compat.now () in
+          let started_at_ns = Mtime_clock.elapsed_ns () in
           let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
           Exact_lane_run_registry.register_running
             registry
             ~run_id:evaluation_id
             ~lane:Exact_lane_run_registry.Librarian
             ~actor:keeper_id
-            ~started_at:(Time_compat.now ())
+            ~started_at
             ~input:
               (Exact_lane_run_registry.Exact_input
                  (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
                     ~direction ~destinations ~state ~questions));
-          evaluation_id
+          evaluation_id, started_at_ns
         in
-        let complete_absorb_evaluation ~evaluation_id evaluation =
+        let absorb_evaluation_elapsed_s started_at_ns =
+          Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_at_ns) /. 1_000_000_000.
+        in
+        let complete_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) evaluation =
           let outcome =
             match evaluation.Keeper_librarian_absorb_gate.result with
-            | Ok _ -> Exact_lane_run_registry.Succeeded
+            | Ok _ ->
+              (match Keeper_librarian_absorb_gate.validate_evaluation_answer evaluation with
+               | Ok () -> Exact_lane_run_registry.Succeeded
+               | Error detail ->
+                 Exact_lane_run_registry.Failed
+                   { code = "absorb_gate_invalid_answer"; detail })
             | Error failure ->
               Exact_lane_run_registry.Failed
                 { code = "absorb_gate_provider_failure"
@@ -1318,7 +1328,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output:
                  (Keeper_librarian_absorb_gate.observation_to_yojson
@@ -1332,7 +1342,7 @@ let run_best_effort
                evaluation_id
                (Exact_lane_run_registry.completion_error_to_string error))
         in
-        let abort_absorb_evaluation ~evaluation_id result =
+        let abort_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) result =
           let outcome, output =
             match result with
             | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
@@ -1346,7 +1356,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output
            with

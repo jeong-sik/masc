@@ -631,6 +631,13 @@ type evaluation =
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
 
+let validate_evaluation_answer (evaluation : evaluation) =
+  match evaluation.result with
+  | Error failure -> Error (Typesafeai_client.failure_to_string failure)
+  | Ok evaluated ->
+    Result.map (fun _ -> ()) (decode evaluation.questions evaluated.response)
+;;
+
 type run_result =
   | Skipped of
       { reason : skip_reason

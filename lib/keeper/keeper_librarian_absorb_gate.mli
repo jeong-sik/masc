@@ -224,6 +224,10 @@ type observation =
     It carries no final absorption decision and cannot be passed to
     {!absorbed_of_run}. *)
 
+val validate_evaluation_answer : evaluation -> (unit, string) result
+(** Validate every requested Noul answer using the absorption decoder.
+    A transport response alone does not establish a completed judgment. *)
+
 val observation_to_yojson : observation -> Yojson.Safe.t
 
 val evaluation_request_to_yojson
@@ -276,10 +280,10 @@ val run
         -> destinations:Typesafeai_client.destination_id list
         -> state:Yojson.Safe.t
         -> questions:(string * Typesafeai_types.question) list
-        -> string)
-  -> ?after_evaluate:(evaluation_id:string -> evaluation -> unit)
+        -> 'evaluation_id)
+  -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
   -> ?on_evaluation_aborted:
-       (evaluation_id:string -> [ `Cancelled | `Failed of string ] -> unit)
+       (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
   -> facts:Keeper_memory_os_types.fact list
@@ -296,6 +300,7 @@ val run
     [Complete] on normal return. It must only update the caller's in-memory
     observation without I/O or yielding. [before_evaluate] runs before each
     provider dispatch and must durably record the exact request, returning its
-    identity. [after_evaluate] closes that record after a provider result;
+    opaque token (which may pair its identity with a monotonic start value).
+    [after_evaluate] receives that same token and closes the record after a provider result;
     [on_evaluation_aborted] closes it when dispatch raises. Cancellation is
     propagated unchanged. *)

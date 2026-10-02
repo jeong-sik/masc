@@ -7987,10 +7987,14 @@ let render_repository_list (state : state) =
       let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
       if split then begin
         let height = max (List.length listing) (List.length detail) in
-        for index = 0 to min budget height - 1 do
-          c.push (fit_width (Option.value (List.nth_opt listing index) ~default:"") list_width
-            ^ "  " ^ fit_width (Option.value (List.nth_opt detail index) ~default:"") detail_width)
-        done
+        (* The zip [studio_pair] draws four lines above: build each row once,
+           then push, so no row of the loop walks either list to find itself
+           (#40177 left the for-shaped copy here, the only one on the
+           screen). *)
+        List.init (min budget height) (fun index ->
+          fit_width (Option.value (List.nth_opt listing index) ~default:"") list_width
+          ^ "  " ^ fit_width (Option.value (List.nth_opt detail index) ~default:"") detail_width)
+        |> List.iter c.push
       end else begin
         List.iter c.push listing;
         List.iter c.push detail

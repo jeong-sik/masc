@@ -195,13 +195,21 @@ class GatedHttpResponse:
         self.subsequent_requested = threading.Event()
         self.release = threading.Event()
         self.completed = threading.Event()
+        self.transmitted = threading.Event()
+        self.subsequent_transmitted = threading.Event()
+        self.transmission_error: Exception | None = None
+        self.subsequent_transmission_error: Exception | None = None
+        self.peer_closed = False
+        self.subsequent_peer_closed = False
         self.calls = 0
         self.lock = threading.Lock()
+        self._thread_calls: dict[int, int] = {}
 
     def __call__(self) -> HttpResponse:
         with self.lock:
             call_index = self.calls
             self.calls += 1
+            self._thread_calls[threading.get_ident()] = call_index
         if call_index > 0 and self.subsequent_response is not None:
             self.subsequent_requested.set()
             return self.subsequent_response
@@ -212,6 +220,22 @@ class GatedHttpResponse:
             return self.response
         finally:
             self.completed.set()
+
+    def on_transmitted(self) -> None:
+        call_index = self._thread_calls.get(threading.get_ident(), 0)
+        if call_index == 0:
+            self.peer_closed = True
+            self.transmitted.set()
+        else:
+            self.subsequent_peer_closed = True
+            self.subsequent_transmitted.set()
+
+    def on_transmission_failed(self, exc: Exception) -> None:
+        call_index = self._thread_calls.get(threading.get_ident(), 0)
+        if call_index == 0:
+            self.transmission_error = exc
+        else:
+            self.subsequent_transmission_error = exc
 
 
 # Same test-only allowance as the harness's ordinary response waits.
@@ -349,6 +373,26 @@ def test_http_endpoint(
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+            self.wfile.flush()
+            if hasattr(fixture, "on_transmitted"):
+                try:
+                    self.connection.shutdown(socket.SHUT_WR)
+                    self.connection.settimeout(2.0)
+                    peer_closed = False
+                    while True:
+                        chunk = self.connection.recv(1024)
+                        if not chunk:
+                            peer_closed = True
+                            break
+                    if peer_closed:
+                        fixture.on_transmitted()
+                    elif hasattr(fixture, "on_transmission_failed"):
+                        fixture.on_transmission_failed(
+                            RuntimeError("peer connection closed without EOF")
+                        )
+                except Exception as exc:
+                    if hasattr(fixture, "on_transmission_failed"):
+                        fixture.on_transmission_failed(exc)
 
         def do_GET(self) -> None:
             self.respond()
@@ -9734,7 +9778,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/tools?keeper=beta"] = inventory("beta", "keeper_beta_current")
     async_calls = 0
     async_lock = threading.Lock()
-    settled = {n: threading.Event() for n in range(1, 5)}
+    settled = {n: threading.Event() for n in (1, 2)}
 
     def async_read() -> HttpResponse:
         nonlocal async_calls
@@ -9758,7 +9802,18 @@ def run_tools_request_identity_regression(executable: str) -> None:
             if not wait_for_fixture_event(process, master_fd, output, event, timeout=10.0):
                 raise AssertionError(description)
 
-        def assert_current(expected: bytes, *, columns: int) -> None:
+        def await_transmission(fixture: GatedHttpResponse, description: str, *, subsequent: bool = False) -> None:
+            event = fixture.subsequent_transmitted if subsequent else fixture.transmitted
+            if not wait_for_fixture_event(process, master_fd, output, event, timeout=10.0):
+                err = fixture.subsequent_transmission_error if subsequent else fixture.transmission_error
+                if err is not None:
+                    raise AssertionError(f"{description} failed with transport error: {err}")
+                raise AssertionError(description)
+            err = fixture.subsequent_transmission_error if subsequent else fixture.transmission_error
+            if err is not None:
+                raise AssertionError(f"{description} failed with transport error: {err}")
+
+        def assert_current(expected: bytes, *, columns: int, phase: str) -> None:
             # The main loop handles resize, drains async_messages, then calls
             # Render_schedule.take/present_frame. Require that completed full
             # redraw, not merely an earlier frame containing the same label.
@@ -9771,7 +9826,9 @@ def run_tools_request_identity_regression(executable: str) -> None:
             screen = screen_text(bytes(output))
             for stale in (b"keeper_alpha_late", b"obsolete beta refresh failure"):
                 if stale in screen:
-                    raise AssertionError(f"stale Tools response replaced the current view: {screen!r}")
+                    raise AssertionError(f"[{phase}] stale Tools response replaced current view: {stale!r} present in screen")
+            if expected not in screen:
+                raise AssertionError(f"[{phase}] expected current view {expected!r} missing from screen after stale release: {screen!r}")
 
         try:
             resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Dashboard")
@@ -9783,21 +9840,37 @@ def run_tools_request_identity_regression(executable: str) -> None:
             with async_lock:
                 if async_calls != 1:
                     raise AssertionError("held alpha request settled before its fixture response")
+            read_available(master_fd, output)
+            screen_initial = screen_text(bytes(output))
+            if b"keeper_beta_current" not in screen_initial:
+                raise AssertionError("initial beta load did not render keeper_beta_current")
+
             alpha_late.release.set()
-            await_event(settled[2], "late alpha response did not settle")
-            assert_current(b"keeper_beta_current", columns=119)
+            await_transmission(alpha_late, "late alpha response did not transmit")
+            assert_current(b"keeper_beta_current", columns=119, phase="after_stale_alpha_release")
+            with async_lock:
+                if async_calls != 1:
+                    raise AssertionError("stale alpha response erroneously triggered async observation")
 
             fixtures["/api/v1/dashboard/tools?keeper=beta"] = beta_refresh_error
             os.write(master_fd, b"r")
             await_event(beta_refresh_error.requested, "older beta refresh did not start")
             send_and_wait(process, master_fd, output, b"r", b"keeper_beta_newest")
-            await_event(settled[3], "newer beta refresh did not settle")
+            await_event(settled[2], "newer beta refresh did not settle")
             with async_lock:
-                if async_calls != 3:
+                if async_calls != 2:
                     raise AssertionError("held beta error settled before its fixture response")
+            read_available(master_fd, output)
+            screen_beta_refresh = screen_text(bytes(output))
+            if b"keeper_beta_newest" not in screen_beta_refresh:
+                raise AssertionError("newer beta refresh did not render keeper_beta_newest")
+
             beta_refresh_error.release.set()
-            await_event(settled[4], "obsolete same-keeper error did not settle")
-            assert_current(b"keeper_beta_newest", columns=120)
+            await_transmission(beta_refresh_error, "obsolete same-keeper error did not transmit")
+            assert_current(b"keeper_beta_newest", columns=120, phase="after_stale_beta_error_release")
+            with async_lock:
+                if async_calls != 2:
+                    raise AssertionError("stale beta error erroneously triggered async observation")
             captured = bytes(output)
             end = captured.rfind(FRAME_END) + len(FRAME_END)
             redraw = captured.rfind(FULL_REDRAW, 0, end)

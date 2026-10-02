@@ -1,13 +1,14 @@
 """Usage coverage remains reachable when a metric row exceeds the viewport."""
 import os
 import sys
+
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_message_layout.ml")
 
 
 def run(executable):
-    fixtures = {
+    fixtures: h.HttpFixtures = {
         "/api/v1/dashboard/keeper-costs?window=1440": (200, {
             "cache": {"state": "fresh"}, "generated_at": 1,
             "window_minutes": 1440, "keepers": [{
@@ -38,8 +39,10 @@ def run(executable):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")
         # Make the wrapped content exceed the body, then reach its final row.
-        h.resize_and_wait(process, master_fd, output, rows=18, columns=60,
-                          needle=b"MASC Usage", final_cursor=b"\x1b[?25l")
+        frame = h.resize_and_wait(process, master_fd, output, rows=18, columns=30,
+                                  needle=b"MASC Usage", final_cursor=b"\x1b[?25l")
+        if b"Transport" in h.screen_text(frame):
+            raise AssertionError("Usage fixture does not overflow the viewport")
         h.send_and_wait(process, master_fd, output, b"j" * 30, b"Transport")
         h.drain_until_quiet(process, master_fd, output)
         screen = h.unwrapped(h.screen_text(bytes(output)))

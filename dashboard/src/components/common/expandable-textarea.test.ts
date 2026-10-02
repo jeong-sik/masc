@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
+import { useState } from 'preact/hooks'
 import { ExpandableTextarea } from './expandable-textarea'
 
 let host: HTMLDivElement | undefined
@@ -59,6 +60,36 @@ describe('ExpandableTextarea draft synchronization', () => {
     expect(el.value).toBe('Unsaved local draft')
     act(() => { editor('Server reset') })
     expect(el.value).toBe('Server reset')
+  })
+
+  it.each(['취소', '닫기', 'backdrop'])('restores the parent draft on %s', async (close) => {
+    const onChange = vi.fn()
+    const onInput = vi.fn()
+    function Parent() {
+      const [value, setValue] = useState('Original instructions')
+      return html`<${ExpandableTextarea}
+        value=${value} label="Instructions"
+        onChange=${(next: string) => { onChange(next); setValue(next) }}
+        onInput=${(next: string) => { onInput(next); setValue(next) }}
+      />`
+    }
+    host = document.body.appendChild(document.createElement('div'))
+    act(() => render(html`<${Parent} />`, host!))
+    act(() => input(host!.querySelector('textarea')!, 'Before expansion'))
+    act(() => host!.querySelector('button')!.click())
+    act(() => input(host!.querySelectorAll('textarea')[1]!, 'Cancelled fullscreen draft'))
+    expect(onInput).toHaveBeenLastCalledWith('Cancelled fullscreen draft')
+    const closer = close === 'backdrop'
+      ? host!.querySelector<HTMLElement>('.fixed')!
+      : Array.from(host!.querySelectorAll('button'))
+        .find(button => button.textContent?.trim() === close)!
+    act(() => closer.click())
+    expect(host!.querySelectorAll('textarea')).toHaveLength(1)
+    const inline = host!.querySelector('textarea')!
+    expect(inline.value).toBe('Before expansion')
+    expect(onInput).toHaveBeenLastCalledWith('Before expansion')
+    act(() => { inline.focus(); inline.blur() })
+    expect(onChange).toHaveBeenLastCalledWith('Before expansion')
   })
 
   it('confirms the current fullscreen draft', async () => {

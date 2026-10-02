@@ -3038,10 +3038,10 @@ let test_code_search_count_tracks_fetched_source () =
   load "large.ml" (Array.init 20_000 (fun index ->
     [((if index mod 2 = 0 then "needle" else "other"), "")]));
   Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
-  let first_reading = !code_search_count_memo in
+  let first_reading = Masc_tui_surface_search.For_testing.code_search_count_snapshot () in
   Alcotest.(check (option int)) "repaint keeps the count" (Some 10_000) (count "needle");
   Alcotest.(check bool) "repaint reuses the settled reading" true
-    (first_reading == !code_search_count_memo);
+    (first_reading == Masc_tui_surface_search.For_testing.code_search_count_snapshot ());
   Alcotest.(check (option int)) "query change recounts" (Some 0) (count "absent");
   load "large.ml" [|[("needle", "")]|];
   Alcotest.(check (option int)) "same-path replacement recounts" (Some 1) (count "needle");

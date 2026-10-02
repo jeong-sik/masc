@@ -3011,9 +3011,9 @@ let render_keeper_message (state : state) =
        taken: the ones on screen when the operator anchored are what they
        anchored to, not rows that arrived since. *)
     let rows_since_pin =
-      match state.msg_scroll_pin, live_block with
+      match state.msg_scroll_pin, other_live_blocks with
       | None, _ -> 0
-      | Some _, Some _ ->
+      | Some _, _ :: _ ->
           (* A live trail has no durable row identity and may already have
              many wrapped rows when the operator first leaves the bottom.
              Treating that existing height as newly arrived double-counts it
@@ -3029,7 +3029,7 @@ let render_keeper_message (state : state) =
              the reader is not moved by them while the turn runs and not
              jumped by them when it ends. *)
           0
-      | Some pin, None ->
+      | Some pin, [] ->
           let arrived_since_pin = function
             | Tagged_row _ -> true
             | Tagged_block log -> not (List.memq log state.msg_scroll_pin_settled)

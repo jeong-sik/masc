@@ -80,9 +80,17 @@ type ('not_committed, 'committed) replacement_effect =
   | Not_committed of 'not_committed
   | Committed of 'committed
 
+type runtime_observation =
+  { candidate : Runtime_candidate_backpressure.candidate
+  ; quota_scope : Runtime_quota_window.scope
+  }
+(** Frozen alongside a target derived from the same materialized runtime.
+    Full replacement catalog targets carry no runtime observation. *)
+
 type selected_slot =
   { slot_id : string
   ; admitted_target : Agent_core.Exact_output.admitted_target
+  ; runtime_observation : runtime_observation option
   }
 
 type resolved_lane =
@@ -101,7 +109,8 @@ type lane_resolution_error =
   | No_admitted_lane_slots of { lane_id : string }
 
 val publish
-  :  ?required_lane_ids:string list
+  :  ?runtime_observations:(string * runtime_observation) list
+  -> ?required_lane_ids:string list
   -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
@@ -138,7 +147,8 @@ val unpublish : unit -> (unit, publication_error) result
     intact. Refuses while a configuration replacement reservation is active. *)
 
 val prepare_replacement
-  :  lanes:Runtime_schema.exact_output_lane_decl list
+  :  runtime_observations:(string * runtime_observation) list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
   -> excused_lane_ids:string list
   -> load_resolver_snapshot:
        (unit

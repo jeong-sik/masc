@@ -141,7 +141,7 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
           (match failure with Exact.Flow_candidate_execution_failed f -> failed f.candidate f.cause
            | Exact.Flow_candidate_rejected rejection ->
              if retryable_candidate rejection then retryable := true); Ok ()) ~validate attempt in
-      Runtime_exact_lane_backpressure.observe flow;
+      Runtime_exact_lane_backpressure.observe ~resolved flow;
       (match flow with
        | Ok success -> Ok (success.accepted, (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id)
        | Error (Exact.Flow_execution_terminal {cause;_}) ->

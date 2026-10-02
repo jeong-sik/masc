@@ -385,7 +385,7 @@ def main() -> None:
             environment["RUNNER_TEMP"] = str(root)
             # Run only the existing real purchase/equip/router scenario.
             # Its export is reached after all product assertions succeed.
-            result = subprocess.run([fixture, "test", "router", "4"],
+            result = subprocess.run([fixture, "test", "router", "6"],
                 env=environment, capture_output=True, timeout=60, check=False)
             (evidence / "native-fixture.log").write_bytes(result.stdout + result.stderr)
             assert result.returncode == 0, (result.stdout + result.stderr).decode(errors="replace")

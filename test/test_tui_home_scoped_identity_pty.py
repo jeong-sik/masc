@@ -137,6 +137,11 @@ def scoped_identity_journey(executable, *, unread):
         # The chat footer has no HTTP badge; assert the captured A health and
         # briefing readings below rather than waiting for an absent label.
         h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+        # The first boot read establishes authority and schedules one matching
+        # full follow-up. Settle it before attributing reads to Home navigation.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: sum(path == BRIEFING for path, _, _ in snapshot()) >= 2,
+            timeout=10), snapshot()
         h.drain_until_quiet(process, fd, output)
         initial = snapshot()
         local_reads = [response for path, _, response in initial if path == "/health"]

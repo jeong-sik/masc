@@ -311,30 +311,32 @@ let option_of_label set label =
 
 let decode_choice set = function
   | Choice_answer { choice; probabilities; confidence } ->
-    let* selected = option_of_label set choice in
-    let* confidence = confidence_value ~field:"choice confidence" confidence in
-    let labels = List.map fst probabilities in
-    let expected = List.map set.label set.options in
+    let labels = List.map (fun option -> set.label option) set.options in
+    let probability_labels = List.map fst probabilities in
     let* () =
-      if List.length labels <> List.length (List.sort_uniq String.compare labels)
-      then Error "typesafeai: duplicate choice probability option"
-      else if List.sort String.compare labels <> List.sort String.compare expected
-      then Error "typesafeai: probabilities must cover every declared choice option"
-      else Ok () in
+      if List.sort String.compare probability_labels = List.sort String.compare labels
+      then Ok ()
+      else Error "typesafeai: probabilities must cover each declared option exactly once"
+    in
+    let unit_probability value = Float.is_finite value && value >= 0.0 && value <= 1.0 in
     let* () =
-      if List.for_all (fun (_, probability) ->
-          Float.is_finite probability && probability >= 0.0 && probability <= 1.0) probabilities
-      then Ok () else Error "typesafeai: choice probabilities must be finite and in [0, 1]" in
-    let sum = List.fold_left (fun sum (_, probability) -> sum +. probability) 0.0 probabilities in
-    (* The protocol requires a unit sum. Bounded unit-interval additions may
-       accumulate one machine epsilon per term; this allows representation
-       roundoff, not a model-confidence or semantic acceptance threshold. *)
-    let roundoff = float_of_int (List.length probabilities) *. epsilon_float in
-    let* () = if abs_float (sum -. 1.0) <= roundoff then Ok ()
-      else Error "typesafeai: choice probabilities must sum to 1" in
-    let selected_probability = List.assoc choice probabilities in
-    let* () = if List.for_all (fun (_, probability) -> probability <= selected_probability) probabilities
-      then Ok () else Error "typesafeai: choice must have maximal probability" in
+      if unit_probability confidence && List.for_all (fun (_, p) -> unit_probability p) probabilities
+      then Ok ()
+      else Error "typesafeai: probabilities and confidence must be finite values from zero to one"
+    in
+    let total = List.fold_left (fun sum (_, p) -> sum +. p) 0.0 probabilities in
+    (* Summing bounded IEEE-754 values can accumulate one rounding error per option. *)
+    let rounding_error = Float.epsilon *. float_of_int (List.length probabilities) in
+    let* () =
+      if Float.abs (total -. 1.0) <= rounding_error then Ok ()
+      else Error "typesafeai: probabilities must sum to one"
+    in
+    let* () =
+      match List.assoc_opt choice probabilities with
+      | Some p when List.for_all (fun (_, other) -> p >= other) probabilities -> Ok ()
+      | _ -> Error "typesafeai: choice must have a highest probability"
+    in
+    let* choice = option_of_label set choice in
     let rec decode_probabilities acc = function
       | [] -> Ok (List.rev acc)
       | (label, probability) :: rest ->
@@ -342,7 +344,7 @@ let decode_choice set = function
         decode_probabilities ((option, probability) :: acc) rest
     in
     let* probabilities = decode_probabilities [] probabilities in
-    Ok ({ choice = selected; probabilities; confidence } : _ decoded_choice)
+    Ok ({ choice; probabilities; confidence } : _ decoded_choice)
   | Score_answer _ -> Error "typesafeai: expected a choice answer, got a score answer"
   | Noul_answer _ -> Error "typesafeai: expected a choice answer, got a noul answer"
 ;;

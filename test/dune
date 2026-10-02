@@ -9552,6 +9552,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
 
+(include stanzas/test_tui_surface_studio_pty.inc)
+
 (rule
  (alias runtest-test_tui_home_failure_task_pty)
  (deps test_tui_home_failure_task_pty.py test_tui_home_decision_cards_pty.py
@@ -10194,3 +10196,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_continuity_admission)))
+
+(test
+ (name test_server_keeper_build_maintenance)
+ (modules test_server_keeper_build_maintenance)
+ (libraries alcotest masc masc_server masc_test_deps unix))

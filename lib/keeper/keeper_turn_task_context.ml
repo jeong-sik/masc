@@ -7,6 +7,7 @@ type source_error =
 
 type t =
   | No_task
+  | Admission_not_recorded
   | Task_source_unavailable of string
   | Task of { task_id : Keeper_id.Task_id.t; goals : (goal list, source_error) result }
 
@@ -39,6 +40,7 @@ let source_error_to_json = function
   | Linked_goal_missing goal_id -> `Assoc ["kind", `String "linked_goal_missing"; "goal_id", `String goal_id]
 
 let to_json = function
+  | Admission_not_recorded -> `Assoc ["kind", `String "admission_not_recorded"]
   | No_task -> `Assoc ["kind", `String "no_task"]
   | Task_source_unavailable detail -> `Assoc ["kind", `String "task_source_unavailable"; "detail", `String detail]
   | Task { task_id; goals } ->
@@ -113,6 +115,8 @@ let of_json json =
   let* f = fields json in
   let* kind = text "kind" f in
   match kind with
+  | "admission_not_recorded" ->
+    let* () = exact ["kind"] f in Ok Admission_not_recorded
   | "no_task" -> let* () = exact ["kind"] f in Ok No_task
   | "task_source_unavailable" ->
     let* () = exact ["kind";"detail"] f in

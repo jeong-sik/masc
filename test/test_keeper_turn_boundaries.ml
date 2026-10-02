@@ -957,11 +957,25 @@ let test_admission_context_strict_and_goalless () =
   List.iter (fun context -> match Task_context.of_json (Task_context.to_json context) with
     | Ok decoded -> check bool "typed context roundtrip" true (context = decoded)
     | Error e -> fail (Wire.wire_error_to_string e))
-    [context; Task_context.No_task; unavailable_task; unavailable_goal];
+    [context; Task_context.No_task; Task_context.Admission_not_recorded; unavailable_task; unavailable_goal];
   let json = Boundaries.record_to_json (record atom_history) in
   let json = match json with `Assoc fields -> `Assoc (List.remove_assoc "task_context" fields) | _ -> assert false in
   (match Boundaries.record_of_json json with
-   | Error _ -> () | Ok _ -> fail "missing historical context accepted")
+   | Ok { Boundaries.event = Boundaries.Turn_ended {task_context; position; _}; _ } ->
+     check bool "absent admission is explicit" true (task_context = Task_context.Admission_not_recorded);
+     check bool "position evidence preserved" true (position = atom_history)
+   | Ok _ -> fail "turn boundary changed kind"
+   | Error e -> fail (Wire.wire_error_to_string e));
+  let malformed = match json with
+    | `Assoc fields -> `Assoc (("task_context", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json malformed with
+   | Error _ -> () | Ok _ -> fail "malformed admission accepted");
+  let unknown = match json with
+    | `Assoc fields -> `Assoc (("unknown", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json unknown with
+   | Error _ -> () | Ok _ -> fail "unknown boundary field accepted")
 ;;
 
 let () =

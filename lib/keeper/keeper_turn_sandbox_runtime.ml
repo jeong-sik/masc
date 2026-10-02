@@ -2948,6 +2948,21 @@ let cleanup (t : t) =
 
 type build_cleanup_report = { cleaned : int; failed : int }
 
+let build_cleanup_report_of_string stdout =
+  try
+    let open Yojson.Safe.Util in
+    let report = Yojson.Safe.from_string stdout in
+    match member "skip" report with
+    | `String reason -> Error ("Keeper guest cleanup skipped: " ^ reason)
+    | `Null ->
+      let entries = member "entries" report |> to_list in
+      let count action = List.fold_left (fun n entry ->
+          if member "action" entry = `String action then n + 1 else n) 0 entries in
+      Ok { cleaned = count "cleaned"; failed = count "clean failed" }
+    | _ -> Error "invalid Keeper cleanup report"
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    Error "invalid Keeper cleanup report"
+
 (* Called only while the Owner holds its exclusive maintenance slot. Attach to
    the recorded guest; never boot, stop, pause, or refresh its credentials. *)
 let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -2978,14 +2993,7 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
              match outcome, !observation with
              | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ },
                Keeper_sandbox_remote.Execution_observed _ ->
-             (try
-                let open Yojson.Safe.Util in
-                let entries = Yojson.Safe.from_string stdout |> member "entries" |> to_list in
-                let count action = List.fold_left (fun n entry ->
-                    if member "action" entry = `String action then n + 1 else n) 0 entries in
-                Ok (Some { cleaned = count "cleaned"; failed = count "clean failed" })
-              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-                Error "invalid Keeper cleanup report")
+               Result.map Option.some (build_cleanup_report_of_string stdout)
              | Masc_exec.Sandbox_target.Transport_failed { reason; _ }, _ ->
                Error ("Keeper guest cleanup transport failed: " ^ reason)
              | _, Keeper_sandbox_remote.Execution_unavailable _ ->

@@ -383,6 +383,12 @@ with (root / 'server.log').open('wb') as log:
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
         # Leave the purchased accessory equipped for the restart proof.
         tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+        status, before_restart_body, _ = request(path)
+        account_before_restart = json.loads(before_restart_body)
+        require(status == 200 and account_before_restart['status'] == 'ready'
+                and account_before_restart['balance_milli'] == '100'
+                and account_before_restart['owned_items'] == [item], account_before_restart)
+        (root / 'account-before-restart.json').write_bytes(before_restart_body)
     finally:
         stop_server()
 
@@ -396,7 +402,7 @@ with (root / 'server.log').open('ab') as log:
         start_ready(log)
         status, persisted_body, _ = request(path)
         persisted = json.loads(persisted_body)
-        require(status == 200 and persisted == account_after, ('restart lost Item account', persisted))
+        require(status == 200 and persisted == account_before_restart, ('restart lost Item account', persisted))
         (root / 'account-restarted.json').write_bytes(persisted_body)
         status, persisted_png, _ = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         require(status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment')

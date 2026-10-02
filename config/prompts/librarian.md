@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [continuity, working_context, working_contexts_rule, current_memory, conversation_history, counterpart_observations, keeper_id, keeper_instructions, turn_tool_observations, goal_context, facts_budget]
+template_variables: [continuity, working_context, working_contexts_rule, current_memory, conversation_history, counterpart_observations, keeper_id, keeper_instructions, turn_tool_observations, goal_context, historical_task_contexts, facts_budget]
 ---
 
 당신은 Keeper의 장기 기억을 선별하는 Librarian입니다. 아래 자료를 읽고,
@@ -264,6 +264,20 @@ Goal 기준이 오면 성공 조건 중 아직 증거가 없는 것을 기억할
 목표는 지난 작업의 맥락이며 새 실행 의무가 아닙니다. `unavailable`은 목표 자료를
 받지 못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된
 Task가 없다는 뜻입니다.
+
+### 선택된 대화의 과거 Task/Goal 자료
+{{historical_task_contexts}}
+
+각 항목의 `first_message`부터 `after_message` 직전까지는 아래 대화의
+`turn=N` 메시지 번호입니다. 이 번호는 Keeper의 실제 turn_ref가 아닙니다.
+`first_tool_observation`부터 `after_tool_observation` 직전까지는 도구 관측 JSON
+배열의 0부터 시작하는 인덱스입니다. 본문이 없어도 해당 도구 관측은 그 Turn에
+속합니다. 메시지 범위가 비었다고 다른 Turn의 도구 관측을 가져오지 마세요.
+`observed` 자료는 해당 turn_ref가 시작할 때 관측한 Task와 Goal이며 현재 상태나
+완료 증거가 아닙니다. `unattributed` 구간의 Task/Goal은 알 수 없습니다.
+`boundary_only`는 끝난 Turn의 자료만 알며 앞선 대화 전체에 적용하면 안 됩니다.
+현재 Task의 Goal 자료와 과거 자료를 섞거나, 마지막 Turn의 자료를 배치 전체에
+적용하지 마세요. 읽기 실패는 Task나 Goal이 없다는 뜻이 아닙니다.
 
 ### 정확한 현재 기억
 {{current_memory}}

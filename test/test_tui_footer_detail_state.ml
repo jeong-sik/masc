@@ -105,7 +105,7 @@ let render_path = "bin/masc_tui_render.ml"
    again. *)
 let renderers =
   [ ("bin/masc_tui_render_board.ml", "render_board_list")
-  ; (render_path, "render_fusion_list")
+  ; ("bin/masc_tui_render_fusion.ml", "render_fusion_list")
   ; (render_path, "render_system_logs")
   ; (render_path, "render_system_log_detail")
   ; (render_path, "render_planning_list")

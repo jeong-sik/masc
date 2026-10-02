@@ -313,9 +313,10 @@ opam_pin_add() {
     echo "[opam-pin] pinning ${package} from ${source} (attempt ${attempt}/${max_attempts})" >&2
     if opam pin add "${package}" "${source}" "$@"; then
       return 0
+    else
+      status=$?
     fi
 
-    status=$?
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then
       echo "[opam-pin] ERROR: opam pin add failed after ${attempt} attempts: ${package} ${source}" >&2
       return "${status}"

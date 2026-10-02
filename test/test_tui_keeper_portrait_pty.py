@@ -24,6 +24,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_items.ml",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_loader.ml",
     "lib/tui_decode.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",
@@ -256,9 +257,15 @@ def no_portrait_under_no_color(binary: str) -> None:
 
 def portrait_as_pixels(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    reason = "fixture appraiser unavailable " + "long account headline " * 8
+    revision = hashlib.sha256(("disabled\0" + reason).encode()).hexdigest()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "disabled", "reason": reason}
+    for keeper in roster["keepers"]:
+        keeper["candle_account_revision"] = revision
     fixtures["/api/v1/keepers/alpha/items"] = (200, {
         "status": "disabled", "keeper": "alpha",
-        "reason": "fixture appraiser unavailable " + "long account headline " * 8,
+        "reason": reason, "account_revision": revision,
     })
 
     def interact(process, fd, _slave, output, _base):
@@ -941,7 +948,7 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                             refresh=0.2)
 
 
-def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs: bool = False) -> None:
+def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs: bool = False, leave: bool = False, fallback_exit: bool = False) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
@@ -1005,6 +1012,45 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             wait_refreshes(process, fd, output)
             assert reads == [True], "unread authority restarted the held detail read"
             assert old not in frame(output)
+            if leave or fallback_exit:
+                if fallback_exit:
+                    # Recovery's failed roster falls back to the list while
+                    # the separate focus intent remains pending. Esc here is
+                    # a deliberate exit, not a command-palette transition.
+                    metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
+                    original_metadata = metadata.read_bytes()
+                    metadata.write_text("{invalid fixture metadata")
+                    try:
+                        identity["unread"] = False
+                        wait_refreshes(process, fd, output)
+                        report = f"[masc-tui] decode failed for {metadata}:"
+                        assert h.wait_for_fixture_state(
+                            process, fd, output,
+                            lambda: report in h.exit_reason_log(_base),
+                            timeout=10,
+                        ), "failed roster decode was not observed"
+                        assert h.wait_for_fixture_state(process, fd, output,
+                            lambda: b"MASC Keepers" in frame(output), timeout=10)
+                        assert reads == [True], "failed roster resumed detail"
+                        # The failed roster keeps the detail screen while the
+                        # source-bound focus waits. The first Esc exits detail
+                        # to Keepers; the second exits Keepers to Dashboard.
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+                    finally:
+                        metadata.write_bytes(original_metadata)
+                else:
+                    h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+                    identity["unread"] = False
+                wait_refreshes(process, fd, output)
+                release.set()
+                wait_refreshes(process, fd, output)
+                h.drain_until_quiet(process, fd, output)
+                assert b"MASC Dashboard" in frame(output), "recovery stole navigation"
+                assert reads == [True], "left detail restarted its suspended read"
+                assert old not in frame(output) and current not in frame(output)
+                os.write(fd, b"q")
+                return
             identity["unread"] = False
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: current in frame(output), timeout=10), "Instructions did not recover automatically"
@@ -1023,7 +1069,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             release.set()
 
     h.run_terminal_scenario(binary,
-        description=("Held Sandbox logs are revoked and resumed on authority recovery" if sandbox_logs else
+        description=("Esc from recovery fallback list retires suspended focus" if fallback_exit else
+                     "Leaving revoked Instructions retires suspended focus" if leave else
+                     "Held Sandbox logs are revoked and resumed on authority recovery" if sandbox_logs else
                      "Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery"),
         interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
         prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())), refresh=0.2)
@@ -1054,4 +1102,6 @@ if __name__ == "__main__":
     item_account_is_withdrawn_at_workspace_boundary(binary)
     instructions_read_recovers_workspace_authority(binary)
     instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
-    print("tui keeper portrait: PASS (13 scenarios)")
+    instructions_read_recovers_workspace_authority(binary, leave=True)
+    instructions_read_recovers_workspace_authority(binary, fallback_exit=True)
+    print("tui keeper portrait: PASS (15 scenarios)")

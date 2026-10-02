@@ -1474,7 +1474,8 @@ let start_post_ready_owner_lanes
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;
     Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
-      ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path);
+      ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ())
+      ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path) ();
     Server_workspace_memory_curator.start ~sw
       ~base_path:(Mcp_server.workspace_config state).base_path
   in

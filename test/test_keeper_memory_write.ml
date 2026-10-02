@@ -949,8 +949,8 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     ~artifact_reader_available:false ~config ~meta ~keepers_dir
     ~keeper_id:meta.name ~now:(Time_compat.now ()) ()
     |> Option.value ~default:"" in
-  Alcotest.(check bool) "missing reader is explicit rather than an unusable reference" true
-    (contains ~needle:"retrieval is unavailable" no_reader);
+  Alcotest.(check bool) "search remains available without an artifact reader" true
+    (contains ~needle:"keeper_memory_search" no_reader);
   Alcotest.(check bool) "missing reader does not fall back to full injection" false
     (contains ~needle:"deployment region is us-west-1" no_reader);
   let no_tools = Masc.Keeper_memory_os_recall.render_if_enabled

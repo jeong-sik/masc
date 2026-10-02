@@ -1,14 +1,14 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
 type jsonl_snapshot = { entry_count : int; reference : evidence }
-type t = { root : string; sequence_mutex : Mutex.t;
+type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
   let rec trim_separator root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = false; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -22,15 +22,18 @@ let protect f =
 let sync_parent_directory parent =
   let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
-let rec durable_directory ~root ~sync_parent directory =
+let rec durable_directory t ~sync_parent directory =
   let parent = Filename.dirname directory in
-  if directory = root then (
-    try Unix.mkdir directory 0o700 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) ->
-        if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
-          raise (Sys_error "retained evidence root is not a directory"))
+  if directory = t.root then (
+    (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
+     | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
+           raise (Sys_error "retained evidence root is not a directory"));
+    (* Flush only the new root entry, never walk preexisting ancestors.
+       Keep the obligation on failure so a retry in this store cannot skip it. *)
+    if t.root_parent_pending then (sync_parent parent; t.root_parent_pending <- false))
   else if parent <> directory then (
-    durable_directory ~root ~sync_parent parent;
+    durable_directory t ~sync_parent parent;
     (try Unix.mkdir directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
          if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
@@ -38,7 +41,7 @@ let rec durable_directory ~root ~sync_parent directory =
     sync_parent parent)
 let write_with ~sync_parent t relative bytes = protect (fun () ->
   let path = Filename.concat t.root relative in
-  durable_directory ~root:t.root ~sync_parent (Filename.dirname path);
+  durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
 let write = write_with ~sync_parent:sync_parent_directory
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
@@ -169,7 +172,7 @@ let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
-  durable_directory ~root:t.root ~sync_parent (Filename.dirname path);
+  durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
 let save_action = save_action_with ~sync_parent:sync_parent_directory
 let broadcast_path ~instance_id ~request_id =

@@ -711,6 +711,18 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
   let module S = Mcp_protocol.Sampling in
+  let first_root = Filename.concat dir "root-sync-retry" in
+  let first_store = Store.create ~root:first_root in
+  let syncs = ref [] in
+  let write_root fail_sync = Store.For_testing.write first_store "evidence/root.json" "{}"
+    ~sync_parent:(fun path -> syncs := path :: !syncs;
+      if fail_sync && path = dir then raise (Unix.Unix_error (Unix.EIO,"fsync",path))) in
+  check bool "new root parent sync failure refuses receipt" true (Result.is_error (write_root true));
+  check bool "root sync failure does not publish child evidence" false
+    (Sys.file_exists (Filename.concat first_root "evidence/root.json"));
+  syncs := [];
+  (match write_root false with Ok () -> () | Error detail -> fail detail);
+  check bool "retry preserves root parent sync obligation" true (List.mem dir !syncs);
   let store = Store.create ~root:(Filename.concat dir "first-use") in
   List.iter (fun relative ->
     let fail_parent = Store.root store in

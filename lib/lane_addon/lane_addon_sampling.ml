@@ -98,17 +98,22 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       Store.save_sampling_request store ~instance_id ~request_id (record state)) in
     let* () = save Pending |> Result.map_error (fun _ -> "sampling request could not be indexed") in
     let outcome = try match invoke ~route ~request params with
-      | Ok answer ->
+      | Ok answer -> Answer answer
+      | Error detail -> Host_error detail
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Invocation_exception (Printexc.to_string exn) in
+    (* No yielding operation may separate the returned outcome from protection. *)
+    let outcome, retained = Eio.Cancel.protect (fun () ->
+    let outcome = match outcome with
+      | Answer answer ->
           (match Eio_unix.run_in_systhread (fun () ->
             validate_response ~max_bytes:package.resources.max_reply_bytes answer) with
            | Error detail -> Invalid_response (answer, detail)
            | Ok _ when String.trim answer.S.model = "" ->
                Invalid_response (answer, "host response has no model identity")
            | Ok _ -> Answer answer)
-      | Error detail -> Host_error detail
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Invocation_exception (Printexc.to_string exn) in
+      | outcome -> outcome in
     let fields = ["kind",`String "model_outcome";"instance_id",`String instance_id;
       "route",`String route;"request",Types.evidence_to_json request] in
     let fields = fields @ (match outcome with
@@ -119,8 +124,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Invocation_exception detail -> ["status",`String "outcome_unknown";"error",`String detail]) in
     (* Once invocation has returned, cancellation must not orphan a known
        result between its immutable blob and the durable recovery index. *)
-    let retained = Eio.Cancel.protect (fun () ->
-      Eio_unix.run_in_systhread (fun () ->
+    let retained = Eio_unix.run_in_systhread (fun () ->
         let bytes = match encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) with
           | Ok bytes -> Ok bytes
           | Error detail -> encode_bounded ~max_bytes:package.resources.max_reply_bytes
@@ -140,7 +144,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Error _, Error _ -> Error "sampling outcome could not be indexed" in
         let* _ = Store.write_blob store bytes |> Result.map_error (fun _ ->
           "sampling outcome retained in recovery index") in
-        Ok (`Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence]))) in
+        Ok (`Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence])) in
+    outcome, retained) in
     Eio.Fiber.check ();
     let* references = retained in
     match outcome with

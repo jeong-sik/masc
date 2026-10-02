@@ -1051,11 +1051,13 @@ val move_exact_output_lane_slot :
   move:exact_slot_move ->
   unit ->
   (config_commit_receipt, string) result
-(** Exchange [slot] with its neighbour in the declared order of the list that
+(** Exchange [slot] with its neighbour, or promote it to the first position
+    while preserving the relative order of the other candidates, in the list that
     holds it -- [slots] or [cli_slots] -- read under the write lock like
     {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
     into the other one. Refused when the lane declares no such slot, and when
-    the slot is already at the end of its list the move heads for. *)
+    a neighbour move would pass the end. Promoting an already first candidate
+    keeps the order unchanged. *)
 
 val replace_exact_output_lane_slot :
   ?runtime_config_path:string ->

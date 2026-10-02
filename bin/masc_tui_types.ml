@@ -1719,6 +1719,7 @@ type runtime_mode =
 type runtime_lane_pick =
   | Pick_conversation_lane of string
   | Pick_exact_lane of Standalone_lane.t
+  | Pick_exact_lane_replacement of Standalone_lane.t * string * Tui_decode.exact_slot_group
   | Pick_new_lane of string
   | Pick_media_failover
       (* Appends to [\[runtime\].media_failover]. The route takes its whole
@@ -1730,7 +1731,7 @@ type runtime_lane_pick =
 
 let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_new_lane lane -> lane
-  | Pick_exact_lane lane -> Standalone_lane.to_id lane
+  | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) -> Standalone_lane.to_id lane
   | Pick_media_failover -> "[runtime].media_failover"
   | Pick_route_default -> "[runtime].default"
 ;;
@@ -1787,10 +1788,12 @@ type runtime_lane_notice =
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
+  | Lane_write_confirmed
       (* A key that would write, pressed while the previous write is out. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
+  | Lane_write_confirmed -> "Saved · current candidate order reloaded"
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
@@ -5747,6 +5750,8 @@ type state = {
      Held until the write settles, so a refused write leaves the cursor on the
      row the operator pressed. *)
   mutable runtime_lane_cursor_after_write: int option;
+  mutable runtime_lane_replacement_selection:
+    (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
@@ -8194,6 +8199,7 @@ let create_state
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
+  runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
@@ -9694,15 +9700,31 @@ let runtime_picker_page = 3
 (* The text a runtime's picker row draws before its notes, made terminal
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
+let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
+  let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
+      runtime.Tui_decode.ro_declared_reasoning_effort in
+  Masc.Tui_terminal_text.sanitize_terminal_text
+    (Printf.sprintf "%s %s · %s · %d ctx · %s"
+       runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
+       runtime.Tui_decode.ro_effective_max_context runtime.Tui_decode.ro_id)
+
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
   Masc.Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
        runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
 
+let runtime_picker_label_for = function
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> runtime_model_picker_label
+  | _ -> runtime_picker_label
+
 (* The picker opens on the first row with no filter, and closing it drops
    both. *)
 let open_runtime_lane_pick (state : state) pick =
-  state.runtime_lane_pick <- Some (pick, Masc_tui_pick_list.closed)
+  let list = match pick with
+    | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
+      { Masc_tui_pick_list.closed with query = Some "" }
+    | _ -> Masc_tui_pick_list.closed in
+  state.runtime_lane_pick <- Some (pick, list)
 
 (* A conversation lane's candidates as the runtime surface last resolved
    them. *)
@@ -9733,7 +9755,7 @@ let swap_candidates order i j =
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
-  | Pick_exact_lane lane ->
+  | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
@@ -9770,6 +9792,7 @@ let lane_picker_existing_slots (state : state) = function
    front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
   | No_output_schema_channel
+  | Wrong_candidate_group
 
 type runtime_pick_availability =
   | Pick_available
@@ -9777,9 +9800,11 @@ type runtime_pick_availability =
 
 let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
-  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+  | Pick_exact_lane_replacement (_, _, group), actual when group <> actual ->
+    Pick_refused Wrong_candidate_group
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
-  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
     , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
@@ -9790,12 +9815,15 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
   | No_output_schema_channel -> "no output schema"
+  | Wrong_candidate_group -> "different candidate group"
 
 (* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | Wrong_candidate_group ->
+    "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
@@ -9816,13 +9844,17 @@ let runtime_picker_rows (state : state) pick =
   let lands runtime =
     match runtime_pick_availability pick runtime with
     | Pick_available -> true
-    | Pick_refused No_output_schema_channel -> false
+    | Pick_refused _ -> false
   in
   let landing, refused =
     List.partition lands
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
-  ( already, providers, landing @ refused )
+  let rows = match pick with
+    | Pick_exact_lane_replacement _ -> landing |> List.filter (fun runtime ->
+        not (List.mem runtime.Tui_decode.ro_id already))
+    | _ -> landing @ refused in
+  ( already, providers, rows )
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
@@ -9843,7 +9875,7 @@ let runtime_picker_projection (state : state) =
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
       Masc_tui_pick_list.view ~page:runtime_picker_page
-        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:runtime_picker_label
+        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:(runtime_picker_label_for pick)
         catalog list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
@@ -9892,7 +9924,7 @@ let runtime_lane_write_busy (state : state) =
    later has to say which side it is on. *)
 let runtime_lane_pick_sends_whole_order = function
   | Pick_conversation_lane _ | Pick_media_failover -> true
-  | Pick_exact_lane _ | Pick_new_lane _ | Pick_route_default -> false
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ | Pick_new_lane _ | Pick_route_default -> false
 
 let runtime_lane_candidate_write_refusal (state : state) =
   if runtime_lane_write_busy state
@@ -9941,10 +9973,10 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
      | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
-     | Ok () -> ());
+     | Ok () -> state.runtime_lane_notice <- Some Lane_write_confirmed);
     (match state.runtime_lane_notice with
      | Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Some (Lane_write_refused _) | None -> ())
+     | Some (Lane_write_refused _ | Lane_write_confirmed) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -10150,10 +10182,12 @@ let navigate_slot_editor state move =
 
 type slot_edit =
   | Drop_slot
+  | First_slot
   | Move_slot of runtime_lane_move
 
 let slot_edit_of_key = function
   | "x" -> Some Drop_slot
+  | "1" -> Some First_slot
   | "J" -> Some (Move_slot Move_down)
   | "K" -> Some (Move_slot Move_up)
   | _ -> None
@@ -10166,6 +10200,7 @@ let slot_edit_of_key = function
    between would be overwritten by an order built from it. *)
 type slot_write_request =
   | Drop_declared_slot
+  | First_declared_slot
   | Move_declared_slot of runtime_lane_move
   | Write_route_order of string list
       (* [\[runtime\].media_failover] has no per-entry action on the routing
@@ -10207,6 +10242,11 @@ let plan_slot_edit (state : state) edit =
            Refuse_slot_edit notice
          | true, None | false, (Some _ | None) ->
          match target, edit with
+         | Exact_lane_slots _, First_slot ->
+           Send_slot_write { target; slot; request = First_declared_slot }
+         | Media_failover_slots, First_slot ->
+           Send_slot_write { target; slot;
+             request = Write_route_order (slot :: List.filteri (fun index _ -> index <> cursor) order) }
          | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)

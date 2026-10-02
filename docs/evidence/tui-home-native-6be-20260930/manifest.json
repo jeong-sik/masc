@@ -1,0 +1,28 @@
+{
+  "scope": "synthetic fixture PTY; no production, installation, human timing, or current-head claim",
+  "binary_source_commit": "6be390c6dfcfe31e388dace1d5e4247d10a0ae4c",
+  "native_run_id": 36690672472,
+  "artifact_id": 11085886537,
+  "artifact_zip_digest": "sha256:2dd9abee5a146bb82b63221dc3b27768db69c09b7fcfb54dd37d59b43cf5f542",
+  "tui_sha256": "7d08c8f138dfd61b6d140ebecf503745c56dac273c661372e3579214fa67db0f",
+  "harness_git_base": "1e37295cd85ea4ee3363be3d7653615de94b0c38",
+  "harness_file_sha256": {
+    "test/test_tui_home_question_recovery_pty.py": "e81543cd2b1007de29425cff0d086913b1754576909988af4f2fd0e46623c2d7",
+    "test/test_tui_home_queue_identity_pty.py": "f76835095c69b6947cddb9e198ec96847e135312f7d5873904533c86ab3f596b",
+    "test/test_tui_keyboard_input.py": "de2fd8b3b994265f009662df47af7413f91730d34c54a0ba0e32e1e9ee66e1f4",
+    "test/test_tui_home_journey_pty.py": "c503e7fb70d12efedebe2751dff32c4e213c29f076319f663afcc032cdbd974c",
+    "test/test_tui_home_decision_cards_pty.py": "e642920d04094f5ff8c211ea6a9f9cbaecd0a6f0de107d65d278055a8db1a22e"
+  },
+  "verified": {
+    "question_recovery_scenarios": 2,
+    "queue_identity_scenarios": 1
+  },
+  "logs": {
+    "question-recovery.log": "dafc27cb87e561ed0d0650a2cebcb22853b59c0d9f4d04dacecceabb9b95017a",
+    "queue-identity.log": "23f05d84d9998f12134f967241c571d082874772ac671ae10ab63a60b35f6fe2"
+  },
+  "negative_reproductions": {
+    "composer_focus": "Home mouse entry keeps focused unsent draft at 6be; new fixture fails on its visible draft",
+    "scoped_identity": "Foreign question is rendered after scoped Home read at 6be without applied mismatch; new fixture waits for missing mismatch"
+  }
+}

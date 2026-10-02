@@ -316,18 +316,32 @@ let keeper_tool_approval_timeout_sec = 180.0
    as before. *)
 let handle_keeper_tool_approval ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     let parsed =
       try
         match Yojson.Safe.from_string body_str with
-        | `Assoc fields ->
+        | `Assoc fields as json ->
+          let ( let* ) = Result.bind in
+          let* stripped_json =
+            match Workspace.validate_expected_workspace ~config json with
+            | Ok payload -> Ok payload
+            | Error Workspace.Invalid_workspace_precondition ->
+              Error "invalid expected_workspace precondition"
+            | Error Workspace.Workspace_precondition_failed ->
+              Error "workspace precondition failed"
+          in
+          let fields =
+            match stripped_json with
+            | `Assoc f -> f
+            | _ -> fields
+          in
           let field name =
             match List.assoc_opt name fields with
             | Some (`String value) -> Ok (String.trim value)
             | Some _ | None ->
               Error (Printf.sprintf "%s (string) is required" name)
           in
-          let ( let* ) = Result.bind in
           let* keeper_name = field "name" in
           let* tool_call_id = field "tool_call_id" in
           let* decision_raw = field "decision" in
@@ -2012,6 +2026,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Official_tool_result { block_index; tool_call_id; execution_id } ->
+        (match Keeper_stream_tool_accum.record_official_execution_id worker_tool_accum
+                 ~block_index ~tool_call_id ~execution_id with
+         | Error _ as error -> error
+         | Ok occurrence ->
+           push_worker_event (Stream_chat_event (Keeper_chat_events.Tool_result_ready
+             { occurrence; tool_call_id = Some tool_call_id; execution_id }));
+           Ok ())
       | Keeper_hooks_agent_core.Turn_closed_without_sources { turn } ->
         Keeper_stream_tool_accum.close_turn_without_sources worker_tool_accum ~turn
     in
@@ -2048,8 +2070,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     | Error detail ->
       (* The runtime-aware wrapper invokes this callback only for the exact
          Agent Core candidate attempt whose pre-execution sidecar can satisfy
-         the coordinate contract. Official-client attempts remain explicitly
-         delivery-only. Once an Agent Core tool log committed, a failed
+         the coordinate contract. Official producers use their explicit block
+         receipt observation instead. Once an Agent Core tool log committed, a failed
          occurrence join must abort the turn; publishing a diagnostic and
          returning would let chat persistence claim terminal success without
          its canonical execution. *)
@@ -2728,6 +2750,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Worker_event (Stream_chat_event event) ->
+        let bridge_state =
+          match event with
+          | Keeper_chat_events.Tool_result_ready { occurrence; _ } ->
+            Keeper_chat_agent_core_stream_bridge.record_tool_result bridge_state occurrence
+          | _ -> bridge_state
+        in
         Keeper_chat_events.publish events event;
         consume_worker_events bridge_state
     | `Worker_event (Stream_terminal _ | Stream_client_disconnected) ->

@@ -207,6 +207,45 @@ let establish_progress config ~trace_id first =
 module Historical = Masc.Keeper_librarian_task_context
 module Task_context = Masc.Keeper_turn_task_context
 
+let test_absent_admission_keeps_durable_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-admission-not-recorded" in
+  establish_progress config ~trace_id "t1";
+  let first = [message "t1"] in
+  let messages = first @ [message "t2"] in
+  let record : Boundaries.record =
+    {recorded_at=2.;event=Boundaries.Turn_ended {
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+      task_context=Task_context.No_task;
+      history_at_start=Boundaries.history_at_start_of_messages first;
+      position=(match Boundaries.position_of_messages messages with
+        | Ok position -> position | Error detail -> fail detail)}} in
+  let json = match Boundaries.record_to_json record with
+    | `Assoc fields -> `Assoc (List.remove_assoc "task_context" fields)
+    | _ -> fail "boundary must be an object" in
+  let path = Boundaries.path_for_keepers_dir
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let oc = open_out_gen [Open_wronly; Open_append] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc (Yojson.Safe.to_string json ^ "\n"));
+  save_checkpoint config ~trace_id messages 2;
+  write_meta ~current_task_id:"task-current-unrelated" config trace_id;
+  let commits = ref 0 in
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+    incr commits;
+    check (list string) "unread body selected exactly once" ["t2"] (text_markers input);
+    (match input.historical_task_contexts with
+     | [{Historical.scope={attribution=Historical.Observed {task_context; _}; _}; _}] ->
+       check bool "absence is not current Task or no Task" true
+         (task_context=Task_context.Admission_not_recorded)
+     | _ -> fail "missing explicit historical admission");
+    true) with
+   | Consumer.Progress_advanced progress ->
+     check int "durable reader advances" 2 progress.position.end_atom
+   | _ -> fail "unrecorded admission stopped durable reader");
+  check int "one commit" 1 !commits
+;;
+
 let historical_task task_id goal_id target =
   let task_id = match Keeper_id.Task_id.of_string task_id with
     | Ok id -> id | Error detail -> fail detail in
@@ -3249,7 +3288,9 @@ let () =
   run
     "Keeper Librarian durable consumer"
     [ ( "range lifecycle"
-      , [ test_case "A and B retain distinct historical contexts in one batch" `Quick
+      , [ test_case "absent admission preserves durable progress" `Quick
+            test_absent_admission_keeps_durable_progress
+        ; test_case "A and B retain distinct historical contexts in one batch" `Quick
             (test_historical_contexts_in_one_batch ~missing_boundary:false)
         ; test_case "missing boundary leaves earlier atoms unattributed" `Quick
             (test_historical_contexts_in_one_batch ~missing_boundary:true)

@@ -1201,6 +1201,22 @@ max-concurrent = 1
                ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
                ~observation ~latency_ms:1 ~degraded_retry_applied:None
                ~degraded_retry_deferred:None ~keeper_turn_id:1 ~spend:[] execution in
+           let metrics_store = Masc.Keeper_types_support.keeper_metrics_store config name in
+           let metrics_row =
+             match Dated_jsonl.read_recent_result metrics_store 1 with
+             | Ok [Dated_jsonl.Parsed row] -> row
+             | Ok [Dated_jsonl.Malformed_json {detail; _}] ->
+                 failwith ("malformed metrics row: " ^ detail)
+             | Ok _ -> failwith "expected one durable metrics row"
+             | Error error -> failwith (Dated_jsonl.read_error_to_string error)
+           in
+           let metric_member = Yojson.Safe.Util.member in
+           check (name ^ " metrics row keeps its unified turn id")
+             (metric_member "keeper_turn_id" metrics_row = `Int 1);
+           check (name ^ " metrics row marks the readable backlog authoritative")
+             (metric_member "backlog_observation_authoritative" metrics_row = `Bool true);
+           check (name ^ " metrics row records the empty claimable backlog")
+             (metric_member "claimable_task_count" metrics_row = `Int 0);
            let log_path = Masc.Keeper_types_support.keeper_decision_log_path config name in
            let decision = Fs_compat.load_file log_path |> String.split_on_char '\n'
              |> List.filter (fun line -> line <> "") |> List.rev |> List.hd

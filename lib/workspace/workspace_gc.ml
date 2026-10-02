@@ -79,10 +79,13 @@ let gc config ~days () =
   in
   let cutoff_iso = Masc_domain.iso8601_of_unix_seconds cutoff_time in
 
-  let orphaned = read_orphaned_nonterminal_tasks config in
   let live_tasks_after_gc, archived_tasks, restored =
     let lock_path = backlog_lock_path config in
     with_file_lock config lock_path (fun () ->
+      (* Keep the archive snapshot and its cleanup on the same backlog
+         revision lineage: a competing GC must not replace an orphan with a
+         terminal row between this read and the drop below. *)
+      let orphaned = read_orphaned_nonterminal_tasks config in
       let backlog =
         match read_backlog_r config with
         | Ok backlog -> backlog
@@ -138,19 +141,21 @@ let gc config ~days () =
         let new_backlog = { backlog with tasks = live_tasks_after_gc } in
         write_backlog config new_backlog
       end;
+      (* Drop the archive copy of every orphaned non-terminal entry, including
+         any the backlog already held (a pure duplicate). Not the ones this
+         pass archived: [append_archive_tasks] replaced that row with the
+         backlog's, and it is the row that now holds the task. Keep the backlog
+         lock until cleanup finishes so another GC cannot replace a row that
+         this pass is about to drop. *)
+      let archived_ids = List.map (fun (t : task) -> t.id) archived_tasks in
+      let stale_orphan_ids =
+        List.filter_map
+          (fun (t : task) -> if List.mem t.id archived_ids then None else Some t.id)
+          orphaned
+      in
+      if stale_orphan_ids <> [] then drop_archive_tasks config ~ids:stale_orphan_ids;
       live_tasks_after_gc, archived_tasks, restored)
   in
-  (* Drop the archive copy of every orphaned non-terminal entry, including any
-     the backlog already held (a pure duplicate). Not the ones this pass
-     archived: [append_archive_tasks] replaced that row with the backlog's, and
-     it is the row that now holds the task. *)
-  let archived_ids = List.map (fun (t : task) -> t.id) archived_tasks in
-  let stale_orphan_ids =
-    List.filter_map
-      (fun (t : task) -> if List.mem t.id archived_ids then None else Some t.id)
-      orphaned
-  in
-  if stale_orphan_ids <> [] then drop_archive_tasks config ~ids:stale_orphan_ids;
   let stale_count = List.length archived_tasks in
   let restore_count = List.length restored in
   List.iter (fun (t : task) ->

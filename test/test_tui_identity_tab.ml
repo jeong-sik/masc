@@ -234,6 +234,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
   state.server_identity <- Some origin;
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   state.keepers <- [ keeper ];
+  state.keeper_cursor <- 0;
   state.view <- Masc_tui_types.Keepers Masc_tui_types.Keeper_detail;
   state.detail_tab <- Masc_tui_types.Detail_identity;
   let request =

@@ -1415,7 +1415,11 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"\r")
             chat = h.wait_for_http_request(process, fd, output, requests,
                 path="/api/v1/keepers/chat/stream")
-            assert created == [("a-returned", {"title": "workspace-a-fresh-task"})], created
+            expected_workspace = {"base_path": str(Path(_base).resolve()),
+                                  "masc_root": str(Path(_base).resolve() / ".masc")}
+            assert created == [("a-returned", {
+                "expected_workspace": expected_workspace,
+                "title": "workspace-a-fresh-task"})], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
             os.write(fd, b"q")
         finally:

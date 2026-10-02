@@ -131,7 +131,9 @@ def run(executable):
                           needle=b"Goal detail needs", final_cursor=b"\x1b[?25l")
         assert b"Actions:" not in screen(output), screen(output)
         for key in (b"c", b"x", b"o", b"a"):
-            h.press_and_settle(process, fd, output, key)
+            os.write(fd, key)
+            # Ignored actions leave an identical frame, which emits no bytes.
+            assert h.drain_until_quiet(process, fd, output)
         assert not posted, "hidden actions dispatched through the too-small frame"
         h.resize_and_wait(process, fd, output, rows=400, columns=80,
                           needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")

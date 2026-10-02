@@ -38,10 +38,13 @@ def main():
     parser.add_argument('--binary-file', help='optional alias for the same executable; wrappers are refused')
     parser.add_argument('--ttyd', default='ttyd', help='ttyd executable name on PATH or explicit path')
     parser.add_argument('--board-only', action='store_true')
+    parser.add_argument('--panes-only', action='store_true')
     parser.add_argument('--rows', type=int, default=32)
     parser.add_argument('--workspace-currency', action='store_true')
     parser.add_argument('--author', default='wkbl-layout-reviewer-with-long-name')
     args = parser.parse_args()
+    if args.board_only and args.panes_only:
+        parser.error('--board-only and --panes-only are mutually exclusive')
     out = ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -77,7 +80,8 @@ def main():
     commit = subprocess.check_output([str(executable), '--build-commit'], text=True).strip()
     manifest.update(binary_commit=commit, binary_sha256=hashes['executable'],
                     launched_executable=str(executable), input_sha256=hashes,
-                    fixture_parameters={'author': args.author, 'board_only': args.board_only})
+                    fixture_parameters={'author': args.author, 'board_only': args.board_only, 'panes_only': args.panes_only,
+                                        'workspace_currency': args.workspace_currency})
     write_manifest(out, manifest)
 
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -125,7 +129,17 @@ def main():
     post['comment_count'] = 1
     fixtures['/api/v1/board?sort_by=hot'] = (200, {'posts': [post]})
     fixtures['/api/v1/board/post-layout?format=flat'] = (200, h.board_detail_page(post, comments))
-    manifest['fixture_sha256'] = hashlib.sha256(json.dumps(fixtures, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if args.panes_only:
+        fixtures.update(h.code_lane_fixtures())
+        fixtures['/mcp'] = h.resources_mcp_fixture()['/mcp']
+        run = h.fusion_run('pane-audit', keeper='alpha')
+        fixtures[h.FUSION_RUNS_PATH] = h.fusion_runs_response([run])
+        fixtures[f'{h.FUSION_RUNS_PATH}/pane-audit'] = h.fusion_detail_response(run, 'Pane audit synthesis')
+    # The MCP callable is bound by the hashed fixture helper, while the other
+    # actual response values remain in the fixture digest.
+    fixture_values = {key: ({'factory': 'resources_mcp_fixture'} if key == '/mcp' and args.panes_only else value)
+                      for key, value in fixtures.items()}
+    manifest['fixture_sha256'] = hashlib.sha256(json.dumps(fixture_values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     write_manifest(out, manifest)
 
     def wait_ready(page, markers):
@@ -203,6 +217,29 @@ def main():
                             })
                             page.wait_for_function('(size) => window.term.cols === size[0] && window.term.rows === size[1]',
                                                    arg=[width, args.rows], timeout=15000)
+                            if args.panes_only:
+                                c.goto_surface(page, 'go System', 'runtime.toml')
+                                page.keyboard.press('s')
+                                wait_ready(page, ['Event Log (JSON)'])
+                                page.keyboard.press('Enter')
+                                shot(page, f'resources-{width}', ['MCP resource', 'application/json', 'status'])
+                                c.goto_surface(page, 'go code', 'MASC Workspace / Code')
+                                if width == 80:
+                                    wait_ready(page, ['README.md'])
+                                    page.keyboard.press('Home')
+                                    page.keyboard.press('Enter')
+                                    wait_ready(page, ['a.ml'])
+                                    page.keyboard.press('j')
+                                    page.keyboard.press('Enter')
+                                shot(page, f'code-{width}', ['let x = 1', 'a.ml'])
+                                c.goto_surface(page, 'go fusion', 'MASC Fusion')
+                                wait_ready(page, ['pane-audit'])
+                                page.keyboard.press('Enter')
+                                page.keyboard.press('Home')
+                                shot(page, f'fusion-{width}', ['Original question:', 'question-proof-501'])
+                                page.keyboard.press('End')
+                                shot(page, f'fusion-evidence-{width}', ['EVIDENCE RECORDED', 'Pane audit synthesis'])
+                                continue
                             for name, query, title, ready in ([surfaces[4]] if args.board_only else surfaces):
                                 if name == 'board':
                                     board_list(page)

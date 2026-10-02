@@ -37,6 +37,10 @@ val start_runtime_attempt
     accumulator computes this disposition before advancing, so a sealed or
     result-ready occurrence remains intact on both live and persisted surfaces. *)
 
+val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> state
+(** Preserve this committed result against outer cancellation/fallback, without
+    exempting it from actual block/delta protocol conflicts. *)
+
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the
     outer transport/cancellation boundary fails after the typed stream reader

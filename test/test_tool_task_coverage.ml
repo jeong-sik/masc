@@ -2749,6 +2749,52 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
   assert (!recorded = [ (false, Some "the premise this rests on is gone") ])
 )
 
+let () = test "add_task_refuses_replaced_workspace_before_creation" (fun () ->
+  let ctx = make_test_ctx () in
+  let base = Unix.realpath ctx.config.base_path in
+  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let create base_path =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task"
+      ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc [ "title", `String "Workspace-bound task";
+        "expected_workspace", `Assoc [ "base_path", `String base_path;
+                                      "masc_root", `String root ] ]) in
+  let before = Workspace.get_tasks_raw ctx.config in
+  let refused = create (base ^ "-replacement") in
+  assert (not (Tool_result.is_success refused));
+  assert (Workspace.get_tasks_raw ctx.config = before);
+  assert (Tool_result.is_success (create base))
+)
+
+let () = test "transition_cancel_refuses_replaced_workspace_before_task_change" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool"
+    ~start_time:(Tool_timing.start ()) ctx
+    (`Assoc [ "title", `String "Keep this task in its own workspace" ]) in
+  let base = Unix.realpath ctx.config.base_path in
+  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let cancel base_path =
+    Task.Tool.handle_transition ~tool_name:"masc_transition"
+      ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc
+        [ "task_id", `String "task-001"
+        ; "action", `String "cancel"
+        ; "reason", `String "operator withdrew it"
+        ; "handoff_context", `Assoc
+            [ "summary", `String "operator withdrew it" ]
+        ; "expected_workspace", `Assoc
+            [ "base_path", `String base_path
+            ; "masc_root", `String root ] ])
+  in
+  let refused = cancel (base ^ "-replacement") in
+  assert (not (Tool_result.is_success refused));
+  assert (str_contains (Tool_result.message refused) "workspace precondition failed");
+  let task = List.find (fun (task : Masc_domain.task) ->
+    String.equal task.id "task-001") (Workspace.get_tasks_raw ctx.config) in
+  assert (task.task_status = Masc_domain.Todo);
+  assert (Tool_result.is_success (cancel base))
+)
+
 (* Test dispatch transition release *)
 let () = test "dispatch_transition_release" (fun () ->
   let ctx = make_test_ctx () in

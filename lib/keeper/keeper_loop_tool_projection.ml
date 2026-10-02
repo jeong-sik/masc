@@ -33,6 +33,11 @@ let on_tool_stream_observation t
     (match Keeper_stream_tool_accum.seal_turn t.accum ~turn ~tool_source_map with
      | Ok () -> ()
      | Error detail -> record_rejection t detail)
+  | Keeper_hooks_agent_core.Official_tool_result { block_index; tool_call_id; execution_id } ->
+    (match Keeper_stream_tool_accum.record_official_execution_id t.accum
+             ~block_index ~tool_call_id ~execution_id with
+     | Ok _ -> ()
+     | Error detail -> record_rejection t detail)
   | Keeper_hooks_agent_core.Turn_closed_without_sources { turn } ->
     (match Keeper_stream_tool_accum.close_turn_without_sources t.accum ~turn with
      | Ok () -> ()

@@ -495,6 +495,77 @@ other = "test_provider.test_model"
       | Error detail -> fail detail)
 ;;
 
+(* Exercise the production mutation handler, not the HTTP/UI fixture. An
+   installed owner plus a declarative manifest makes an accidental update
+   observable in both durable files and the owner projection. No lane is
+   started and this context has neither a network nor a process manager. *)
+let check_create_only_refusal_preserves_existing ?(config_only = false) ~create_only ~expected_error () =
+  with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
+  let keeper_name = "create-only-existing" in
+  let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  write_file toml_path
+    {|[keeper]
+instructions = "Keep the existing declaration"
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "none"
+activation_mode = "manual"
+|};
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name
+              ; "trace_id", `String ("trace-" ^ keeper_name) ]) with
+    | Error detail -> fail detail
+    | Ok meta ->
+      { meta with instructions = "Keep the existing declaration";
+                  activation_mode = Masc.Keeper_activation_mode.Manual }
+  in
+  (if not config_only then match Owner_registry.create_meta ~base_path:config.base_path meta with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "fixture owner creation returned no metadata"
+   | Error error -> fail (Owner_registry.command_error_to_string error));
+  let meta_path = Profile.keeper_meta_path config keeper_name in
+  let metadata_snapshot () =
+    if Sys.file_exists meta_path then Some (read_file meta_path) else None
+  in
+  let metadata_before = metadata_snapshot () in
+  let declaration_before = read_file toml_path in
+  let runtime_before = read_file runtime_path in
+  let owner_snapshot () =
+    match Store.read_meta config keeper_name with
+    | Ok (Some value) -> Some (Yojson.Safe.to_string (Masc.Keeper_meta_json.meta_to_json value))
+    | Ok None -> None
+    | Error detail -> fail detail
+  in
+  let owner_before = owner_snapshot () in
+  check bool "fixture metadata presence" (not config_only) (Option.is_some owner_before);
+  let ctx : _ Profile.context =
+    { config; agent_name = "test-agent"; sw; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider }
+  in
+  let result = Turn_up.handle_keeper_up ctx
+    (`Assoc [ "name", `String keeper_name
+            ; "create_only", create_only
+            ; "instructions", `String "Unauthorized replacement declaration"
+            ; "sandbox_profile", `String "docker"
+            ; "sandbox_image", `String "base"
+            ; "network_mode", `String "inherit"
+            ; "activation_mode", `String "manual"
+            ; "runtime_id", `String "test_provider.test_model" ])
+  in
+  check bool "production keeper_up refuses" false (Profile.tool_result_success result);
+  check string "refusal comes from create-only admission" expected_error
+    (Profile.tool_result_body result);
+  check (option string) "durable metadata bytes unchanged" metadata_before (metadata_snapshot ());
+  check string "declarative TOML bytes unchanged" declaration_before (read_file toml_path);
+  check string "runtime TOML bytes unchanged" runtime_before (read_file runtime_path);
+  check (option string) "owner metadata projection unchanged" owner_before (owner_snapshot ());
+  check bool "refusal did not start a Keeper lane" true
+    (Option.is_none (Masc.Keeper_registry.get ~base_path:config.base_path keeper_name))
+;;
+
 let () =
   Alcotest.run
     "keeper_create_admission_transaction"
@@ -521,6 +592,22 @@ let () =
         ; test_case "explicit boot runtime replaces the previous assignment" `Quick
             (check_config_boot_runtime_assignment ~requested_runtime:(Some "test_provider.other_model")
                ~expected_runtime:"test_provider.other_model")
+        ; test_case "create-only refuses existing Keeper without metadata or config writes" `Quick
+            (check_create_only_refusal_preserves_existing ~create_only:(`Bool true)
+               ~expected_error:"Keeper already exists; creation did not reconfigure it. Choose a new name.")
+        ; test_case "create-only refuses config-only declaration without materialization" `Quick
+            (check_create_only_refusal_preserves_existing ~config_only:true
+               ~create_only:(`Bool true)
+               ~expected_error:"Keeper already exists; creation did not reconfigure it. Choose a new name.")
+        ; test_case "string create-only is rejected without writes" `Quick
+            (check_create_only_refusal_preserves_existing ~create_only:(`String "true")
+               ~expected_error:"create_only must be a boolean")
+        ; test_case "null create-only is rejected without writes" `Quick
+            (check_create_only_refusal_preserves_existing ~create_only:`Null
+               ~expected_error:"create_only must be a boolean")
+        ; test_case "numeric create-only is rejected without writes" `Quick
+            (check_create_only_refusal_preserves_existing ~create_only:(`Int 1)
+               ~expected_error:"create_only must be a boolean")
         ] )
     ]
 ;;

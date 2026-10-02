@@ -51,7 +51,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
       ~now:100. ~source ~facts () |> require in
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1
-    ; goal_context = Librarian.No_task
+    ; historical_task_contexts = []; goal_context = Librarian.No_task
     ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
     ; keeper_instructions = "Keep both service deployment instructions."
     ; current = Some { Librarian.facts = seeded.facts }

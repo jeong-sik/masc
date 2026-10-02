@@ -172,9 +172,12 @@ val dropped_statement_of_json
   :  Yojson.Safe.t
   -> (dropped_statement, wire_error) result
 
-(** Librarian taxonomy as a closed sum. Labels outside the current vocabulary
-    reject at the producer and persistence boundaries. Categories are model
-    context only and do not grant retention, expiry, or promotion authority. *)
+(** Validated category name, constructed by {!category_of_string}. *)
+type category_name = private string
+
+(** Librarian labels include familiar categories and dynamically named topics.
+    Categories are model context only and do not grant retention, expiry, or
+    promotion authority. *)
 type category =
   | Code_change
   | Fact
@@ -184,14 +187,17 @@ type category =
   | Constraint
   | Validated_approach
   | Lesson
+  | Custom of category_name
 
 (** Canonical lowercase token for a category. *)
 val category_to_string : category -> string
 
-(** All closed taxonomy categories that can be emitted by the librarian prompt. *)
+(** Suggested categories; newly named categories are also accepted. *)
 val all_categories : category list
 
-(** Parse an exact category token. Unknown or non-canonical tokens reject. *)
+(** Parse a lowercase snake_case name: starts with a letter, followed by
+    letters/digits and single underscores separating nonempty words.
+    New canonical names become {!Custom}; malformed names reject. *)
 val category_of_string : string -> category option
 
 (** Row-level provenance. [Authored]: explicit keeper memory_write.

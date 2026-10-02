@@ -190,10 +190,19 @@ claim의 `absorbs`에 넣지 마세요. `absorbs`는 그 claim이 재료의 내�
 - 이름·선호·책임·약속·관계가 바뀌면 같은 선택에서 옛 claim을 삭제하고
   교정합니다. 같은 행위자에 대한 상충하는 사실을 함께 남기지 마세요.
 
-## 분류
+## Category
 
-유지·신규 claim 모두 위 기준을 통과해야 합니다. 아래에서 처음 맞는 분류를
-선택하세요. 분류 이름이 부적절한 기억을 정당화하지는 않습니다.
+유지·신규 claim 모두 위 기준을 통과해야 합니다. `category`는 기억의 내용을
+찾고 묶기 위한 이름입니다. 현재 기억에 같은 주제의 Category가 있으면 그 이름을
+재사용하세요. 알맞은 이름이 없으면 새 Category를 직접 만듭니다.
+`architecture_decision`, `deployment_recovery`처럼 내용을 드러내는 영문 소문자
+snake_case를 쓰세요. 첫 글자는 영문 소문자이며, 이후에는 소문자와 숫자,
+단어 사이의 밑줄 하나를 사용합니다. 같은 뜻의 이름을 매번 새로 만들거나
+Keeper 이름·turn 번호를 Category로 쓰지 마세요. Category를 바꾸기 위해 같은
+claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억을 정당화하지는 않습니다.
+
+다음은 사용할 수 있는 기본 이름과 기억의 품질 기준 예시입니다. 같은 내용을
+더 정확하게 묶는 주제 이름이 필요하면 새 이름을 만드세요.
 
 1. `code_change`: 오래 유용한 코드·설정 변경의 결정과 이유. 나중에 확인할 수
    있게 적되, git에서 복구할 수 있는 파일 변경 목록이나 현재 설정값만 복제하지
@@ -205,10 +214,10 @@ claim의 `absorbs`에 넣지 마세요. `absorbs`는 그 claim이 재료의 내�
 4. `goal`: 현재 턴을 넘어 추구하는 지속적인 목표.
 5. `preference`: 일하는 방식·도구·절차에 대한 안정되고 명시적인 선호.
 6. `validated_approach`: 실제로 시도해 결과가 확인된 방법. 무엇을 했고 왜
-   통했는지 재사용할 수 있게 적습니다. 확인된 성과를 막연한 `fact`로 쓰지 마세요.
+   통했는지 재사용할 수 있게 적습니다. 확인된 방법은 결과와 조건을 구체적으로 적습니다.
 7. `lesson`: 어떤 조건에서 무엇이 실패했고 다음에는 어떻게 할지 담은 교훈.
    구체적인 교정이 없으면 이 분류로 저장하지 않습니다.
-8. `fact`: 위 분류에 해당하지 않는, 외부에서 검증 가능하고 오래 유용한 사실.
+8. `fact`: 외부에서 검증 가능하고 오래 유용한 사실.
    Keeper 자신의 실행 기록이나 불확실한 주장을 넣는 기본 분류가 아닙니다.
 
 ## 출력
@@ -223,7 +232,7 @@ claim의 `absorbs`에 넣지 마세요. `absorbs`는 그 claim이 재료의 내�
   "new_claims": [
     {
       "claim": "근거 있는 지식. absorbs 가 비어 있으면 한 문장입니다. 재료를 묶은 claim 은 재료가 말한 조건·수치·교훈을 빠뜨리지 않도록 필요한 만큼의 문장으로 씁니다.",
-      "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson",
+      "category": "architecture_decision",
       "board_post_id": "지식을 읽은 Board 글의 실제 post_id(p-…) 또는 null",
       "board_comment_id": "그 글의 댓글에서 읽었으면 실제 comment_id, 아니면 null",
       "supersedes": "교정하는 옛 기억의 짧은 ID(m2 등), 없으면 null",

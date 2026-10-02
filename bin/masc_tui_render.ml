@@ -3413,7 +3413,7 @@ let render_exact_lane_provider_editor (state : state) editor =
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
      let visible =
-       let reserved = if entries <> [] && Option.is_none selected_index then 6 else 5 in
+       let reserved = if entries <> [] && Option.is_none selected_index then 8 else 7 in
        max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
      in
      let selected_display_index =
@@ -3462,6 +3462,21 @@ let render_exact_lane_provider_editor (state : state) editor =
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())
          "  no slot selected; j/k selects a current slot";
+     (match Masc_tui_types.slot_editor_cursor_row state with
+      | None -> ()
+      | Some row ->
+        let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
+        (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
+           String.equal runtime.ro_id row.sr_slot) state.runtime_catalog with
+         | Some runtime ->
+           box_line_styled buf cols ~style:(Theme.info ())
+             (Printf.sprintf "  Account %s · %s context"
+                (Masc_tui_message_layout.fit_middle (max 1 (cols - 28))
+                   (Terminal_text.single_line runtime.ro_provider_id))
+                (format_context_tokens runtime.ro_effective_max_context))
+         | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
+        box_line_styled buf cols ~style:(Theme.recede ())
+          ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
        "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
      box_line_styled buf cols ~style:(Theme.recede ())

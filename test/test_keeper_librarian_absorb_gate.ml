@@ -994,6 +994,31 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   let second = fact (List.nth sources 1) in
   let other = fact "beta ships on fridays and pages the operator" in
   let observed = ref [] in
+  let module Runs = Masc.Exact_lane_run_registry in
+  let registry_dir = Filename.temp_dir "absorb-cancel-registry-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree registry_dir);
+  let registry_path = Filename.concat registry_dir Runs.storage_filename in
+  let registry = Runs.create ~path:registry_path () in
+  let registered = ref [] in
+  let before_evaluate ~direction ~destinations ~state ~questions =
+    let run_id = Printf.sprintf "cancel-evaluation-%d" (List.length !registered) in
+    let started_at = Time_compat.now () in
+    let started_ns = Mtime_clock.elapsed_ns () in
+    Runs.register_running registry ~run_id ~lane:Runs.Librarian
+      ~actor:"cancel-observation-fixture" ~started_at
+      ~input:(Runs.Exact_input (Gate.evaluation_request_to_yojson
+        ~direction ~destinations ~state ~questions));
+    registered := !registered @ [ run_id ];
+    run_id, started_ns
+  in
+  let finish (run_id, started_ns) outcome output =
+    let elapsed_s = Int64.to_float
+        (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000_000. in
+    match Runs.mark_completed registry ~run_id ~outcome ~elapsed_s
+        ~selected_slot:None ~output with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Runs.completion_error_to_string error)
+  in
   let raised_by_gate = ref false in
   let returned = ref false in
   let context, resolve_context = Eio.Promise.create () in
@@ -1004,6 +1029,13 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
          Eio.Promise.resolve resolve_context cancellation;
          match Gate.run ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
              ~observe:(fun observation -> observed := observation :: !observed)
+             ~before_evaluate
+             ~after_evaluate:(fun ~evaluation_id evaluation ->
+               finish evaluation_id Runs.Succeeded
+                 (Gate.observation_to_yojson (Gate.Incomplete [ evaluation ])))
+             ~on_evaluation_aborted:(fun ~evaluation_id -> function
+               | `Cancelled -> finish evaluation_id Runs.Cancelled `Null
+               | `Failed detail -> Alcotest.fail detail)
              ~facts:[ first; second ] ~new_claims:[ merged; other ]
              ~absorbed:(absorbed_into merged [ first ] @ absorbed_into other [ second ]) () with
          | _ -> returned := true
@@ -1022,6 +1054,18 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   Alcotest.(check bool) "Gate.run itself propagates the original cancellation" true !raised_by_gate;
   Alcotest.(check bool) "cancellation is not turned into a returned disposition" false !returned;
   Alcotest.(check int) "the second request reached HTTP before cancellation" 2 (F.post_count server);
+  let cancelled_id = match !registered with
+    | [ _completed; cancelled ] -> cancelled
+    | _ -> Alcotest.fail "expected two registered evaluations" in
+  let check_cancelled label registry =
+    match Runs.get registry ~run_id:cancelled_id with
+    | Some { status = Runs.Completed { outcome = Runs.Cancelled; elapsed_s; output = `Null; _ };
+             output_availability = Some Runs.Available; _ } ->
+      Alcotest.(check bool) (label ^ " retains measured cancellation duration") true (elapsed_s > 0.)
+    | _ -> Alcotest.fail (label ^ " did not retain the exact cancelled subrun and its payload")
+  in
+  check_cancelled "live durable registry" registry;
+  check_cancelled "disk replay" (Runs.replay registry_path);
   match List.rev !observed with
   | [ Gate.Incomplete [ evaluation ] as observation ] ->
     let sent = List.hd (F.request_bodies server) in

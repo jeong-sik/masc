@@ -86,7 +86,9 @@ class LocalBuildInstall(unittest.TestCase):
     def test_successful_default_install_cleans_only_its_own_build(self):
         for flags, expected_clean, fail_build in (
                 ([], True, False), (["--keep-build"], False, False),
-                (["--skip-build"], False, False), ([], False, True)):
+                (["--skip-build"], False, False), ([], False, True),
+                (["--prefix", "BUILD_PREFIX"], False, False),
+                (["--manifest-dir", "BUILD_MANIFESTS"], False, False)):
             with self.subTest(flags=flags, fail_build=fail_build), \
                     tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
@@ -103,11 +105,16 @@ class LocalBuildInstall(unittest.TestCase):
                 wrapper.write_text(
                     "#!/bin/sh\n"
                     'repo=$(cd "$(dirname "$0")/.." && pwd)\n'
-                    'printf "%s\\n" "$1" >> "$repo/calls"\n'
+                    'printf "%s:%s\\n" "$1" "$MASC_DUNE_LOCK_HELD" >> "$repo/calls"\n'
                     'if [ "$1" = clean ]; then rm -f "$repo/_build/cache-artifact"; '
                     'else exit ' + ("23" if fail_build else "0") + '; fi\n')
                 wrapper.chmod(0o755)
                 prefix = root / "prefix"
+                flags = [str(checkout / "_build/installed") if flag == "BUILD_PREFIX"
+                         else str(checkout / "_build/manifests") if flag == "BUILD_MANIFESTS"
+                         else flag for flag in flags]
+                if "--prefix" in flags:
+                    prefix = Path(flags[flags.index("--prefix") + 1])
                 result = subprocess.run(
                     ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
                      "--manifest-dir", str(root / "absent"), *flags],
@@ -122,6 +129,10 @@ class LocalBuildInstall(unittest.TestCase):
                     self.assertEqual(subprocess.check_output(
                         [str(prefix / "masc")], text=True).strip(), "main_eio.exe")
                 self.assertEqual(artifact.exists(), not expected_clean)
+                calls = checkout / "calls"
+                if calls.exists():
+                    self.assertTrue(all(line.endswith(":1")
+                                        for line in calls.read_text().splitlines()))
 
     def test_every_registered_host_gets_the_new_copy_under_its_own_name(self):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:

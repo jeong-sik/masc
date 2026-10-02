@@ -42,6 +42,7 @@ skip_build=false
 keep_build=false
 custom_build_dir=false
 base_path=""
+install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
   Linux) manifest_dir="$HOME/.mozilla/native-messaging-hosts" ;;
@@ -60,6 +61,22 @@ while [ $# -gt 0 ]; do
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# Use the same lock as dune-local.sh for the complete installation transaction.
+# Releasing it after build permits another install's clean to remove our input
+# while preflight, binary copies or browser refresh are still using it.
+if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
+  repo_lock_key=$(printf '%s' "$repo" | cksum | awk '{print $1}')
+  install_lock="${DUNE_LOCAL_LOCK:-${TMPDIR:-/tmp}/masc-dune-${UID:-$(id -u)}-${repo_lock_key}.lock}"
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf -k "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" "${install_args[@]}"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" "${install_args[@]}"
+  else
+    echo "install-local-build: a shared build lock requires lockf or flock" >&2
+    exit 1
+  fi
+fi
 
 if [ "$skip_build" = false ]; then
   # Built through dune-local.sh, which stops before Dune runs when the active
@@ -227,15 +244,31 @@ if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
     && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
     && [ ! -L "$repo/_build" ] \
     && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
-  installed_prefix=$(cd "$prefix" && pwd -P)
-  case "$installed_prefix/" in
-    "$repo/_build/"*)
-      echo "install-local-build: retaining build output because the install prefix is inside _build" ;;
-    *)
+  if python3 - "$repo/_build" "$prefix" "$manifest_dir" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+build, prefix, manifests = (Path(arg).resolve() for arg in sys.argv[1:])
+destinations = [prefix, manifests]
+if manifests.is_dir():
+    for manifest in manifests.glob("*.json"):
+        try:
+            declared = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            print("install-local-build: retaining output: manifest destination is unreadable", file=sys.stderr)
+            sys.exit(1)
+        if isinstance(declared, dict) and isinstance(declared.get("path"), str):
+            destinations.append(Path(declared["path"]).resolve())
+if any(path == build or build in path.parents for path in destinations):
+    print("install-local-build: retaining output: an installed destination is inside _build")
+    sys.exit(1)
+PY
+  then
       if (cd "$repo" && scripts/dune-local.sh clean --root "$repo"); then
         echo "install-local-build: removed default build artifacts after successful installation"
       else
         echo "install-local-build: WARN installation succeeded, but build cleanup failed" >&2
-      fi ;;
-  esac
+      fi
+  fi
 fi

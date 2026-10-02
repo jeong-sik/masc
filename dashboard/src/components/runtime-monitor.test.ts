@@ -429,6 +429,48 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('snapshot · source:runtime.toml')
   })
 
+  it.each([
+    { binding: 1000000, provider: 400000, model: 272000, expected: 1000000, source: 'binding' },
+    { binding: null, provider: 400000, model: 272000, expected: 400000, source: 'provider' },
+    { binding: undefined, provider: undefined, model: 272000, expected: 272000, source: 'model' },
+    { binding: null, provider: 400000, model: null, expected: 400000, source: 'provider' },
+    { binding: null, provider: null, model: null, expected: null, source: null },
+  ])('shows the selected declared context and each scope: $source', async (context) => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    const provider = baseline.providers[0]
+    apiMocks.fetchRuntimeProviders.mockResolvedValue({
+      ...baseline,
+      providers: [{
+        ...provider,
+        declared_spec: {
+          ...provider.declared_spec,
+          provider: { ...provider.declared_spec.provider, max_context: context.provider },
+          model: { ...provider.declared_spec.model, max_context: context.model },
+          binding: { ...provider.declared_spec.binding, max_context: context.binding },
+        },
+      }],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('declared ·') ?? false,
+      'scoped context declarations',
+    )
+    const summary = Array.from(container.querySelectorAll('div'))
+      .find(element => element.textContent?.startsWith('declared ·'))?.textContent
+    if (context.expected == null) {
+      expect(summary).not.toContain(' · ctx:')
+      expect(summary).not.toContain('ctx-source:')
+    } else {
+      expect(summary).toContain(`ctx:${context.expected} · ctx-source:${context.source}`)
+    }
+    expect(parameterValue(container, 'declared provider · context')).toBe(
+      context.provider == null ? undefined : context.provider.toLocaleString('en-US'),
+    )
+    expect(parameterValue(container, 'binding · context')).toBe(
+      context.binding == null ? undefined : context.binding.toLocaleString('en-US'),
+    )
+  })
+
   it('renders parameter facts as structured request declared and effective rows', async () => {
     render(h(RuntimeMonitor, {}), container)
     await waitFor(

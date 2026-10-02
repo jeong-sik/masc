@@ -190,6 +190,52 @@ let read_directory t relative = protect (fun () ->
              | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
+let bounded_file_for_sampling ~max_bytes path = protect (fun () ->
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+  let channel = Unix.in_channel_of_descr fd in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let stat = Unix.fstat fd in
+    if stat.Unix.st_kind <> Unix.S_REG then Error "retained observation is not a regular file"
+    else if stat.Unix.st_size > max_bytes then Error "retained observation exceeds query byte envelope"
+    else
+      try
+        let bytes = really_input_string channel stat.Unix.st_size in
+        match input_char channel with
+        | _ -> Error "retained observation changed during query"
+        | exception End_of_file -> Ok bytes
+      with End_of_file -> Error "retained observation changed during query"))
+let sampling_directory instance_id = Filename.concat "sampling" (digest instance_id)
+let save_sampling_request t ~instance_id ~request_id json =
+  write t (Filename.concat (sampling_directory instance_id) (digest request_id ^ ".json"))
+    (Yojson.Safe.to_string json)
+let sampling_requests t ~instance_id =
+  read_directory t (sampling_directory instance_id)
+let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes" (digest instance_id)
+let save_sampling_outcome t ~instance_id ~request_id json =
+  write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
+    (Yojson.Safe.to_string json)
+let iter_sampling_requests t ~instance_id ~max_bytes ~f =
+  if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
+  else protect (fun () ->
+    let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
+    let scan relative ~skip =
+      let path = Filename.concat t.root relative in
+      match Fs_compat.exact_path_kind path with
+      | Fs_compat.Exact_missing -> Ok ()
+      | _ ->
+          let handle = Unix.opendir path in
+          Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
+            let rec next () = match Unix.readdir handle with
+              | name when Filename.check_suffix name ".json" && not (skip name) ->
+                  let* bytes = bounded_file_for_sampling ~max_bytes (Filename.concat path name) in
+                  let* () = f (Yojson.Safe.from_string bytes) in
+                  next ()
+              | _ -> next ()
+              | exception End_of_file -> Ok () in
+            next ()) in
+    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
+    scan (sampling_directory instance_id) ~skip:(fun name ->
+      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -250,13 +296,10 @@ let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protec
       let stat = Unix.stat path in
       if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
       else
-        (* No new receipt-size policy: use the observed file size to reject
-           growth between the path read and the exact descriptor verification. *)
         let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
           ~max_bytes:stat.Unix.st_size path in
         Ok (Some (Yojson.Safe.from_string bytes)))
 let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -289,31 +332,6 @@ let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
         | Error detail -> Some detail in
       Error (Publication_failed {failure;verification_error})
 let append_observation = append_observation_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
-let observations t ~instance_id =
-  let* values = read_directory t (observation_dir instance_id) in
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | `Assoc fields :: rest ->
-        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
-         | Some sources, Some json ->
-             let* output = output_of_json json in loop ((sources, output) :: acc) rest
-         | _ -> Error "invalid retained observation")
-    | _ -> Error "invalid retained observation"
-  in loop [] values
-(* The sequence is part of the row identity issued by the host, so evidence
-   selection can read exactly its files without scanning unrelated history. *)
-let sequence_of_row ~instance_id id =
-  let prefix = instance_id ^ "/" in
-  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
-  else
-    let offset = String.length prefix in
-    match String.index_from_opt id offset '/' with
-    | None -> Error "row identity has no observation sequence"
-    | Some ending ->
-        let digits = String.sub id offset (ending - offset) in
-        (match int_of_string_opt digits with
-         | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
-         | _ -> Error "row identity has an invalid observation sequence")
 let record_path t instance_id seq =
   Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
 let decode_record bytes =
@@ -325,6 +343,17 @@ let decode_record bytes =
              let* output = output_of_json json in Ok (sources, output)
          | _ -> Error "invalid retained observation")
     | _ -> Error "invalid retained observation")
+let observations t ~instance_id =
+  let* values = read_directory t (observation_dir instance_id) in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | `Assoc fields :: rest ->
+        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
+         | Some sources, Some json ->
+             let* output = output_of_json json in loop ((sources, output) :: acc) rest
+         | _ -> Error "invalid retained observation")
+    | _ -> Error "invalid retained observation"
+  in loop [] values
 let highwater t instance_id = protect (fun () ->
   let directory = Filename.concat t.root (observation_dir instance_id) in
   match Fs_compat.exact_path_kind directory with
@@ -373,6 +402,18 @@ let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t
   let* _,output = decode_record bytes in
   Ok output
 let read_observation = read_observation_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+let sequence_of_row ~instance_id id =
+  let prefix = instance_id ^ "/" in
+  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
+  else
+    let offset = String.length prefix in
+    match String.index_from_opt id offset '/' with
+    | None -> Error "row identity has no observation sequence"
+    | Some ending ->
+        let digits = String.sub id offset (ending - offset) in
+        match int_of_string_opt digits with
+        | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
+        | _ -> Error "row identity has an invalid observation sequence"
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
   let* found = highwater t instance_id in

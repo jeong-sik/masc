@@ -693,8 +693,11 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       Unix.rename saved_index index_directory);
     let index = match sampling_requests store ~instance_id with
       | Ok [value] -> value | Ok _ -> fail "missing exact sampling request" | Error detail -> fail detail in
-    check string "cancelled call still has a finished recovery index" "finished"
-      Yojson.Safe.Util.(index |> member "state" |> to_string);
+    let state = match index with
+      | `Assoc fields -> (match List.assoc_opt "state" fields with
+          | Some (`String value) -> value | _ -> fail "missing state")
+      | _ -> fail "invalid sampling index" in
+    check string "cancelled call still has a finished recovery index" "finished" state;
     let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" index) with
       | Ok value -> value | Error detail -> fail detail in
     let outcome = match Store.read_blob store reference with

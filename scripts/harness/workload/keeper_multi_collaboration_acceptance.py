@@ -1758,6 +1758,35 @@ def preflight(
     return client, health, result
 
 
+def fresh_sandbox_declaration(
+    profile: str | None,
+    image: str | None,
+    backend: str | None,
+    endpoint: str | None,
+) -> dict[str, str]:
+    if profile not in SANDBOX_PROFILES:
+        raise AcceptanceError("--run requires --sandbox-profile: choose docker, microvm or remote_ssh")
+    values = {
+        "sandbox_image": (image or "").strip(),
+        "microvm_backend": (backend or "").strip(),
+        "remote_endpoint": (endpoint or "").strip(),
+    }
+    required = {
+        "docker": ("sandbox_image",),
+        "microvm": ("sandbox_image", "microvm_backend"),
+        "remote_ssh": ("remote_endpoint",),
+    }[profile]
+    for field, value in values.items():
+        flag = "--" + field.replace("_", "-")
+        if field in required and not value:
+            raise AcceptanceError(f"--sandbox-profile {profile} requires {flag}")
+        if field not in required and value:
+            raise AcceptanceError(f"{flag} is not applicable to --sandbox-profile {profile}")
+    if values["microvm_backend"] and values["microvm_backend"] not in ("apple_container", "microsandbox", "nerdctl_kata"):
+        raise AcceptanceError("--microvm-backend must be apple_container, microsandbox or nerdctl_kata")
+    return {"sandbox_profile": profile, **{field: values[field] for field in required}}
+
+
 class MissionRun:
     def __init__(
         self,
@@ -1775,7 +1804,7 @@ class MissionRun:
         token_file: pathlib.Path,
         browser_proof_script: pathlib.Path,
         expected_base_path: str,
-        sandbox_profile: str,
+        sandbox_declaration: dict[str, str],
         turn_settle_budget_sec: float,
     ) -> None:
         self.catalog = catalog
@@ -1819,11 +1848,8 @@ class MissionRun:
         self.require_heterogeneous_runtimes = require_heterogeneous_runtimes
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
-        if sandbox_profile not in SANDBOX_PROFILES:
-            raise AcceptanceError(
-                f"sandbox_profile must be one of {list(SANDBOX_PROFILES)}, got {sandbox_profile!r}"
-            )
-        self.sandbox_profile = sandbox_profile
+        self.sandbox_declaration = sandbox_declaration
+        self.sandbox_profile = sandbox_declaration["sandbox_profile"]
         if not turn_settle_budget_sec > 0:
             raise AcceptanceError(
                 f"turn_settle_budget_sec must be positive, got {turn_settle_budget_sec!r}"
@@ -2050,11 +2076,8 @@ class MissionRun:
                 "instructions": self.role_instructions(role),
                 "mention_targets": [keeper, role],
                 "activation_mode": "on_demand",
-                # The lane is an operator decision per campaign server
-                # (--sandbox-profile); the runner never assumes one. The
-                # server refuses profiles outside its closed set, and the
-                # receipt records the value under resources.sandbox_profile.
-                "sandbox_profile": self.sandbox_profile,
+                # Fresh Keepers have no saved image/backend/endpoint to retain.
+                **self.sandbox_declaration,
             }
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
@@ -2874,13 +2897,9 @@ class MissionRun:
                 "coordinator shutdown did not clear the admission fence within "
                 "90 seconds"
             )
-        # The restart re-states the lane the fleet was created with; the value
-        # comes from --sandbox-profile like create_fleet's, never a literal
-        # (a second literal survived #32593 and aborted r8 run1 at this call).
-        arguments: dict[str, Any] = {
-            "name": self.roles["coordinator"],
-            "sandbox_profile": self.sandbox_profile,
-        }
+        # remove_meta=False retained the Keeper's complete declaration. Restart
+        # does not overwrite it with the campaign's fresh-create settings.
+        arguments: dict[str, Any] = {"name": self.roles["coordinator"]}
         runtime_id = self.runtime_for_role("coordinator")
         if runtime_id:
             arguments["runtime_id"] = runtime_id
@@ -4572,6 +4591,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-mutation", action="store_true")
     parser.add_argument("--runtime-id")
     parser.add_argument("--sandbox-profile", choices=SANDBOX_PROFILES)
+    parser.add_argument("--sandbox-image")
+    parser.add_argument("--microvm-backend")
+    parser.add_argument("--remote-endpoint")
     parser.add_argument("--runtime-by-role-json")
     parser.add_argument("--require-heterogeneous-runtimes", action="store_true")
     parser.add_argument("--run-id")
@@ -4639,15 +4661,12 @@ def main() -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
+        # Fresh declarations must be complete before preflight installs fixtures.
+        sandbox_declaration = fresh_sandbox_declaration(
+            args.sandbox_profile, args.sandbox_image, args.microvm_backend, args.remote_endpoint
+        ) if args.run else {}
         token = read_token(args)
         health_url = args.health_url or default_health_url(args.mcp_url)
-        # Checked before any network call: a run without a lane decision
-        # should not spend a preflight to find out.
-        if args.run and not args.sandbox_profile:
-            raise AcceptanceError(
-                "--run requires --sandbox-profile "
-                f"(one of {', '.join(SANDBOX_PROFILES)}): the campaign server's keeper lane"
-            )
         if args.run and args.turn_settle_budget_sec is None:
             raise AcceptanceError(
                 "--run requires --turn-settle-budget <seconds>: how long one turn may "
@@ -4716,7 +4735,7 @@ def main() -> int:
             token_file=pathlib.Path(args.token_file).resolve(),
             browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
             expected_base_path=args.expected_base_path,
-            sandbox_profile=args.sandbox_profile,
+            sandbox_declaration=sandbox_declaration,
             turn_settle_budget_sec=args.turn_settle_budget_sec,
         )
         try:

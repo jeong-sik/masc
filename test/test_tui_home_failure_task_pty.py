@@ -260,10 +260,11 @@ def task_cancel_editor_replacement(executable):
                 time.sleep(0.02)
             assert (editor_root / "entered").exists(), "cancel editor never opened"
             state["foreign"] = True
+            start = len(output)
             (editor_root / "release").write_text("1")
             h.wait_for_output(process, fd, output,
                               b"workspace changed before the action completed",
-                              timeout=10)
+                              start=start, timeout=10)
             assert backlog(base).read_bytes() == original
             assert not [body for path, body in requests if path == "/mcp"
                         and json.loads(body).get("method") == "tools/call"], requests
@@ -354,10 +355,11 @@ def task_cancel_previous_workspace_receipt(executable):
                 h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
                 h.drain_until_quiet(process, fd, output)
                 before = (state["health_reads"], state["history_reads"])
+                start = len(output)
                 release.set()
                 h.wait_for_output(process, fd, output,
                                   ("task " + TASK_A + " cancelled in the previous workspace").encode(),
-                                  timeout=10)
+                                  start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
                 assert (state["health_reads"], state["history_reads"]) == before, state
                 assert len(transitions) == 1, transitions

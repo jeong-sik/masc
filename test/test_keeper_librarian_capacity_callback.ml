@@ -10,7 +10,7 @@ let served_slot =
        | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
     ( = )
 
-let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ?shows_size ?expected_limit ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -64,10 +64,14 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false in
+  let measured_limit = ref None in
   let verdict = ref None in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
-    ~on_cli_input_limit:(fun _ -> incr refused)
+    ~on_cli_input_limit:(fun observed ->
+      incr refused;
+      measured_limit := Some (observed.Keeper_lane_cli_oneshot.runtime_id,
+        observed.capacity.max_chars))
     ~on_not_committed:(fun outcome ->
       (* Folded as the continuity pass folds it: any report's size verdict
          stands. *)
@@ -76,6 +80,9 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
+  Option.iter (fun expected_limit ->
+    Alcotest.(check (option (pair string int))) "latest measured capacity"
+      (Some expected_limit) !measured_limit) expected_limit;
   (* The verdict the continuity pass reads to decide whether to read less. It
      is taken from every failure of the walk, so the same set of causes
      answers the same way in either order. *)
@@ -594,10 +601,10 @@ let () =
     "actual_chars", `Int 23; "max_chars", `Int 17])) in
   let generic = codex_error None in
   let quota = Fusion_official_client.Setup_failure "quota" in
-  let cli_case ?(first_overflow = false) name cli_errors expected shows_size =
+  let cli_case ?(first_overflow = false) ?expected_limit name cli_errors expected shows_size =
     Alcotest.test_case name `Quick (fun () ->
       Fixture.with_official_client_runtimes @@ fun () ->
-      test_callback ~cli_errors ~shows_size ~base_path ~registry ~keeper_id:name
+      test_callback ~cli_errors ~shows_size ?expected_limit ~base_path ~registry ~keeper_id:name
         ~first_overflow ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
     ["size verdict", [Alcotest.test_case "every provider cause, one row each" `Quick
@@ -630,9 +637,9 @@ let () =
          either way (#37877). A measured limit is handed over separately. *)
       cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 false;
       cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
-      cli_case "cli-capacity-then-quota"
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-quota"
         [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 false;
-      cli_case "cli-capacity-then-generic-rpc"
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-generic-rpc"
         [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1 false;
       cli_case "cli-quota-then-capacity"
         [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 false;

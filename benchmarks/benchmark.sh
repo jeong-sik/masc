@@ -1,8 +1,19 @@
 #!/bin/bash
 # MASC Benchmark Framework
-# Usage: ./benchmark.sh [session|read|workspace-collaboration|runtime|a2a|all] [iterations]
+# Usage: ./benchmark.sh [session|read|workspace-collaboration|runtime|all] [iterations]
 
 set -euo pipefail
+
+# Refuse unsupported patterns before creating result files or an MCP session.
+PATTERN="${1:-all}"
+case "$PATTERN" in
+  session|read|workspace-collaboration|runtime|all) ;;
+  *)
+    printf '[ERROR] Unsupported pattern: %s\n' "$PATTERN" >&2
+    printf 'Available: session, read, workspace-collaboration, runtime, all\n' >&2
+    exit 1
+    ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -15,7 +26,6 @@ MASC_URL="${MASC_URL:?set MASC_URL to the /mcp URL of an isolated benchmark serv
 MASC_AGENT="${MASC_AGENT:-bench}"
 MASC_TOKEN="${MASC_TOKEN:-}"
 BENCH_WORKSPACE_PATH="${BENCH_WORKSPACE_PATH:-$ROOT_DIR}"
-PATTERN="${1:-all}"
 ITERATIONS="${2:-3}"
 RESULTS_DIR="${SCRIPT_DIR}/results"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -425,10 +435,6 @@ bench_workspace_collaboration() {
     "$ITERATIONS" "bound agent write path"
 }
 
-bench_a2a() {
-  :
-}
-
 bench_runtime() {
   local i
   local runtime_status_samples=()
@@ -453,7 +459,6 @@ run_pattern() {
       ensure_session_ready
       bench_read_path
       bench_workspace_collaboration
-      bench_a2a
       bench_runtime
       ;;
     session)
@@ -470,15 +475,6 @@ run_pattern() {
     runtime)
       ensure_session_ready
       bench_runtime
-      ;;
-    a2a)
-      ensure_session_ready
-      bench_a2a
-      ;;
-    *)
-      error "Unknown pattern: $PATTERN"
-      echo "Available: session, read, workspace-collaboration, runtime, a2a, all" >&2
-      exit 1
       ;;
   esac
 }

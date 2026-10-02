@@ -663,7 +663,7 @@ let test_resources_footer_steps_through_detail () =
     ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
-     the same answer [surface_row_texts] gives for that focus. Both ends
+     the same answer [Masc_tui_surface_search.surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
   check str "the text names scrolling and the step it answers"
     ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
@@ -983,14 +983,14 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
    | Error detail -> Alcotest.fail detail
    | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
-    1 (List.length (fusion_list_entries state));
-  (match selected_fusion_entry state with
+    1 (List.length (Masc_tui_fusion_model.fusion_list_entries state));
+  (match Masc_tui_fusion_model.selected_fusion_entry state with
    | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
        check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
    | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
        Alcotest.fail "historical evidence disappeared or became an invented run");
   check Alcotest.int "historical evidence does not inflate Keeper run count"
-    0 (List.length (selected_keeper_runs state))
+    0 (List.length (Masc_tui_fusion_model.selected_keeper_runs state))
 
 let test_keeper_runs_selection_survives_a_shorter_list () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1019,7 +1019,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   in
   let selected () =
     Option.map (fun (index, run) -> index, run.Masc.Tui_decode_fusion.fur_run_id)
-      (selected_keeper_run state)
+      (Masc_tui_fusion_model.selected_keeper_run state)
   in
   state.keepers <- [keeper "alpha"; keeper "beta"];
   load [run "alpha-1" "alpha"; run "alpha-2" "alpha"; run "beta-1" "beta"];
@@ -2617,7 +2617,7 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
     (Some
        [ "Board Attention"; "HITL Auto Judge"; "Librarian"
        ; "Verifier" ])
-    (surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts state Lanes)
 
 (* Resources draws a list beside a reading, and j/k means one thing in each.
    The search follows the same split: a match lands the list cursor, and with
@@ -2650,33 +2650,33 @@ let test_resources_searches_the_names_the_list_draws () =
     "the title when there is one, the name otherwise, and a blank title is \
      not one"
     (Some [ "Board posts"; "keepers"; "lanes" ])
-    (surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts state Resources)
 
 let test_the_resource_reading_offers_no_row_search () =
   let state = resources_state () in
   state.resource_focus <- Right_pane;
   Alcotest.(check (option (list string)))
     "with the text focused there is no cursor to land a match on" None
-    (surface_row_texts state Resources);
+    (Masc_tui_surface_search.surface_row_texts state Resources);
   state.resource_focus <- Left_pane;
   Alcotest.(check Alcotest.bool) "and the list has one again" true
-    (Option.is_some (surface_row_texts state Resources))
+    (Option.is_some (Masc_tui_surface_search.surface_row_texts state Resources))
 
 let test_resources_without_a_list_answers_nothing () =
   let state = resources_state () in
   state.resources_list <- None;
   Alcotest.(check (option (list string)))
     "before the catalog arrives there are no rows" None
-    (surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts state Resources)
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
   state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
-    (surface_row_texts state Lanes);
+    (Masc_tui_surface_search.surface_row_texts state Lanes);
   state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
-    (surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts state Lanes)
 
 (* Board and Planning answer "/" over the list they draw. Both panes window
    themselves around the cursor, so a landing is on screen without a scroll
@@ -2713,23 +2713,23 @@ let test_board_searches_the_post_list () =
     "id, author and title -- what the list draws"
     (Some
        [ "p-1 alpha release evidence sweep"; "p-2 beta frame budget" ])
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let test_board_reading_and_writing_keep_the_key_closed () =
   let state = board_state () in
   state.board_mode <- Board_read "p-1";
   Alcotest.(check (option (list string))) "reading a post" None
-    (surface_row_texts state Board);
+    (Masc_tui_surface_search.surface_row_texts state Board);
   state.board_mode <- Board_compose;
   (* Writing is the stronger case: "/" there is draft text. *)
   Alcotest.(check (option (list string))) "writing a post" None
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let test_board_without_posts_offers_nothing_to_search () =
   let state = board_state () in
   state.board_posts <- [];
   Alcotest.(check (option (list string))) "no rows" None
-    (surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts state Board)
 
 let planning_goal_row id title =
   { pg_id = id
@@ -2779,7 +2779,7 @@ let test_planning_searches_the_goals_the_list_shows () =
   Alcotest.(check (option (list string)))
     "id and title"
     (Some [ "g-1 cut the frame budget"; "g-2 paste follows the field" ])
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let test_planning_searches_what_the_filter_left () =
   (* The cursor counts positions in the filtered, sorted list, so the search
@@ -2789,13 +2789,13 @@ let test_planning_searches_what_the_filter_left () =
   state.planning_filter <- Planning_filter_completed;
   Alcotest.(check (option (list string)))
     "nothing active survives the completed filter" None
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let test_planning_detail_keeps_the_key_closed () =
   let state = planning_state () in
   state.planning_mode <- Planning_detail "g-1";
   Alcotest.(check (option (list string))) "a goal is open" None
-    (surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts state Planning)
 
 let hit_to_string = function
   | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
@@ -2997,7 +2997,7 @@ let surface_keys surface =
     (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
     (Masc_tui_keys.for_surface surface)
 
-(* Every surface [Masc_tui_types.surface_row_texts] can answer with rows.
+(* Every surface [Masc_tui_surface_search.surface_row_texts] can answer with rows.
    Read off that function's arms, which is where the row search comes from:
    the arm that opens [/] asks it, and so does the arm that steps [n] / [N].
    Keeper detail is absent on purpose -- its rows exist only while the
@@ -3034,7 +3034,7 @@ let test_code_search_count_tracks_fetched_source () =
     | Masc_tui_fetched.Started (next, request) ->
         state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
   in
-  let count query = surface_search_count state Code ~query in
+  let count query = Masc_tui_surface_search.surface_search_count state Code ~query in
   load "large.ml" (Array.init 20_000 (fun index ->
     [((if index mod 2 = 0 then "needle" else "other"), "")]));
   Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
@@ -3076,14 +3076,14 @@ let test_detail_search_counts_follow_the_active_pane () =
       sys_total = 1; sys_latest_seq = 1 };
   let check_pane label surface set_detail =
     state.view <- surface;
-    let count () = surface_search_count state surface ~query:state.search_last in
+    let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
     Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " list has a cursor") true
       (Option.is_some (scrolled_surface_rows state surface));
     set_detail true;
     Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
     Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
-      None (surface_row_texts state surface);
+      None (Masc_tui_surface_search.surface_row_texts state surface);
     Alcotest.(check bool) (label ^ " detail has no cursor") false
       (Option.is_some (scrolled_surface_rows state surface));
     set_detail false;
@@ -3113,15 +3113,15 @@ let test_changes_diff_uses_visible_search_rows () =
   state.search_last <- "needle";
   let check_list label =
     Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
-      (surface_search_count state Changes ~query:state.search_last);
+      (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
     Alcotest.(check bool) (label ^ " cursor available") true
       (Option.is_some (scrolled_surface_rows state Changes)) in
   check_list "list";
   state.changes_diff_row <- Some 0;
   Alcotest.(check (option (list string))) "diff has no hidden search rows" None
-    (surface_row_texts state Changes);
+    (Masc_tui_surface_search.surface_row_texts state Changes);
   Alcotest.(check (option int)) "diff has no hidden list count" None
-    (surface_search_count state Changes ~query:state.search_last);
+    (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
   Alcotest.(check bool) "diff cannot move a hidden list cursor" false
     (Option.is_some (scrolled_surface_rows state Changes));
   state.changes_diff_row <- None;
@@ -3151,10 +3151,10 @@ let test_workspace_activity_offers_no_row_search () =
   state.repositories <-
     Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
   Alcotest.(check (option int)) "the repository list answers the search"
-    (Some 1) (surface_search_count state Repositories ~query:"masc");
+    (Some 1) (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc");
   state.workspace_activity_repo <- Some "masc";
   Alcotest.(check (option int)) "Workspace Activity answers no search"
-    None (surface_search_count state Repositories ~query:"masc")
+    None (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc")
 
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
@@ -3197,7 +3197,7 @@ let test_a_surface_without_rows_offers_no_row_search () =
          presented approval, unarmed and immediate, and on Schedules it opens
          the form for a new one. A search whose own follow-through refuses an
          approval is worse than no search, so these wait on a different step
-         key rather than on another arm in [surface_row_texts] (#35306). *)
+         key rather than on another arm in [Masc_tui_surface_search.surface_row_texts] (#35306). *)
     ; "Approvals", Approvals
     ; "Schedules", Schedules
     ; "Config", Config

@@ -315,14 +315,29 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades
         ~content_rows:100 ~content_cols:100)))
 
+let test_mosaic_previews_every_catalog_accessory () =
+  let cache = Portrait.cache () in
+  let bare = Option.get (band ~cache ()) in
+  let full_bare = Draw.render (Look.body_of_name alpha) Look.bare bare.Portrait.box.View.size in
+  List.iter (fun item ->
+    let equipment = Keeper_portrait_item.preview item Look.bare in
+    let shown = Option.get (band ~cache ~equipment ()) in
+    let id = Keeper_portrait_item.id item in
+    check bool (id ^ " changes the Mosaic portrait") false
+      (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
+    check bool (id ^ " remains visible beyond a full empty portrait") false
+      (String.equal full_bare.Draw.rgba shown.Portrait.image.Draw.rgba))
+    Keeper_portrait_item.all
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
       , [ test_case "a small pane keeps its rows for facts" `Quick
             test_a_small_pane_keeps_its_rows_for_facts
         ; test_case "no picture is no band" `Quick test_no_picture_is_no_band
-        ; test_case "Item Mosaic selection changes accessory preview" `Quick test_item_mosaic_preview_changes_with_selected_accessory;
-          test_case "the band is compact" `Quick test_the_band_is_compact
+        ; test_case "Item Mosaic selection changes accessory preview" `Quick test_item_mosaic_preview_changes_with_selected_accessory
+        ; test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory
+        ; test_case "the band is compact" `Quick test_the_band_is_compact
         ; test_case "the still portrait the name draws" `Quick
             test_the_still_portrait_the_name_draws
         ; test_case "observed Items remain visible in the Info mosaic" `Quick

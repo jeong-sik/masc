@@ -804,8 +804,8 @@ let test_runtime_and_egress_change_share_the_published_revision () =
 let test_deleted_keeper_loses_assignment_and_egress_together () =
   with_runtime_file (fun path ->
     let source = Fs_compat.load_file path
-      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"routingtest" ~allow:["api.github.com"]
-      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"other" ~allow:["example.com"] in
+      |> fun text -> Runtime_config_text.update_egress_allow_text text ~keeper_name:"routingtest" ~allow:["api.github.com"]
+      |> fun text -> Runtime_config_text.update_egress_allow_text text ~keeper_name:"other" ~allow:["example.com"] in
     write_file path source;
     (match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
        ~keeper_name:"routingtest" Runtime.commit_keeper_removal with
@@ -1173,7 +1173,7 @@ enabled = false
 
 let test_first_run_imp_binding_is_explicit () =
   with_runtime_file (fun path ->
-    write_file path (Runtime.update_runtime_assignment_text (read_file path)
+    write_file path (Runtime_config_text.update_runtime_assignment_text (read_file path)
       ~keeper_name:"imp" ~runtime_id:"runpod_mtp.qwen");
     let select ?(bind_imp = false) () =
       match Runtime.set_first_run_runtime ~runtime_config_path:path

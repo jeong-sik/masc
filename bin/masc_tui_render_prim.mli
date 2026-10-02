@@ -341,7 +341,6 @@ val lexed_span : string * String.t -> string
 
 val keeper_lane_idle_text : int -> string
 
-val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option

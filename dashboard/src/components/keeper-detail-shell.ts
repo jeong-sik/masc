@@ -82,7 +82,7 @@ export function KeeperDetailHeaderInfo({
           ? html`<span aria-hidden="true">${keeper.emoji}</span>`
           : html`<${KeeperPortrait}
               name=${keeper.name}
-              reading=${keeper.portrait ?? { state: 'unavailable', reason: 'Portrait observation not yet read' }}
+              accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: 'Portrait observation not yet read' }}
               sizePx=${HEADER_PORTRAIT_PX}
               fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
             />`}

@@ -1700,9 +1700,9 @@ let tasks_list_task_item_schema =
    ([matching_count]/[returned_count]/[truncated]) are absent on the
    [unchanged] variant: it carries no rows, so row statistics would
    contradict it. [new_tasks]/[new_tasks_count] name the newest visible
-   rows the claim-order page does not already carry, so a task that sorts
-   behind the page is still reported and no row travels twice; they are
-   likewise absent on [unchanged]. *)
+   rows the first claim-order page does not already carry, so a task that
+   sorts behind it is still reported. Continuation pages carry an empty
+   newest window; both fields are absent on [unchanged]. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:

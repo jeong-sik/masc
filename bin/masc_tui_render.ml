@@ -1651,17 +1651,22 @@ let schedule_delivery_word (row : schedule_row) =
 
 (* What the last occurrence came to, for a row that has one line to say it.
 
-   A wake that did not succeed is the outcome: the reaction evidence beside
-   it still describes the occurrence before, so drawing that word would
-   report a delivery this occurrence never made. A succeeded wake hands the
+   A wake that did not succeed is the outcome. A succeeded wake hands the
    column to the furthest step the ledger recorded -- the reading that
-   separates a wake merely taken from one that finished a turn. *)
+   separates a wake merely taken from one that finished a turn. No wake at
+   all is no outcome: the reaction evidence beside it belongs to the
+   occurrence before (a held occurrence has no wake of its own, and a
+   projection between occurrences still carries the last one's reading), so
+   drawing it would pair a dash in the trigger column with a word about a
+   different occurrence in this one. The word is the server's own, cut of
+   its [matched_] prefix, and the caller sanitises it the way it sanitises
+   every other reading from this projection. *)
 let schedule_outcome_word (row : schedule_row) =
   match row.sch_last_wake_status with
-  | Some Schedule_contract_values.Wake_succeeded
-  | None ->
+  | Some Schedule_contract_values.Wake_succeeded ->
       schedule_delivery_word row
   | Some other -> schedule_wake_word other
+  | None -> Masc_tui_theme.Glyph.no_value
 
 (* Whether a status word names a schedule that can still act. The word is
    the projection's own; a word this build does not name stays with the live
@@ -5917,15 +5922,25 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ (let outcome_words = List.map schedule_outcome_word rows in
+            @ (let outcome_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line (schedule_outcome_word row))
+                   rows
+               in
                let by_words =
                  List.map
                    (fun (row : schedule_row) ->
                       Terminal_text.single_line row.sch_requested_by)
                    rows
                in
+               (* Every line carries a two-cell lead before the table, so the
+                  table is fitted to what the lead leaves -- the same reserve
+                  the Schedules list makes, without which the frame cuts the
+                  last column's tail on every row. *)
+               let table_inner = max 1 (inner - 2) in
                let layout =
-                 Render_schedule.kauto_layout ~inner_width:inner
+                 Render_schedule.kauto_layout ~inner_width:table_inner
                    ~status_width:schedule_status_word_cells
                    ~clock_width:schedule_requested_clock_cells
                    ~outcome_width:
@@ -5935,9 +5950,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let header = Render_schedule.kauto_header_row ~layout in
                (* The rule under the names runs the header's own width, so a
                   pane narrower than the table does not draw a rule longer
-                  than the rows under it. *)
+                  than the rows under it. The closed rule below ends at the
+                  same cell, so the two rules read as one margin. *)
                let rule_cells =
-                 min inner (Message_layout.display_width header) in
+                 min table_inner (Message_layout.display_width header) in
                let occurrence_clock = function
                  | Some iso -> Terminal_text.short_timestamp iso
                  | None -> Masc_tui_theme.Glyph.no_value
@@ -5947,7 +5963,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                     own; the outcome wears the outcome's, so a failed wake
                     reads red beside a state still reading live. *)
                  let status_style = schedule_status_color row.sch_status in
-                 let outcome = schedule_outcome_word row in
+                 let outcome =
+                   Terminal_text.single_line (schedule_outcome_word row)
+                 in
                  "  "
                  ^ Render_schedule.kauto_row ~layout
                      ~styles:
@@ -6007,7 +6025,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                              Printf.sprintf "%d %s"
                                (List.length
                                   (List.filter (String.equal word) words))
-                               word)
+                               (Terminal_text.single_line word))
                           (first_seen [] words))
                    in
                    let lead = "  \xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
@@ -7987,14 +8005,22 @@ let render_repository_list (state : state) =
       let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
       if split then begin
         let height = max (List.length listing) (List.length detail) in
-        (* The zip [studio_pair] draws four lines above: build each row once,
-           then push, so no row of the loop walks either list to find itself
-           (#40177 left the for-shaped copy here, the only one on the
-           screen). *)
-        List.init (min budget height) (fun index ->
-          fit_width (Option.value (List.nth_opt listing index) ~default:"") list_width
-          ^ "  " ^ fit_width (Option.value (List.nth_opt detail index) ~default:"") detail_width)
-        |> List.iter c.push
+        let count = min budget height in
+        (* Both panels through the list-window helper the scroll panes read:
+           one array per panel, each row reads its own cells. No row of the
+           loop walks either list to find itself -- the walk is what #40177's
+           for-shaped zip left here, and it survives a [List.init] reshape,
+           so the guard going green on that reshape would have been the
+           shape leaving, not the walk. *)
+        let left = Rows.of_list ~first:0 ~height:count listing in
+        let right = Rows.of_list ~first:0 ~height:count detail in
+        for index = 0 to count - 1 do
+          c.push
+            (fit_width (Option.value (Rows.at left index) ~default:"") list_width
+            ^ "  "
+            ^ fit_width (Option.value (Rows.at right index) ~default:"")
+                detail_width)
+        done
       end else begin
         List.iter c.push listing;
         List.iter c.push detail

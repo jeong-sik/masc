@@ -1454,7 +1454,7 @@ let test_one_long_cron_folds_inside_its_own_cell () =
     Schedule.kauto_row ~styles:Schedule.kauto_plain_styles ~layout
       { kauto_probe with
         krow_recurrence = cron
-      ; krow_what = "#38891 full cron task"
+      ; krow_what = "#38891 full sweep task"
       }
   in
   let one_shot_row =
@@ -1471,8 +1471,11 @@ let test_one_long_cron_folds_inside_its_own_cell () =
     (width cron_row);
   check int "the one_shot row stays on the header's columns" header
     (width one_shot_row);
+  (* The WHAT cell no longer says "cron", so this holds only if the folded
+     recurrence keeps the expression's own head: at twelve cells the middle
+     fold keeps its first three, "cro". *)
   check bool "the cron row keeps its expression's head" true
-    (holds "cron" cron_row);
+    (holds "cro" cron_row);
   check bool "the one_shot row keeps its summary's head" true
     (holds "#36319" one_shot_row)
 

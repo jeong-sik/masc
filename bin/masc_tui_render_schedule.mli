@@ -398,8 +398,10 @@ val kauto_row :
 
 val kauto_status_mark : string -> string
 (** The mark a status word draws: the Fusion pipeline's vocabulary, one cell
-    -- waiting, ripe, active, done, failed. A word this build does not name
-    keeps the middot, saying the pane did not classify it. *)
+    -- waiting, active, done, failed. A word this build does not name keeps
+    the middot, saying the pane did not classify it; a cancelled or expired
+    schedule keeps the waiting mark, inert beside the word that names
+    it. *)
 
 val kauto_group_label : title:string -> string list -> string
 (** The label on the rule parting the live rows from the closed ones: the

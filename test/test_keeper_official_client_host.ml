@@ -2311,7 +2311,7 @@ let absorbed_boundary () : Boundaries.record =
   { recorded_at = 1.0
   ; event =
       Boundaries.Turn_ended
-        { turn_ref = Ids.Turn_ref.make ~trace_id:start_seed_trace ~absolute_turn:1
+        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:start_seed_trace ~absolute_turn:1
         ; history_at_start = Boundaries.Fresh_history
         ; position
         }

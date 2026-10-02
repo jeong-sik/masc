@@ -26,6 +26,8 @@ SAMPLING_RECEIPTS = {}
 
 def retain_fixture_receipt(refs, terminal):
     terminal = copy.deepcopy(terminal)
+    if terminal is not None:
+        terminal.pop("error", None)
     if terminal is not None and isinstance(terminal.get("response"), dict):
         terminal["response"].pop("_meta", None)
     SAMPLING_RECEIPTS[refs["request"]["sha256"]] = copy.deepcopy({
@@ -105,22 +107,22 @@ def computation_output(status="answered", *, role="panel", outcome=True, text="F
               "model_evidence": refs, "input_complete": True,
               "sampling_response": response if answered else None,
               "sampling_error": None if answered else {"code": -32603, "message": json.dumps({
-                  "status": status, "error": "actual host failure", "evidence": refs})},
+                  "status": status, "evidence": refs})},
               "input_coverage": [{"source_id": "project", "incarnation": "capture-1",
                   "cursor": "7", "complete": True, "detail": None}]}
-    terminal = None
+    terminal: dict | None = None
     if outcome:
-        terminal = {"status": status, "error": "actual host failure"}
+        terminal = {"status": status}
         if answered or status == "invalid_response":
             terminal["response"] = {key: value for key, value in response.items() if key != "_meta"}
     if status == "invalid_response":
         fields["sampling_response"] = response
         fields["validation_error"] = "Fusion requires an actual response model"
         fields["sampling_error"]["message"] = json.dumps({
-            **terminal, "evidence": refs})
+            "status": status, "evidence": refs})
     elif not answered and not outcome:
         fields["sampling_error"]["message"] = json.dumps({
-            "status": status, "error": "actual host failure", "request": refs["request"]})
+            "status": status, "evidence": refs})
     retain_fixture_receipt(refs, terminal)
     template = project(detail())
     item = copy.deepcopy(template["rows"][0])
@@ -433,10 +435,16 @@ class FusionReport(unittest.TestCase):
                       {"status": "failed", "failure_code": "provider_error"}):
             value = detail()
             value["evidence"]["post"]["meta"]["judge"] = judge
-            self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+            self.assertTrue(call("fusion-results", [source(value)])["isError"])
+            output = project(detail())
+            output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+            self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
         value = detail()
         del value["evidence"]["post"]["meta"]
-        self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+        self.assertTrue(call("fusion-results", [source(value)])["isError"])
+        output = project(detail())
+        output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
 
 
     def test_empty_and_whitespace_answers_preserve_canonical_bytes_and_raw_synthesis(self):
@@ -463,7 +471,10 @@ class FusionReport(unittest.TestCase):
         value = detail()
         value["evidence"]["post"]["meta"]["judge"] = {
             "status": "failed", "failure_code": "invalid_judge", "error": "Judge reply invalid"}
-        self.assertTrue(call("fusion-report", [upstream(project(value))])["isError"])
+        self.assertTrue(call("fusion-results", [source(value)])["isError"])
+        output = project(detail())
+        output["rows"][1]["fields"]["board_post"] = value["evidence"]["post"]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
 
 
     def test_rejects_stale_rows_and_incomplete_coverage_scope(self):

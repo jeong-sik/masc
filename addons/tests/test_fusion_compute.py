@@ -75,10 +75,7 @@ class Host:
         if self.status == "answered":
             result["_meta"] = {"masc.lane_sampling": refs}
             return {"result": result}
-        terminal: dict[str, object] = {"status": self.status, "error": "Actual fixture failure"}
-        if self.status == "invalid_response":
-            terminal["response"] = copy.deepcopy(result)
-        terminal.update({"request": request_ref} if self.pending else {"evidence": refs})
+        terminal: dict[str, object] = {"status": self.status, "evidence": refs}
         return {"error": {"code": -32603, "message": json.dumps(terminal)}}
 
 
@@ -374,17 +371,17 @@ class FusionCompute(unittest.TestCase):
             host = Host(root, status="invalid_response")
             output = call(host, [source()], ping=True)["structuredContent"]
             fields = output["rows"][0]["fields"]
-            self.assertEqual(fields["sampling_response"]["model"], "")
-            self.assertEqual(fields["sampling_response"]["content"]["text"], host.text)
-            self.assertEqual(fields["validation_error"], "Fusion requires an actual response model")
+            self.assertIsNone(fields["sampling_response"])
+            self.assertIsNone(fields["validation_error"])
             terminal = json.loads(fields["sampling_error"]["message"])
-            self.assertEqual(terminal["response"]["content"], fields["sampling_response"]["content"])
+            self.assertEqual(set(terminal), {"status", "evidence"})
+            self.assertNotIn("Actual fixture failure", fields["sampling_error"]["message"])
             self.assertFalse(call_report("fusion-report", [upstream(output)])["isError"])
             judged = call(Host(root), [upstream(output)], binding("judge"), ping=True)
             self.assertFalse(judged["isError"])
             self.assertFalse(judged["structuredContent"]["rows"][0]["fields"]["input_complete"])
             omitted = copy.deepcopy(output)
-            omitted["rows"][0]["fields"].update(sampling_response=None, validation_error=None)
+            omitted["rows"][0]["fields"].update(sampling_response={"model": "forged"}, validation_error=None)
             self.assertTrue(call_report("fusion-report", [upstream(omitted)])["isError"])
             for key, value in (("error", "invented"), ("status", "answered"), ("response", {}), ("evidence", {})):
                 forged = copy.deepcopy(output)
@@ -399,7 +396,10 @@ class FusionCompute(unittest.TestCase):
                 host = Host(root, status=status)
                 output = call(host, [source()])["structuredContent"]
                 fields = output["rows"][0]["fields"]
-                self.assertEqual(set(fields["sampling_response"]["_meta"]), {"masc.lane_sampling"})
+                if status == "answered":
+                    self.assertEqual(set(fields["sampling_response"]["_meta"]), {"masc.lane_sampling"})
+                else:
+                    self.assertIsNone(fields["sampling_response"])
                 outcome = host.records[fields["model_evidence"]["outcome"]["sha256"]]
                 self.assertIn("masc.lane_host", outcome["response"]["_meta"])
                 observed = upstream(output)
@@ -407,6 +407,8 @@ class FusionCompute(unittest.TestCase):
                 judged = call(Host(root), [observed], binding("judge"))
                 self.assertFalse(judged["isError"])
                 self.assertFalse(call_report("fusion-report", [observed])["isError"])
+                if fields["sampling_response"] is None:
+                    fields["sampling_response"] = copy.deepcopy(outcome["response"])
                 fields["sampling_response"]["_meta"]["provider_key"] = "forged credential"
                 self.assertTrue(call_report("fusion-report", [upstream(output)])["isError"])
 
@@ -615,7 +617,8 @@ class FusionCompute(unittest.TestCase):
                 item = output["rows"][0]
                 self.assertEqual(item["fields"]["computation"]["status"], status)
                 self.assertIsNone(item["fields"]["computation"]["text"])
-                self.assertIn("Actual fixture failure", item["fields"]["sampling_error"]["message"])
+                self.assertNotIn("Actual fixture failure", item["fields"]["sampling_error"]["message"])
+                self.assertEqual(set(json.loads(item["fields"]["sampling_error"]["message"])), {"status", "evidence"})
                 self.assertEqual(set(item["fields"]["model_evidence"]),
                                  {"request"} if pending else {"request", "outcome"})
                 judge = Host(root)

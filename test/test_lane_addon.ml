@@ -1118,6 +1118,61 @@ let test_fleet_service_isolates_blocked_recipient_and_admissions () =
       (member "delivery" original = member "delivery" replay);
     detach config id; await_phase clock config id "detached")
 
+let test_fleet_recovery_isolates_locked_journal_and_concurrent_admission () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id", `String id; "row_ids", `List [`String selected];
+        "broadcast", `Bool true; "request_id", `String operation]) |> unwrap in
+    let calls = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot = (fun ~config:_ ~caller:_ ~access:_ ->
+        Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender, ["keeper-a"; "keeper-b"]));
+      project = (fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls := (delivery.Workspace_broadcast.request_id, recipient) :: !calls;
+        Ok ())};
+    let _ = send "op-a" in
+    let ledger_root = Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery" in
+    let pending_dir = Filename.concat ledger_root "pending" in
+    let markers_a = Sys.readdir pending_dir |> Array.to_list in
+    check Alcotest.int "op-a creates one pending marker" 1 (List.length markers_a);
+    let marker_a = List.hd markers_a in
+    let journal_a = Filename.concat ledger_root marker_a in
+    let entered_lock = Atomic.make false in
+    let release_lock = Atomic.make false in
+    let hold_fiber = Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio_unix.run_in_systhread (fun () ->
+        Fs_compat.update_existing_private_file_durable_locked_result journal_a (fun _bytes ->
+          Atomic.set entered_lock true;
+          while not (Atomic.get release_lock) do
+            Unix.sleepf 0.002
+          done;
+          (None, Ok ())))) in
+    let hold_finished = ref false in
+    let finish_hold () =
+      if not !hold_finished then begin
+        hold_finished := true;
+        Atomic.set release_lock true;
+        ignore (Eio.Promise.await_exn hold_fiber)
+      end in
+    Fun.protect ~finally:finish_hold (fun () ->
+      await clock (fun () -> Atomic.get entered_lock);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      let _ = send "op-b" in
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-b");
+      check bool "op-b completes while op-a journal lock is held" true (fleet_complete config "op-b");
+      check bool "hold fiber is still holding op-a lock" false (Atomic.get release_lock);
+      finish_hold ();
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-a");
+      check bool "op-a completes after journal lock is released" true (fleet_complete config "op-a");
+      detach config id; await_phase clock config id "detached"))
+
 let test_broadcast_pending_commit_recovers_same_identity () =
   with_fixture (fun env sw config dir _ ->
     ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
@@ -1292,6 +1347,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_mcp_attribution_does_not_authorize_private_lane;
   test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
     test_fleet_service_isolates_blocked_recipient_and_admissions;
+  test_case "Fleet recovery isolates locked journal and concurrent admission" `Quick
+    test_fleet_recovery_isolates_locked_journal_and_concurrent_admission;
   test_case "private Broadcast retry uses saved visibility after binding removal" `Quick
     test_private_broadcast_retry_uses_saved_visibility;
   test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick

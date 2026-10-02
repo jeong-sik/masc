@@ -394,9 +394,28 @@ let test_corrupt_journal_does_not_block_other_operations () = fixture (fun root 
   check string "damaged evidence is preserved for operator repair" before (Fs_compat.load_file bad_path);
   check bool "damaged pending marker remains durable" true
     (Sys.file_exists (Filename.concat (Filename.concat root "pending") bad)))
+let test_pending_markers_and_reconcile () = fixture (fun root ledger ->
+  let accepted=require (D.admit ledger payload) in
+  let markers=require (D.pending_markers ledger) in
+  check int "pending markers list contains admitted marker" 1 (List.length markers);
+  let marker=List.hd markers in
+  let reconciled=require (D.reconcile ledger marker) in
+  check bool "reconcile returns pending receipt" true
+    (match reconciled with
+     | D.Pending receipt -> D.Request_id.equal receipt.record.workspace_request_id accepted.record.workspace_request_id
+     | _ -> false);
+  let _=require (D.commit ledger ~caller:payload.caller ~operation_id:operation ~seq:1) in
+  List.iter (fun recipient ->
+    ignore (require (D.recipient_result ledger ~caller:payload.caller ~operation_id:operation ~recipient D.Accepted)))
+    payload.recipients;
+  let reconciled_after=require (D.reconcile ledger marker) in
+  check bool "reconcile retires completed journal marker" true
+    (match reconciled_after with D.Retired -> true | _ -> false);
+  check int "pending markers is now empty" 0 (List.length (require (D.pending_markers ledger))))
 
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
   test_case "sender authority comes from verified standing" `Quick test_sender_snapshot_uses_verified_standing;
+  test_case "pending markers and per-journal reconcile lifecycle" `Quick test_pending_markers_and_reconcile;
   test_case "one damaged journal cannot block healthy deliveries" `Quick test_corrupt_journal_does_not_block_other_operations;
   test_case "recovery disappearance and torn evidence" `Quick test_recovery_disappearance_and_torn_journal;
   test_case "missing and invalid pending journals preserve evidence" `Quick test_pending_journal_loss_and_invalid_identity;

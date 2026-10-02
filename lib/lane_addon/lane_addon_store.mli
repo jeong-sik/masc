@@ -35,8 +35,9 @@ val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) re
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
-(** Publishes every directory ancestor before accepting a durable receipt,
-    including ancestors left visible by earlier failed publication attempts. *)
+(** Requires the configured root parent to exist as the workspace anchor.
+    Publishes the root and action directories, syncing each parent even on
+    retries after failed publication. Never opens ancestors above root.parent. *)
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Missing receipts return [None]. Existing receipts are accepted only after
     strictly syncing the exact opened file and parent directory, verifying the
@@ -49,11 +50,11 @@ val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Saf
     Repeated sends read that original artifact, not a changing live binding. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
-val sampling_requests : t -> instance_id:string -> (Yojson.Safe.t list, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
-(** Retain the authoritative terminal request/outcome link. The original request
-    index remains the pending intent; recovery and projection prefer this journal. *)
+(** Independently retain the terminal request/outcome link before replacing the
+    primary request index. Terminal records include exact [outcome_bytes] before
+    blob publication; recovery verifies the digest and restores a missing blob. *)
 val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
   f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
 (** Stream recovery records with bounded per-record reads and constant directory

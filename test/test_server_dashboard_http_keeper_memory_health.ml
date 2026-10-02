@@ -760,7 +760,7 @@ let test_context_cycle_separates_saved_and_prepared () =
   let position = B.position_of_messages messages |> get in
   let trace_id = "saved-trace" in
   let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
-    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+    { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
      history_at_start = B.Fresh_history; position}}] in
   let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"PRIVATE_WORKING_STATE"
     |> Result.map_error S.error_to_string |> get in
@@ -827,7 +827,7 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let position = B.position_of_messages messages |> get in
   let trace_id = "lagging-trace" in
   let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
-    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+    { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
      history_at_start = B.Fresh_history; position}}] in
   let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"a working state"
     |> Result.map_error S.error_to_string |> get in
@@ -907,7 +907,7 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
           { B.recorded_at = test_now
           ; event =
               B.Turn_ended
-                { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+                { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
                 ; history_at_start = B.Fresh_history
                 ; position
                 }
@@ -1041,7 +1041,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
     { B.recorded_at = test_now
     ; event =
         B.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
           ; history_at_start = B.Fresh_history
           ; position
           }

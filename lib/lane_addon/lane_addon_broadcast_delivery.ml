@@ -262,56 +262,67 @@ let recipient_result t ~caller ~operation_id ~recipient state =
           "state",`String status;"error",error] in
         let* next=transition r event |> Result.map_error (fun _ -> Conflict) in
         if next=r then Ok (None,r) else Ok (Some event,next))
-let recover_after_scan t ~after_scan = protect (fun () ->
+type journal_reconciliation =
+  | Pending of receipt
+  | Settled_with_cleanup of receipt
+  | Retired
+let pending_markers_after_scan t ~after_scan = protect (fun () ->
   let names = match Fs_compat.exact_path_kind (pending_dir t) with
     | Fs_compat.Exact_missing -> []
     | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
   after_scan ();
-  let recover_one recovery name =
-    if not (Filename.check_suffix name ".jsonl") then Ok recovery else
-    let digest=String.sub name 0 (String.length name-6) in
-    if not (valid_digest digest) then Error (Corrupt "invalid pending journal filename") else
-    let filename=Filename.concat t.root name in
-    let outcome=existing_transaction t filename
-      (fun bytes ->
-        let decoded=decode bytes in
-        (* Marker creation may precede a failed admission. Remove that empty
-           marker while still holding the journal lock, so a concurrent admit
-           must create its own marker after this cleanup. *)
-        let decoded=match decoded with
-          | Ok None -> Result.map (fun () -> None) (remove_marker t filename)
-          | Ok (Some _) | Error _ -> decoded in
-        None,decoded) in
-    let present = function
-      | None -> Error (Corrupt "pending journal is missing")
-      | Some result -> result in
-    let* record,settlement_error=match outcome with
-      | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) (present result)
-      | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
-          (match present value with
-           | Ok r -> Ok (r,Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-           | Error primary -> Error (Settlement_failed {primary;
-               cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
-      | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.private_jsonl_transaction_error_to_string e))
-      | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
-          Error (Settlement_failed {primary=Io_error (Fs_compat.private_jsonl_transaction_error_to_string error);
-            cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
-    match record with
-    | None -> (match settlement_error with None -> Ok recovery | Some detail -> Error (Io_error detail))
-    | Some record when filename<>path t record.payload.caller record.payload.operation_id ->
-        let primary=Corrupt "journal identity disagrees with its path" in
-        (match settlement_error with None -> Error primary
-         | Some cleanup -> Error (Settlement_failed {primary;cleanup}))
-    | Some record ->
-        let receipt=settle_marker t filename {record;settlement_error} in
-        let settlement_error=receipt.settlement_error in
-        if complete record then (match settlement_error with
-          | None -> Ok recovery
-          | Some _ -> Ok {recovery with settled_with_cleanup=receipt::recovery.settled_with_cleanup})
-        else Ok {recovery with pending=receipt::recovery.pending} in
+  Ok names)
+let pending_markers t = pending_markers_after_scan t ~after_scan:(fun () -> ())
+let reconcile t name = protect (fun () ->
+  if not (Filename.check_suffix name ".jsonl") then Ok Retired else
+  let digest=String.sub name 0 (String.length name-6) in
+  if not (valid_digest digest) then Error (Corrupt "invalid pending journal filename") else
+  let filename=Filename.concat t.root name in
+  let outcome=existing_transaction t filename
+    (fun bytes ->
+      let decoded=decode bytes in
+      (* Marker creation may precede a failed admission. Remove that empty
+         marker while still holding the journal lock, so a concurrent admit
+         must create its own marker after this cleanup. *)
+      let decoded=match decoded with
+        | Ok None -> Result.map (fun () -> None) (remove_marker t filename)
+        | Ok (Some _) | Error _ -> decoded in
+      None,decoded) in
+  let present = function
+    | None -> Error (Corrupt "pending journal is missing")
+    | Some result -> result in
+  let* record,settlement_error=match outcome with
+    | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) (present result)
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+        (match present value with
+         | Ok r -> Ok (r,Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+         | Error primary -> Error (Settlement_failed {primary;
+             cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
+    | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.private_jsonl_transaction_error_to_string e))
+    | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+        Error (Settlement_failed {primary=Io_error (Fs_compat.private_jsonl_transaction_error_to_string error);
+          cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
+  match record with
+  | None -> (match settlement_error with None -> Ok Retired | Some detail -> Error (Io_error detail))
+  | Some record when filename<>path t record.payload.caller record.payload.operation_id ->
+      let primary=Corrupt "journal identity disagrees with its path" in
+      (match settlement_error with None -> Error primary
+       | Some cleanup -> Error (Settlement_failed {primary;cleanup}))
+  | Some record ->
+      let receipt=settle_marker t filename {record;settlement_error} in
+      let settlement_error=receipt.settlement_error in
+      if complete record then (match settlement_error with
+        | None -> Ok Retired
+        | Some _ -> Ok (Settled_with_cleanup receipt))
+      else Ok (Pending receipt))
+
+let recover_after_scan t ~after_scan = protect (fun () ->
+  let* names = pending_markers_after_scan t ~after_scan in
   let recovery=List.fold_left (fun recovery name ->
-    match protect (fun () -> recover_one recovery name) with
-    | Ok next -> next
+    match reconcile t name with
+    | Ok Retired -> recovery
+    | Ok (Pending receipt) -> {recovery with pending=receipt::recovery.pending}
+    | Ok (Settled_with_cleanup receipt) -> {recovery with settled_with_cleanup=receipt::recovery.settled_with_cleanup}
     | Error error -> {recovery with rejected=(name,error)::recovery.rejected})
     {pending=[];settled_with_cleanup=[];rejected=[]} names in
   Ok {pending=List.rev recovery.pending;
@@ -322,4 +333,6 @@ let recover t = recover_after_scan t ~after_scan:(fun () -> ())
 module For_testing = struct
   let create ~root ~io = {root;io=Some io}
   let recover = recover_after_scan
+  let pending_markers = pending_markers_after_scan
+  let reconcile = reconcile
 end

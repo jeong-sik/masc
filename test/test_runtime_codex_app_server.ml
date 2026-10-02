@@ -495,6 +495,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
             ; Dynamic_tool_started
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
+            ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] ->
             check string
@@ -540,6 +541,7 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
+           ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
@@ -4073,7 +4075,7 @@ for line in sys.stdin:
     let boundary : Keeper_turn_boundaries.record =
       { recorded_at = 1.
       ; event = Keeper_turn_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
           ; history_at_start = Fresh_history
           ; position = Atom_history
               { end_atom = 4; last_atom_digest = Option.get (digest_at 3) }
@@ -4861,6 +4863,106 @@ let test_agent_message_delta_without_item_id_streams () =
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
+;;
+
+let test_completed_message_streams_without_delta () =
+  let events = ref [] in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      item_completed; turn_completed] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ ->
+      match List.rev !events with
+      | [Runtime_codex_app_server.Turn_started _;
+         Text_delta {item_id=Some "message-1"; delta="MASC_SUBSCRIPTION_OK"};
+         Turn_finished {text="MASC_SUBSCRIPTION_OK"}] -> ()
+      | _ -> fail "completed assistant item must reach live output before the turn ends")
+;;
+
+let test_mixed_item_identity_keeps_delta_order () =
+  let delta item_id text =
+    Yojson.Safe.to_string (`Assoc ["method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  List.iter (fun (first, second) ->
+    let events = ref [] in
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+        delta first "MASC_"; delta second "SUBSCRIPTION_OK"; item_completed;
+        delta (Some "message-next") "NEXT";
+        {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"message-next","text":"NEXT","phase":"commentary"}}}|};
+        turn_completed] (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ ->
+        let text = List.rev !events |> List.filter_map (function
+          | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+          |> String.concat "" in
+        check string "mixed identity neither repeats nor poisons the next item"
+          "MASC_SUBSCRIPTION_OKNEXT" text))
+    [None, Some "message-1"; Some "message-1", None]
+;;
+
+let test_anonymous_completion_closes_current_item () =
+  let delta item_id text = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  let complete text phase = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc ["type", `String "agentMessage"; "text", `String text; "phase", `String phase]]]) in
+  List.iter (fun first_id ->
+    let events = ref [] in
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+        delta first_id "A"; complete "A" "commentary";
+        delta None "B"; complete "B" "final_answer"; turn_completed]
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok _ ->
+            let text = List.rev !events |> List.filter_map (function
+              | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+              |> String.concat "" in
+            check string "anonymous completion consumes the current item once" "AB" text))
+    [None; Some "first-item"]
+;;
+
+let test_blank_completion_closes_identity_across_four_messages () =
+  let delta item_id text = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  let complete item_id text phase = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc (["type", `String "agentMessage"; "text", `String text;
+          "phase", `String phase] @ match item_id with None -> [] | Some id -> ["id", `String id])]]) in
+  let terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  List.iter (fun blank ->
+    List.iter (fun first_id ->
+      List.iter (fun first_completion_id ->
+        List.iter (fun second_completion_id ->
+          let events = ref [] in
+          with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+              delta first_id blank; complete first_completion_id blank "commentary";
+              delta None "B"; complete second_completion_id "B" "commentary";
+              delta (Some "n+2") "C"; complete (Some "n+2") "C" "commentary";
+              delta (Some "n+3") "D"; complete (Some "n+3") "D" "final_answer";
+              terminal] (fun path ->
+            match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok result ->
+                let text = List.rev !events |> List.filter_map (function
+                  | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+                  |> String.concat "" in
+                check string "blank completion cannot poison or repeat the next messages"
+                  (blank ^ "BCD") text;
+                check string "last named message remains the final answer" "D" result.text))
+          [None; Some "n+1"])
+        [None; Some "n"])
+      [None; Some "n"])
+    [""; "\n"]
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -7227,7 +7329,15 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
+    [ ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
+            test_blank_completion_closes_identity_across_four_messages
+        ; test_case "anonymous completion closes current item" `Quick
+            test_anonymous_completion_closes_current_item
+        ; test_case "mixed optional item identities preserve order" `Quick
+            test_mixed_item_identity_keeps_delta_order
+        ; test_case "completed text streams even without token deltas" `Quick
+            test_completed_message_streams_without_delta
+        ; test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
       , [ test_case "empty overflow retry survives the next production turn" `Quick
             test_production_empty_retry_boundary_survives_the_next_turn

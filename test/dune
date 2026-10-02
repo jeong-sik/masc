@@ -1,3 +1,4 @@
+(include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 
 (test
@@ -3696,6 +3697,8 @@
  (libraries masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
+  masc.fusion_core
+  masc_tui_fetched
   alcotest
   ast_grep
   astring
@@ -4156,6 +4159,7 @@
   masc
   masc_workspace
   masc_tui_agenda
+  masc_tui_home
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_types
@@ -4658,6 +4662,17 @@
  (alias runtest-test_tui_keyboard_overview_pty)
  (deps test_tui_keyboard_overview_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_keyboard_overview_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_home_decision_receipt_pty)
+ (deps test_tui_home_decision_receipt_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_decision_receipt_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_decision_receipt_pty)))
 
 (rule
  (alias runtest-test_tui_home_receipt_pty)
@@ -6006,6 +6021,7 @@
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_tui_voice_pane_fills_its_height.inc)
+(include stanzas/test_tui_voice_selection_viewport_pty.inc)
 (include stanzas/test_tui_runtime_params_viewport_pty.inc)
 (include stanzas/test_tui_runtime_picker_width_pty.inc)
 (include stanzas/test_tui_keeper_metadata_wrap_pty.inc)
@@ -7330,7 +7346,6 @@
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
-(include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -7443,7 +7458,7 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
- (deps ../addons/protocol.py ../addons/fusion_sampling.py ../addons/output-statistics/server.py
+ (deps ../addons/fusion_judge.py ../addons/fusion_sampling.py ../addons/protocol.py ../addons/output-statistics/server.py
        ../addons/msx-observer/server.py ../addons/tests/test_packages.py
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
@@ -7802,7 +7817,7 @@
 (include stanzas/test_tui_schedule_detail_viewport_pty.inc)
 (rule
  (alias runtest-test_tui_keeper_create_journey_pty)
- (deps test_tui_keeper_create_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_keeper_create_journey_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_keeper_create_journey_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7856,7 +7871,10 @@
  (name runtest)
  (deps (alias runtest-test_tui_home_decision_cards_pty)))
 
-(rule (alias runtest-test_tui_palette_input_viewport_pty)
+
+
+(rule
+ (alias runtest-test_tui_palette_input_viewport_pty)
  (deps test_tui_palette_input_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_palette_input_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -7874,6 +7892,84 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(include stanzas/test_tui_surface_studio_pty.inc)
+
+(rule
+ (alias runtest-test_tui_home_failure_task_pty)
+ (deps test_tui_home_failure_task_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_failure_task_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_failure_task_pty)))
+
+(rule
+ (alias runtest-test_tui_home_queue_identity_pty)
+ (deps test_tui_home_queue_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_queue_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_queue_identity_pty)))
+
+(rule
+ (alias runtest-test_tui_home_overflow_pty)
+ (deps test_tui_home_overflow_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_overflow_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_overflow_pty)))
+
+(rule
+ (alias runtest-test_tui_home_identity_decision_pty)
+ (deps test_tui_home_identity_decision_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_identity_decision_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_identity_decision_pty)))
+
+(rule
+ (alias runtest-test_tui_home_question_recovery_pty)
+ (deps test_tui_home_question_recovery_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_question_recovery_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_question_recovery_pty)))
+
+(rule
+ (alias runtest-test_tui_home_composer_focus_pty)
+ (deps test_tui_home_composer_focus_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_composer_focus_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_composer_focus_pty)))
+
+(rule
+ (alias runtest-test_tui_home_scoped_identity_pty)
+ (deps test_tui_home_scoped_identity_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_scoped_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_scoped_identity_pty)))
 
 (alias
  (name runtest-test_tui_voice_wizard_pty)
@@ -7976,7 +8072,7 @@
 (test
  (name test_lane_addon_broadcast_delivery)
  (modules test_lane_addon_broadcast_delivery)
- (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix))
+ (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix yojson))
 
 
 
@@ -8051,3 +8147,32 @@
 
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
+
+(rule
+ (alias runtest-test_prepare_keeper_collaboration)
+ (deps
+  test_prepare_keeper_collaboration.py
+  ../scripts/prepare-keeper-collaboration.py
+  ../scripts/prepare-fusion-decision-live.py)
+ (action (run python3 %{dep:test_prepare_keeper_collaboration.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_prepare_keeper_collaboration)))
+
+(rule
+ (alias runtest-test_keeper_continuity_admission)
+ (deps
+  test_keeper_continuity_admission.py
+  ../scripts/harness/workload/keeper_continuity_validation.sh
+  ../config/tools/masc_keeper_up.toml)
+ (action (run python3 %{dep:test_keeper_continuity_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_continuity_admission)))
+
+(test
+ (name test_server_keeper_build_maintenance)
+ (modules test_server_keeper_build_maintenance)
+ (libraries alcotest masc masc_server masc_test_deps unix))

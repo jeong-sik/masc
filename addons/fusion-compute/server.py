@@ -197,21 +197,9 @@ def observe(binding: dict, sources: tuple[Source, ...], client: SamplingClient) 
         status = terminal.get("status")
         if status not in ("host_error", "outcome_unknown", "invalid_response"):
             raise InvalidInput("Unsupported host failure outcome")
-        if "evidence" in terminal:
-            refs = model_references(terminal["evidence"])
-        elif status == "outcome_unknown":
-            # A post-call retention failure names only the durable request.
-            refs = {"request": retained([terminal.get("request")], "model request")[0]}
-        else:
-            raise InvalidInput("Terminal host failure has no outcome reference")
-        if status == "invalid_response":
-            response = dict(object_value(terminal.get("response"), "host rejected response"))
-            metadata = dict(object_value(response.get("_meta", {}), "sampling metadata"))
-            metadata["masc.lane_sampling"] = refs
-            response["_meta"] = metadata
-            validation_error = response_problem(response)
-            if validation_error is None:
-                raise InvalidInput("Host rejected response has no validation failure")
+        if set(terminal) != {"status", "evidence"}:
+            raise InvalidInput("Host failures must expose only neutral status and evidence")
+        refs = model_references(terminal["evidence"], pending=status == "outcome_unknown")
         computation = {"analysis_id": analysis_id, "role": role.value, "status": status,
                        "model": None, "text": None, "stop_reason": None}
     references.extend(refs.values())

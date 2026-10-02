@@ -39,24 +39,16 @@ def terminal_error(error, computation, refs):
             or error.get("data") is not None):
         raise InvalidInput("Sampling error envelope differs from the host callback error")
     try:
-        terminal = object_value(json.loads(error.get("message")), "sampling terminal error")
+        terminal = object_value(json.loads(string(error.get("message"), "sampling_error.message")), "sampling terminal error")
     except (json.JSONDecodeError, TypeError) as cause:
         raise InvalidInput("Sampling error must retain the host terminal outcome") from cause
     if terminal.get("status") != computation["status"]:
         raise InvalidInput("Computation status differs from the host terminal outcome")
-    keys = {"status", "error", "evidence"}
-    if terminal["status"] == "invalid_response":
-        keys.add("response")
-    elif terminal["status"] == "outcome_unknown" and "request" in terminal:
-        keys = {"status", "error", "request"}
-    if set(terminal) != keys or not isinstance(terminal.get("error"), str):
-        raise InvalidInput("Sampling terminal fields differ from the host outcome contract")
+    if set(terminal) != {"status", "evidence"}:
+        raise InvalidInput("Sampling terminal fields differ from the redacted host outcome contract")
     expected = terminal.get("evidence")
-    if expected is not None and (not isinstance(expected, dict) or "outcome" not in expected):
-        raise InvalidInput("Terminal evidence requires an attested outcome")
-    if expected is None and terminal["status"] == "outcome_unknown" and "request" in terminal:
-        expected = {"request": terminal["request"]}
-    if expected != refs or ("request" in terminal and terminal["request"] != refs.get("request")):
+    if (not isinstance(expected, dict) or set(expected) not in ({"request"}, {"request", "outcome"})
+            or expected != refs):
         raise InvalidInput("Model evidence differs from the host terminal outcome")
     return terminal
 
@@ -83,7 +75,7 @@ def validate_host_receipt(computation, fields, refs, row_evidence, receipts):
         actual = object_value(terminal.get("response"), "host sampling response")
         if terminal.get("status") == "invalid_response" and computation["status"] == "invalid_response":
             failure = terminal_error(fields.get("sampling_error"), computation, refs)
-            if failure.get("error") != terminal.get("error") or failure.get("response") != actual:
+            if failure.get("status") != terminal.get("status"):
                 raise InvalidInput("Computation differs from the host-retained sampling failure")
         elif terminal.get("status") != "answered" or fields.get("sampling_error") is not None:
             raise InvalidInput("Computation response was not returned by host sampling")
@@ -105,12 +97,10 @@ def validate_host_receipt(computation, fields, refs, row_evidence, receipts):
         if supplied != expected:
             raise InvalidInput("Computation differs from the host-retained sampling response")
     else:
-        if terminal.get("status") == "invalid_response" and terminal.get("response") is not None:
-            raise InvalidInput("Invalid response must preserve the host-retained response")
         if terminal.get("status") != computation["status"]:
             raise InvalidInput("Computation contradicts the host sampling terminal status")
         failure = terminal_error(fields.get("sampling_error"), computation, refs)
-        if failure.get("error") != terminal.get("error"):
+        if failure.get("status") != terminal.get("status"):
             raise InvalidInput("Computation differs from the host-retained sampling failure")
 
 

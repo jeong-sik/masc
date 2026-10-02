@@ -24,6 +24,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_items.ml",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_loader.ml",
     "lib/tui_decode.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",

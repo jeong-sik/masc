@@ -13199,6 +13199,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.keeper_deletions_cursor <- (match find 0 inventory.operations with
             | Some i -> i | None -> 0))
   | Keeper_action_done (origin, keeper_name, action, result) ->
+      let origin_matches =
+        Option.for_all
+          (fun expected ->
+            Masc_tui_types.server_workspace_matches ~expected:(Some expected)
+              (match state.server_identity with
+               | Some current -> Ok current
+               | None -> Error "workspace unread"))
+          origin
+      in
+      if origin_matches then begin
       apply_keeper_action_result state ~base_path keeper_name action result;
       (* A paused or shut-down Keeper still routes its channels to itself, and
          answers on them the moment it runs again. Read the bindings fresh
@@ -13245,6 +13255,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+      end
   | Board_new_post_done { reply_to; sent_draft; result } ->
       Masc_tui_board_updates.new_post_done state ~reply_to ~sent_draft
         ~report:(report_action state)

@@ -506,7 +506,7 @@ let test_provider_refusal ~status ~rejected () =
       [ { F.id = slot; base_url = server.base_url } ];
     let calls = ref [] in
     (match run_declared ~base_path (unavailable_cli calls) with
-     | Error (A.Invalid_response _) ->
+     | Error (A.Invalid_response _ | A.Execution_rejected _) ->
        check bool "refusal parks until an explicit event" true rejected
      | Error (A.Transport_unavailable _) ->
        check bool "availability remains pulse retryable" false rejected

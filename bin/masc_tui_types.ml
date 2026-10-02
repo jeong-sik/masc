@@ -5238,6 +5238,8 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  (* URL-free waiting intent belongs to the admitting workspace and provider. *)
+  mutable identity_login_intents: (Tui_decode.server_identity * string * string) list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -6202,6 +6204,37 @@ type state = {
   refresh_interval: float;
 }
 
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
+let reconcile_identity_login_intents (state : state) reading =
+  match reading with
+  | Ok (current : Tui_decode.server_identity)
+    when current.sid_base_path <> "" && current.sid_masc_root <> "" ->
+      state.identity_login_intents <- List.filter
+        (fun (origin, _, _) ->
+          String.equal (canonical_path origin.Tui_decode.sid_base_path)
+            (canonical_path current.sid_base_path)
+          && String.equal (canonical_path origin.sid_masc_root)
+               (canonical_path current.sid_masc_root))
+        state.identity_login_intents
+  | Ok _ | Error _ -> ()
+
+let identity_login_pending_keepers (state : state) =
+  state.identity_login_intents
+  |> List.filter_map (fun (origin, keeper, _) ->
+       if server_workspace_matches ~expected:(Some origin)
+            (match state.server_identity with Some current -> Ok current | None -> Error "unread")
+       then Some keeper else None)
+  |> List.sort_uniq String.compare
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
@@ -6238,6 +6271,10 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider) ->
+      not (String.equal keeper keeper_name && String.equal provider provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6248,9 +6285,19 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_workspace_matches ~expected:(Some origin) (Ok origin) ->
+       state.identity_login_intents <-
+         (origin, login.ils_keeper, login.ils_provider) :: state.identity_login_intents
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider_id) ->
+      not (String.equal keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -7959,6 +8006,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_intents = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;

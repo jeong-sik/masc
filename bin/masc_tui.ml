@@ -10142,14 +10142,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
   state.keeper_usage <- Keeper_usage_unread;
-  state.github_identity_view <- None;
-  state.github_identity_view_error <- None;
-  state.identity_view <- None;
-  state.identity_view_error <- None;
-  state.identity_logins <- [];
-  state.identity_login_requests <- [];
-  state.identity_app_form <- None;
-  state.identity_attempt_error <- None;
+  Masc_tui_types.withdraw_identity_readings state;
   state.github_token_input <- None;
   state.github_token_save_status <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
@@ -10184,6 +10177,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
    | _ -> ())
 
 let apply_server_identity_reading state reading =
+  Masc_tui_types.reconcile_identity_login_intents state reading;
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -10921,18 +10915,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        waiting for it. Same shape as the chat reload above, and for the same
        reason: a pane that read once on open showed a fact that had since
        changed. *)
-    (if
-       (not was_booting)
-       && state.view = Keepers Keeper_detail
-       && state.detail_tab = Detail_identity
-     then
-       match selected_keeper state with
-       | Some keeper when identity_logins_for_keeper state keeper.k_name <> []
-           && Option.is_none
-             (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
-                ~keeper:keeper.k_name) ->
-           Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-       | Some _ | None -> ());
+    (if not was_booting then
+      Masc_tui_types.identity_login_pending_keepers state
+      |> List.iter (fun keeper_name ->
+           if Option.is_none
+                (Masc_tui_types.pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
+           then Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state mailbox) keeper_name));
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. The

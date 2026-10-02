@@ -15,6 +15,9 @@ val keeper_message_find_scroll :
   older_than:Masc_tui_types.msg_anchor option ->
   (int * Masc_tui_types.msg_anchor) option
 
+val keeper_message_clock : float -> string
+(** Format a conversation timestamp in the renderer's local timezone. *)
+
 val render_keeper_message :
   Masc_tui_types.state ->
   Masc_tui_render_prim.Frame_presenter.frame *

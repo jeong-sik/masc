@@ -49,6 +49,8 @@
 
 ### Complete change record
 
+- Final RC repairs retain local chat drafts across unread identity, preserve pre-tool progress and dispatch spans, and withdraw Item monetary facts without a current roster revision. Typed Librarian capacity evidence, Candle refusal classification and narrow Work backlog counts are also corrected. (#40820, #40829, #40831, #40833, #40838)
+
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
 
 ## [0.48.0] - 2026-09-29

@@ -312,10 +312,12 @@ val run_autonomous_if_idle
     with that exception, so the callback's own return value is not available. *)
 
 val run_maintenance_if_idle
-  :  t
+  :  ?defer_to_chat:bool
+  -> t
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
-(** Mailbox-linearized exclusive maintenance attempt. *)
+(** Mailbox-linearized exclusive maintenance attempt. [defer_to_chat] fences
+    background work behind queued/running chat and unavailable operation stores. *)
 
 val begin_shutdown
   :  t

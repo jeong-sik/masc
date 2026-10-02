@@ -223,6 +223,108 @@ let test_keeper_up_route_classifies_and_extracts () =
        Server_dashboard_http_keeper_api.keeper_suffix_up)
 ;;
 
+let test_keeper_up_workspace_precondition () =
+  let module Lifecycle = Server_dashboard_http_keeper_api_lifecycle_post in
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_root_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let expected base root = `Assoc ["base_path", `String base; "masc_root", `String root] in
+    let declaration = ["name", `String "new-keeper"; "create_only", `Bool true] in
+    let args workspace = `Assoc (("expected_workspace", workspace) :: declaration) in
+    (match Lifecycle.validate_up_workspace ~config (args (expected base root)) with
+     | Ok json ->
+       check bool "transport precondition removed, declaration retained" true
+         (json = `Assoc declaration)
+     | Error _ -> fail "matching canonical workspace refused");
+    check bool "ordinary Up clients retain their contract" true
+      (Lifecycle.validate_up_workspace ~config (`Assoc declaration) = Ok (`Assoc declaration));
+    List.iter (fun workspace ->
+      check bool "replacement workspace is refused before dispatch" true
+        (Lifecycle.validate_up_workspace ~config (args workspace)
+         = Error Lifecycle.Workspace_precondition_failed))
+      [expected (base ^ "-other") root; expected base (root ^ "-other")];
+    List.iter (fun workspace ->
+      check bool "malformed precondition fails closed" true
+        (Lifecycle.validate_up_workspace ~config (args workspace)
+         = Error Lifecycle.Invalid_workspace_precondition))
+      [`Null; `Assoc []; expected "" root; expected "." root;
+       `Assoc ["base_path", `String base; "masc_root", `Bool true]];
+    check bool "duplicate transport preconditions refused" true
+      (Lifecycle.validate_up_workspace ~config
+        (`Assoc (("expected_workspace", expected base root)
+          :: ("expected_workspace", expected base root) :: declaration))
+       = Error Lifecycle.Invalid_workspace_precondition);
+    Unix.rmdir (Workspace.masc_root_dir config);
+    check bool "unreadable receiving root fails closed" true
+      (Lifecycle.validate_up_workspace ~config (args (expected base root))
+       = Error Lifecycle.Workspace_precondition_failed))
+
+let test_gate_resolve_workspace_precondition () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_root_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let request base_path masc_root =
+      `Assoc
+        [ "id", `String "absent-approval"
+        ; "decision", `String "approve"
+        ; "expected_workspace", `Assoc
+            [ "base_path", `String base_path
+            ; "masc_root", `String masc_root ] ]
+    in
+    let resolve args =
+      Server_dashboard_http.dashboard_gate_resolve_http_json
+        ~workspace_config:config ~base_path:base ~created_by:"operator"
+        ~args ()
+    in
+    (match resolve (request (base ^ "-replaced") root) with
+     | Error (Server_dashboard_http.Bad_request "workspace precondition failed") -> ()
+     | _ -> fail "Gate accepted a replaced workspace before resolution");
+    (match resolve (request base root) with
+     | Error (Server_dashboard_http.Gone _)
+     | Error (Server_dashboard_http.Unavailable _) -> ()
+     | _ -> fail "matching Gate workspace did not reach approval lookup"))
+
+let test_gate_retry_workspace_precondition () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_root_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let expected base_path masc_root =
+      `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ]
+    in
+    let retry fields =
+      Server_dashboard_http.dashboard_gate_retry_http_json
+        ~workspace_config:config ~base_path:base ~requested_by:"operator"
+        ~args:(`Assoc fields)
+    in
+    let expect_error label expected result =
+      match result with
+      | Error actual -> check string label expected actual
+      | Ok _ -> fail (label ^ ": retry unexpectedly admitted")
+    in
+    (* Invalid row data would fail with [id is required] after admission.
+       Refusal must precede row parsing, and therefore all queue mutation. *)
+    expect_error "foreign base refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected (base ^ "-other") root ]);
+    expect_error "foreign root refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected base (root ^ "-other") ]);
+    expect_error "duplicate precondition refused" "invalid expected_workspace precondition"
+      (retry [ "expected_workspace", expected base root
+             ; "expected_workspace", expected base root ]);
+    expect_error "matching workspace reaches row parser" "retry request.id is required"
+      (retry [ "expected_workspace", expected base root ]);
+    expect_error "unbound dashboard request keeps existing parser" "retry request.id is required"
+      (retry []))
+
+
 let test_keeper_memory_cleanup_routes_and_closed_requests () =
   let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
   let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
@@ -2389,7 +2491,7 @@ let test_gate_resolve_requires_reason_on_reject () =
     Server_dashboard_http.dashboard_gate_resolve_http_json
       ~base_path:"/nonexistent/base/path"
       ~created_by:"regression-test"
-      ~args:(`Assoc fields)
+      ~args:(`Assoc fields) ()
   in
   let expect_bad_request label result =
     match result with
@@ -7557,6 +7659,12 @@ let () =
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper up route classifies and extracts" `Quick
             test_keeper_up_route_classifies_and_extracts;
+          test_case "keeper up binds mutation to probed workspace" `Quick
+            test_keeper_up_workspace_precondition;
+          test_case "Gate resolve binds to receiving workspace" `Quick
+            test_gate_resolve_workspace_precondition;
+          test_case "Gate retry workspace precondition" `Quick
+            test_gate_retry_workspace_precondition;
           test_case "keeper memory cleanup routes and requests are closed" `Quick
             test_keeper_memory_cleanup_routes_and_closed_requests;
           test_case "keeper sensitive GET permissions are exact" `Quick

@@ -80,7 +80,8 @@ val resource_contents_of_body :
 (** Read every [resources/read] content part without discarding its MIME type. *)
 
 val task_cancel_arguments :
-  task_id:string -> reason:string -> (string * Yojson.Safe.t) list
+  task_id:string -> reason:string -> expected_workspace:Masc.Tui_decode.server_identity ->
+  (string * Yojson.Safe.t) list
 (** The [masc_transition] arguments for an operator cancel. Exit-class on the
     tool contract, so the one typed reason is sent as both [reason] and the
     required non-empty [handoff_context.summary]. *)

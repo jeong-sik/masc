@@ -128,9 +128,8 @@ val run_local_playback :
 (** {1 Filesystem layout} *)
 
 val masc_base_dir : unit -> string
-(** [<base_path>/.masc/]. Resolves [base_path] from
-    [Env_config_core.base_path_opt], falling back to the nearest git
-    root walking up from CWD. *)
+(** [<base_path>/.masc/]. Resolves [base_path] through the canonical workspace
+    resolver. Raises [Invalid_argument] when no workspace can be resolved. *)
 
 val ensure_audio_dir : unit -> unit
 (** [mkdir -p <masc_base_dir>/audio]. *)

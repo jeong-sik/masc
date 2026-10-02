@@ -1040,6 +1040,17 @@ let work_volume_trim_name ~keeper_name =
    (measured in [masc-sandbox:general] and [masc-keeper-sandbox:local]). *)
 let fstrim_guest_path = "/usr/sbin/fstrim"
 
+(* The ext4 default survives the helper's unmount and makes later keeper
+   deletes discard their blocks without granting the keeper capabilities.
+   Resolve the mounted device instead of assuming a virtio disk number. *)
+let work_volume_reclaim_script =
+  Printf.sprintf
+    "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target %s)\n\
+     /usr/sbin/tune2fs -o discard \"$work_device\"\n\
+     %s -v %s"
+    trim_guest_root fstrim_guest_path trim_guest_root
+;;
+
 (** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
     blocks allocated on the host until something discards them. The virtio
     disk does accept discard ([discard_max_bytes] 274877906944 on
@@ -1053,7 +1064,8 @@ let fstrim_guest_path = "/usr/sbin/fstrim"
     on container 1.3.1, [--user 0 --cap-add CAP_SYS_ADMIN] gives [CapEff]
     00000000a82425fb (the default set plus SYS_ADMIN), and with [--cap-drop
     ALL] first it is 0000000000200000, SYS_ADMIN only. The root is read-only
-    and the network is off, and [fstrim] is the entrypoint, so the image's
+    and the network is off. A fixed shell script enables ext4 discard and
+    runs [fstrim] by absolute path, so the image's
     own entrypoint ([opam] on the ocaml image) never runs with the
     capability. *)
 let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
@@ -1061,9 +1073,9 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
   @ [ "run"; "--rm"; "--name"; work_volume_trim_name ~keeper_name
     ; "--user"; "0"; "--cap-drop"; "ALL"; "--cap-add"; trim_capability
     ; "--network"; "none"; "--read-only"
-    ; "--entrypoint"; fstrim_guest_path
+    ; "--entrypoint"; "/bin/sh"
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "-v"; trim_guest_root ]
+    ; image; "-eu"; "-c"; work_volume_reclaim_script ]
 ;;
 
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =

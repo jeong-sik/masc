@@ -125,6 +125,56 @@ let test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter () =
   check int "nobody is left in the queue" 0 snapshot.Slot_scheduler.queue_length
 ;;
 
+(* Time can pass between calculating the remaining budget and arming the
+   timer (mutex contention, or descheduling). Move the real mock clock
+   immediately after the first reading. A relative timer then sleeps until
+   1.5; an absolute timer still ends at the caller's original 1.0 deadline. *)
+let test_time_before_arming_the_timer_does_not_extend_the_deadline () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let underlying_clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time underlying_clock 0.0;
+  let advanced = ref false in
+  let module Clock = struct
+    type t = unit
+    type time = float
+    let now () =
+      let now = Eio.Time.now underlying_clock in
+      if not !advanced then (
+        advanced := true;
+        Eio_mock.Clock.set_time underlying_clock (deadline_s /. 2.0));
+      now
+    let sleep_until () time = Eio.Time.sleep_until underlying_clock time
+  end in
+  let clock = Eio.Resource.T ((), Eio.Time.Pi.clock (module Clock)) in
+  let scheduler = Slot_scheduler.create ~max_slots:1 in
+  Eio.Switch.run
+  @@ fun sw ->
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Slot_scheduler.with_permit scheduler (fun () -> Eio.Promise.await release));
+  let waiter =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s scheduler (fun () ->
+        fail "the held permit was never granted"))
+  in
+  check int "the request joined the permit queue" 1
+    (Slot_scheduler.snapshot scheduler).Slot_scheduler.queue_length;
+  Eio_mock.Clock.set_time underlying_clock deadline_s;
+  (match Eio.Promise.await_exn waiter with
+   | Error `Permit_wait_expired -> ()
+   | Ok () -> fail "the request ran without a permit");
+  check (float 0.0) "the original deadline ended the wait" deadline_s
+    (Eio.Time.now underlying_clock);
+  let snapshot = Slot_scheduler.snapshot scheduler in
+  check int "the holder still owns the permit" 1 snapshot.Slot_scheduler.active;
+  check int "the cancelled waiter left the queue" 0 snapshot.Slot_scheduler.queue_length;
+  Eio.Promise.resolve resolve_release ();
+  Eio.Fiber.yield ();
+  check int "the holder returned its permit" 0
+    (Slot_scheduler.snapshot scheduler).Slot_scheduler.active
+;;
+
 let () =
   Alcotest.run
     "slot scheduler deadline ownership"
@@ -141,6 +191,10 @@ let () =
             "a holder cancelled with the slot returns it to the next waiter"
             `Quick
             test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter
+        ; test_case
+            "time before arming the timer does not extend the deadline"
+            `Quick
+            test_time_before_arming_the_timer_does_not_extend_the_deadline
         ] )
     ]
 ;;

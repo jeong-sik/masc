@@ -9588,9 +9588,10 @@ let apply_keeper_roster_load state result =
   (match result with
   | Ok (roster, candle) ->
       state.candle_observation <-
-        (match state.server_identity with
-         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
-         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
+        (match state.workspace_identity, state.server_identity with
+         | Workspace_identity_match,
+           Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle
+         | _ -> None);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with

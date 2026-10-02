@@ -20,7 +20,11 @@ OUT, LOG, SOURCE_SHA, RUN_ID = args.out, args.log, args.source_sha, args.run_id
 records = []
 for line in LOG.read_text().splitlines():
     if 'HOME_JOURNEY_FRAME ' in line:
-        records.append(json.loads(line.split('HOME_JOURNEY_FRAME ', 1)[1]))
+        record = json.loads(line.split('HOME_JOURNEY_FRAME ', 1)[1])
+        # Combined CI also emits creation/layout/request frames. This artifact
+        # proves only the viewport suite's explicitly marked color variants.
+        if 'no_color' in record and record['name'] in ('unread', 'requests'):
+            records.append(record)
 assert len(records) == 12, len(records)
 assert 'Home viewport PTY: PASS (4 scenarios, 12 frames)' in LOG.read_text()
 OUT.mkdir(parents=True, exist_ok=True)
@@ -55,7 +59,34 @@ try:
                 page = context.new_page()
                 page.goto(f'http://127.0.0.1:{port}', wait_until='domcontentloaded')
                 page.wait_for_function('window.term && window.term.rows > 0')
+                page.wait_for_function('''window.term.options.fontSize === 14
+                    && window.term.options.fontFamily === 'Menlo'
+                    && document.querySelector('.xterm-rows')''')
                 page.evaluate('''async ({cols, rows, raw}) => {
+                    await document.fonts.ready;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    // ttyd's resize observer can fit the terminal after DOM
+                    // initialization. Set the container to exact cell geometry
+                    // first, let that observer settle, then replay at that size.
+                    const cell = window.term._core._renderService.dimensions.css.cell;
+                    const container = document.querySelector('#terminal-container');
+                    container.style.padding = '0';
+                    // The terminal's screen is the screenshot target. Parent
+                    // clipping must not hide its final composer row.
+                    for (let parent = window.term.element; parent; parent = parent.parentElement) {
+                        parent.style.overflow = 'visible';
+                    }
+                    // ttyd pads .terminal itself, not just its container.
+                    // A cell-grid-only container leaves the last row outside
+                    // the viewport background even with overflow visible.
+                    const style = getComputedStyle(window.term.element);
+                    const inset = side => parseFloat(style[`padding${side}`])
+                        + parseFloat(style[`border${side}Width`]);
+                    container.style.width = `${Math.ceil(cols * cell.width
+                        + inset('Left') + inset('Right'))}px`;
+                    container.style.height = `${Math.ceil(rows * cell.height
+                        + inset('Top') + inset('Bottom'))}px`;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                     window.term.reset(); window.term.resize(cols, rows);
                     const bytes = Uint8Array.from(atob(raw), c => c.charCodeAt(0));
                     await new Promise(resolve => window.term.write(bytes, resolve));
@@ -77,8 +108,26 @@ try:
                         return s.display === 'none' || s.visibility === 'hidden'
                             || s.opacity === '0' || el.getBoundingClientRect().width === 0; })''',
                     arg=f'{cols}x{rows}', timeout=5000)
-                page.locator('.xterm-screen').screenshot(path=str(OUT / (stem + '.png')))
+                capture = page.evaluate('''() => {
+                    const bounds = selector => document.querySelector(selector)
+                        .getBoundingClientRect().toJSON();
+                    const screen = bounds('.xterm-screen');
+                    const finalRow = bounds('.xterm-rows > div:last-child');
+                    const viewport = bounds('.xterm-viewport');
+                    const left = Math.floor(Math.min(screen.left, finalRow.left));
+                    const top = Math.floor(Math.min(screen.top, finalRow.top));
+                    const right = Math.ceil(Math.max(screen.right, finalRow.right));
+                    const bottom = Math.ceil(Math.max(screen.bottom, finalRow.bottom));
+                    return {screen, final_row: finalRow, viewport,
+                        dom_rows: document.querySelector('.xterm-rows').children.length,
+                        clip: {x: left + scrollX, y: top + scrollY,
+                            width: right - left, height: bottom - top}};
+                }''')
+                assert capture['dom_rows'] == rows, (stem, capture)
+                assert capture['viewport']['bottom'] >= capture['final_row']['bottom'], (stem, capture)
+                page.screenshot(path=str(OUT / (stem + '.png')), clip=capture['clip'])
                 record.update({'stem': stem, 'observed_terminal': geometry,
+                               'capture_geometry': capture,
                                'raw_sha256': hashlib.sha256(raw).hexdigest()})
                 record.pop('pty')
             finally:

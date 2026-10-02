@@ -284,6 +284,146 @@ let test_generation_pointer_failure_retry ~after_rename () =
     [false; true]
 ;;
 
+let test_pointerless_store_reseeds_only_a_fresh_seed () =
+  let seed_a = Masc_test_deps.antigravity_oauth_fixture "account-a" in
+  let seed_captured_orphan revision_dir ~seed =
+    (* The exact layout a process death between [Unix.mkdir] and the pointer
+       rename leaves behind. *)
+    let rec mkdir_p path =
+      if not (Sys.file_exists path) then begin
+        mkdir_p (Filename.dirname path);
+        Unix.mkdir path 0o700
+      end in
+    let gemini_dir = Filename.concat revision_dir ".gemini" in
+    let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
+    mkdir_p cli_dir;
+    Unix.mkdir (Filename.concat gemini_dir "config") 0o700;
+    write_file ~mode:0o600 (Filename.concat cli_dir "antigravity-oauth-token") seed in
+  (* A crash-window orphan plus the writer's staged temp reseeds. *)
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source seed_a;
+  let owner_leaf = "orphan-reseed" in
+  let store = Filename.concat runtime_root
+      (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+  let prepare () = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source in
+  let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+  seed_captured_orphan (Filename.concat store "00000000-0000-7000-8000-000000000000")
+    ~seed:seed_a;
+  write_file ~mode:0o600 (Filename.concat store ".atomic_dead_publish.tmp") "{partial";
+  let recovered = prepare () |> require_ok in
+  check bool "the crash-window orphan is cleared" false
+    (Sys.file_exists (Filename.concat store "00000000-0000-7000-8000-000000000000"));
+  check bool "the writer's staged temp is cleared" false
+    (Sys.file_exists (Filename.concat store ".atomic_dead_publish.tmp"));
+  check (list string) "only the fresh generation and pointer remain"
+    [Filename.basename (Runtime_antigravity_home.home_dir recovered); "current.json"]
+    (entries ());
+  check string "the fresh generation reseeds the selected account" seed_a
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered));
+  (* CLI state beyond a fresh seed refuses and is preserved untouched. *)
+  let second = Runtime_antigravity_home.home_dir recovered in
+  Unix.mkdir (Filename.concat (Filename.concat second ".gemini")
+      (Filename.concat "antigravity-cli" "cache")) 0o700;
+  Unix.unlink (Filename.concat store "current.json");
+  let snapshot = entries () in
+  (match prepare () with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "an unreferenced generation with CLI state was admitted");
+  check (list string) "refusal preserves every unreferenced entry" snapshot (entries ());
+  check bool "refusal preserves the CLI state" true
+    (Sys.is_directory (Filename.concat (Filename.concat second ".gemini")
+         (Filename.concat "antigravity-cli" "cache")));
+  (* Isolate the refreshed credential from the cache refusal above: its bytes
+     alone must prevent reseeding a pointerless fresh-layout generation. *)
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source seed_a;
+  let store = Filename.concat runtime_root
+      (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+  let prepare () = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source in
+  let third = Filename.concat store "00000000-0000-7000-8000-000000000001" in
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"vendor-refresh" "account-a" in
+  seed_captured_orphan third ~seed:refreshed;
+  check (list string) "only the refreshed generation is present"
+    [Filename.basename third] (Sys.readdir store |> Array.to_list);
+  (match prepare () with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "a vendor-refreshed unreferenced credential was discarded");
+  check bool "refusal preserves the refreshed credential's generation" true
+    (Sys.file_exists third);
+  check string "refusal preserves the refreshed credential bytes" refreshed
+    (Fs_compat.load_file (Filename.concat third ".gemini/antigravity-cli/antigravity-oauth-token"))
+;;
+
+let test_pointerless_store_preserves_entries_outside_managed_scope () =
+  List.iter (fun kind ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    write_file ~mode:0o600 oauth_source
+      (Masc_test_deps.antigravity_oauth_fixture "account-a");
+    let owner_leaf = "foreign-store-entry" in
+    let store = List.fold_left (fun parent leaf ->
+      let path = Filename.concat parent leaf in
+      Unix.mkdir path 0o700;
+      path) runtime_root ["official-clients"; "antigravity"; owner_leaf] in
+    (* A real pointer-writer temp must survive too: classify the whole store
+       before deleting any entry. *)
+    let temp, channel = Fs_compat.open_atomic_temp_file ~temp_dir:store () in
+    output_string channel "partial pointer";
+    close_out channel;
+    let path = Filename.concat store (match kind with
+      | `Atomic_directory | `Atomic_symlink | `Atomic_public | `Atomic_hardlink ->
+        ".atomic_foreign.tmp"
+      | `Unknown_directory -> "operator-notes"
+      | `Public_generation | `Public_child -> Random_id.uuid_v7 ()) in
+    let notes = Filename.concat path "notes" in
+    (match kind with
+     | `Atomic_directory ->
+       Unix.mkdir path 0o700;
+       write_file ~mode:0o600 notes "operator state"
+     | `Unknown_directory -> Unix.mkdir path 0o700
+     | `Public_generation ->
+       Unix.mkdir path 0o755;
+       Unix.chmod path 0o755
+     | `Public_child ->
+       Unix.mkdir path 0o700;
+       let child = Filename.concat path ".gemini" in
+       Unix.mkdir child 0o755;
+       Unix.chmod child 0o755
+     | `Atomic_symlink -> Unix.symlink oauth_source path
+     | `Atomic_public -> write_file ~mode:0o644 path "external file"
+     | `Atomic_hardlink -> Unix.link oauth_source path);
+    let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    let before = entries () in
+    (match Runtime_antigravity_home.prepare_account
+       ~runtime_root ~owner_leaf ~oauth_source with
+     | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail "an unmanaged pointerless-store entry was discarded");
+    check (list string) "refusal preserves every store entry" before (entries ());
+    check string "refusal preserves a valid staged pointer" "partial pointer"
+      (Fs_compat.load_file temp);
+    check bool "no replacement pointer is published" false
+      (Sys.file_exists (Filename.concat store "current.json"));
+    match kind with
+    | `Atomic_directory ->
+      check string "foreign directory contents remain" "operator state"
+        (Fs_compat.load_file notes)
+    | `Unknown_directory | `Public_generation | `Public_child ->
+      check bool "foreign directory remains" true (Sys.is_directory path)
+    | `Atomic_symlink ->
+      check string "foreign symlink remains" oauth_source (Unix.readlink path)
+    | `Atomic_public ->
+      check string "foreign file remains" "external file" (Fs_compat.load_file path)
+    | `Atomic_hardlink ->
+      check int "foreign hardlink remains" 2 (Unix.lstat path).Unix.st_nlink)
+    [`Atomic_directory; `Unknown_directory; `Public_generation; `Public_child;
+     `Atomic_symlink; `Atomic_public; `Atomic_hardlink]
+;;
+
 let test_generation_pointer_is_private_under_standard_umask () =
   with_temp_root @@ fun runtime_root ->
   let previous_umask = Unix.umask 0o022 in
@@ -1002,6 +1142,10 @@ let () =
             (test_generation_pointer_failure_retry ~after_rename:false)
         ; test_case "post-rename pointer failure preserves HOME until retry" `Quick
             (test_generation_pointer_failure_retry ~after_rename:true)
+        ; test_case "pointerless store preserves unmanaged entries" `Quick
+            test_pointerless_store_preserves_entries_outside_managed_scope
+        ; test_case "pointerless store reseeds only a fresh seed" `Quick
+            test_pointerless_store_reseeds_only_a_fresh_seed
         ; test_case "pointer permissions permit repeated preparation under 0022" `Quick
             test_generation_pointer_is_private_under_standard_umask
         ; test_case "interrupted creation leaves no orphan generation" `Quick

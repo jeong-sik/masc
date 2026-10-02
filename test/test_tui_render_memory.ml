@@ -2235,6 +2235,17 @@ let test_memory_state_tracks_current_pass_not_history () =
      && H.memory_alert_is_history H.Librarian_failures);
   check bool "current store read errors retain error semantics" false
     (H.memory_alert_is_history H.Snapshot_read_error);
+  let refused = { (make_fleet_health recovered) with H.mhs_refused_keepers =
+      [{ H.mkr_keeper_id = Some "unread"; mkr_reason = "invalid payload" }] } in
+  check (option int) "refused rows keep fleet count unknown" None
+    (Types.current_memory_starving_count refused);
+  let history_keeper = { recovered with H.mkh_alerts =
+      [{ H.ma_code = H.Librarian_failures; ma_label = "Librarian failures";
+         ma_message = "3 failures since server start" }] } in
+  let state = make_state () in
+  state.memory_health <- Some (make_fleet_health history_keeper);
+  check bool "historical alert retains severity with an explicit history label" true
+    (contains "[history warn]" (String.concat "\n" (body_lines ~cols:140 ~budget:40 state)));
   check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
 ;;
 

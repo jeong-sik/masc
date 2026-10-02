@@ -381,9 +381,11 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
     List.map
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
-          (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
-           | `Warn -> "warn"
-           | `Error -> "error")
+          ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
+            then "history " else "")
+           ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
+              | `Warn -> "warn"
+              | `Error -> "error"))
           a.ma_label
           (Terminal_text.single_line a.ma_message))
       k.mkh_alerts

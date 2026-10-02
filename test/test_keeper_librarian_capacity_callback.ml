@@ -631,7 +631,9 @@ let () =
       cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 false;
       cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
       cli_case "cli-capacity-then-quota"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 0 false;
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 false;
+      cli_case "cli-capacity-then-generic-rpc"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1 false;
       cli_case "cli-quota-then-capacity"
         [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 false;
       (* The API walk that sent the pass to the official client met a size

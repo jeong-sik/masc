@@ -628,9 +628,10 @@ let rec extraction_shows_size = function
    its caller with the size verdict above instead. *)
 let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
-    (match List.rev failures with
-     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
-     | [] -> None)
+    (* A later account refusal does not invalidate the character limit an
+       earlier slot measured for this same request. Keep the latest measured
+       limit rather than letting the final slot erase it. *)
+    List.find_map Keeper_lane_cli_oneshot.input_capacity (List.rev failures)
   | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared

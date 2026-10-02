@@ -2,6 +2,7 @@ type pass_end =
   | Off
   | Lane_unconfigured
   | Drained
+  | Yielded_to_waiting_unit
   | Not_committed
   | Stopped of Keeper_librarian_durable_consumer.error
   | Raised of string
@@ -147,9 +148,14 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
       | Ok Keeper_librarian_durable_consumer.Nothing_to_read -> Drained
       | Ok Memory_not_committed -> uncommitted_pass ()
       | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
-        (* Only stored progress continues the existing drain; observations
-           below never control its scheduling or admission. *)
-        drain ()
+        (* A committed range is the boundary at which later phases and a
+           waiting unit can run. New completed turns may arrive faster than
+           Memory reads them; draining until empty would then never reach
+           continuity or the Goal-enriched queue pass. The next unit resumes
+           the stored cursor, so yielding discards no source. *)
+        if Keeper_memory_lane.has_waiting ~base_path:config.Workspace.base_path ~keeper_name
+        then Yielded_to_waiting_unit
+        else drain ()
       | Error error ->
         Log.Keeper.warn ~keeper_name "durable Librarian range not consumed: %s"
           (Keeper_librarian_durable_consumer.error_to_string error);
@@ -160,7 +166,7 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
     let unread =
       match last_pass with
       | Off -> None
-      | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
+      | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed | Stopped _ | Raised _ ->
         measure_unread ~config ~keeper_name
     in
     publish_measurement ~config ~keeper_name ~last_pass ~unread
@@ -298,7 +304,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let ( let* ) = Result.bind in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
-        { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+        { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
           keeper_id;
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
@@ -511,15 +517,16 @@ let context_pass_needed ~keepers_dir ~keeper_name
 
 (* The queue pass organizes the inputs pending now, with no turn range, so
    the Keeper's current task is the task these inputs belong to. The durable
-   and continuity passes read turns that may predate that task, and a turn
-   boundary does not record its task, so they stay [No_task]. *)
+   and continuity passes read turns that may predate that task, so their
+   current Goal context stays [No_task]. Historical durable context is separate;
+   continuity admission provenance is not yet transported. *)
 let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
     ~working_context : Keeper_librarian.input =
   { keeper_id
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
-  ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
   ; current
@@ -534,14 +541,14 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~c
    as a failed unit. *)
 exception Blank_keeper_name
 
-let run ~base_path ~keeper_name =
+let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string keeper_name with
     | Some keeper_id -> keeper_id
     | None -> raise Blank_keeper_name
   in
-  run_durable ~base_path ~keeper_name;
-  run_continuity ~base_path ~keeper_name ();
+  durable ();
+  continuity ();
   match Env_config.KeeperMemoryOs.librarian_config_state (),
         Keeper_owner_projection.lookup ~base_path ~keeper_name with
   | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
@@ -565,6 +572,13 @@ let run ~base_path ~keeper_name =
   | (Disabled | Invalid), _
   | Enabled, (Owner_absent | Owner_projection {meta = None; _}
              | Owner_projection {stopping = true; _}) -> ()
+
+let run ~base_path ~keeper_name =
+  run_with_readers
+    ~durable:(fun () -> run_durable ~base_path ~keeper_name)
+    ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
+    ~base_path ~keeper_name
+;;
 
 let install () =
   Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
@@ -620,6 +634,7 @@ module For_testing = struct
   let last_input_capacity = last_input_capacity
   let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
+  let run_with_readers = run_with_readers
   let run_durable_with_commit = run_durable_with_commit
   let queue_input = queue_input
   let context_pass_needed = context_pass_needed

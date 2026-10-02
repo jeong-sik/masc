@@ -77,7 +77,7 @@ let record_completed_turn ~config =
   let position = match B.position_of_messages covered with
     | Ok position -> position | Error detail -> fail detail in
   let boundary : B.record = {recorded_at = 1.; event = B.Turn_ended
-    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+    { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
      history_at_start = B.Fresh_history; position}} in
   let keepers_dir = Workspace.keepers_runtime_dir config in
   (match B.append ~keepers_dir ~keeper_id:keeper_name boundary with
@@ -213,7 +213,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
     | Ok position -> position | Error detail -> fail detail in
   (match B.append ~keepers_dir ~keeper_id:keeper_name
      {recorded_at = 1.; event = B.Turn_ended
-        {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
          history_at_start = B.Fresh_history; position}} with
    | Ok () -> () | Error error -> fail (B.append_error_to_string error));
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest initial_messages in

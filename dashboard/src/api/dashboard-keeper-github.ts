@@ -103,7 +103,7 @@ export async function streamKeeperGithubLogin(
   let buffer = ''
   while (true) {
     const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n')
+    buffer = (buffer + decoder.decode(value, { stream: !done })).replace(/\r\n/g, '\n')
     let boundary = buffer.indexOf('\n\n')
     while (boundary >= 0) {
       const frame = decodeSseFrame(buffer.slice(0, boundary))

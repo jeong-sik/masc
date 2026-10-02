@@ -218,7 +218,7 @@ let create ?path () =
 ;;
 
 let replay path =
-  { store = Store.replay path
+  { store = Store.replay_with_retained_history path
   ; progress_by_run = Hashtbl.create 16
   ; progress_mutex = Stdlib.Mutex.create ()
   }
@@ -306,7 +306,15 @@ let list_runs t =
   List.map (run_of_entry t) entries
 ;;
 
-let get t ~run_id = Option.map (run_of_entry t) (Store.get t.store ~id:run_id)
+(* Fusion payloads are never shed: the bounded live entry is already complete.
+   Avoid rescanning the retained history for ordinary live HTTP/SSE reads. *)
+let get t ~run_id = Option.map (run_of_entry t) (Store.get_metadata t.store ~id:run_id)
+
+let get_for_observer t ~run_id =
+  match get t ~run_id with
+  | Some run -> Ok (Some run)
+  | None -> Store.completed_from_log t.store ~id:run_id
+      |> Result.map (Option.map (run_of_entry t))
 
 let status_label = function
   | Running -> "running"

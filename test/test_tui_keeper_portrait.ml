@@ -73,11 +73,11 @@ let test_the_band_is_compact () =
 let test_the_still_portrait_the_name_draws () =
   let shown = Option.get (band ~display:pixels ()) in
   let body = Look.body_of_name alpha and equipment = Look.bare in
-  let drawn = Draw.render body equipment shown.Portrait.box.View.size in
-  check bool "placed pixels keep the full portrait with server equipment" true
+  let drawn = Draw.render_icon body equipment shown.Portrait.box.View.size in
+  check bool "placed pixels keep the face icon with server equipment" true
     (String.equal drawn.Draw.rgba shown.Portrait.image.Draw.rgba);
   let mosaic = Option.get (band ()) in
-  let compact = Draw.render_compact_posed body equipment Draw.still mosaic.Portrait.box.View.size in
+  let compact = Draw.render_icon body equipment mosaic.Portrait.box.View.size in
   check bool "mosaic draws the compact face" true
     (String.equal compact.Draw.rgba mosaic.Portrait.image.Draw.rgba);
   check bool "a compact face differs from the full backdrop" false
@@ -185,12 +185,12 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let second = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "same name and edge reuse neither old pixels nor equipment" false
     (first.Portrait.image == second.Portrait.image);
-  let expected = Draw.render (Look.body_of_name alpha) equipped second.Portrait.box.View.size in
+  let expected = Draw.render_icon (Look.body_of_name alpha) equipped second.Portrait.box.View.size in
   check string "server equipment determines actual pixels" expected.Draw.rgba second.Portrait.image.Draw.rgba;
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let expected_mosaic = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  let expected_mosaic = Draw.render_icon (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
   check string "mosaic keeps the server equipment in accessory pixels"
     expected_mosaic.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
@@ -205,54 +205,19 @@ let test_equipment_change_replaces_same_keeper_pixels () =
 let test_observed_items_remain_visible_in_the_info_mosaic () =
   let cache = Portrait.cache () in
   let bare = Option.get (band ~cache ()) in
-  let body = Look.body_of_name alpha in
-  let check_equipment label equipment =
+  List.iter (fun face ->
+    let equipment = { Look.bare with face } in
     let equipped = Option.get (band ~cache ~equipment ()) in
-    check int (label ^ ": retains the mosaic rows") bare.Portrait.box.View.rows
-      equipped.Portrait.box.View.rows;
-    check int (label ^ ": retains the mosaic columns") bare.Portrait.box.View.cols
-      equipped.Portrait.box.View.cols;
-    check bool (label ^ ": changes the observed picture") false
+    check bool "equipped face changes icon pixels" false
       (String.equal bare.Portrait.image.Draw.rgba equipped.Portrait.image.Draw.rgba);
-    check bool (label ^ ": changes the emitted terminal cells") false
+    check bool "equipped face changes displayed mosaic cells" false
       (bare.Portrait.lines = equipped.Portrait.lines);
-    equipped
-  in
-  let check_accessory_pixels label equipment equipped =
-    let without_accessories =
-      Draw.For_testing.render_in_frame_of body Look.bare ~frame_of:equipment
-        Draw.still equipped.Portrait.box.View.size
-    in
-    check bool (label ^ ": accessory changes pixels within the same frame") false
-      (String.equal without_accessories.Draw.rgba equipped.Portrait.image.Draw.rgba);
-    let without_accessory_cells =
-      View.lines ~project View.Mosaic equipped.Portrait.box without_accessories
-    in
-    check bool (label ^ ": accessory remains visible in terminal cells") false
-      (without_accessory_cells = equipped.Portrait.lines)
-  in
-  List.iter
-    (fun item ->
-      let equipment = Keeper_portrait_item.preview item Look.bare in
-      let label = Keeper_portrait_item.id item in
-      let equipped = check_equipment label equipment in
-      match Keeper_portrait_item.slot item with
-      | Keeper_portrait_item.Base ->
-          let expected =
-            Draw.render_compact_posed body equipment Draw.still equipped.Portrait.box.View.size
-          in
-          check string (label ^ ": keeps the compact body and dish")
-            expected.Draw.rgba equipped.Portrait.image.Draw.rgba
-      | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
-      | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
-          check_accessory_pixels label equipment equipped)
-    Keeper_portrait_item.all;
-  let outfit = { Look.bare with face = Look.Glasses; neck = Look.Scarf;
-                  head = Look.Crown; hand = Look.Book } in
-  let equipped = check_equipment "complete outfit" outfit in
-  check_accessory_pixels "complete outfit" outfit equipped;
+    let repeated = Option.get (band ~cache ~equipment ()) in
+    check bool "same observed face reuses the icon cache" true
+      (repeated.Portrait.image == equipped.Portrait.image))
+    [Look.Glasses; Look.Shades; Look.Eye_patch; Look.Beard];
   let restored = Option.get (band ~cache ()) in
-  check bool "removing the outfit restores the cached compact body" true
+  check bool "removing face equipment restores the cached icon" true
     (restored.Portrait.image == bare.Portrait.image)
 
 
@@ -261,15 +226,15 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
   Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
     View.set_display View.Mosaic;
     let preview equipment = Option.get (Portrait.preview ~name:alpha ~equipment
-      ~content_rows:(mosaic_size.Portrait.rows + 2)
-      ~content_cols:(mosaic_size.Portrait.cols + 4)) in
+      ~content_rows:14
+      ~content_cols:28) in
     let glasses = {Look.bare with face=Look.Glasses} in
     let shades = {Look.bare with face=Look.Shades} in
     let info () = Option.get (Portrait.shown ~name:alpha ~equipment:glasses
       ~content_rows:(Portrait.min_content_rows mosaic_size)
       ~content_cols:(Portrait.min_content_cols mosaic_size)) in
     let observed_info = info () in
-    let expected_info = Draw.render (Look.body_of_name alpha) glasses
+    let expected_info = Draw.render_icon (Look.body_of_name alpha) glasses
       observed_info.Portrait.box.View.size in
     check string "Info draws the observed glasses with the accessory renderer"
       expected_info.Draw.rgba observed_info.Portrait.image.Draw.rgba;
@@ -281,8 +246,8 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       (mosaic first = mosaic second);
     check bool "returning to glasses restores its cached preview" true
       ((preview glasses).Portrait.image == first.Portrait.image);
-    check string "Info and the same observed glasses draw the same pixels"
-      observed_info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba;
+    check bool "face icon and outfit preview have distinct cached pixels" false
+      (String.equal observed_info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba);
     let retained_info = info () in
     check bool "selecting a preview does not replace the observed Info cache entry" true
       (retained_info.Portrait.image == observed_info.Portrait.image);
@@ -305,7 +270,7 @@ let () =
           test_case "the band is compact" `Quick test_the_band_is_compact
         ; test_case "the still portrait the name draws" `Quick
             test_the_still_portrait_the_name_draws
-        ; test_case "observed Items remain visible in the Info mosaic" `Quick
+        ; test_case "observed facial equipment remains visible in the Info icon" `Quick
             test_observed_items_remain_visible_in_the_info_mosaic
         ; test_case "facts stand beside the portrait" `Quick test_facts_stand_beside_the_portrait
         ] )

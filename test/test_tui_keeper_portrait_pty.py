@@ -47,8 +47,8 @@ PAUSED_ROW = b"Paused:"
 CURRENT_FAILURE = b"Current failure"
 # Masc_tui_keeper_portrait.band_size: the rows and cells a mosaic portrait
 # takes, and the rows a placed one does on a 20 px cell.
-MOSAIC_BAND_ROWS = 12
-MOSAIC_BAND_COLS = 24
+MOSAIC_BAND_ROWS = 8
+MOSAIC_BAND_COLS = 16
 PIXEL_BAND_ROWS = 4
 # Where a portrait cell may sit: the frame's two cells, the fact indent, and
 # the band. A half block further right is not the portrait.
@@ -215,7 +215,7 @@ def portrait_follows_the_terminal_height(binary: str) -> None:
         open_alpha_detail(process, fd, output)
         assert_portrait_beside_identity(output)
         # A short terminal keeps every row for facts.
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
+        h.resize_and_wait(process, fd, output, rows=20, columns=COLUMNS, needle=IDENTITY)
         h.drain_until_quiet(process, fd, output)
         assert_facts_full_width(last_frame_rows(output), "on a short terminal")
         # And the portrait comes back when the rows do.

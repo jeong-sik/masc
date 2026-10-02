@@ -495,25 +495,26 @@ let test_goal_transition_uses_authenticated_actor () =
       (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
   let foreign_base = Filename.concat base_path "replacement" in
   let foreign = workspace foreign_base (Filename.concat foreign_base ".masc") in
-  let post expected_workspace =
+  let fields =
+    [ "goal_id", `String goal.id
+    ; "action", `String "drop"
+    ; "note", `String "route actor audit"
+    ] in
+  let post fields =
     dispatch_json ~router ~token
       ~path:"/api/v1/tools/masc_goal_transition"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
-      ~body:
-        (Yojson.Safe.to_string
-           (`Assoc
-              [ "expected_workspace", expected_workspace
-              ; "goal_id", `String goal.id
-              ; "action", `String "drop"
-              ; "note", `String "route actor audit"
-              ]))
-      ()
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
   in
+  let post_with_workspace workspace =
+    post (("expected_workspace", workspace) :: fields) in
+  let missing_status, _ = post fields in
+  check int "unbound goal transition is refused" 400 missing_status;
   List.iter (fun expected_workspace ->
-    let status, _ = post expected_workspace in
+    let status, _ = post_with_workspace expected_workspace in
     check int "foreign or invalid workspace cannot transition goal" 400 status)
     [ foreign; `Null ];
-  let status, _ = post current in
+  let status, _ = post_with_workspace current in
   check int "goal transition accepted in its own workspace" 200 status;
   let events_path =
     Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"

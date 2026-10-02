@@ -24,6 +24,11 @@ let validate_write_workspace ~config args =
   | Error Workspace.Invalid_workspace_precondition -> Error "invalid expected_workspace precondition"
   | Error Workspace.Workspace_precondition_failed -> Error "workspace precondition failed"
 
+let validate_goal_workspace ~config = function
+  | `Assoc fields as args when List.mem_assoc "expected_workspace" fields ->
+      validate_write_workspace ~config args
+  | _ -> Error "expected_workspace precondition is required"
+
 let runtime_prompt_assets_json ~prompts_dir ~embedded_files =
   let prefix = "prompts/" in
   let prefix_length = String.length prefix in
@@ -1403,7 +1408,7 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
-             let* args = validate_write_workspace ~config args in
+             let* args = validate_goal_workspace ~config args in
              let ctx = { Workspace_types.config; agent_name } in
              let start_time = Tool_timing.start () in
              let result =

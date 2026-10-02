@@ -1507,12 +1507,16 @@ let test_rows_and_header_share_one_grid () =
        };
   state.memory_facts_cursor <- 0;
   let styled = ref [] in
+  let collect_header line =
+    let line = Masc_tui_theme.strip_sgr line in
+    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols cols) in
+    styled := line :: !styled in
   Render_memory.render_memory_facts_body
     ~cols
     ~budget:30
     state
-    ~push:(fun _ -> ())
-    ~push_styled:(fun ~style:_ line -> styled := line :: !styled)
+    ~push:collect_header
+    ~push_styled:(fun ~style:_ line -> collect_header line)
     ~push_selected:(fun _ -> ())
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
@@ -1528,7 +1532,7 @@ let test_rows_and_header_share_one_grid () =
    breakdown and the sort. The title is the row that runs out of width first --
    at 140 columns against a live server it has 80 cells, and the clock and the
    connection badge sit at its end. *)
-let facts_body_lines ?(cols = 120) ?(budget = 30) state =
+let facts_body_lines ?(cols = 100) ?(budget = 30) state =
   let lines = ref [] in
   let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
   Render_memory.render_memory_facts_body ~cols ~budget state
@@ -1603,7 +1607,7 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
   check bool "Category rail visible" true
     (List.exists (contains "CATEGORIES") wide);
   check bool "Category counts visible" true
-    (List.exists (contains "preference  (1)") wide);
+    (List.exists (contains "preference (1)") wide);
   check bool "frame width preserved" true
     (List.for_all (fun line -> Layout.display_width line <= 140) wide);
   check bool "selected Category has clickable rail target" true

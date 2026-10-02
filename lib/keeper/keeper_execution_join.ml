@@ -25,6 +25,12 @@ let discard ~invocation =
     ~finally:(fun () -> Mutex.unlock lock)
     (fun () -> Invocation_table.remove table invocation)
 
+let peek ~invocation =
+  Mutex.lock lock;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock lock)
+    (fun () -> Invocation_table.find_opt table invocation)
+
 let take ~invocation =
   Mutex.lock lock;
   Fun.protect

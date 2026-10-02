@@ -482,6 +482,10 @@ let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
            | Error (_ : read_error) -> found
            | Ok record ->
              let witness turn_ref = Some (line, record.recorded_at, turn_ref) in
+             let ended_at, started_at =
+               if restarts_history ~trace_id record then None, None
+               else ended_at, started_at
+             in
              let ended_at =
                match
                  is_position ~end_atom ~last_atom_digest
@@ -489,9 +493,6 @@ let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
                with
                | Some turn_ref -> witness turn_ref
                | None -> ended_at
-             in
-             let started_at =
-               if restarts_history ~trace_id record then None else started_at
              in
              let started_at =
                match

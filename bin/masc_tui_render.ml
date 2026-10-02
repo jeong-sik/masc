@@ -355,15 +355,21 @@ let render_overview (state : state) =
               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
                 (Terminal_text.single_line line))
             |> List.map (fun line -> None, " " ^ line) in
-          let notice_rows = if Option.is_some state.opening_notice then 1 else 0 in
+          let notice_rows =
+            (if Option.is_some state.opening_notice then 1 else 0)
+            + (if Option.is_some state.home_decision_receipt then 1 else 0) in
           let candle_fits = spare >= 2 + notice_rows + List.length candle in
           let health = if candle_fits then health else
             match Masc_tui_candle.compact_status state.candle_observation with
             | None -> health
             | Some status -> " " ^ status ^ " · " ^ health in
           let readings =
-            [ (None, health); (Some (Theme.recede ()), work) ]
-            @ if candle_fits then candle else []
+            (match state.home_decision_receipt with
+             | None -> []
+             | Some (_, receipt) ->
+                 [None, " Last decision receipt · " ^ Terminal_text.single_line receipt])
+            @ [ (None, health); (Some (Theme.recede ()), work) ]
+            @ (if candle_fits then candle else [])
           in
           match state.opening_notice with
           | None -> readings

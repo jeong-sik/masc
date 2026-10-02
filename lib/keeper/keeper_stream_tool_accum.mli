@@ -67,14 +67,15 @@ val seal_turn :
     rejected; [source_tool_use_count] proves the complete trusted stream
     inventory, including the all-rejected case. Neither fact is reconstructed
     from provider ids. Planned indices must be unique and contiguous. The
-    resulting mapping is the only authority later used by
-    {!record_execution_id}. *)
+    resulting mapping is the authority later used by {!record_execution_id}.
+    Official producers use {!record_official_execution_id} with their explicit
+    active block and committed invocation instead. *)
 
 val close_turn_without_sources : t -> turn:int -> (unit, string) result
 (** Close the current scope for an official-client producer that cannot expose
-    a pre-execution source sidecar. Calls in this scope remain delivery-only;
-    later execution callbacks fail explicitly instead of selecting by provider
-    id or inferred ordinal. *)
+    a whole-response pre-execution sidecar. Calls without a producer-bound
+    receipt remain delivery-only; Agent Core execution callbacks still fail
+    explicitly rather than selecting by provider id or inferred ordinal. *)
 
 val record_execution_id :
   t ->
@@ -90,6 +91,13 @@ val record_execution_id :
     The returned message/block occurrence is
     the live row authority. A missing, conflicting, or multiply-matching
     occurrence is an error, never a provider-id guess. *)
+
+val record_official_execution_id :
+  t -> block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t ->
+  (Keeper_chat_events.tool_stream_occurrence, string) result
+(** The official producer supplies its active block index and exact committed
+    invocation receipt. No provider-id search or reconstructed ordinal. The row
+    survives an outer cancellation; actual stream corruption still rejects it. *)
 
 val take_protocol_errors :
   t ->

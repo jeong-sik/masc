@@ -4859,6 +4859,7 @@ describe('fetchRuntimeProviders', () => {
               source: 'runtime.toml',
               provider: {
                 id: 'runpod_mtp',
+                max_context: 400000,
                 display_name: 'RunPod',
                 protocol: 'openai-compatible-http',
                 api_format: 'chat-completions',
@@ -4911,6 +4912,7 @@ describe('fetchRuntimeProviders', () => {
               },
               binding: {
                 provider_id: 'runpod_mtp',
+                max_context: 1000000,
                 model_id: 'qwen',
                 is_default: true,
                 max_concurrent: 4,
@@ -5048,6 +5050,8 @@ describe('fetchRuntimeProviders', () => {
       'frequency_penalty',
     ])
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
+    expect(result.providers[0]?.declared_spec?.provider?.max_context).toBe(400000)
+    expect(result.providers[0]?.declared_spec?.binding?.max_context).toBe(1000000)
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
     expect(result.providers[0]?.declared_spec?.provider?.connect_timeout_s).toBe(120)
     expect(result.providers[0]?.declared_spec?.provider?.exact_body_timeout_s).toBe(0.125)

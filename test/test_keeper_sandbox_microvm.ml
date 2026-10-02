@@ -1900,14 +1900,17 @@ let test_work_volume_trim_argv_grants_one_capability () =
      && List.length (List.filter (String.equal "--cap-add") argv) = 1);
   Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
   Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
-  Alcotest.(check bool) "fstrim is the entrypoint, not the image's own" true
-    (adjacent ~flag:"--entrypoint" ~value:"/usr/sbin/fstrim" argv);
+  Alcotest.(check bool) "fixed script entrypoint, not the image's own" true
+    (adjacent ~flag:"--entrypoint" ~value:"/bin/sh" argv);
   Alcotest.(check bool) "mounts the work volume at the trim root" true
     (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-  Alcotest.(check (list string)) "the image trims that root"
-    [ "masc-sandbox:general"; "-v"; M.trim_guest_root ]
+  Alcotest.(check (list string)) "fail closed while configuring discard and trimming"
+    [ "masc-sandbox:general"; "-eu"; "-c"
+    ; "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target /masc-trim)\n\
+       /usr/sbin/tune2fs -o discard \"$work_device\"\n\
+       /usr/sbin/fstrim -v /masc-trim" ]
     (let n = List.length argv in
-     List.filteri (fun i _ -> i >= n - 3) argv)
+     List.filteri (fun i _ -> i >= n - 4) argv)
 ;;
 
 let test_work_volume_trim_confirms_cleanup () =

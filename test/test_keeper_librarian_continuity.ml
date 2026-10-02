@@ -200,6 +200,73 @@ let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _ap
     (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
   check bool "normal serial receipt certifies already consumed suffix" true
     (P.memory_committed ~config ~keeper_name suffix |> get)
+let test_historical_sources_survive_narrowing_and_recovery () =
+  with_source @@ fun _env config save append _boundary ->
+  let module H = Masc.Keeper_librarian_task_context in
+  let module T = Masc.Keeper_turn_task_context in
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal target_value = match Goal_store.upsert_goal config ~id:"goal-history"
+      ~title:"Historical goal" ~metric:"count" ~target_value () with
+    | Ok (goal, _) -> goal | Error e -> fail (Goal_store.write_error_to_string e) in
+  let original = goal "1" in
+  Workspace_goal_index.write_goal_task_links config [original.id, ["task-a"]];
+  let capture name = T.capture ~config (Ok (Some (Keeper_id.Task_id.of_string name |> get))) in
+  let task_a = capture "task-a" and task_b = capture "task-b" in
+  let first = List.map message ["a1";"a2"] in
+  let full = first @ List.map message ["b1";"b2";"b3";"b4"] in
+  let ended turn task_context history_at_start messages = append (B.Turn_ended
+    {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn; task_context;
+     history_at_start;position=B.position_of_messages messages |> get}) in
+  save full;
+  ended 1 task_a B.Fresh_history first;
+  let start_atom_digest = Runtime_model_input_tail_window.atom_opening_digest full 1 |> some in
+  ended 2 task_b (B.Continued_history_from {start_atom=2;start_atom_digest}) full;
+  let wide = P.prepare ~end_atom:6 ~config ~keeper_name ~trace_id () |> get |> some in
+  ignore (goal "2");
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
+      "trace_id",`String trace_id;"current_task_id",`String "task-c"]) |> get in
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let contexts prepared = List.map (fun (scope, messages) ->
+    match scope.H.attribution with
+    | H.Observed {task_context;_} -> task_context, List.length messages
+    | H.Unattributed -> fail "witnessed atoms lost admission context") (P.source_spans prepared) in
+  check bool "default next turn uses A" true (contexts (prepare config |> some) = [task_a,2]);
+  check bool "multi-turn range preserves A and B, original criterion" true
+    (contexts wide = [task_a,2;task_b,4]);
+  let narrow = P.narrow wide |> some in
+  check bool "mid-turn cut clips B after A" true (contexts narrow = [task_a,2;task_b,1]);
+  check bool "second cut remains inside A, despite B covering anchor" true
+    (contexts (P.narrow narrow |> some) = [task_a,1]);
+  let receipt = P.memory_range_id ~config ~keeper_name narrow |> get in
+  record_prepared_memory config narrow;
+  let recovered = P.prepare ~end_atom:1 ~config ~keeper_name ~trace_id () |> get |> some in
+  check bool "recovery keeps exact source context" true (P.source_spans recovered = P.source_spans narrow);
+  check bool "recovery keeps exact frontier" true ((P.memory_range_id ~config ~keeper_name recovered |> get) = receipt);
+  check bool "committed recovery cannot shrink" true (P.narrow recovered = None);
+  ignore (commit config recovered "Continue Task B");
+  check bool "next suffix contains only remaining B" true (contexts (prepare config |> some) = [task_b,3])
+
+let test_historical_gap_is_not_covering_task () =
+  with_source @@ fun _env config save append _boundary ->
+  let module H = Masc.Keeper_librarian_task_context in
+  let full = List.map message ["unknown1";"unknown2";"known1";"known2"] in
+  save full;
+  let start_atom_digest = Runtime_model_input_tail_window.atom_opening_digest full 1 |> some in
+  append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
+    task_context=Masc.Keeper_turn_task_context.No_task;
+    history_at_start=B.Continued_history_from {start_atom=2;start_atom_digest};
+    position=B.position_of_messages full |> get});
+  let prepared = P.prepare ~end_atom:4 ~config ~keeper_name ~trace_id () |> get |> some in
+  (match P.source_spans prepared with
+   | [( {H.attribution=H.Unattributed;source=H.Atom_span {start_atom=0;end_atom=2;_}}, gap);
+      ({H.attribution=H.Observed _;source=H.Atom_span {start_atom=2;end_atom=4;_}}, known)] ->
+     check int "missing turn text kept" 2 (List.length gap);
+     check int "only witnessed suffix attributed" 2 (List.length known)
+   | _ -> fail "earlier unknown atoms inherited covering turn context");
+  (match P.source_spans (P.narrow prepared |> some) with
+   | [({H.attribution=H.Unattributed;_}, messages)] -> check int "narrowed unknown prefix" 2 (List.length messages)
+   | _ -> fail "narrowing invented known attribution")
+
 let test_completed_turn_work_units () =
   List.iter (fun fresh -> with_source @@ fun _env config save append boundary ->
     let first = [message "A"; message "B"] in
@@ -251,7 +318,7 @@ let test_recovery_overrides_next_turn () = with_source @@ fun _env config save _
   let recovered = P.prepare ~end_atom:1 ~config ~keeper_name ~trace_id () |> get |> some in
   check int "pending publication keeps exact interval ahead of natural turn" 5 (P.end_atom recovered);
   check bool "pending publication keeps exact receipt" true
-    (P.memory_range_id ~config ~keeper_name recovered |> get = receipt);
+    ((P.memory_range_id ~config ~keeper_name recovered |> get) = receipt);
   check bool "pending publication cannot be subdivided" true (Option.is_none (P.narrow recovered));
   let saved = P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"Five atoms." |> get in
   check int "recovery retains actual covering turn" 6 saved.covering_end_atom;
@@ -356,8 +423,13 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get
     |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
+  let _, historical_task_contexts = List.fold_left (fun (first_message, contexts) (scope, messages) ->
+    let after_message = first_message + List.length messages in
+    let context : Masc.Keeper_librarian_task_context.t =
+      {scope;first_message;after_message;first_tool_observation=0;after_tool_observation=0} in
+    after_message, contexts @ [context]) (0, []) (P.source_spans half) in
   let input : K.input =
-    {turn_ref=P.turn_ref half; historical_task_contexts = []; goal_context =K.No_task;
+    {turn_ref=P.turn_ref half; historical_task_contexts; goal_context =K.No_task;
      keeper_id=Masc_test_deps.keeper_id_fixture keeper_name; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
      working_context=Masc.Keeper_librarian_context.empty;
@@ -594,6 +666,7 @@ let narrowing_atom_text mark = String.make narrowing_atom_chars mark
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
 let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
+    ?(task_context = Masc.Keeper_turn_task_context.No_task)
     ?(atoms = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks)
     ~slot_count ~answer f =
   let open Masc in
@@ -607,7 +680,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
   with_cli_runtimes @@ fun () ->
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true")
   @@ fun () ->
-  with_source @@ fun env config save _append boundary ->
+  with_source @@ fun env config save append _boundary ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
   @@ fun () ->
@@ -639,7 +712,8 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
     (F.resolver_snapshot ~source:"narrowing-fixture"
        (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
   save atoms;
-  boundary ~fresh:true 1 atoms;
+  append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+    task_context; history_at_start=B.Fresh_history;position=B.position_of_messages atoms |> get});
   ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{ kind = Current.Librarian; trace_id } ~absorbed:[] ~new_claims:[] () |> get);
   (* No forget_measurement between passes: that is what a server restart does,
@@ -897,10 +971,24 @@ let check_folded_tool_request body =
          body))
     tool_atom_indices
 
+let historical_request body =
+  let rec strings = function
+    | `String text -> [text]
+    | `List values -> List.concat_map strings values
+    | `Assoc values -> List.concat_map (fun (_, value) -> strings value) values
+    | _ -> [] in
+  let lines = strings (Yojson.Safe.from_string body)
+    |> List.concat_map (String.split_on_char '\n') in
+  match List.find_opt (String.starts_with ~prefix:"[{\"source\":") lines with
+  | Some line -> Yojson.Safe.from_string line |> U.to_list
+  | None -> fail "actual request lacks historical context binding"
+
 let test_a_continuity_pass_carries_tool_turns_folded_once () =
+  let task_context = Masc.Keeper_turn_task_context.Task
+    {task_id=Keeper_id.Task_id.of_string "task-historical" |> get; goals=Ok []} in
   let run ~memory_committed ~answer =
     let requests = ref [] in
-    narrowing_fixture ~atoms:tool_atoms ~slot_count:1
+    narrowing_fixture ~task_context ~atoms:tool_atoms ~slot_count:1
       ~answer:(fun _index body ->
         requests := !requests @ [ body ];
         `OK, Exact_output_fixture.openai_response answer)
@@ -909,6 +997,17 @@ let test_a_continuity_pass_carries_tool_turns_folded_once () =
     pass ();
     check int "one request" 1 (List.length !requests);
     check_folded_tool_request (List.hd !requests);
+    let context = match historical_request (List.hd !requests) with
+      | [context] -> context | _ -> fail "expected one historical turn" in
+    check string "both modes carry historical Task" "task-historical"
+      (context |> U.member "attribution" |> U.member "task_context" |> U.member "task_id" |> U.to_string);
+    check int "message offsets start at selected first message" 0
+      (context |> U.member "first_message" |> U.to_int);
+    check int "message offsets cover exactly sent messages" (List.length tool_atoms)
+      (context |> U.member "after_message" |> U.to_int);
+    check int "tool offsets match actual mode observation array"
+      (if memory_committed then 0 else List.length tool_atom_indices)
+      (context |> U.member "after_tool_observation" |> U.to_int);
     (* The user message and the assistant's call each open an atom; the tool
        result joins the call's atom. *)
     check (option int) "the folded range commits"
@@ -922,6 +1021,17 @@ let test_a_continuity_pass_carries_tool_turns_folded_once () =
 let test_refused_width_carries_to_the_next_pass () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index body ->
+      let context = match historical_request body with
+        | [context] -> context | _ -> fail "narrowed request should have one source span" in
+      let source = U.member "source" context in
+      let width = (source |> U.member "end_atom" |> U.to_int)
+        - (source |> U.member "start_atom" |> U.to_int) in
+      check int "every retry restarts selected message numbering" 0
+        (context |> U.member "first_message" |> U.to_int);
+      check int "every retry clips offsets to selected atoms" width
+        (context |> U.member "after_message" |> U.to_int);
+      check int "message-only retry has no tool offsets" 0
+        (context |> U.member "after_tool_observation" |> U.to_int);
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
@@ -1199,6 +1309,8 @@ let () = run "production continuity pair"
     test_case "an undecodable snapshot is rebuilt" `Quick test_an_undecodable_snapshot_is_rebuilt;
     test_case "an unreadable snapshot stays an error" `Quick test_an_unreadable_snapshot_stays_an_error;
     test_case "a rebuild does not overwrite a valid snapshot" `Quick test_a_rebuild_does_not_overwrite_a_valid_snapshot;
+    test_case "historical sources survive narrowing and recovery" `Quick test_historical_sources_survive_narrowing_and_recovery;
+    test_case "historical gap is not the covering Task" `Quick test_historical_gap_is_not_covering_task;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;

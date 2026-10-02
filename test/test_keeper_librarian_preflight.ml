@@ -4,14 +4,16 @@ module Current = Keeper_memory_os_current
 module Memory = Keeper_memory_os_types
 module Runs = Exact_lane_run_registry
 
-let answer choice = Yojson.Safe.to_string (`Assoc
+let answer_with_probabilities choice probabilities = Yojson.Safe.to_string (`Assoc
   [ "model", `String "fixture-jev"
   ; "answers", `Assoc ["memory_change", `Assoc
       [ "type", `String "choice"; "choice", `String choice
       ; "confidence", `Float 1.0
-      ; "probabilities", `Assoc (List.map (fun name ->
-          name, `Float (if name = choice then 1.0 else 0.0))
-          ["keep_current"; "needs_generation"; "uncertain"]) ]] ])
+      ; "probabilities", `Assoc (List.map (fun (name, probability) -> name, `Float probability) probabilities) ]] ])
+
+let answer choice = answer_with_probabilities choice
+  (List.map (fun name -> name, if name = choice then 1.0 else 0.0)
+    ["keep_current"; "needs_generation"; "uncertain"])
 
 let generated = Yojson.Safe.to_string (`Assoc
   [ "new_claims", `List [`Assoc
@@ -20,12 +22,6 @@ let generated = Yojson.Safe.to_string (`Assoc
       ; "board_post_id", `Null; "board_comment_id", `Null
       ; "supersedes", `Null; "absorbs", `List [] ]]
   ; "dropped", `List []; "working_contexts", `List []; "working_state", `Null ])
-
-let malformed_choice probabilities = Yojson.Safe.to_string (`Assoc
-  ["model", `String "fixture-jev";
-   "answers", `Assoc ["memory_change", `Assoc
-     ["type", `String "choice"; "choice", `String "keep_current";
-      "confidence", `Float 1.; "probabilities", `Assoc probabilities]]])
 
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ?(context_only = false) ?(with_context = false) ~name ~status ~body
@@ -134,16 +130,20 @@ let () =
       case "needs-generation" `OK (answer "needs_generation") 1 1;
       case "uncertain" `OK (answer "uncertain") 1 1;
       case "invalid-answer" `OK {|{"model":"fixture","answers":{}}|} 1 1;
-      case "missing-probability" `OK
-        (malformed_choice ["keep_current", `Float 1.]) 1 1;
-      case "out-of-range-probability" `OK
-        (malformed_choice ["keep_current", `Float (-1.); "needs_generation", `Float 2.; "uncertain", `Float 0.]) 1 1;
+      case "missing-option" `OK
+        (answer_with_probabilities "keep_current" ["keep_current", 1.0]) 1 1;
+      case "duplicate-option" `OK
+        (answer_with_probabilities "keep_current"
+          ["keep_current", 1.0; "keep_current", 0.0; "needs_generation", 0.0; "uncertain", 0.0]) 1 1;
+      case "out-of-range" `OK
+        (answer_with_probabilities "keep_current"
+          ["keep_current", -1.0; "needs_generation", 2.0; "uncertain", 0.0]) 1 1;
       case "inconsistent-choice" `OK
-        (malformed_choice ["keep_current", `Float 0.; "needs_generation", `Float 1.; "uncertain", `Float 0.]) 1 1;
-      case "non-unit-probability-sum" `OK
-        (malformed_choice ["keep_current", `Float 0.8; "needs_generation", `Float 0.8; "uncertain", `Float 0.]) 1 1;
-      case "duplicate-probability" `OK
-        (malformed_choice ["keep_current", `Float 1.; "keep_current", `Float 0.; "needs_generation", `Float 0.; "uncertain", `Float 0.]) 1 1;
+        (answer_with_probabilities "keep_current"
+          ["keep_current", 0.0; "needs_generation", 1.0; "uncertain", 0.0]) 1 1;
+      case "invalid-total" `OK
+        (answer_with_probabilities "keep_current"
+          ["keep_current", 0.5; "needs_generation", 0.0; "uncertain", 0.0]) 1 1;
       case "provider-failed" `Service_unavailable {|{"error":"fixture unavailable"}|} 1 1;
       case ~enabled:false "opt-out" `OK (answer "keep_current") 0 1;
       case ~excluded:true "excluded" `OK (answer "keep_current") 0 1;

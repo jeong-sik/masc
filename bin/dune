@@ -557,7 +557,7 @@
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
- (libraries masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_acting)

@@ -9960,6 +9960,12 @@ let test_librarian_preflight_detail_reports_actual_route () =
    | _ -> Alcotest.fail "actual JEV route not decoded");
   Alcotest.(check bool) "JEV does not invent Board provenance" true
     (detail.lrd_answer_source = None);
+  let invented_slot = match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("selected_slot", `String "codex.fake") :: List.remove_assoc "selected_slot" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "no-change must not invent a generation slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
   List.iter (fun (decision, path, skipped) ->
     Alcotest.(check bool) "inconsistent or unknown route rejected" true
       (Result.is_error (Tui_decode.decode_lane_run_detail (make ~decision ~path ~skipped))))

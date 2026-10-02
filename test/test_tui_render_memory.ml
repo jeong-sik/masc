@@ -1597,23 +1597,23 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
     Render_memory.render_memory_facts_body ~cols ~budget:24 state ~push
       ~push_styled:(fun ~style line -> push (style ^ line))
       ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
-    List.rev !lines
-    |> List.mapi (fun row line -> Masc_tui_hit.extract_line Masc_tui_press.press_marks ~row line)
+    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
   in
-  let wide = render 140 in
+  let wide, zones = render 140 in
   check bool "Category rail visible" true
-    (List.exists (fun (line, _) -> contains "CATEGORIES" line) wide);
+    (List.exists (contains "CATEGORIES") wide);
   check bool "Category counts visible" true
-    (List.exists (fun (line, _) -> contains "preference  (1)" line) wide);
+    (List.exists (contains "preference  (1)") wide);
   check bool "frame width preserved" true
-    (List.for_all (fun (line, _) -> Layout.display_width line <= 140) wide);
+    (List.for_all (fun line -> Layout.display_width line <= 140) wide);
   check bool "selected Category has clickable rail target" true
-    (List.exists (fun (_, zones) -> List.exists (fun (zone : _ Masc_tui_hit.zone) ->
-      zone.first < Masc_tui_roster_pane.pane_cols &&
-      zone.target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference)) zones) wide);
-  let narrow = render 80 in
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
+      (Masc_tui_hit.to_list zones));
+  let narrow, _ = render 80 in
   check bool "narrow frame keeps full fact width" false
-    (List.exists (fun (line, _) -> contains "CATEGORIES" line) narrow)
+    (List.exists (contains "CATEGORIES") narrow)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
@@ -2079,8 +2079,8 @@ let test_facts_selection_follows_the_rendered_viewport () =
     ; mfs_events_read_error = None
     };
   let assert_visible ~cols ~budget () =
-    let used = ref 0 and selected = ref [] in
-    let push _ = incr used in
+    let used = ref 0 and selected = ref [] and rendered = ref [] in
+    let push line = if !used < budget then rendered := line :: !rendered; incr used in
     Render_memory.render_memory_facts_body ~cols ~budget state
       ~push ~push_styled:(fun ~style:_ line -> push line)
       ~push_selected:(fun line ->
@@ -2088,9 +2088,16 @@ let test_facts_selection_follows_the_rendered_viewport () =
         incr used)
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let row = List.nth (Types.memory_fact_rows state) state.memory_facts_cursor in
-    let expected = Render_memory.memory_fact_row_line ~cols row
+    let fact_cols = Render_memory.memory_facts_pane_cols cols in
+    let expected = Render_memory.memory_fact_row_line ~cols:fact_cols row
       |> Masc_tui_theme.strip_sgr in
-    check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
+    if cols < Masc_tui_roster_pane.threshold_cols then
+      check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
+    else
+      let styled = Layout.fit_width
+        (Masc_tui_theme.selection ^ expected ^ Masc_tui_ansi.Ansi.reset) fact_cols in
+      check bool "the composed fact pane shows the selected fact inside the body" true
+        (List.exists (contains styled) !rendered)
   in
   let move ~cols ~budget cursor =
     let height = Render_memory.memory_facts_content_height ~cols ~budget ~cursor state in

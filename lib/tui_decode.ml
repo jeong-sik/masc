@@ -5536,7 +5536,9 @@ let decode_librarian_preflight output =
     let* () = match lp_generation_path, lp_full_llm_skipped, lp_status with
       | Generation_jev_no_change, true,
         Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _} -> Ok ()
-      | (Generation_not_entered | Generation_full_lane), false, _ -> Ok ()
+      | Generation_not_entered, false, _ -> Ok ()
+      | Generation_full_lane, false, Preflight_awaiting -> Error "awaiting preflight cannot enter generation"
+      | Generation_full_lane, false, _ -> Ok ()
       | _ -> Error "Librarian preflight decision and generation path disagree"
     in
     let* lp_elapsed_s = optional_float_field preflight "elapsed_s" in
@@ -5759,6 +5761,10 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
     | _, _ -> Ok None
   in
+  let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
+    | Some {lp_generation_path = Generation_jev_no_change; _}, Some _ ->
+      Error "JEV no-change run must not have a selected generation slot"
+    | _, _ -> Ok () in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with
     | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending

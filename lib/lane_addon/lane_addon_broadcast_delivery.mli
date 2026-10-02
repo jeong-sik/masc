@@ -47,6 +47,17 @@ val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
     callers pass the same workspace_request_id to append_user_message_once on
     every attempt. *)
 val complete : record -> bool
+type journal_reconciliation =
+  | Pending of receipt
+  | Settled_with_cleanup of receipt
+  | Retired
+val pending_markers : t -> (string list, error) result
+(** Enumerate pending marker filenames without acquiring journal locks.
+    Missing pending directory returns an empty list. Other I/O errors refuse the scan. *)
+val reconcile : t -> string -> (journal_reconciliation, error) result
+(** Reconcile a single pending journal under its exclusive lock:
+    validates the journal, retires empty crash markers, commits or retires
+    settled markers, or returns [Pending receipt] for an incomplete operation. *)
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list;rejected:(string * error) list}
 val recover : t -> (recovery, error) result
 (** Restart scans only durable pending markers, created before admission and
@@ -66,4 +77,6 @@ module For_testing : sig
   val recover : t -> after_scan:(unit -> unit) -> (recovery, error) result
   (** [after_scan] runs after journal names are captured, before any journal is
       opened, so fixtures can exercise disappearance during restart recovery. *)
+  val pending_markers : t -> after_scan:(unit -> unit) -> (string list, error) result
+  val reconcile : t -> string -> (journal_reconciliation, error) result
 end

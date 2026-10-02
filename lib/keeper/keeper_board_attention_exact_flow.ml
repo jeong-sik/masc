@@ -68,7 +68,7 @@ type 'callback_error execution_error =
   | Domain_output_invalid of string
 
 type prepared_transport =
-  | Http_flow of Exact_output.flow_attempt
+  | Http_flow of Exact_output.flow_attempt * Runtime_exact_output_registry.resolved_lane
   | Cli_only of
       { first_slot : string
       ; other_slots : string list
@@ -193,7 +193,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
           |> Result.map_error (fun _ -> Flow_snapshot_failed)
         in
         Exact_output.start_flow snapshot
-        |> Result.map (fun attempt -> Http_flow attempt)
+        |> Result.map (fun attempt -> Http_flow (attempt, resolved))
         |> Result.map_error (fun _ -> Flow_start_failed)
     in
     Ok { candidate; net; transport; base_path; cli_slots = resolved.cli_slots;
@@ -844,7 +844,7 @@ let execute_current
            | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
            | Error failures ->
              Error (Cli_slots_exhausted { prior_error = None; failures }))
-        | Http_flow attempt ->
+        | Http_flow (attempt, resolved) ->
           (match jev_first with
            | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->
              Ok
@@ -871,7 +871,7 @@ let execute_current
                  ~validate
                  attempt
              in
-             Runtime_exact_lane_backpressure.observe flow;
+             Runtime_exact_lane_backpressure.observe ~resolved flow;
              (match flow with
               | Ok success -> Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->

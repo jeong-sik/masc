@@ -355,15 +355,21 @@ let render_overview (state : state) =
               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
                 (Terminal_text.single_line line))
             |> List.map (fun line -> None, " " ^ line) in
-          let notice_rows = if Option.is_some state.opening_notice then 1 else 0 in
+          let notice_rows =
+            (if Option.is_some state.opening_notice then 1 else 0)
+            + (if Option.is_some state.home_decision_receipt then 1 else 0) in
           let candle_fits = spare >= 2 + notice_rows + List.length candle in
           let health = if candle_fits then health else
             match Masc_tui_candle.compact_status state.candle_observation with
             | None -> health
             | Some status -> " " ^ status ^ " · " ^ health in
           let readings =
-            [ (None, health); (Some (Theme.recede ()), work) ]
-            @ if candle_fits then candle else []
+            (match state.home_decision_receipt with
+             | None -> []
+             | Some (_, receipt) ->
+                 [None, " Last decision receipt · " ^ Terminal_text.single_line receipt])
+            @ [ (None, health); (Some (Theme.recede ()), work) ]
+            @ (if candle_fits then candle else [])
           in
           match state.opening_notice with
           | None -> readings
@@ -843,6 +849,30 @@ let planning_updated_age ~now (goal : planning_goal) =
 
 (** Render the Planning surface (list view). *)
 
+(* Panels use terminal cell widths, including styled and wide-script text.
+   Callers choose their height from the available rows and retain selection. *)
+let studio_panel ~width ~title ~lines =
+  let inner = max 1 (width - 4) in
+  let border left right =
+    Theme.recede () ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
+  in
+  [ Theme.info () ^ "┌ " ^ fit_width title (max 1 (width - 4)) ^ " ┐" ^ Ansi.reset ]
+  @ List.map (fun line ->
+      Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
+      ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
+  @ [ border "└" "┘" ]
+
+let studio_pair ~width left right =
+  let gutter = 2 in
+  let left_width = (width - gutter) / 2 in
+  let right_width = width - gutter - left_width in
+  let left = left left_width and right = right right_width in
+  let count = max (List.length left) (List.length right) in
+  List.init count (fun index ->
+    fit_width (Option.value (List.nth_opt left index) ~default:"") left_width
+    ^ String.make gutter ' '
+    ^ fit_width (Option.value (List.nth_opt right index) ~default:"") right_width)
+
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -1009,7 +1039,22 @@ let render_planning_list (state : state) =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
          then Buffer.add_buffer buf summary
        in
-       box_line buf cols rollup;
+       let summary_width = framed_inner_width cols in
+       let summary_cards =
+         studio_pair ~width:summary_width
+           (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4))
+                (planning_rollup_row ~cols:width p.pl_rollup)))
+           (fun width -> studio_panel ~width ~title:"Tasks · Backlog:"
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) backlog))
+       in
+       let summary_card_rows = List.length summary_cards in
+       let cards_fit =
+         summary_width >= Message_layout.display_width "Goals · measured outcomes  Tasks · current backlog" * 2
+         && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
+       in
+       if cards_fit then List.iter (box_line buf cols) summary_cards
+       else box_line buf cols rollup;
        let trend = Buffer.create 256 in
        box_line_styled trend cols ~style:(Theme.info ())
          (match state.planning_baseline with
@@ -1035,7 +1080,7 @@ let render_planning_list (state : state) =
        let backlog_summary = Buffer.create 256 in
        box_line backlog_summary cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       add_summary_if_fits backlog_summary;
+       if not cards_fit then add_summary_if_fits backlog_summary;
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;
@@ -1603,6 +1648,34 @@ let schedule_delivery_word (row : schedule_row) =
   match row.sch_reaction_projection_status with
   | None -> Masc_tui_theme.Glyph.no_value
   | Some status -> cut status
+
+(* What the last occurrence came to, for a row that has one line to say it.
+
+   A wake that did not succeed is the outcome. A succeeded wake hands the
+   column to the furthest step the ledger recorded -- the reading that
+   separates a wake merely taken from one that finished a turn. No wake at
+   all is no outcome: the reaction evidence beside it belongs to the
+   occurrence before (a held occurrence has no wake of its own, and a
+   projection between occurrences still carries the last one's reading), so
+   drawing it would pair a dash in the trigger column with a word about a
+   different occurrence in this one. The word is the server's own, cut of
+   its [matched_] prefix, and the caller sanitises it the way it sanitises
+   every other reading from this projection. *)
+let schedule_outcome_word (row : schedule_row) =
+  match row.sch_last_wake_status with
+  | Some Schedule_contract_values.Wake_succeeded ->
+      schedule_delivery_word row
+  | Some other -> schedule_wake_word other
+  | None -> Masc_tui_theme.Glyph.no_value
+
+(* Whether a status word names a schedule that can still act. The word is
+   the projection's own; a word this build does not name stays with the live
+   rows rather than being buried under the closed rule -- the same promise
+   the word itself makes by rendering as itself. *)
+let schedule_status_is_terminal word =
+  match Schedule_domain.schedule_status_of_string word with
+  | Ok status -> Schedule_domain.is_terminal status
+  | Error _ -> false
 
 let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
@@ -5849,25 +5922,142 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ Layout.automation_schedule_lines ~inner_width:inner
-                ~status_cells:schedule_status_word_cells
-                ~clock_cells:schedule_requested_clock_cells
-                (List.map
-                (fun (row : schedule_row) ->
-                   (* The requested clock disambiguates repeated one-shot
-                      requests. The pure layout keeps each payload summary in
-                      the main row; a long recurrence gets a continuation
-                      rather than consuming every row's summary space. *)
-                   ({ Layout.status = Terminal_text.single_line row.sch_status
-                    ; requested_clock =
-                        Terminal_text.short_timestamp row.sch_requested_at_iso
-                    ; recurrence =
-                        Terminal_text.single_line row.sch_recurrence_summary
-                    ; summary =
-                        Terminal_text.single_line
-                          (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
-                    } : Layout.automation_schedule_row))
-                rows)
+            @ (let outcome_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line (schedule_outcome_word row))
+                   rows
+               in
+               let by_words =
+                 List.map
+                   (fun (row : schedule_row) ->
+                      Terminal_text.single_line row.sch_requested_by)
+                   rows
+               in
+               (* Every line carries a two-cell lead before the table, so the
+                  table is fitted to what the lead leaves -- the same reserve
+                  the Schedules list makes, without which the frame cuts the
+                  last column's tail on every row. *)
+               let table_inner = max 1 (inner - 2) in
+               let layout =
+                 Render_schedule.kauto_layout ~inner_width:table_inner
+                   ~status_width:schedule_status_word_cells
+                   ~clock_width:schedule_requested_clock_cells
+                   ~outcome_width:
+                     (Render_schedule.schedule_delivery_width outcome_words)
+                   ~by_width:(Render_schedule.kauto_by_width by_words)
+               in
+               let header = Render_schedule.kauto_header_row ~layout in
+               (* The rule under the names runs the header's own width, so a
+                  pane narrower than the table does not draw a rule longer
+                  than the rows under it. The closed rule below ends at the
+                  same cell, so the two rules read as one margin. *)
+               let rule_cells =
+                 min table_inner (Message_layout.display_width header) in
+               let occurrence_clock = function
+                 | Some iso -> Terminal_text.short_timestamp iso
+                 | None -> Masc_tui_theme.Glyph.no_value
+               in
+               let row_line (row : schedule_row) =
+                 (* The mark and the state word wear one colour, the state's
+                    own; the outcome wears the outcome's, so a failed wake
+                    reads red beside a state still reading live. *)
+                 let status_style = schedule_status_color row.sch_status in
+                 (* A held occurrence has no wake of its own, and the wake and
+                    ledger fields on the row still describe the occurrence
+                    before it (#38205): while the hold holds, the three
+                    occurrence cells draw nothing rather than the previous
+                    occurrence's clocks beside a state that reads due-now.
+                    Why it holds is the Schedules list's own reading -- its
+                    row carries the hold tag -- which this tab's capped-page
+                    line already points the reader to. *)
+                 let held = Option.is_some row.sch_runner_hold in
+                 let occurrence_clock value =
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else occurrence_clock value
+                 in
+                 let outcome =
+                   if held then Masc_tui_theme.Glyph.no_value
+                   else Terminal_text.single_line (schedule_outcome_word row)
+                 in
+                 "  "
+                 ^ Render_schedule.kauto_row ~layout
+                     ~styles:
+                       ({ kstyle_mark = status_style
+                        ; kstyle_status = status_style
+                        ; kstyle_outcome = semantic_status_color outcome
+                        ; kstyle_recurrence = Ansi.dim
+                        ; kstyle_by = Theme.recede ()
+                        } : Render_schedule.kauto_row_styles)
+                     { Render_schedule.krow_mark =
+                         Render_schedule.kauto_status_mark row.sch_status
+                     ; krow_status = Terminal_text.single_line row.sch_status
+                     ; krow_triggered =
+                         occurrence_clock row.sch_last_wake_started_at_iso
+                     ; krow_outcome = outcome
+                     ; krow_received =
+                         occurrence_clock row.sch_stimulus_recorded_at_iso
+                     ; krow_recurrence =
+                         Terminal_text.single_line row.sch_recurrence_summary
+                     ; krow_by = Terminal_text.single_line row.sch_requested_by
+                     ; krow_requested =
+                         Terminal_text.short_timestamp row.sch_requested_at_iso
+                     ; krow_what =
+                         Terminal_text.single_line
+                           (Option.value ~default:row.sch_schedule_id
+                              row.sch_payload_summary)
+                     }
+               in
+               (* The page's live rows, then its closed ones under a labelled
+                  rule. The server sends live-first; the partition keeps each
+                  group's order and makes the grouping this pane's own rather
+                  than the server's sort happening to be right. *)
+               let live, closed =
+                 List.partition
+                   (fun (row : schedule_row) ->
+                      not (schedule_status_is_terminal row.sch_status))
+                   rows
+               in
+               let closed_rule =
+                 if closed = [] || live = [] then []
+                 else
+                   let words =
+                     List.map
+                       (fun (row : schedule_row) -> row.sch_status)
+                       closed
+                   in
+                   let rec first_seen acc = function
+                     | [] -> List.rev acc
+                     | word :: rest ->
+                         if List.mem word acc then first_seen acc rest
+                         else first_seen (word :: acc) rest
+                   in
+                   let label =
+                     Render_schedule.kauto_group_label ~title:"closed"
+                       (List.map
+                          (fun word ->
+                             Printf.sprintf "%d %s"
+                               (List.length
+                                  (List.filter (String.equal word) words))
+                               (Terminal_text.single_line word))
+                          (first_seen [] words))
+                   in
+                   let lead = "  \xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+                   let rest_cells =
+                     max 0
+                       (min (2 + rule_cells) inner
+                          - Message_layout.display_width lead)
+                   in
+                   [ Theme.recede () ^ lead ^ draw_hline rest_cells
+                     ^ Ansi.reset
+                   ]
+               in
+               [ Theme.recede () ^ "  " ^ header ^ Ansi.reset
+               ; Theme.recede () ^ "  " ^ draw_hline rule_cells ^ Ansi.reset
+               ]
+               @ List.map row_line live
+               @ closed_rule
+               @ List.map row_line closed)
       | Some _ | None ->
           if error_lines <> [] then []
           else [ tab_loading_row "loading this Keeper's schedules" ]
@@ -7600,10 +7790,10 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | None -> []
     | Some reason -> wrap "Error" reason
   in
-  wrap "Path" repo.rp_resolved_local_path
+  failure
+  @ wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
-  @ failure
 
 type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
 
@@ -7705,6 +7895,59 @@ let render_workspace_activity (state : state) repo_id =
             ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
           show ~budget:(max 1 (budget - 1)) reading)
 
+let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
+  let repos = match state.repositories with
+    | None -> [] | Some snapshot -> snapshot.rs_repositories in
+  let shown = List.length repos in
+      let width = framed_inner_width cols in
+      let named_width =
+        Render_schedule.workspace_minimum_width + 4
+      in
+      let detail_minimum = Message_layout.display_width "Keepers: none assigned" + 4 in
+      let split = width >= named_width + detail_minimum + 2 && budget >= 8 in
+      let detail_width = if split then min (width - named_width - 2) (max detail_minimum (width / 3)) else width in
+      let list_width = if split then width - detail_width - 2 else width in
+      let selected = List.nth_opt repos cursor in
+      let context_lines = match selected with
+        | None -> []
+        | Some repo -> repository_context_lines ~width:(detail_width - 4) repo in
+      let detail_title = match selected with
+        | None -> "Selected repository"
+        | Some repo -> Terminal_text.single_line repo.rp_name in
+      let errors = match state.repositories_error with
+        | None -> []
+        | Some detail ->
+            Message_layout.wrap_words ~max_cells:(max 1 (list_width - 4))
+              (Terminal_text.single_line detail)
+            |> List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) in
+      (* Keep the header, panel edges and a selected repository visible.
+         The stacked layout also needs the selected-context panel edges. *)
+      let error_budget = max 0 (budget - if split then 4 else 6) in
+      let errors =
+        if List.length errors <= error_budget then errors
+        else List.take (max 0 (error_budget - 1)) errors
+          @ (if error_budget > 0 then ["More error detail · enlarge terminal"] else []) in
+      let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
+      let truncated = List.length context_lines > context_budget in
+      let show_notice = truncated && context_budget >= 2 in
+      let visible_context =
+        List.take (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
+      let detail = studio_panel ~width:detail_width ~title:detail_title
+          ~lines:(visible_context @
+            (if show_notice
+             then ["More context · enlarge the terminal"] else [])) in
+      let list_budget =
+        if split then budget else max 4 (budget - List.length detail) in
+      let room = max 1 (list_budget - 3 - List.length errors) in
+      let overflowing = shown > room && room > 1 in
+      let content_height = if overflowing && room > 1 then room - 1 else room in
+  (split, list_width, detail_width, detail, errors, content_height, overflowing)
+
+let repository_studio_content_height state ~cols ~budget ~cursor =
+  let _, _, _, _, _, content_height, _ =
+    repository_studio_geometry state ~cols ~budget ~cursor in
+  content_height
+
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let repos =
@@ -7737,84 +7980,65 @@ let render_repository_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
-      (* The path takes what the named columns leave, asked of the columns
-         rather than of a constant standing in for their total. *)
-      let repository_layout =
-        Render_schedule.workspace_layout
-          ~inner_width:(max 1 (framed_inner_width cols - 2))
-      in
-      c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~layout:repository_layout);
-      c.push_divider ();
-      (match state.repositories_error with
-       | None -> ()
-       | Some detail ->
-           c.push_styled ~style:(Theme.bad ())
-             ("  " ^ Keeper_chat.terminal_safe_text detail);
-           c.push_divider ());
-      let context_lines =
-        match List.nth_opt repos state.repositories_cursor with
-        | None -> []
-        | Some repo -> repository_context_lines ~width:(cols - 6) repo
-      in
-      let context_rows =
-        match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
-      in
-      let fixed =
-        2 + context_rows
-        + (if Option.is_some state.repositories_error then 2 else 0)
-      in
-      let room = max 1 (budget - fixed) in
-      let overflowing = shown > room in
-      let content_height = if overflowing then max 1 (room - 1) else room in
+      let split, list_width, detail_width, detail, errors, content_height, overflowing =
+        repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
+      let repository_layout = Render_schedule.workspace_layout
+          ~inner_width:(max 1 (list_width - 4)) in
       let max_scroll = max 0 (shown - content_height) in
-      let scroll = max 0 (min state.repositories_scroll max_scroll) in
+      let scroll = max 0 (min max_scroll
+          (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
+             ~height:content_height state.repositories_scroll)) in
       let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
-      if shown = 0 then
-        let empty =
-          match
-            empty_page_of ~snapshot:state.repositories
-              ~error:state.repositories_error
-          with
-          | Page_failed -> page_failed_note
-          | Page_unread -> page_unread_note
-          | Page_empty -> "  (no repositories registered)"
-        in
-        c.push_styled ~style:(Theme.recede ()) empty
-      else begin
-        for i = 0 to content_height - 1 do
+      let lines =
+        if shown = 0 then
+          [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
+           | Page_failed -> page_failed_note
+           | Page_unread -> page_unread_note
+           | Page_empty -> "(no repositories registered)"]
+        else List.init content_height (fun i ->
           let idx = i + scroll in
           match Rows.at repos_window idx with
-          | None -> c.push_empty ()
+          | None -> ""
           | Some r ->
-              let open Masc.Tui_decode in
-              let line =
-                "  "
-                ^ Render_schedule.workspace_row ~layout:repository_layout
-                    { Render_schedule.wrow_name =
-                        Terminal_text.single_line r.rp_name
-                    ; wrow_branch =
-                        Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status =
-                        Terminal_text.single_line
-                          (Masc.Tui_decode.repository_status_word r.rp_status)
-                    ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
-                    ; wrow_path =
-                        Terminal_text.single_line r.rp_resolved_local_path
-                    }
-              in
-              if idx = state.repositories_cursor then c.push_selected line
-              else c.push line
-        done;
-        if overflowing then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[repositories %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
-      end;
-      (match context_lines with
-       | [] -> ()
-       | lines ->
-           c.push_divider ();
-           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+              let line = Render_schedule.workspace_row ~layout:repository_layout
+                { Render_schedule.wrow_name = Terminal_text.single_line r.rp_name
+                ; wrow_branch = Terminal_text.single_line r.rp_default_branch
+                ; wrow_status = Terminal_text.single_line
+                    (Masc.Tui_decode.repository_status_word r.rp_status)
+                ; wrow_sync = if r.rp_auto_sync then "auto" else "manual"
+                ; wrow_path = Terminal_text.single_line r.rp_resolved_local_path } in
+              if idx = state.repositories_cursor then
+                Theme.selection ^ fit_width line (list_width - 4) ^ Ansi.reset
+              else line)
+      in
+      let lines = [Theme.recede () ^ Render_schedule.workspace_header_row ~layout:repository_layout ^ Ansi.reset]
+        @ errors @ lines
+        @ (if overflowing then
+             ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
+           else []) in
+      let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
+      if split then begin
+        let height = max (List.length listing) (List.length detail) in
+        let count = min budget height in
+        (* Both panels through the list-window helper the scroll panes read:
+           one array per panel, each row reads its own cells. No row of the
+           loop walks either list to find itself -- the walk is what #40177's
+           for-shaped zip left here, and it survives a [List.init] reshape,
+           so the guard going green on that reshape would have been the
+           shape leaving, not the walk. *)
+        let left = Rows.of_list ~first:0 ~height:count listing in
+        let right = Rows.of_list ~first:0 ~height:count detail in
+        for index = 0 to count - 1 do
+          c.push
+            (fit_width (Option.value (Rows.at left index) ~default:"") list_width
+            ^ "  "
+            ^ fit_width (Option.value (Rows.at right index) ~default:"")
+                detail_width)
+        done
+      end else begin
+        List.iter c.push listing;
+        List.iter c.push detail
+      end)
 
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
@@ -10096,14 +10320,14 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some value ->
               ("  " ^ label ^ " (producer-redacted JSON)")
-              :: (document_markdown ~width:(max 1 (cols - 6))
+              :: (document_markdown ~width:(max 1 (cols - 7))
                     ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
           | None -> ["  " ^ label ^ ": not carried"]
           | Some text ->
               ("  " ^ label ^ " (producer-redacted preview)")
-              :: (document_markdown ~width:(max 1 (cols - 6))
+              :: (document_markdown ~width:(max 1 (cols - 7))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
         [""; "  INPUT / OUTPUT OBSERVATIONS"]
@@ -10391,7 +10615,7 @@ let render_acting (state : state) =
     | Actions | Everything -> Acting_selection (scroll, cursor) in
   finish_surface state ~clamped ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
-let provider_history_lines (state : state) =
+let provider_history_lines ~cols (state : state) =
   match state.provider_history with
   | Provider_history_unread ->
       [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
@@ -10422,9 +10646,13 @@ let provider_history_lines (state : state) =
       in
       let chart (row : Masc_tui_usage_trend.row) =
         let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") row.limit_id in
-        Printf.sprintf "   %s · %s%s  %s  %d/%d UTC days reported"
-          (label row.scope_id) (Terminal_text.single_line limit)
-          (Terminal_text.single_line row.kind) row.marks row.reported_days days
+        let width = max 1 (cols - 7) in
+        let heading = Masc_tui_message_layout.fit_middle width (label row.scope_id) in
+        let window = Terminal_text.single_line limit ^ Terminal_text.single_line row.kind in
+        ("   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset)
+        :: List.map (fun line -> "   " ^ line)
+             (Masc_tui_message_layout.wrap_words ~max_cells:width window)
+        @ [ Printf.sprintf "   %s  %d/%d UTC days reported" row.marks row.reported_days days; "" ]
       in
       (Printf.sprintf
          " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report"
@@ -10439,7 +10667,7 @@ let provider_history_lines (state : state) =
                   count (if count = 1 then "" else "s") ])
       @ (match trend.rows with
          | [] -> [ "   No reports recorded in this window" ]
-         | rows -> List.map chart rows)
+         | rows -> List.concat_map chart rows)
 
 let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
@@ -10471,7 +10699,7 @@ let usage_lines ~cols (state : state) =
         (Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
            kuw_window_minutes freshness)
         :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
-            else List.map
+            else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens =
                   Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
@@ -10486,12 +10714,19 @@ let usage_lines ~cols (state : state) =
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
                 in
-                Printf.sprintf
-                  "   %s · %d turns · tokens %s (%d reported, %d missing) · cost %s (%d reported, %d missing) · %s"
-                  (Terminal_text.single_line row.kur_name)
-                  row.kur_turn_samples tokens row.kur_tokens_reported
-                  row.kur_tokens_missing cost row.kur_cost_reported
-                  row.kur_cost_missing coverage)
+                let width = max 1 (cols - 7) in
+                let heading = Masc_tui_message_layout.fit_middle width
+                    (Terminal_text.single_line row.kur_name) in
+                [ "   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset ]
+                @ List.concat_map
+                    (fun line -> List.map (fun text -> "   " ^ text)
+                        (Masc_tui_message_layout.wrap_words ~max_cells:width line))
+                    [ Printf.sprintf "%d turns · %s" row.kur_turn_samples coverage
+                    ; Printf.sprintf "Tokens  %s · %d reported, %d missing"
+                        tokens row.kur_tokens_reported row.kur_tokens_missing
+                    ; Printf.sprintf "Cost    %s · %d reported, %d missing"
+                        cost row.kur_cost_reported row.kur_cost_missing
+                    ; "" ])
               kuw_rows)
   in
   let transport =
@@ -10502,25 +10737,30 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  let lines = scopes @ [ "" ] @ provider_history_lines state
-    @ [ "" ] @ keepers @ [ "" ] @ transport in
-  (* Wrap before the scroll window is counted. Coverage and missing samples
-     are evidence, so a narrow terminal must keep them as reachable rows. *)
-  List.concat_map
-    (fun line ->
-      if String.equal line "" then [ "" ]
-      else if Message_layout.display_width line <= framed_inner_width cols then [line]
-      else
-        let rec leading index =
-          if index < String.length line && Char.equal line.[index] ' '
-          then leading (index + 1) else index in
-        let indent_cells = leading 0 in
-        let indent = String.make indent_cells ' ' in
-        let body = String.sub line indent_cells (String.length line - indent_cells) in
-        Message_layout.split_styled_cells
-          ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
-        |> List.map (fun text -> indent ^ text))
-    lines
+  let wrap_evidence lines =
+    (* Wrap before the scroll window is counted. Coverage and missing samples
+       remain reachable rows on narrow terminals. *)
+    List.concat_map
+      (fun line ->
+        if String.equal line "" then [ "" ]
+        else if Message_layout.display_width line <= framed_inner_width cols then [line]
+        else
+          let rec leading index =
+            if index < String.length line && Char.equal line.[index] ' '
+            then leading (index + 1) else index in
+          let indent_cells = leading 0 in
+          let indent = String.make indent_cells ' ' in
+          let body = String.sub line indent_cells (String.length line - indent_cells) in
+          Message_layout.split_styled_cells
+            ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+          |> List.map (fun text -> indent ^ text))
+      lines
+  in
+  match state.usage_section with
+  (* Plan cards already have a cell-sized border and wrapped contents. *)
+  | Usage_plan -> scopes
+  | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
+  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -10555,8 +10795,20 @@ let render_metrics (state : state) =
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
       else begin
+        let pill section label =
+          if state.usage_section = section then Ansi.reverse ^ " " ^ label ^ " " ^ Ansi.reset
+          else Theme.recede () ^ " " ^ label ^ " " ^ Ansi.reset
+        in
+        let navigation_rows = if budget >= 3 then 1 else 0 in
+        let spacing_rows = if budget >= 6 then 1 else 0 in
+        if navigation_rows > 0 then
+          c.push (pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
+                  ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view");
+        if spacing_rows > 0 then c.push "";
         let lines = usage_lines ~cols state in
-        let height = max 0 (budget - 1) in
+        let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
+        let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
+        let height = content_budget - overflow_rows in
         let max_scroll = max 0 (List.length lines - height) in
         let scroll = min max_scroll (max 0 state.metrics_scroll) in
         drawn_metrics_scroll := scroll;
@@ -10564,7 +10816,7 @@ let render_metrics (state : state) =
           (fun index line ->
             if index >= scroll && index < scroll + height then c.push line)
           lines;
-        if List.length lines > height then
+        if overflow_rows > 0 then
           c.push (Printf.sprintf " [rows %s · j/k to scroll]"
                     (Masc_tui_scroll.window_text ~scroll ~height
                        (List.length lines)))
@@ -10754,6 +11006,7 @@ let render_runtime_params (state : state) =
                 (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
       @ field "Contract" row.rpr_description
+      @ field "Source" (if row.rpr_has_override then "override" else "default")
       @ (match row.rpr_surface with
          | None -> []
          | Some surface -> field "Group" (surface.rps_id ^ " · " ^ surface.rps_description))
@@ -10860,18 +11113,31 @@ let render_runtime_params (state : state) =
                ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line
        done
      end);
-  box_divider buf cols;
   let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
       ~height:(max 1 detail_height) state.config_scroll in
+  let reading = Masc_tui_scroll.window_reading ~noun:"Detail" ~scroll
+      ~height:detail_height (List.length selected_lines) in
   let detail_window = Rows.of_list ~first:scroll ~height:detail_height selected_lines in
-  for index = 0 to detail_height - 1 do
-    match Rows.at detail_window (scroll + index) with
-    | None -> box_empty buf cols
-    | Some line -> box_line buf cols line
-  done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Masc_tui_scroll.window_reading ~noun:"Detail" ~scroll
-       ~height:detail_height (List.length selected_lines));
+  let visible_lines = List.init detail_height (fun index ->
+      Option.value (Rows.at detail_window (scroll + index)) ~default:"") in
+  let panel_title = Option.map (fun row ->
+      "Selected setting · " ^ Terminal_text.single_line row.Tui_decode.rpr_key
+      ^ " · " ^ reading) selected in
+  (* The panel replaces the divider and position row, so the document keeps
+     the shared paging height. Use plain rows when panel borders would trim
+     any exact JSON row or hide the document position. *)
+  (match panel_title with
+   | Some title
+     when Message_layout.display_width title <= framed_inner_width cols - 4
+       && List.for_all
+            (fun line -> Message_layout.display_width line <= framed_inner_width cols - 4)
+            selected_lines ->
+       studio_panel ~width:(framed_inner_width cols) ~title ~lines:visible_lines
+       |> List.iter (box_line buf cols)
+   | Some _ | None ->
+       box_divider buf cols;
+       List.iter (box_line buf cols) visible_lines;
+       box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ reading));
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -11698,7 +11964,7 @@ let render_config_models (state : state) =
              if i < detail_height
              then (
                let line =
-                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 6))
+                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 7))
                in
                if i = 0
                then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
@@ -11879,10 +12145,14 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
+     let caret = if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏" in
+     let input =
+       Message_layout.input_viewport
+         ~max_cells:(max 0 (framed_inner_width cols - 4 - Message_layout.display_width caret))
+         (Terminal_text.single_line session.vws_input)
+     in
      box_line head cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
-             (Terminal_text.single_line session.vws_input)) Ansi.reset
-          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold input Ansi.reset caret));
   (match session.vws_step with
    | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
    | Voice_wizard.Model | Voice_wizard.Voice ->
@@ -11937,8 +12207,8 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    reader has to keep apart. *)
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
-  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
+  let head = Buffer.create 256 in
   let selector label items cursor draw =
     let position =
       if items = [] then "0/0"

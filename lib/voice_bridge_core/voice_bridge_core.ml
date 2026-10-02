@@ -444,23 +444,18 @@ let get_voice_for_agent agent_id =
    premade-name compatibility map and rejects arbitrary names before the
    network call. *)
 
-let rec find_git_root_from path =
-  let git_path = Filename.concat path ".git" in
-  if Sys.file_exists git_path then Some path
-  else
-    let parent = Filename.dirname path in
-    if String.equal parent path then None else find_git_root_from parent
-
 (** Ensure .masc/audio/ directory exists *)
 let resolved_base_path_opt () =
-  match (Host_config.from_env ()).base_path with
-  | Some path -> Some path
-  | None -> find_git_root_from (Sys.getcwd ())
+  match Workspace_root.resolve_current ~flag:None with
+  | Ok { root; _ } -> Some root
+  | Error _ -> None
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Common.masc_dir_from_base_path ~base_path
-  | None -> Common.masc_dirname
+  | None ->
+    invalid_arg
+      "MASC workspace is unresolved; pass --base-path or set MASC_BASE_PATH"
 
 let ensure_audio_dir () =
   let dir = Filename.concat (masc_base_dir ()) "audio" in

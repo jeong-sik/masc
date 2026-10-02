@@ -153,7 +153,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
   let waiting = prepared config "paid-once" in
   let calls = ref [] in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:(make_runner calls);
+    Candle_payout_worker.start ~sw ~config ~appraise:(make_runner calls) ();
     await env "Paid" (fun () -> paid config waiting.goal_id <> []);
     idle env;
     Candle_payout_worker.wake ();
@@ -254,7 +254,7 @@ let test_invalid_weights_wait_for_an_event_not_a_pulse () =
       Ok {A.decision=A.Weights_decided ["outsider",1];trace=trace "invalid-weights"}
     | A.Grade _ | A.Relation _ | A.Weights _ -> make_runner calls ~identity request in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "refused weights" (fun () -> List.exists (fun (_, r) -> A.stage r="weights") !calls);
     idle env;
     let rejected_calls = List.length !calls in
@@ -268,6 +268,41 @@ let test_invalid_weights_wait_for_an_event_not_a_pulse () =
     idle env);
   ignore (one_payment config "rejected")
 
+let test_refused_transport_waits_for_an_event () =
+  with_workspace @@ fun env config ->
+  ignore (prepared config "provider-refusal");
+  let accept = ref false in
+  let attempts = ref 0 in
+  let calls = ref [] in
+  let runner ~identity request =
+    incr attempts;
+    if !accept then make_runner calls ~identity request
+    else Error (A.Invalid_response "provider refused the unchanged request") in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    await env "provider refusal" (fun () -> !attempts > 0);
+    idle env;
+    let refused_attempts = !attempts in
+    check int "refusal has no payment" 0
+      (List.length (paid config "provider-refusal"));
+    Candle_payout_worker.pulse ();
+    idle env;
+    check int "pulse does not redispatch refused request" refused_attempts !attempts;
+    accept := true;
+    Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+    Fun.protect
+      ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+      (fun () ->
+        Candle_payout_worker.wake ();
+        idle env;
+        check int "an unavailable pass does not call the provider"
+          refused_attempts !attempts);
+    Candle_payout_worker.pulse ();
+    await env "the retained event retries after availability recovers"
+      (fun () -> paid config "provider-refusal" <> []);
+    idle env);
+  ignore (one_payment config "provider-refusal")
+
 let test_transport_recovery_is_retried_by_pulse () =
   with_workspace @@ fun env config ->
   ignore (prepared config "transport");
@@ -279,7 +314,7 @@ let test_transport_recovery_is_retried_by_pulse () =
     if !available then make_runner calls ~identity request
     else Error (A.Transport_unavailable "fixture binding is resting") in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "transport deferral" (fun () -> !attempted);
     idle env;
     available := true;
@@ -300,7 +335,7 @@ let test_execution_rejection_waits_for_event_and_preserves_preceding_work () =
       Error (A.Execution_rejected "fixture provider rejected the relation request")
     | A.Grade _ | A.Relation _ | A.Weights _ -> make_runner calls ~identity request in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "permanent relation refusal" (fun () ->
       List.exists (fun (_, request) -> A.stage request = "relation") !calls);
     idle env;
@@ -468,6 +503,32 @@ let test_disable_during_appraisal_preserves_the_obligation () =
      | Candle_payout.Waiting current -> check bool "the original obligation survives" true (current=waiting)
      | _ -> fail "disable consumed the obligation")) [true;false]
 
+let test_disable_before_ledger_decision_preserves_the_obligation () =
+  with_workspace @@ fun _env config ->
+  let waiting = prepared config "disable-before-append" in
+  let () = match Candle_status.current ~base_path:config.base_path with
+    | Candle_config.Enabled _ -> ()
+    | Candle_config.Off | Candle_config.Disabled _ -> fail "fixture policy is not enabled" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  let policy_text = Fs_compat.load_file policy_path in
+  let before = events config in
+  let calls = ref [] in
+  (* Timestamp generation occurs inside each settlement transaction attempt.
+     Disable there to ensure the subsequent availability read refuses append. *)
+  let disable_now () = Sys.remove policy_path; now () in
+  (match Candle_appraise.settle_one ~now:disable_now ~appraise:(make_runner calls)
+           ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> ()
+   | Candle_appraise.Rejected _ | Candle_appraise.Settled _ | Candle_appraise.Superseded _ ->
+     fail "disable after appraisal did not defer settlement");
+  check bool "disable happened after all appraisal stages" true
+    (List.exists (fun (_, request) -> A.stage request = "weights") !calls);
+  check bool "disabled transaction appended no row" true (events config = before);
+  Fs_compat.save_file policy_path policy_text;
+  ignore (drain config (make_runner calls));
+  ignore (one_payment config waiting.goal_id);
+  check int "restored policy settles once" 1 (List.length (paid config waiting.goal_id))
+
 let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
   let historical_amount = max_int / 1000 in
@@ -498,7 +559,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
    | Candle_payout.Waiting _ -> () | _ -> fail "overflow consumed the obligation");
   Eio.Switch.run (fun sw ->
     let started_calls = List.length !calls in
-    Candle_payout_worker.start ~sw ~config ~appraise:(make_runner calls);
+    Candle_payout_worker.start ~sw ~config ~appraise:(make_runner calls) ();
     await env "overflow refusal in the worker" (fun () -> List.length !calls > started_calls);
     idle env;
     let refused_calls = List.length !calls in
@@ -553,7 +614,7 @@ let test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it () =
      | A.Grade _ | A.Relation _ | A.Weights _ -> ());
     make_runner calls ~identity request in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    Candle_payout_worker.start ~sw ~config ~appraise:runner ();
     await env "slow Goal entering model" (fun () -> Option.is_some (Eio.Promise.peek entered));
     Candle_payout_worker.wake ();
     Candle_payout_worker.pulse ();
@@ -652,14 +713,135 @@ let test_clock_reversal_retries_but_malformed_history_rejects () =
       ~base_path:config.base_path malformed with
    | Candle_appraise.Rejected _ -> () | _ -> fail "reversed historical order became retryable")
 
+(* An actual lane publication repairs the provider, without a new Goal or
+   manual payout event. The normal maintenance pulse must reconsider debt. *)
+let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
+  with_workspace @@ fun env config ->
+  let module F = Exact_output_fixture in
+  let module R = Runtime_exact_output_registry in
+  let waiting = prepared config "configuration-recovery" in
+  Eio.Switch.run (fun sw ->
+    let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+    Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+    @@ fun () ->
+    let release, release_refusal = Eio.Promise.create () in
+    let refused = F.start_server ~sw ~net ~clock
+      (F.Reply_with (fun _ _ ->
+         if in_flight then Eio.Promise.await release;
+         `Bad_request,
+         {|{"error":{"message":"model configuration refused","type":"invalid_request_error"}}|})) in
+    let answers =
+      [`Assoc ["grade", `String "medium"];
+       `Assoc ["relation", `String "related"];
+       `Assoc ["relation", `String "related"];
+       `Assoc ["relation", `String "related"];
+       `Assoc ["weights", `Assoc ["keeper-a", `Int 2; "keeper-b", `Int 1]]] in
+    let repaired = F.start_server ~sw ~net ~clock
+      (F.Replies (List.map F.openai_response answers)) in
+    let publish ?(unrelated = false) id base_url =
+      let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
+      let lane : Runtime_schema.exact_output_lane_decl =
+        {id="candle_appraiser";slot_ids=[id];cli_slot_ids=[];
+         max_output_tokens=Some F.fixture_max_output_tokens;thinking=None} in
+      let lanes = if unrelated then [lane; {lane with id="other-lane"}] else [lane] in
+      match R.publish ~lanes snapshot with
+      | Ok _ -> () | Error error -> fail (R.publication_error_to_string error) in
+    publish "refused-slot" refused.base_url;
+    let probe = Server_candle_appraiser.declaration_change_probe () in
+    let samples = ref 0 in
+    let appraiser_declaration_changed () = incr samples; probe () in
+    let appraise = Server_candle_appraiser.run ~base_path:config.base_path in
+    Candle_payout_worker.start ~sw ~config ~appraise ~appraiser_declaration_changed ();
+    await env "permanent provider refusal" (fun () -> F.post_count refused = 1);
+    if not in_flight then (
+      idle env;
+      publish "refused-slot" refused.base_url;
+      Candle_payout_worker.pulse ();
+      idle env;
+      check int "same declaration does not retry refusal" 1 (F.post_count refused);
+      publish ~unrelated:true "refused-slot" refused.base_url;
+      Candle_payout_worker.pulse ();
+      idle env;
+      check int "unrelated publication does not retry refusal" 1 (F.post_count refused));
+    publish "repaired-slot" repaired.base_url;
+    if in_flight then (
+      let sampled = !samples in
+      Candle_payout_worker.pulse ();
+      await env "changed declaration sampled during old call" (fun () -> !samples > sampled);
+      check int "repair does not overlap the old call" 0 (F.post_count repaired);
+      Eio.Promise.resolve release_refusal ())
+    else (
+      let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+      let enabled = Fs_compat.load_file path in
+      Fs_compat.save_file path "invalid = true\n";
+      let sampled = !samples in
+      Candle_payout_worker.pulse ();
+      idle env;
+      check int "disabled worker retains declaration baseline" sampled !samples;
+      check int "disabled worker does not dispatch repair" 0 (F.post_count repaired);
+      Fs_compat.save_file path enabled;
+      Candle_payout_worker.pulse ());
+    await env "retained obligation paid after normal pulse" (fun () -> paid config waiting.goal_id <> []);
+    idle env;
+    let payment = one_payment config waiting.goal_id in
+    check string "same obligation is settled" waiting.request_id payment.identity.request_id;
+    check int "declared grade amount is conserved" 3001 payment.total_milli;
+    check int "allocation shares conserve the grade amount" payment.total_milli
+      (List.fold_left (fun total (a : Candle_payment.allocation) -> total + a.share_milli)
+         0 payment.allocations);
+    check int "every eligible task has a relation" 3 (List.length payment.relations);
+    check int "real Grade, three Relations and Weights completed" 5 (F.post_count repaired);
+    check int "original refusal dispatched once" 1 (F.post_count refused);
+    Candle_payout_worker.pulse ();
+    idle env;
+    check int "later pulse appends no second payment" 1 (List.length (paid config waiting.goal_id));
+    check int "later pulse does not appraise paid debt" 5 (F.post_count repaired))
+
+let test_declaration_probe_retains_usable_baseline () =
+  with_workspace @@ fun _env config ->
+  let module F = Exact_output_fixture in
+  let module R = Runtime_exact_output_registry in
+  let snapshot = F.resolver_snapshot ~source:config.base_path
+      [{F.id="slot-a";base_url="http://127.0.0.1:1"};
+       {F.id="slot-b";base_url="http://127.0.0.1:1"}] in
+  let publish ?(lane_id="candle_appraiser") id =
+    ignore (F.publish_registry ~lane_id ~slot_ids:[id] snapshot : R.t) in
+  let registry_ok = function Ok value -> value
+    | Error error -> fail (R.publication_error_to_string error) in
+  publish "slot-a";
+  let probe = Server_candle_appraiser.declaration_change_probe () in
+  check bool "initial declaration seeds baseline" false (probe ());
+  let retained = Option.get (R.prepare_retention ()) in
+  let reservation = registry_ok (R.For_testing.reserve_replacement retained) in
+  check bool "busy publication is not a change" false (probe ());
+  (match R.For_testing.abort_replacement reservation with
+   | Ok () -> () | Error _ -> fail "reservation abort failed");
+  ignore (registry_ok (R.unpublish ()));
+  check bool "unpublished registry is not a change" false (probe ());
+  publish ~lane_id:"other-lane" "slot-b";
+  check bool "missing Candle declaration is not a change" false (probe ());
+  publish "slot-a";
+  check bool "same declaration after missing stays unchanged" false (probe ());
+  publish "slot-b";
+  check bool "changed usable declaration recovers" true (probe ());
+  check bool "change is consumed once" false (probe ());
+  ignore (registry_ok (R.unpublish ()));
+  let initially_missing = Server_candle_appraiser.declaration_change_probe () in
+  publish "slot-a";
+  check bool "first usable declaration seeds missing baseline" false (initially_missing ())
+
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
+      [test_case "published appraiser repair releases rejected payout" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:false)
+      ;test_case "publication during refusal retains recovery event" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:true)
+      ;test_case "declaration probe retains usable baseline" `Quick test_declaration_probe_retains_usable_baseline
+      ;test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
       ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
       ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
+      ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "execution refusal holds through pulses and resumes on event" `Quick test_execution_rejection_waits_for_event_and_preserves_preceding_work
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
@@ -667,6 +849,7 @@ let () =
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider
       ;test_case "disable during model call preserves waiting" `Quick test_disable_during_appraisal_preserves_the_obligation
+      ;test_case "disable before ledger decision preserves waiting" `Quick test_disable_before_ledger_decision_preserves_the_obligation
       ;test_case "cumulative overflow refuses the real settlement" `Quick test_cumulative_overflow_refuses_the_real_settlement
       ;test_case "slow Goal cannot hold another or overlap itself" `Quick test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it
       ;test_case "server receipt is durable before dispatch and after answer" `Quick test_server_records_the_request_before_dispatch_and_retains_its_answer]]

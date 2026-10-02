@@ -10,6 +10,17 @@ type file_source =
   ; sha256 : string
   }
 
+type revalidation_scope =
+  | All_sources
+  | Selected_sources of file_source list
+
+module Source_identity_set = Set.Make (struct
+  type t = file_source
+  let compare left right =
+    let path = String.compare left.path right.path in
+    if path <> 0 then path else String.compare left.sha256 right.sha256
+end)
+
 type fact =
   { claim : string
   ; first_seen : float
@@ -635,6 +646,7 @@ type revalidation_step =
   ; kept_rev : fact list
   ; unverified_rev : string list
   ; invalidated_rev : invalidation list
+  ; deferred_paths : Path_set.t
   }
 
 let keep_unverified step fact =
@@ -644,7 +656,13 @@ let keep_unverified step fact =
   }
 ;;
 
-let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
+let revalidate ?(scope = All_sources) ?clock ~config ~meta ~keepers_dir ~now () =
+  let identities = match scope with
+    | All_sources -> None
+    | Selected_sources sources -> Some (Source_identity_set.of_list sources) in
+  let selected fact = match identities with
+    | None -> true
+    | Some identities -> Source_identity_set.mem fact.source identities in
   if not (finite_nonnegative now)
   then Error "source-bound memory timestamp must be finite and non-negative"
   else
@@ -671,7 +689,10 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
           let step =
             List.fold_left
               (fun step fact ->
-                 match step.asking with
+                 if not (selected fact) then
+                   { (keep_unverified step fact) with
+                     deferred_paths = Path_set.add fact.source.path step.deferred_paths }
+                 else match step.asking with
                  | Stopped_after_unanswered_read -> keep_unverified step fact
                  | Asking ->
                    (match read_source ~config ~meta ~source_path:fact.source.path with
@@ -720,21 +741,24 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                           }
                           :: step.invalidated_rev
                       }))
-              { asking = Asking; kept_rev = []; unverified_rev = []; invalidated_rev = [] }
+              { asking = Asking; kept_rev = []; unverified_rev = []; invalidated_rev = [];
+                deferred_paths = Path_set.empty }
               previous.facts
           in
           let unverified = List.rev step.unverified_rev in
-          (match step.asking, unverified with
+          let read_unverified = List.filter
+              (fun path -> not (Path_set.mem path step.deferred_paths)) unverified in
+          (match step.asking, read_unverified with
            | Asking, [] -> ()
            | Asking, _ :: _ ->
              Log.Keeper.warn
                "source-bound memory kept %d fact(s) unverified keeper=%s: source unreadable"
-               (List.length unverified)
+               (List.length read_unverified)
                meta.Keeper_meta_contract.name
            | Stopped_after_unanswered_read, _ ->
              Log.Keeper.warn
                "source-bound memory kept %d fact(s) unverified keeper=%s: the endpoint did not answer, the rest of the pass was not asked"
-               (List.length unverified)
+               (List.length read_unverified)
                meta.Keeper_meta_contract.name);
           let facts = List.rev step.kept_rev in
           let newly_invalidated = List.rev step.invalidated_rev in

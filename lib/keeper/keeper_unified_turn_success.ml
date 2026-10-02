@@ -88,6 +88,7 @@ let append_metrics_snapshot
       ~meta
       ~updated_meta
       ~observation
+      ~keeper_turn_id
       ~channel
       ~result
       ~latency_ms
@@ -135,6 +136,7 @@ let append_metrics_snapshot
          ~config
          ~meta:updated_meta
          ~observation
+         ~keeper_turn_id
          ~result
          ~latency_ms
          ~usage_resolution
@@ -682,6 +684,7 @@ let handle
     ~meta
     ~updated_meta
     ~observation
+    ~keeper_turn_id
     ~channel
     ~result
     ~latency_ms

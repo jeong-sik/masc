@@ -266,7 +266,10 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         query = parse_qs(urlsplit(path).query)
         if query != {"run_id": ["retained world/0"]}:
             raise AssertionError(f"history read changed its exact run target: {query!r}")
-        return 200, {"rows": [old_rows[0]], "coverage": [], "complete": True}
+        row = {**old_rows[0]}
+        if len(slice_reads) > 1:
+            row["title"] = "Refreshed old result"
+        return 200, {"rows": [row], "coverage": [], "complete": True}
 
     fixtures["/api/v1/lane-addons/slice"] = terminal.PathHttpResponse(retained_slice)
     requests: terminal.HttpRequests = []
@@ -301,6 +304,12 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
             raise AssertionError("history detail did not retain detached state")
         terminal.send_and_wait(process, master, output, b"D", b"retained-0/1/result")
         terminal.send_and_wait(process, master, output, b"\x1b", b"Preserved old result")
+        before_refresh = len(inventory_reads)
+        terminal.send_and_wait(process, master, output, b"r", b"Refreshed old result")
+        if len(inventory_reads) != before_refresh:
+            raise AssertionError("retained detail refresh replaced its run scope with inventory")
+        terminal.send_and_wait(process, master, output, b"D", b"retained-0/1/result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Refreshed old result")
         terminal.send_and_wait(process, master, output, b"\x1b", b"Instance retained-0")
         returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
         if b"Repeated counters" in terminal.screen_text(returned):
@@ -326,8 +335,8 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         interact=interact, http_fixtures=fixtures, http_requests=requests)
     if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
         raise AssertionError("history navigation sent a write")
-    if len(slice_reads) != 1:
-        raise AssertionError(f"retained detail did not perform exactly one fresh scoped GET: {slice_reads!r}")
+    if len(slice_reads) != 2:
+        raise AssertionError(f"retained detail open and refresh did not each perform a scoped GET: {slice_reads!r}")
     print("Lane current list / grouped retained instances / fresh scoped GET / exact raw target / return: PASS")
 
 

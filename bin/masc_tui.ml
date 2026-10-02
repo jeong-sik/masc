@@ -18926,7 +18926,14 @@ and is loaded on demand through keeper_skill.
                               let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=lane_addons_input_failure detail}))
-                     | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "r" ->
+                         let request = match view.screen, view.overview_mode, Addons.selected_instance view with
+                           | Addons.Detail _, Addons.Retained_runs, Some item ->
+                               Addons.Slice ["run_id",item.run_id]
+                           | Addons.Overview, _, _
+                           | Addons.Detail _, Addons.Current_installations, _
+                           | Addons.Detail _, Addons.Retained_runs, None -> Addons.Inspect in
+                         launch_lane_addons state ~mailbox:async_messages request
                      | "h" when view.screen=Addons.Overview -> update (Addons.toggle_history view)
                      | "S" ->
                          if not view.loading then (

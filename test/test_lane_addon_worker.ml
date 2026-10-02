@@ -558,22 +558,17 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     if Sys.file_exists saved_index then (
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory)) (fun () ->
-    check bool "terminal index failure does not report success" true
-      (Result.is_error (observe worker "good")));
+    check bool "terminal journal preserves success when the primary index fails" true
+      (Result.is_ok (observe worker "good")));
   let index_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
-    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message"
-    |> Yojson.Safe.Util.to_string |> Yojson.Safe.from_string in
-  check string "terminal index failure remains uncertain" "outcome_unknown"
-    (Yojson.Safe.Util.member "status" index_failure |> Yojson.Safe.Util.to_string);
-  let recovered_references = Yojson.Safe.Util.member "evidence" index_failure in
+    |> Yojson.Safe.Util.member "result" in
+  let recovered_references = index_failure |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member "masc.lane_sampling" in
   let recovered_outcome = Yojson.Safe.Util.member "outcome" recovered_references |> read_reference in
-  check string "index failure exposes the retained actual answer" "host answer"
+  check string "index failure keeps the retained actual answer" "host answer"
     (recovered_outcome |> Yojson.Safe.Util.member "response"
       |> Yojson.Safe.Util.member "content" |> Yojson.Safe.Util.member "text"
       |> Yojson.Safe.Util.to_string);
-  check bool "retained outcome links the returned request" true
-    (Yojson.Safe.Util.member "request" recovered_outcome
-      = Yojson.Safe.Util.member "request" recovered_references);
   let interrupted = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
   check bool "failed terminal replacement recovers the independently retained outcome" true
@@ -597,16 +592,13 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let uncertain = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
     |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
     |> Yojson.Safe.from_string in
-  check string "post-invocation persistence failure remains uncertain" "outcome_unknown"
+  check string "oversized response is rejected before transmission" "invalid_response"
     (uncertain |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
-  check string "uncertain outcome still exposes its durable request" "model_request"
-    (uncertain |> Yojson.Safe.Util.member "request" |> read_reference
-      |> Yojson.Safe.Util.member "kind" |> Yojson.Safe.Util.to_string);
-  let pending_after_failure = match sampling_requests recovered ~instance_id:"sampling-worker" with
+  let terminal_after_failure = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
-  check bool "uncertain response remains discoverable after reopening the store" true
-    (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "pending"
-      && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" uncertain) pending_after_failure);
+  check bool "retention failure still has terminal recovery evidence" true
+    (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
+      && Yojson.Safe.Util.member "outcome" row = Yojson.Safe.Util.(uncertain |> member "evidence" |> member "outcome")) terminal_after_failure);
   oversized := false; raises := true;
   check bool "invocation exception reaches the package as an error" true (Result.is_error (observe worker "good"));
   let inline_error () = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
@@ -721,7 +713,7 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   let module S = Mcp_protocol.Sampling in
   let store = Store.create ~root:(Filename.concat dir "first-use") in
   List.iter (fun relative ->
-    let fail_parent = Filename.dirname (Filename.concat (Store.root store) relative) |> Filename.dirname in
+    let fail_parent = Store.root store in
     let syncs = ref [] in
     let write fail_sync = Store.For_testing.write store relative "{}" ~sync_parent:(fun path ->
       syncs := path :: !syncs;
@@ -779,7 +771,52 @@ let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _
     ~f:(fun _ -> incr count; Ok ()) with Ok () -> () | Error detail -> fail detail);
   check int "complete scan still visits every retained request" 128 !count)
 
+let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "terminal-recovery") in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let invoke instance_id answer =
+    let broker = match Sampling.create ~store ~package:p ~instance_id ~route:"r"
+      ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
+    let handler = match Sampling.for_worker broker ~package:p ~instance_id with
+      | Ok value -> value | Error detail -> fail detail in handler params in
+  let answer meta : S.create_message_result = {role=Assistant;content=Text {type_="text";text="answer"};
+    model="model";stop_reason=None;_meta=Some meta} in
+  (match invoke "unsafe-json" (Ok (answer (`Intlit "not-json"))) with
+   | Ok _ -> fail "invalid serialized JSON accepted" | Error _ -> ());
+  let rows = match sampling_requests store ~instance_id:"unsafe-json" with Ok rows -> rows | Error detail -> fail detail in
+  check bool "invalid serialization is terminal and recoverable" true
+    (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") rows);
+  let secret = "https://internal.example/token=host-secret" in
+  (match invoke "host-error" (Error secret) with
+   | Ok _ -> fail "host failure accepted"
+   | Error reply ->
+       let json = Yojson.Safe.from_string reply in
+       check bool "host diagnostics stay out of package response" true
+         (Yojson.Safe.Util.member "error" json = `Null));
+  let journal = Filename.concat (Store.root store) "sampling-outcomes" in
+  let backup = journal ^ ".saved" in
+  Unix.rename journal backup;
+  write journal "unavailable journal";
+  Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
+    check bool "primary terminal index succeeds when journal is unavailable" true
+      (Result.is_ok (invoke "journal-failure" (Ok (answer `Null)))));
+  let rows = match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail in
+  let row = match rows with [row] -> row | _ -> fail "missing terminal recovery row" in
+  let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
+    | Ok value -> value | Error detail -> fail detail in
+  let hash = match reference.sha256 with Some hash -> hash | None -> fail "missing digest" in
+  Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json"));
+  ignore (match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail);
+  check bool "recovery reconstructs outcome from first durable terminal record" true
+    (Result.is_ok (Store.read_blob store reference)))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;

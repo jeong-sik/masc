@@ -59,3 +59,14 @@ val lifecycle_log_line :
     follows docs/spec/18-log-severity-taxonomy.md § 3.6. A carried reason is
     appended last as [reason=...] with newlines collapsed to spaces, so free
     text from a dispatched tool cannot split the record across lines. *)
+
+
+type up_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+val validate_up_workspace :
+  config:Workspace.config -> Yojson.Safe.t -> (Yojson.Safe.t, up_workspace_error) result
+(** Validate an optional canonical base/root precondition before Up dispatch,
+    stripping the HTTP-only field from tool arguments. A mismatched or
+    unreadable receiving workspace fails closed. Other Up clients may omit it. *)

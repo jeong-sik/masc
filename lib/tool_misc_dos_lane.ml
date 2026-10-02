@@ -394,22 +394,36 @@ let relay_to_board ~author content =
    call returns. One Eio mutex lets one fiber drain at a time, so the queue's
    order is the board's order. A line left behind by a failed drain goes out
    with the next one. *)
-let announcements : (string * string) Queue.t = Queue.create ()
+type announcement = { author : string; content : string; ready : bool Atomic.t }
+let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
 let posting = Eio.Mutex.create ()
 
-let announce ~author content () =
-  Mutex.protect announcements_lock (fun () -> Queue.push (author, content) announcements)
+let enqueue ~ready ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
+;;
+let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author content ()
+;;
+
+(* Queue in machine order, but keep this transaction's notices invisible to
+   every flusher until its Auth admission has exited, including on exception. *)
+let with_deferred_announcements f =
+  let ready = Atomic.make false in
+  Fun.protect ~finally:(fun () -> Atomic.set ready true)
+    (fun () -> f (enqueue ~ready))
 ;;
 
 let flush_announcements () =
-  let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
+  let next () = Mutex.protect announcements_lock (fun () ->
+    match Queue.peek_opt announcements with
+    | Some notice when Atomic.get notice.ready -> Queue.take_opt announcements
+    | Some _ | None -> None) in
   try
     Eio.Mutex.use_rw ~protect:false posting (fun () ->
       let rec drain () =
         match next () with
         | None -> ()
-        | Some (author, content) ->
+        | Some {author;content;ready=_} ->
           relay_to_board ~author content;
           drain ()
       in
@@ -470,7 +484,7 @@ let departure_notice holder = function
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
 ;;
 
-let free_left_controller ~holder_left ~who =
+let free_left_controller ?(announce = announce) ~holder_left ~who () =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
     when not (String.equal holder who) ->
@@ -589,7 +603,7 @@ let pass_target args =
    A post is a message in their queue, not an obligation to answer. *)
 (* Only the machine operation: the Keeper handoff owner keeps Auth admission
    until this returns, then flushes the queued Board announcements. *)
-let pass_without_announcing ~tool_name ~start_time ~base_path ~agent_name args =
+let pass_without_announcing ?(announce = announce) ~tool_name ~start_time ~base_path ~agent_name args =
   match pass_target args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok to_ ->

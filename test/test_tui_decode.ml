@@ -9940,7 +9940,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
      "confidence", `Float 0.9;
      "probabilities", `Assoc ["keep_current", `Float 0.9; "needs_generation", `Float 0.05; "uncertain", `Float 0.05];
      "model", `String "jev-fixture"; "elapsed_s", `Float 0.1] in
-  let make ~decision ~path ~skipped =
+  let make ?(rejection = `Null) ~decision ~path ~skipped =
     match lane_run_detail_json "librarian-preflight" with
     | `Assoc ["run", `Assoc fields] ->
       `Assoc ["run", `Assoc
@@ -9948,7 +9948,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
          ("output", `Assoc ["jev_preflight", preflight decision;
                              "generation_path", `String path;
                              "full_llm_skipped", `Bool skipped;
-                             "preflight_domain_rejection", `Null]) ::
+                             "preflight_domain_rejection", rejection]) ::
          List.remove_assoc "output" (List.remove_assoc "lane" fields))]
     | _ -> Alcotest.fail "invalid fixture" in
   let detail = Tui_decode.decode_lane_run_detail
@@ -9972,7 +9972,19 @@ let test_librarian_preflight_detail_reports_actual_route () =
     ["uncertain", "jev_no_change", true;
      "keep_current", "full_lane", true;
      "keep_current", "new_route", false;
-     "new_choice", "full_lane", false]
+     "new_choice", "full_lane", false];
+  Alcotest.(check bool) "keep_current falling back to full lane requires domain rejection" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~decision:"keep_current" ~path:"full_lane" ~skipped:false)));
+  Alcotest.(check bool) "keep_current with full lane and domain rejection accepted" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "missing context") ~decision:"keep_current" ~path:"full_lane" ~skipped:false)));
+  Alcotest.(check bool) "needs_generation with domain rejection rejected" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "invalid domain") ~decision:"needs_generation" ~path:"full_lane" ~skipped:false)));
+  Alcotest.(check bool) "accepted no-change with domain rejection rejected" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "invalid domain") ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true)))
 
 let test_decode_lane_run_detail_carries_prompt_and_output () =
   match Tui_decode.decode_lane_run_detail (lane_run_detail_json "cmp-1") with

@@ -1619,6 +1619,35 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
   check bool "narrow frame keeps full fact width" false
     (List.exists (contains "CATEGORIES") narrow)
 
+let test_category_rail_wrapped_range_and_overflow () =
+  let state = three_kinds_state () in
+  state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
+  let render ~budget cols =
+    Masc_tui_hit.reset Masc_tui_press.press_marks;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_memory.render_memory_facts_body ~cols ~budget state ~push
+      ~push_styled:(fun ~style line -> push (style ^ line))
+      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
+  in
+  let lines_fit, zones_fit = render ~budget:10 140 in
+  check bool "selected category visible when fitting in budget" true
+    (List.exists (contains "preference (1)") lines_fit);
+  check bool "clickable target exists when fitting" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
+      (Masc_tui_hit.to_list zones_fit));
+  let lines_small, zones_small = render ~budget:4 140 in
+  check bool "selected category start anchored and visible under small budget" true
+    (List.exists (contains "preference") lines_small);
+  check bool "clickable target exists on overflow" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
+      (Masc_tui_hit.to_list zones_small))
+
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
    pills before, a third shape for a strip on one screen. *)
@@ -2305,6 +2334,8 @@ let () =
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ; test_case "Category rail keeps counts, click targets and frame width" `Quick
             test_category_rail_keeps_click_targets_and_frame_width
+        ; test_case "Category rail wrapped range exposure and overflow" `Quick
+            test_category_rail_wrapped_range_and_overflow
         ; test_case "a failed facts read does not say loading" `Quick
             test_a_failed_facts_read_does_not_say_loading
         ; test_case "a failed facts refresh keeps the facts" `Quick

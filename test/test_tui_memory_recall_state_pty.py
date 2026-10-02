@@ -27,6 +27,7 @@ def run(executable, baseline=False):
         row["librarian_failures"] = 0 if failed_now else 3
         row["librarian"].update(state="stopped" if failed_now else "drained",
                                 detail="model unavailable" if failed_now else None)
+        health["alert_summary"]["librarian_stopped_keepers"] = int(failed_now)
         health["totals"].update(snapshot_bytes=262144,
                                 librarian_failures=row["librarian_failures"])
 

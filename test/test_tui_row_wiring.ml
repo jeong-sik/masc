@@ -681,7 +681,7 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
-  (* Starvation depends on ordinary absence and failed Librarian runs, while a
+  (* Starvation depends on ordinary absence and the current Librarian pass, while a
      source-bound snapshot changes the truthful row label from memoryless to
      source-only. Keep all three axes in the renderer. *)
   List.iter

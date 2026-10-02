@@ -261,8 +261,101 @@ def run_read_states(executable, failed):
                             interact=interact, http_fixtures=fixtures)
 
 
+def run_connector_startup_identity(executable, *, failed=False, leave=False):
+    fixtures = h.keeper_runtime_http_fixtures()
+    health = h.GatedHttpResponse((200, {}), hold_seconds=20)
+    full_health = h.GatedHttpResponse(h.fleet_safety_fixture(), hold_seconds=20)
+    requests: list[str] = []
+    lock = threading.Lock()
+
+    def record(path):
+        with lock:
+            requests.append(path)
+
+    def count(path):
+        with lock:
+            return requests.count(path)
+
+    def compact_response():
+        response = health()
+        record("/health")
+        return response
+
+    def full_response():
+        response = full_health()
+        record("/health?full=1")
+        return response
+
+    def connector_response():
+        record(h.CONNECTORS_PATH)
+        return ((503, {"error": "startup connector failure"}) if failed else
+                (200, {"total": 0, "active_count": 0, "connectors": []}))
+
+    fixtures["/health"] = compact_response
+    fixtures["/health?full=1"] = full_response
+    fixtures[h.CONNECTORS_PATH] = connector_response
+
+    def interact(process, fd, _slave, output, base):
+        matching = h.with_workspace_identity({
+            "/health": (200, {}), "/health?full=1": h.fleet_safety_fixture()}, base)
+        compact = matching["/health"]
+        full = matching["/health?full=1"]
+        assert isinstance(compact, tuple) and isinstance(full, tuple)
+        health.response, full_health.response = compact, full
+        try:
+            assert h.wait_for_fixture_event(process, fd, output, health.requested, timeout=3.0)
+            h.palette_go(process, fd, output, b"go Connectors", b"not loaded yet")
+            assert not health.completed.is_set(), "initial identity gate expired before navigation"
+            assert count(h.CONNECTORS_PATH) == 0, requests
+            assert any(b"not loaded yet" in row for row in screen(output).values()), screen(output)
+            if leave:
+                h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+            start = len(output)
+            health.release.set()
+            full_health.release.set()
+            needle = b"nothing here is a reading" if failed else b"no connectors registered"
+            if not leave:
+                # No refresh or navigation key: identity completion owns this read.
+                h.wait_for_output(process, fd, output, needle, start=start, timeout=3.0)
+                h.drain_until_quiet(process, fd, output)
+                assert count(h.CONNECTORS_PATH) == 1, requests
+                assert any(needle in row for row in screen(output).values()), screen(output)
+                if failed:
+                    assert not any(b"no connectors registered" in row
+                                   for row in screen(output).values()), screen(output)
+            if leave:
+                # The roster is applied only after workspace discovery settles.
+                h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha",
+                                  start=start, timeout=3.0)
+                h.drain_until_quiet(process, fd, output)
+                assert count(h.CONNECTORS_PATH) == 0, requests
+            else:
+                # A deliberate refresh remains available after either outcome.
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: count(h.CONNECTORS_PATH) == 2, timeout=3.0), requests
+                h.drain_until_quiet(process, fd, output)
+                assert count(h.CONNECTORS_PATH) == 2, requests
+            expected_frame = b"MASC Dashboard" if leave else needle
+            assert any(expected_frame in row for row in screen(output).values()), screen(output)
+            print("CONNECTOR_STARTUP_IDENTITY " + json.dumps({
+                "case": "left" if leave else "failed" if failed else "empty",
+                "connector_requests": count(h.CONNECTORS_PATH)}), flush=True)
+            os.write(fd, b"q")
+        finally:
+            health.release.set()
+            full_health.release.set()
+
+    h.run_terminal_scenario(executable,
+        description="Connector initial identity " + ("left surface" if leave else "failed read" if failed else "automatic empty read"),
+        interact=interact, http_fixtures=fixtures, refresh=60.0, terminal_cols=160)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
+    run_connector_startup_identity(executable)
+    run_connector_startup_identity(executable, failed=True)
+    run_connector_startup_identity(executable, leave=True)
     run_tables(executable)
     run_client_exact_read(executable)
     run_client_modal_boundary(executable)

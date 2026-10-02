@@ -3657,7 +3657,14 @@ let launch_connectors_load state ~mailbox =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
-  if state.connectors_inflight then ()
+  let identity_ready = match identity with
+    | None -> false
+    | Some current ->
+        Masc_tui_types.server_workspace_matches ~expected:identity (Ok current)
+  in
+  (* The initial frame can be navigated before the full identity read lands.
+     Leave this pane unread; a confirmed refresh resumes the selected pane. *)
+  if state.connectors_inflight || not identity_ready then ()
   else begin
     state.connectors_inflight <- true;
     let host = server_peer_host in
@@ -12717,6 +12724,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       apply_http_surfaces state ~mailbox results;
+      (match state.view with
+       | Connectors
+       | Keepers Keeper_detail when
+           (state.view = Connectors || state.detail_tab = Detail_channels)
+           && state.connectors = None && state.connectors_error = None ->
+           launch_connectors_load state ~mailbox
+       | _ -> ());
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)

@@ -181,6 +181,20 @@ let test_restart_and_forget_end_the_waiting_login () =
   check (Alcotest.list Alcotest.string) "a stopped login is no longer owed" []
     (held_expectations state "A")
 
+let test_a_rework_rerun_ends_every_admitted_login () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"B" ~provider:"slack" ~base_path:"/w/b"
+    ~masc_root:"/r";
+  Masc_tui_types.retire_identity_login_expectations state;
+  check (Alcotest.list Alcotest.string) "the rerun leaves nothing held" []
+    (held_expectations state "A");
+  check (Alcotest.list Alcotest.string) "no other keeper keeps one either" []
+    (held_expectations state "B")
+
 let test_workspace_withdrawal_retires_identity_consent () =
   let state = identity_state () in
   Masc_tui_types.remember_identity_login state
@@ -722,5 +736,7 @@ let () =
             `Quick test_the_recovery_read_retires_only_the_landed_login;
           Alcotest.test_case "restart and forget end the waiting login" `Quick
             test_restart_and_forget_end_the_waiting_login;
+          Alcotest.test_case "a rework rerun ends every admitted login" `Quick
+            test_a_rework_rerun_ends_every_admitted_login;
         ] );
     ]

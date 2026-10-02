@@ -6680,6 +6680,13 @@ let forget_identity_login_expectations (state : state) ~keeper_name ~providers =
         not (String.equal expectation.ile_keeper keeper_name && landed expectation))
       state.identity_login_expectations
 
+(* A workspace rework rerun keeps the workspace but ends every login it had
+   admitted, so every expectation retires with it. Nothing here runs for a
+   transient authority loss — that path must keep the expectations so the
+   recovery tick can reopen the poll for logins still being completed. *)
+let retire_identity_login_expectations (state : state) =
+  state.identity_login_expectations <- []
+
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
     ~in_chat:(state.view = Keepers Keeper_message)

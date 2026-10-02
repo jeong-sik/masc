@@ -11294,10 +11294,13 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
-  (* Re-running a workspace keeps it, so consent presented here must die with
-     it — including the held login-completion expectation, which is a token
-     the tick polls on and must never survive into the rerun's successor. *)
-  state.identity_login_expectations <- [];
+  (* A workspace rework keeps the workspace itself, so consent presented here
+     must die with it — including the held login-completion expectation,
+     which is a token the tick polls on. A transient authority loss takes
+     the other branch: it clears only the presentation and keeps the
+     expectation, so the recovery read can reopen the poll. *)
+  if not keep_detail_navigation then
+    Masc_tui_types.retire_identity_login_expectations state;
   state.identity_login_requests <- [];
   state.identity_app_form <- None;
   state.identity_attempt_error <- None;

@@ -55,12 +55,14 @@ for s in servers:
 origin = f'http://127.0.0.1:{servers[0].server_port}'
 foreign = f'http://127.0.0.1:{servers[1].server_port}'
 
-def helpers():
+def helpers(server_generation=1):
     ns = {'urllib': urllib, 'json': json, 'hashlib': hashlib,
           'origin': origin, 'token': 'synthetic-admin-redirect-control',
           'keeper_token': 'synthetic-worker-redirect-control',
-          'records': [], 'rpc_sequence': 0, 'rpc_session': {}}
+          'records': [], 'rpc_sequence': 0, 'rpc_session': {},
+          'server_generation': 1}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(args.source), 'exec'), ns)
+    ns['server_generation'] = server_generation
     return ns
 
 results = []
@@ -82,6 +84,7 @@ try:
                     except RuntimeError:
                         rejected = True
                     require(ns['records'][0]['status'] == code, 'redirect provenance was concealed')
+                    require(ns['records'][0]['server_generation'] == 1, 'server generation provenance was concealed')
                 else:
                     try:
                         ns['rpc']('tools/call', {})
@@ -98,11 +101,32 @@ try:
     servers[0].redirect = None
     ns = helpers()
     require(ns['request']('/probe')[0] == 200, 'normal GET was rejected')
+    require(ns['records'][-1]['server_generation'] == 1, 'normal GET missing server generation provenance')
     if args.mcp:
         require(ns['rpc']('tools/call', {}) == {'local': True}, 'normal RPC was rejected')
+        require(ns['records'][-1]['server_generation'] == 1, 'normal RPC missing server generation provenance')
+    ns_restarted = helpers(server_generation=2)
+    require(ns_restarted['request']('/probe')[0] == 200, 'restarted GET was rejected')
+    require(ns_restarted['records'][-1]['server_generation'] == 2, 'fixture server generation was concealed in GET')
+    if args.mcp:
+        require(ns_restarted['rpc']('tools/call', {}) == {'local': True}, 'restarted RPC was rejected')
+        require(ns_restarted['records'][-1]['server_generation'] == 2, 'fixture server generation was concealed in RPC')
+    # Run the real assignment sites too: correct helpers cannot rescue a
+    # restart consumer that still unpacks an obsolete response shape.
+    request_assignments = [node for node in ast.walk(source)
+                           if isinstance(node, ast.Assign)
+                           and isinstance(node.value, ast.Call)
+                           and isinstance(node.value.func, ast.Name)
+                           and node.value.func.id == 'request']
+    ns.update(path='/probe', portrait_path='/probe')
+    for assignment in request_assignments:
+        exec(compile(ast.Module(body=[assignment], type_ignores=[]),
+                     str(args.source), 'exec'), ns)
+        require(ns['status'] == 200, 'request assignment lost its response status')
     print(json.dumps({'scope': 'actual extracted helpers, synthetic loopback TCP; no native run',
                       'source_sha256': hashlib.sha256(args.source.read_bytes()).hexdigest(),
-                      'controls': results, 'direct_requests_pass': True}, indent=2))
+                      'controls': results, 'direct_requests_pass': True,
+                      'request_assignments_executed': len(request_assignments)}, indent=2))
 finally:
     for s in servers:
         s.shutdown()

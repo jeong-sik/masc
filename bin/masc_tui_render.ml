@@ -7843,6 +7843,7 @@ let render_repository_list (state : state) =
       let scroll = max 0 (min max_scroll
           (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
              ~height:content_height state.repositories_scroll)) in
+      let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
       let lines =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
@@ -7851,7 +7852,7 @@ let render_repository_list (state : state) =
            | Page_empty -> "(no repositories registered)"]
         else List.init content_height (fun i ->
           let idx = i + scroll in
-          match List.nth_opt repos idx with
+          match Rows.at repos_window idx with
           | None -> ""
           | Some r ->
               let line = Render_schedule.workspace_row ~layout:repository_layout

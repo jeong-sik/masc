@@ -887,7 +887,8 @@ let execute_answer
       ~validate:validate_flow
       attempt
   in
-  Runtime_exact_lane_backpressure.observe flow;
+  Runtime_exact_lane_backpressure.observe
+    ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots } flow;
   match flow with
   | Ok success ->
     let selected_slot =

@@ -6,7 +6,7 @@
 // observe the current draft through onInput without waiting for blur.
 
 import { html } from 'htm/preact'
-import { useLayoutEffect, useState } from 'preact/hooks'
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 
 export const EXPANDABLE_TEXTAREA_STYLE =
   'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-mono focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset resize-y custom-scrollbar'
@@ -38,21 +38,38 @@ export function ExpandableTextarea({
 }) {
   const [local, setLocal] = useState(value)
   const [expanded, setExpanded] = useState(false)
+  const expandedOriginal = useRef(value)
+  const lastNotifiedValue = useRef(value)
 
   // Apply parent resets before the editor accepts input. A delayed effect
   // can overwrite text entered immediately after mounting or a parent reset.
   useLayoutEffect(() => {
+    // Live-input echoes keep the cancellation baseline; external resets replace it.
+    if (value !== lastNotifiedValue.current) expandedOriginal.current = value
+    lastNotifiedValue.current = value
     setLocal(value)
   }, [value])
 
   function commit(next: string) {
+    lastNotifiedValue.current = next
     setLocal(next)
     onChange(next)
   }
 
   function input(next: string) {
+    lastNotifiedValue.current = next
     setLocal(next)
     onInput?.(next)
+  }
+
+  function openExpanded() {
+    expandedOriginal.current = local
+    setExpanded(true)
+  }
+
+  function cancelExpanded() {
+    input(expandedOriginal.current)
+    setExpanded(false)
   }
 
   const borderClass = dirty
@@ -106,7 +123,7 @@ export function ExpandableTextarea({
         type="button"
         class="absolute top-2 right-2 rounded-[var(--r-0)] bg-[var(--color-bg-surface)] border border-card-border px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)] hover:text-text-strong hover:bg-[var(--color-bg-hover)] transition-colors"
         title="전체 화면으로 편집"
-        onClick=${() => setExpanded(true)}
+        onClick=${openExpanded}
       >
         ⛶
       </button>
@@ -114,7 +131,7 @@ export function ExpandableTextarea({
         ? html`
             <div
               class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-              onClick=${() => setExpanded(false)}
+              onClick=${cancelExpanded}
             >
               <div
                 class="flex flex-col w-full max-w-5xl h-[85vh] rounded-[var(--r-3)] border border-card-border bg-[var(--color-bg-elevated)] shadow-[var(--shadow-3)] p-4"
@@ -127,7 +144,7 @@ export function ExpandableTextarea({
                   <button
                     type="button"
                     class="text-2xs text-[var(--color-fg-muted)] hover:text-text-strong"
-                    onClick=${() => setExpanded(false)}
+                    onClick=${cancelExpanded}
                   >
                     닫기
                   </button>
@@ -145,7 +162,7 @@ export function ExpandableTextarea({
                     <button
                       type="button"
                       class="px-3 py-1.5 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
-                      onClick=${() => setExpanded(false)}
+                      onClick=${cancelExpanded}
                     >
                       취소
                     </button>

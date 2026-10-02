@@ -26,6 +26,12 @@
 - Run isolated Lane Add-ons and inspect declared results, retained evidence and report lineage.
 - Recover selected-screen reads after workspace discovery and retain route/probe status in narrow Runtime views.
 
+### Final corrections (#40760, #40764)
+
+- Librarian absorption evaluations now report malformed or missing judgment answers as failures and record measured monotonic duration for completed, failed and cancelled evaluations.
+- Restore the pre-expansion Keeper prompt draft when fullscreen editing is cancelled, closed, or dismissed through its backdrop; confirmed edits and live save protection remain available. (#40764)
+- Preserve a cleaner stop request issued before its spawned worker acquires the service lease; only a new start clears an earlier stop request. (#40764)
+
 ### Complete change record
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.

@@ -2806,9 +2806,11 @@ let test_parse_rejects_unknown_keys () =
     ; "keep_warm", ("keep_warm", `Bool false)
     ; "stash_untracked", ("stash_untracked", `String "yes")
     ];
-  check (list string) "known set is exactly the parse-consumed keys"
+  (* create_only is consumed by handle_keeper_up before the shared parser;
+     the shared unknown-key check must admit that outer operation argument. *)
+  check (list string) "known set covers parser and operation-consumed keys"
     (List.sort String.compare
-       [ "name"; "runtime_id"; "activation_mode"; "input_policy"; "mention_targets"
+       [ "name"; "create_only"; "runtime_id"; "activation_mode"; "input_policy"; "mention_targets"
        ; "board_interests"
        ; "max_context_override"; "sandbox_profile"; "sandbox_image"
        ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"

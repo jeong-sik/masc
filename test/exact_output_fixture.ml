@@ -2,6 +2,22 @@ open Masc
 
 module EO = Agent_core.Exact_output
 
+(* A pass and its absorption evaluations share an actor and lane. List rows
+   omit payloads: read the exact input before selecting the pass envelope. *)
+let librarian_pass_runs registry ~keeper_id =
+  let module Runs = Exact_lane_run_registry in
+  Runs.list_runs registry
+  |> List.filter (fun (run : Runs.run) ->
+       run.lane = Runs.Librarian && String.equal run.actor keeper_id)
+  |> List.filter_map (fun (run : Runs.run) -> Runs.get registry ~run_id:run.run_id)
+  |> List.filter (fun (run : Runs.run) -> match run.input with
+       | Runs.Exact_input (`Assoc fields) ->
+         (match List.assoc_opt "actual_input" fields with
+          | Some (`Assoc _) -> true
+          | Some _ | None -> false)
+       | Runs.Exact_input _ -> false)
+;;
+
 (* Every wait a case makes on the fixture is bounded by this budget. A
    loopback POST from a forked worker (connect, accept, read) takes well
    under a second on an idle machine. The nightly runner has 4 CPUs and runs

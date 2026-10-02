@@ -2564,7 +2564,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~binding:"draw_ask_context"
     ~callees:(sanitizer_calls @ [ "box_wrapped_field" ])
     [ "context" ];
-  check_fields "task_line" [ "id"; "title" ];
+  (* The collision check compares the canonical ID without rendering it.
+     Keep raw output accesses subject to the same sanitization check. *)
+  check_fields ~non_rendering_calls:[ "String.equal" ]
+    "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
   check_fields "render_overview" [ "overview_error" ];
@@ -2677,7 +2680,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Metadata rows now belong to [planning_detail_lines]. Its local [field]
      builder passes every value through the text-block sanitizer; the pane
      draws those projected rows and the separate transition-derived actions. *)
-  check_fields "planning_detail_pane" [ "pg_id" ];
+  (* The identity moved with the responsive header, so check its producer. *)
+  check_fields "planning_detail_header_rows" [ "pg_id" ];
+  check int "goal pane draws its sanitized header projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane" ~callee:"planning_detail_header_rows");
   check_fields
     ~non_rendering_calls:[ "field"; "List.mem"; "Planning_detail.timeline"; "Link.reference" ]
     "planning_detail_lines"
@@ -2781,6 +2788,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         (* Item preview hashes the name by the same portrait path and returns
            only pixels; no Keeper-name text reaches terminal cells. *)
       ; "Masc_tui_keeper_portrait.preview"
+        (* The identity projector uses the name only to select its login;
+           it sanitizes every text row before returning it. *)
+      ; "Masc_tui_render_identity.lines"
       ]
     "keeper_detail_pane"
     [ "k_name"
@@ -2901,15 +2911,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_log_rows"
        ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
-  (* Seven: two observation timestamps in Live Context, the last turn, the
-     oldest row a partial Last 24h window reached, the created / updated pair,
-     and the Automation row's request clock. Each one arrives from a keeper
-     file, a metrics row or the schedule store, so none may reach the frame
-     unprojected. *)
-  check int "keeper detail uses safe short projections for every timestamp" 7
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"keeper_detail_pane"
-       ~callee:"Terminal_text.short_timestamp");
+  (* Check the wire values at their output boundary, not a fixed count of
+     calls: Automation's shared occurrence clock projects two more fields. *)
+  check_fields ~non_rendering_calls:[ "occurrence_clock" ]
+    "keeper_detail_pane"
+    [ "observed_at"; "k_last_turn_ts"; "k_created_at"; "k_updated_at"
+    ; "sch_requested_at_iso"; "sch_last_wake_started_at_iso"
+    ; "sch_stimulus_recorded_at_iso" ];
+  check_identifiers ~module_path:render_path ~binding:"keeper_detail_pane"
+    ~callees:[ "Terminal_text.short_timestamp" ] [ "oldest"; "iso" ];
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
 ;;

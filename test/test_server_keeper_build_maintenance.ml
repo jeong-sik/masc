@@ -80,10 +80,28 @@ let test_cleanup_rejects_invalid_profile () =
     | Error _ -> ()
     | Ok _ -> Alcotest.fail "cleanup accepted an invalid profile")
 
+let test_cleanup_report_keeps_guest_skip_reason () =
+  let decode = Keeper_turn_sandbox_runtime.build_cleanup_report_of_string in
+  (match decode {|{"skip":"dune unavailable","entries":[]}|} with
+   | Error reason -> Alcotest.(check string) "guest refusal remains observable"
+       "Keeper guest cleanup skipped: dune unavailable" reason
+   | Ok _ -> Alcotest.fail "skipped cleanup was reported as successful");
+  (match decode {|{"entries":[{"action":"cleaned"},{"action":"clean failed"}]}|} with
+   | Ok report ->
+     Alcotest.(check int) "successful clean counted" 1 report.cleaned;
+     Alcotest.(check int) "failed clean counted" 1 report.failed
+   | Error reason -> Alcotest.fail reason);
+  List.iter (fun body ->
+    match decode body with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "malformed cleanup report accepted")
+    [ {|{"skip":false,"entries":[]}|}; "not JSON" ]
+
 let () =
   Alcotest.run "Keeper build maintenance admission"
     [ "metadata", [
       Alcotest.test_case "TOML resolves disk placeholders" `Quick test_cleanup_reads_toml_owned_backend;
       Alcotest.test_case "Owner identity must match" `Quick test_cleanup_rejects_other_owner;
       Alcotest.test_case "Profile errors refuse cleanup" `Quick test_cleanup_rejects_invalid_profile;
+      Alcotest.test_case "Guest skip reason is not empty success" `Quick test_cleanup_report_keeps_guest_skip_reason;
     ] ]

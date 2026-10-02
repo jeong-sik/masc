@@ -992,11 +992,11 @@ let assemble_hooks
                 (if not post_tool_round
                  then
                    let ordinary_recall =
-                     (* Memory OS recall publishes every persisted current fact
-                        in a paged artifact and injects its retrieval index. Source-bound
-                        facts are revalidated here; a changed source atomically
-                        replaces its fact with an invalidation before the block
-                        is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
+                     (* Search-capable recall injects store availability and
+                        lookup guidance only. Source claims are revalidated at
+                        retrieval, not while preparing every turn. Artifact-only
+                        surfaces use a retained paged projection instead.
+                        On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
                         turns it off.
                         The work is skipped, not just filtered, on post-tool
                         rounds: the block would be dropped at assembly anyway. *)

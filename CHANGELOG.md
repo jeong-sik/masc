@@ -38,6 +38,11 @@
 - Reclaim deleted Keeper work-volume blocks on Apple VMs and run build-output maintenance through the server lifecycle. (#40734, #40751)
 - Resolve the workspace consistently for local voice and Lane probes. (#40729)
 
+### Final main follow-up
+
+- Use retrieval-first Keeper memory and validate only query-matching source candidates, retaining stale-source and concurrent-change checks. (#40782, #40784)
+- Repair chat compilation and refresh authenticated Item accounts from the current authoritative roster without requiring public currency revisions. (#40788)
+
 ### Complete change record
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.

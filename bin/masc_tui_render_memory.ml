@@ -1509,7 +1509,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let categories = Category_all :: memory_fact_categories state in
     let entries = List.concat_map (fun category ->
         let count = match count category with None -> "?" | Some count -> string_of_int count in
-        let label = memory_category_filter_label category ^ "  (" ^ count ^ ")" in
+        let label = memory_category_filter_label category ^ " (" ^ count ^ ")" in
         Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line label)
         |> List.map (fun text -> category, text)) categories in
     let selected = entries |> List.mapi (fun index (category, _) -> index, category)

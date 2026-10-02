@@ -1,39 +1,23 @@
-(** Publish current ordinary and source-bound Memory OS facts for demand recall.
+(** Demand recall separates stored knowledge from per-turn context.
 
-    Ordinary facts come from the same snapshot as the dashboard. Source-bound
-    facts are revalidated against their exact file bytes before injection;
-    changed or unavailable sources contribute a typed invalidation instead of
-    their old claim. The complete projection is stored as an immutable artifact;
-    the prompt carries its identity and availability, not all stored knowledge.
-    Search and paged artifact reads retain access to verified selected facts.
-    Unreadable source claims remain stored but are projected only as deferred
-    source identity, reason, and re-read instructions, never claim text.
-    Invalidations and deferred identities remain inline on every tool surface.
-    Artifact publication failure preserves readable-store availability and
-    search guidance. If retrieval is unavailable, readable ordinary facts and
-    verified source facts are included inline without a truncation cap.
-    Callers supply both tool capabilities from the selected runtime surface.
-    Before publication, each snapshot reference is persisted structurally in
-    the keeper runtime tree. The latest published snapshot has a current pin;
-    historical references follow the existing dated Keeper history retention
-    policy. Replacing memory or the latest prompt capture does not release
-    snapshots while their dated reference history remains retained.
-    A failed pin write uses the same readable-store fallback as publication
-    failure, without publishing an unowned artifact link.
+    Search-capable surfaces receive only store availability and counts plus a
+    current-lookup requirement: no claim bodies, source-file revalidation,
+    artifact rendering, blob writes or retention writes. The Keeper selects
+    relevant facts through [keeper_memory_search], whose read boundary
+    revalidates source claims before returning them.
 
-    Each store is rendered as present, authoritatively empty/absent, or
-    unavailable. Empty and absent states explicitly supersede earlier current
-    facts. Read failures mark prior facts as unverified without claiming they
-    were deleted. Source-store failure retains readable ordinary facts.
-    Disabling recall emits a stable suspension marker. These explicit states
-    let resumed sessions observe withdrawal, uncertainty and later recovery.
+    Artifact-only surfaces revalidate the complete projection and publish a
+    retained, paged snapshot; no claim body is copied into the prompt. If no
+    retrieval capability is available or publication fails, emit availability
+    and explicit historical-reference withdrawal, never the complete facts.
+    No stored memory is deleted by a recall decision. Source invalidations
+    and unreadable-source identities accompany the artifact-only projection.
 
-    The rendered block depends on fact contents and provenance, availability,
-    invalidations and per-pass source readability. Snapshot commit revisions
-    and update times remain in the durable stores and tools; identical facts
-    recommitted by a later Librarian tick render identically. The wall clock
-    passed as [now] drives revalidation and dates retention history; it never
-    appears in the text. *)
+    Empty/absent, unreadable and disabled states remain distinct and stable.
+    [now] drives source revalidation and artifact retention only, never notice
+    identity. A notice is not verification of any previous retrieved claim;
+    current facts must be looked up again when used. Caller capabilities are
+    those of the actual selected runtime surface. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)

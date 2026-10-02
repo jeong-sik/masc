@@ -21,6 +21,7 @@ type filter =
   { status : string option
   ; include_done : bool
   ; projection : string
+  ; selection : Keeper_tasks_list_query.t
   }
 
 type t =

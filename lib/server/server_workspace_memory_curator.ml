@@ -67,7 +67,7 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
        ~on_measurement_terminal:(fun _ -> Ok ())
        ~before_dispatch:(fun _ -> Ok ())
        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt in
-    Runtime_exact_lane_backpressure.observe flow;
+    Runtime_exact_lane_backpressure.observe ~resolved flow;
     (match flow with
      | Ok success ->
        let candidate = Exact.flow_success_candidate success.transport_success in

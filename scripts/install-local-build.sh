@@ -68,10 +68,13 @@ done
 if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
   repo_lock_key=$(printf '%s' "$repo" | cksum | awk '{print $1}')
   install_lock="${DUNE_LOCAL_LOCK:-${TMPDIR:-/tmp}/masc-dune-${UID:-$(id -u)}-${repo_lock_key}.lock}"
+  # ${install_args[@]+...} guard: bash 3.2 (macOS /bin/bash) treats
+  # "${empty_array[@]}" as unbound under set -u, and an argument-less
+  # invocation re-execs with zero args.
   if command -v lockf >/dev/null 2>&1; then
-    exec lockf -k "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" "${install_args[@]}"
+    exec lockf -k "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" ${install_args[@]+"${install_args[@]}"}
   elif command -v flock >/dev/null 2>&1; then
-    exec flock "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" "${install_args[@]}"
+    exec flock "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" ${install_args[@]+"${install_args[@]}"}
   else
     echo "install-local-build: a shared build lock requires lockf or flock" >&2
     exit 1

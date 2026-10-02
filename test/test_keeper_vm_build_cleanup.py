@@ -62,6 +62,44 @@ class GuestCleanup(unittest.TestCase):
             process.terminate()
             process.wait(timeout=5)
 
+    def test_vanished_descriptor_keeps_later_checkout_owner_visible(self) -> None:
+        proc = self.root / "proc"
+        process = proc / str(os.getpid() + 1)
+        descriptors = process / "fd"
+        descriptors.mkdir(parents=True)
+        (process / "stat").write_text("1 (fixture) S\n")
+        (process / "cwd").symlink_to(self.root)
+        (process / "exe").symlink_to(self.root / "external-executable")
+        vanished = descriptors / "0"
+        retained = descriptors / "1"
+        vanished.symlink_to(self.root / "closed-file")
+        retained.symlink_to(self.build / "artifact")
+        readlink = os.readlink
+        iterdir = Path.iterdir
+
+        def read_descriptor(path):
+            if path == vanished:
+                raise FileNotFoundError(path)
+            return readlink(path)
+
+        def enumerate_paths(path):
+            if path == descriptors:
+                return iter([vanished, retained])
+            return iterdir(path)
+
+        with (
+            patch.object(
+                cleaner.GUEST,
+                "Path",
+                side_effect=lambda value: proc if value == "/proc" else Path(value),
+            ),
+            patch.object(cleaner.GUEST.os, "readlink", side_effect=read_descriptor),
+            patch.object(Path, "iterdir", enumerate_paths),
+        ):
+            report = cleaner.guest_sweep(self.root, 0, True)
+        self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
+        self.assertTrue((self.build / "artifact").exists())
+
     def test_native_dune_lock_preserves_output(self) -> None:
         with (self.build / ".lock").open("w") as lease:
             lease.write(str(os.getpid()))

@@ -80,7 +80,10 @@ recovery to restore an interrupted blob write without repeating the model call.
 
 The package's existing byte envelope bounds request and outcome retention.
 A request that cannot be retained is not invoked. Host filesystem writes are
-offloaded from the Eio owner domain. The worker stdio scenario inspects durable
+offloaded from the Eio owner domain. When an error response or its inline
+evidence references exceed the package envelope, the boundary returns a compact
+bounded refusal without repeating the unbounded payload, preserving durable
+terminal storage and index recovery. The worker stdio scenario inspects durable
 request bytes inside the invocation callback, reads actual response/error records,
 and exercises pre-invocation bounds and post-invocation retention uncertainty.
 The model response remains synthetic fixture data and native execution is pending

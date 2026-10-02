@@ -851,6 +851,17 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
      "cancelled-index-failure",Ok {S.role=Assistant;content=Text {type_="text";text="exact answer"};
        model="actual-model";stop_reason=Some "endTurn";_meta=None},true])
 
+let run_sampling_observation broker handler params =
+  let reply = ref None in
+  let result = Masc.Lane_addon_sampling.with_observation broker
+    ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
+      reply := Some (handler params);
+      Ok {Types.rows=[];coverage=[]}) in
+  match result, !reply with
+  | Error detail, _ -> Error detail
+  | Ok _, Some reply -> reply
+  | Ok _, None -> fail "sampling observation did not execute callback"
+
 let test_sampling_response_bound_and_directory_durability () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -892,7 +903,8 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
     let broker = match Sampling.create ~store ~package:p ~instance_id:"w" ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with Ok value -> value | Error detail -> fail detail in
     let handler = match Sampling.for_worker broker ~package:p ~instance_id:"w" with
-      | Ok value -> value | Error detail -> fail detail in handler params in
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
   let first = match run p with Ok value -> value | Error detail -> fail detail in
   let size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson first)) in
   let bounded = {p with resources={p.resources with max_reply_bytes=size-1}} in
@@ -1032,7 +1044,8 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
     let broker = match Sampling.create ~store ~package:p ~instance_id ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
     let handler = match Sampling.for_worker broker ~package:p ~instance_id with
-      | Ok value -> value | Error detail -> fail detail in handler params in
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
   let answer meta : S.create_message_result = {role=Assistant;content=Text {type_="text";text="answer"};
     model="model";stop_reason=None;_meta=Some meta} in
   (match invoke "unsafe-json" (Ok (answer (`Intlit "not-json"))) with
@@ -1041,12 +1054,56 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   check bool "invalid serialization is terminal and recoverable" true
     (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") rows);
   let secret = "https://internal.example/token=host-secret" in
-  (match invoke "host-error" (Error secret) with
-   | Ok _ -> fail "host failure accepted"
-   | Error reply ->
-       let json = Yojson.Safe.from_string reply in
-       check bool "host diagnostics stay out of package response" true
-         (Yojson.Safe.Util.member "error" json = `Null));
+  let host_error_reply = match invoke "host-error" (Error secret) with
+    | Ok _ -> fail "host failure accepted"
+    | Error reply -> reply in
+  let json = Yojson.Safe.from_string host_error_reply in
+  check bool "host diagnostics stay out of package response" true
+    (Yojson.Safe.Util.member "error" json = `Null);
+  check string "error reply status is host_error" "host_error"
+    (Yojson.Safe.Util.member "status" json |> Yojson.Safe.Util.to_string);
+  let evidence_json = Yojson.Safe.Util.member "evidence" json in
+  let outcome_ref = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" evidence_json) with
+    | Ok value -> value | Error detail -> fail detail in
+  let blob_content = match Store.read_blob store outcome_ref with
+    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+  check string "stored outcome preserves host_error status" "host_error"
+    (Yojson.Safe.Util.member "status" blob_content |> Yojson.Safe.Util.to_string);
+  check string "stored outcome recovers actual host error detail" secret
+    (Yojson.Safe.Util.member "error" blob_content |> Yojson.Safe.Util.to_string);
+  let host_error_rows = match sampling_requests store ~instance_id:"host-error" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  check bool "host failure outcome is indexed as finished" true
+    (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") host_error_rows);
+  let reply_size = String.length host_error_reply in
+  let bounded_p = {p with resources={p.resources with max_reply_bytes=reply_size-1}} in
+  let invoke_bounded instance_id answer =
+    let broker = match Sampling.create ~store ~package:bounded_p ~instance_id ~route:"r"
+      ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
+    let handler = match Sampling.for_worker broker ~package:bounded_p ~instance_id with
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
+  let overflow_result = invoke_bounded "overflow-error" (Error secret) in
+  check bool "inline error response exceeding envelope is refused" true (Result.is_error overflow_result);
+  (match overflow_result with
+   | Error refusal ->
+       check bool "overflow error refusal obeys package byte envelope" true
+         (String.length (Yojson.Safe.to_string (`String refusal)) <= bounded_p.resources.max_reply_bytes);
+       check string "overflow error returns compact bounded refusal"
+         "sampling failed; outcome retained" refusal
+   | Ok _ -> fail "oversized error reply accepted");
+  let overflow_rows = match sampling_requests store ~instance_id:"overflow-error" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  check int "overflow outcome remains indexed" 1 (List.length overflow_rows);
+  check bool "overflow outcome remains indexed as finished" true
+    (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") overflow_rows);
+  let overflow_row = match overflow_rows with [row] -> row | _ -> fail "missing overflow row" in
+  let overflow_outcome_ref = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" overflow_row) with
+    | Ok value -> value | Error detail -> fail detail in
+  let overflow_blob = match Store.read_blob store overflow_outcome_ref with
+    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+  check string "overflow outcome recovers actual host error from storage" secret
+    (Yojson.Safe.Util.member "error" overflow_blob |> Yojson.Safe.Util.to_string);
   let journal = Filename.concat (Store.root store) "sampling-outcomes" in
   let backup = journal ^ ".saved" in
   Unix.rename journal backup;

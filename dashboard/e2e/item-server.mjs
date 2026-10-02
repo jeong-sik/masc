@@ -109,12 +109,23 @@ try {
   await verifyPanel(mobileRequestStart)
   await verifyMobileLayout()
   await capture('item-server-mobile-entry')
+  // Preserve the independently reachable composer command entry as well.
+  const composerRequestStart = requests.length
+  stage = 'fresh-document-mobile-composer-entry'
+  await page.reload()
+  await page.getByRole('textbox', { name: '메시지 입력', exact: true }).fill('/detail')
+  const commands = page.getByRole('listbox', { name: 'keeper slash commands', exact: true })
+  await commands.getByRole('option', { name: /\/detail\b/ }).click()
+  await page.getByRole('tab', { name: '아이템', exact: true }).click()
+  await verifyPanel(composerRequestStart)
+  await verifyMobileLayout()
+  await capture('item-server-mobile-composer-entry')
   stage = 'page-errors-and-receipt'
   if (errors.length) throw new Error(`served dashboard page errors: ${errors.join(' | ')}`)
   successReceipt = {
     scope: 'Production dashboard bundle served by isolated native CI server; authenticated real API and synthetic paused Keeper with real free purchase/equipment ledger; no provider/model decision or rollout',
     source_sha: sourceSha, keeper, owned_item: ownedItem, browser_version: browser.version(),
-    entry_paths: ['desktop-overflow-detail-items', 'retained-detail-360px', 'fresh-document-mobile-menu-detail-items-360px'],
+    entry_paths: ['desktop-overflow-detail-items', 'retained-detail-360px', 'fresh-document-mobile-menu-detail-items-360px', 'fresh-document-mobile-composer-detail-items-360px'],
     requests, captures, page_errors: errors, passed: true,
   }
 } catch (error) {

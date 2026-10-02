@@ -117,7 +117,7 @@ let lane_state () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-      rrs_default_runtime_id = Some "a";
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
@@ -361,7 +361,7 @@ let authority_state () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture";
       rrs_config_path = Some "/Users/operator/work/.masc/config/runtime.toml";
-      rrs_default_runtime_id = Some "assigned";
+      rrs_default_route = Some "assigned"; rrs_default_runtime_id = Some "assigned";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "assigned"];
       rrs_lanes =
@@ -421,7 +421,7 @@ let test_search_follows_the_runtime_mode () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-      rrs_default_runtime_id = Some "assigned";
+      rrs_default_route = Some "assigned"; rrs_default_runtime_id = Some "assigned";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
@@ -454,7 +454,7 @@ let test_runtime_detail_keeps_its_owner () =
   let snapshot ids =
     let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
       { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-        rrs_default_runtime_id = None;
+        rrs_default_route = None; rrs_default_runtime_id = None;
         rrs_media_failover = []; rrs_media_failover_declared = [];
         rrs_runtimes = List.map runtime ids;
         rrs_lanes =
@@ -881,7 +881,7 @@ let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-      rrs_default_runtime_id = Some "a";
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
       rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
@@ -928,7 +928,7 @@ let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-      rrs_default_runtime_id = Some "a";
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
       rrs_media_failover = admitted; rrs_media_failover_declared = declared;
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
@@ -1090,11 +1090,32 @@ let drawn state =
   match runtime_picker_projection state with
   | None -> Alcotest.fail "the picker is not drawn"
   | Some picker ->
-      ( List.map (fun (r : Masc.Tui_decode.runtime_option) -> r.ro_id) picker.rlp_choices,
+      ( List.map runtime_picker_choice_id picker.rlp_choices,
         Option.bind picker.rlp_selected_row (fun row ->
-          Option.map (fun (r : Masc.Tui_decode.runtime_option) -> r.ro_id)
+          Option.map runtime_picker_choice_id
             (List.nth_opt picker.rlp_choices row)),
         picker )
+
+let test_default_route_picker_keeps_the_lane_name () =
+  let state = lane_state () in
+  state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "resolved routes are unread"
+   | Some snapshot ->
+       state.runtime_surface <- Some { snapshot with
+         rss_resolved = { snapshot.rss_resolved with rrs_default_route = Some "primary" } });
+  open_runtime_lane_pick state Pick_route_default;
+  let already, _, choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check (list string)) "the configured route stays a lane"
+    ["primary"] already;
+  Alcotest.(check (list string)) "declared lanes and runtimes share the picker"
+    ["primary"; "solo"; "a"; "b"; "c"]
+    (List.map runtime_picker_choice_id choices);
+  press state ["/"; "p"; "r"; "i"];
+  let rows, selected, _ = drawn state in
+  Alcotest.(check (list string)) "filter finds the route name" ["primary"] rows;
+  Alcotest.(check (option string)) "the lane is the selectable row"
+    (Some "primary") selected
 
 (* The operator types part of a runtime id and the drawn choices are the ones
    that carry it; the header says how many of the catalogue those are. *)
@@ -1141,7 +1162,7 @@ let test_the_filter_matches_the_drawn_text () =
   let rows, _, _ = drawn state in
   Alcotest.(check (list string)) "the escaped text finds it" [ "odd.id" ] rows;
   Alcotest.(check string) "the label is the drawn, escaped text"
-    "odd.id   provider / mod\\x0Ael" (runtime_picker_label odd)
+    "odd.id   provider / mod\\x0Ael" (runtime_picker_label (Runtime_choice odd))
 
 (* A reload that shortens the catalogue under a cursor on its last row draws
    the new last row selected, never a cursor past the end. *)
@@ -1460,6 +1481,8 @@ let () = Alcotest.run "runtime list geometry"
         test_the_pick_dispatch_asks_the_same_question;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
         test_the_route_editor_keeps_an_unresolved_entry_in_place;
+      Alcotest.test_case "default route picker keeps the lane name" `Quick
+        test_default_route_picker_keeps_the_lane_name;
       Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
         test_a_typed_filter_narrows_the_drawn_choices;
       Alcotest.test_case "an empty match is not an unread catalogue" `Quick

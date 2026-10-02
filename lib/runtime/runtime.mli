@@ -433,10 +433,9 @@ end
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 
-val get_default_and_runtimes : unit -> t option * t list
-(** The default runtime and the runtime list from one read of the loaded
-    state, so a reload between two separate reads cannot pair a default with
-    a list it is not in. *)
+val get_default_route_and_runtimes : unit -> string option * t option * t list
+(** The configured default route, its entry runtime and the runtime list from
+    one read of the loaded state. [None] means no default is initialized. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool

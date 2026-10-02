@@ -20,7 +20,7 @@ def run(executable):
     for model in models:
         model["quota_exhausted"] = True
     served[h.RUNTIME_RESOLVED_PATH] = (200, {
-        **resolved, "default_runtime": models[0], "runtimes": models,
+        **resolved, "default_route": IDS[0], "default_runtime": models[0], "runtimes": models,
         "lanes": [], "assignments": [],
     })
     served["/api/v1/keepers/alpha/config"] = (200, {

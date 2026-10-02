@@ -1911,14 +1911,15 @@ let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string lis
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
-(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
-    a keeper with no assignment walks. [None] clears the entry. *)
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the lane
+    or runtime a keeper with no assignment walks. The wire field remains
+    [runtime_id]; [None] clears the entry. *)
 let set_runtime_default ~(host : string) ~(port : int)
-      ~(runtime_id : string option) : (unit, string) result =
+      ~(route_id : string option) : (unit, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "default"
     ; ( "runtime_id"
-      , match runtime_id with None -> `Null | Some id -> `String id )
+      , match route_id with None -> `Null | Some id -> `String id )
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a

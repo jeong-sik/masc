@@ -386,6 +386,8 @@ type runtime_resolved_snapshot = {
   rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
+  rrs_default_route : string option;
+      (** [\\[runtime\\].default] as configured: a declared lane or runtime id. *)
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
       (** [\[runtime\].media_failover] as boot admitted it, in order: the

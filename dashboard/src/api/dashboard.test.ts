@@ -4559,7 +4559,7 @@ describe('runtime.toml raw config API', () => {
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
+    const sourceText = '[runtime]\ndefault = "deepseek-first"\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(committedPayload({
         ok: true,
@@ -4576,7 +4576,7 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('default', 'openai.gpt')
+    const result = await patchRuntimeRouting('default', 'deepseek-first')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -4584,7 +4584,7 @@ describe('runtime.toml raw config API', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
       lane: 'default',
-      runtime_id: 'openai.gpt',
+      runtime_id: 'deepseek-first',
     })
     expect(result.source_text).toBe(sourceText)
   })

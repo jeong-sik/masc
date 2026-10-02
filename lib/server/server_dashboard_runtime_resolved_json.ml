@@ -315,7 +315,7 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
      default runtime with a list that no longer holds it, and its scope with
      no label. The default is grouped too; [usage_scopes] adds a provider to a
      scope once, so it is not counted twice. *)
-  let default, runtimes = Runtime.get_default_and_runtimes () in
+  let default_route, default, runtimes = Runtime.get_default_route_and_runtimes () in
   let scopes = usage_scopes (Option.to_list default @ runtimes) in
   (* The keeper directory is listed once too: the lanes an assignment
      implies and the assignment rows then name the same fleet. *)
@@ -341,6 +341,7 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
     [ "generated_at_iso", `String generated_at_iso
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", string_opt_json (Runtime.config_path ())
+    ; "default_route", string_opt_json default_route
     ; ( "default_runtime"
       , match default with
         | Some rt -> runtime_resolution_json ~now ~scope_label rt

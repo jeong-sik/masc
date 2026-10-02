@@ -22,6 +22,7 @@ def run(executable, no_color):
     runtime = h.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
     resolved["runtimes"] = [runtime]
     resolved["default_runtime"] = runtime
+    resolved["default_route"] = LANE_ID
     resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID], "declared": True}]
     resolved["assignments"] = []
     _, probe = h.runtime_probe_response(fresh=True)
@@ -53,6 +54,11 @@ def run(executable, no_color):
                 h.wait_for_output(process, fd, output, h.FRAME_END,
                     start=h.end_of_needle(output, b"ROUTE / PROBE", clear), timeout=3)
                 visible = screen(output)
+                if not all_runtimes:
+                    default_block = visible.split("[runtime].default", 1)[1].split("ROUTE / PROBE", 1)[0]
+                    readable = "".join(default_block.split())
+                    assert LANE_ID in readable and RUNTIME_ID in readable, (columns, default_block)
+                    assert "…" not in default_block, (columns, default_block)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
                 status = "ready / reach" if columns == 30 else "ready / reachable"
                 candidate_rows = [row for row in visible.splitlines()

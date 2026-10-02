@@ -132,11 +132,15 @@ def automatic_gate_is_not_a_human_decision(executable):
     operator_path = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
     fixtures[operator_path] = _keyboard_harness.approval_selection_snapshot([])
     gate = _keyboard_approvals.blocked_gate_detail_http_fixtures()["/api/v1/dashboard/gate"]
-    template = gate[1]["approval_queue"][0]
-    gate[1]["approval_queue"] = [
+    assert isinstance(gate, tuple) and isinstance(gate[1], dict)
+    original_queue = gate[1]["approval_queue"]
+    assert isinstance(original_queue, list) and isinstance(original_queue[0], dict)
+    template = original_queue[0]
+    queue = [
         dict(template, id=f"appr-{phase}", phase=phase)
         for phase in ("queued", "judging")
     ]
+    gate[1]["approval_queue"] = queue
     fixtures["/api/v1/dashboard/gate"] = gate
 
     def interact(process, fd, _slave, output, _base):
@@ -144,7 +148,7 @@ def automatic_gate_is_not_a_human_decision(executable):
         frame = capture(process, fd, output, "automatic-gate", b"No decision is waiting")
         assert b"Needs your decision" not in frame
         # A blocked Auto Judge exposes manual resolution in Approvals.
-        gate[1]["approval_queue"].append(dict(template, id="appr-blocked", phase="blocked"))
+        queue.append(dict(template, id="appr-blocked", phase="blocked"))
         _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
         frame = capture(process, fd, output, "blocked-gate", b"appr-blocked", columns=100)
         assert b"appr-blocked" in frame
@@ -154,7 +158,7 @@ def automatic_gate_is_not_a_human_decision(executable):
         assert_no_decision_posts(requests)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         # A separate explicit human handoff retains its own identity.
-        gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
+        queue.append(dict(template, id="appr-human", phase="human_required"))
         _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 2 need you")
         # Change the width so capture receives a full redraw after refresh;
         # requesting the current 80x24 size does not produce another frame.

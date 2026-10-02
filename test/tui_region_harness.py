@@ -236,6 +236,15 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
     if len(tops) != 1 or len(bottoms) != 1:
         raise AssertionError(f"the pane in cells {left}-{right} has tops {tops} "
                              f"and bottoms {bottoms}: {rows!r}")
+    for row, left_corner, right_corner in ((tops[0], BOX_TOP_LEFT, "┐"),
+                                           (bottoms[0], BOX_BOTTOM_LEFT, "┘")):
+        border = cells(rows[row], left, right)
+        expected = left_corner + "─" * (right - left - 2) + right_corner
+        if border != expected:
+            raise AssertionError(f"the pane in cells {left}-{right} has an incomplete border: {border!r}")
+    if bottoms[0] <= tops[0]:
+        raise AssertionError(f"the pane in cells {left}-{right} closes before its top: "
+                             f"top {tops[0]}, bottom {bottoms[0]}")
     return {"top": tops[0], "bottom": bottoms[0]}
 
 

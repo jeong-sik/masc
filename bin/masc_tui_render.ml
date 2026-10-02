@@ -4382,6 +4382,40 @@ let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
   lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
 let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
+  let preflight_lines = match detail.lrd_librarian_preflight with
+    | None -> []
+    | Some reading ->
+      let decision = match reading.lp_status with
+        | Tui_decode.Preflight_awaiting -> "응답 대기"
+        | Tui_decode.Preflight_not_called reason -> "호출하지 않음 · " ^ reason
+        | Tui_decode.Preflight_failed reason -> "호출 실패 · " ^ reason
+        | Tui_decode.Preflight_invalid reason -> "답변 거절 · " ^ reason
+        | Tui_decode.Preflight_judged judgment ->
+          Masc.Typesafeai_librarian_preflight.decision_label judgment.choice in
+      let path = match reading.lp_generation_path with
+        | Tui_decode.Generation_not_entered -> "생성 Lane 진입 전"
+        | Tui_decode.Generation_full_lane -> "생성 Lane 진입 · 실제 요청 수는 별도 기록"
+        | Tui_decode.Generation_jev_no_change -> "생성 호출 생략 · 빈 변경 검증 통과" in
+      let probabilities = match reading.lp_status with
+        | Tui_decode.Preflight_judged judgment ->
+          [Printf.sprintf "Confidence %.3f" judgment.confidence]
+          @ List.map (fun (decision, probability) ->
+              Printf.sprintf "%s %.3f" (Masc.Typesafeai_librarian_preflight.decision_label decision) probability)
+              judgment.probabilities
+        | _ -> [] in
+      let elapsed = match reading.lp_elapsed_s with
+        | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in
+      let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
+      let rejection = match reading.lp_domain_rejection with
+        | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
+      ["JEV PREFLIGHT · " ^ decision; path]
+      @ model @ elapsed @ probabilities @ rejection
+      @ ["기억 저장 결과는 아래 after/absorption 및 실행 상태에서 확인"; ""]
+      |> List.concat_map (fun text ->
+          Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
+          |> List.map (fun line -> Theme.info (), line))
+  in
+  preflight_lines @
   match detail.lrd_output_availability, detail.lrd_output with
   | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
   | Some availability, output ->

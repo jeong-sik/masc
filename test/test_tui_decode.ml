@@ -9897,6 +9897,40 @@ let lane_run_detail_json ?(output = true) run_id =
       )
     ]
 
+let test_librarian_preflight_detail_reports_actual_route () =
+  let preflight decision = `Assoc
+    ["status", `String "judged"; "decision", `String decision;
+     "confidence", `Float 0.9;
+     "probabilities", `Assoc ["keep_current", `Float 0.9; "needs_generation", `Float 0.05; "uncertain", `Float 0.05];
+     "model", `String "jev-fixture"; "elapsed_s", `Float 0.1] in
+  let make ~decision ~path ~skipped =
+    match lane_run_detail_json "librarian-preflight" with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc
+        (("lane", `String "librarian_exact") ::
+         ("output", `Assoc ["jev_preflight", preflight decision;
+                             "generation_path", `String path;
+                             "full_llm_skipped", `Bool skipped;
+                             "preflight_domain_rejection", `Null]) ::
+         List.remove_assoc "output" (List.remove_assoc "lane" fields))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let detail = Tui_decode.decode_lane_run_detail
+    (make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true)
+    |> Result.get_ok in
+  (match detail.lrd_librarian_preflight with
+   | Some {lp_generation_path = Tui_decode.Generation_jev_no_change;
+           lp_full_llm_skipped = true; lp_model = Some "jev-fixture"; _} -> ()
+   | _ -> Alcotest.fail "actual JEV route not decoded");
+  Alcotest.(check bool) "JEV does not invent Board provenance" true
+    (detail.lrd_answer_source = None);
+  List.iter (fun (decision, path, skipped) ->
+    Alcotest.(check bool) "inconsistent or unknown route rejected" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make ~decision ~path ~skipped))))
+    ["uncertain", "jev_no_change", true;
+     "keep_current", "full_lane", true;
+     "keep_current", "new_route", false;
+     "new_choice", "full_lane", false]
+
 let test_decode_lane_run_detail_carries_prompt_and_output () =
   match Tui_decode.decode_lane_run_detail (lane_run_detail_json "cmp-1") with
   | Error detail -> Alcotest.fail detail
@@ -12459,6 +12493,8 @@ let () =
           test_decode_verifier_lane_summary_keeps_subject_and_verdict;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
+        Alcotest.test_case "Librarian preflight keeps actual route and rejects inconsistent evidence" `Quick
+          test_librarian_preflight_detail_reports_actual_route;
         Alcotest.test_case "Board answer source rejects an invented selected slot" `Quick
           test_decode_board_answer_source_rejects_invented_selected_slot;
         Alcotest.test_case "Board answer source survives persistence failure" `Quick

@@ -1,6 +1,8 @@
 (** A semantic no-change judgment. Text generation and commit authority stay
     with the existing Librarian pipeline. *)
 type decision = Keep_current | Needs_generation | Uncertain
+val decision_label : decision -> string
+val decode_judgment : Yojson.Safe.t -> (decision Typesafeai_types.decoded_choice, string) result
 type outcome =
   | Awaiting_answer
   | Skipped of Typesafeai_config.unavailable_reason

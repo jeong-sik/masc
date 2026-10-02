@@ -1543,25 +1543,26 @@ let facts_body_lines ?(cols = 100) ?(budget = 30) state =
     ~push_empty:(fun () -> ());
   List.rev !lines
 
-let three_kinds_state ?(keeper = "alpha") () =
+let make_memory_fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { mf_claim = claim
+  ; mf_category = category
+  ; mf_origin = "manual"
+  ; mf_first_seen = 100.0
+  ; mf_last_seen = 200.0
+  ; mf_memory_id = "mem-" ^ claim
+  ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
+  }
+
+let three_kinds_state ?(keeper = "alpha") ?(extra_ordinary = []) () =
   let state = make_state () in
-  let fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
-    { mf_claim = claim
-    ; mf_category = category
-    ; mf_origin = "manual"
-    ; mf_first_seen = 100.0
-    ; mf_last_seen = 200.0
-    ; mf_memory_id = "mem-" ^ claim
-    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
-    }
-  in
+  let fact = make_memory_fact in
   let ordinary : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts =
         [ fact Cat.Fact "The renderer draws the board"
         ; fact Cat.Preference "Roger reads for the tester"
-        ]
+        ] @ extra_ordinary
     }
   in
   let source : Masc.Tui_decode_memory_facts.memory_source_store =
@@ -1625,6 +1626,51 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
   let closed, _ = render 140 in
   check bool "closing Categories restores the fact reading" false
     (List.exists (contains "CATEGORIES") closed)
+
+let test_category_rail_wrapped_range_and_overflow () =
+  let long_cat_name = "custom_architecture_infrastructure_deployment_pipeline_specification" in
+  let long_cat = Option.get (Cat.category_of_string long_cat_name) in
+  let cat_filter = Types.Category_ordinary long_cat in
+  let state =
+    three_kinds_state
+      ~extra_ordinary:[ make_memory_fact long_cat "Long category test claim" ]
+      ()
+  in
+  state.memory_facts_category <- cat_filter;
+  let render ~budget cols =
+    Masc_tui_hit.reset Masc_tui_press.press_marks;
+    let lines = ref [] in
+    let push line = lines := line :: !lines in
+    Render_memory.render_memory_facts_body ~cols ~budget state ~push
+      ~push_styled:(fun ~style line -> push (style ^ line))
+      ~push_selected:push ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines)
+  in
+  let lines_fit, zones_fit = render ~budget:7 140 in
+  check bool "selected category start row visible when fitting in budget" true
+    (List.exists (contains "custom_architecture_infrastructu") lines_fit);
+  check bool "selected category end row with count visible when fitting in budget" true
+    (List.exists (contains "tion (1)") lines_fit);
+  check bool "clickable target exists when fitting" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category cat_filter)
+      (Masc_tui_hit.to_list zones_fit));
+  let lines_small, zones_small = render ~budget:5 140 in
+  check bool "selected category start anchored and visible under height overflow" true
+    (List.exists (contains "custom_architecture_infrastructu") lines_small);
+  check bool "clickable target exists on overflow" true
+    (List.exists (fun (_, first, _, target) ->
+      first <= Masc_tui_roster_pane.pane_cols &&
+      target = Masc_tui_press.Press_memory_category cat_filter)
+      (Masc_tui_hit.to_list zones_small));
+  let title =
+    live_title
+      ~filter_label:(Types.memory_category_filter_label state.memory_facts_category)
+      ()
+  in
+  check bool "accessible overflow: facts_title renders full category label unconditionally" true
+    (contains long_cat_name title)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed
@@ -2315,6 +2361,8 @@ let () =
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ; test_case "Category rail keeps counts, click targets and frame width" `Quick
             test_category_rail_keeps_click_targets_and_frame_width
+        ; test_case "Category rail wrapped range exposure and overflow" `Quick
+            test_category_rail_wrapped_range_and_overflow
         ; test_case "a failed facts read does not say loading" `Quick
             test_a_failed_facts_read_does_not_say_loading
         ; test_case "a failed facts refresh keeps the facts" `Quick

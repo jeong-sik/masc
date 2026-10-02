@@ -369,7 +369,14 @@ let test_admission_deadline_ends_the_wait_for_a_stream_permit () =
        bool
        "the message names the admission deadline"
        true
-       (Agent_core_strings.contains_substring ~needle:"admission_timeout_s" ~haystack:message)
+       (Agent_core_strings.contains_substring ~needle:"admission_timeout_s" ~haystack:message);
+     check
+       bool
+       "the failure reports the held permit after this waiter left"
+       true
+       (Agent_core_strings.contains_substring
+          ~needle:"admission_snapshot=after_wait max_slots=1 active=1 available=0 queue_length=0"
+          ~haystack:message)
    | Error (Http_client.TimeoutError { phase; _ }) ->
      failf "the wait ended in phase %s, not Queue" (Http_client.timeout_phase_to_label phase)
    | Error _ | Ok _ -> fail "expected a queue timeout while the permit was held");

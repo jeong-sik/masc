@@ -607,13 +607,24 @@ let complete_prepared_stream
          with
          | Ok stream_result -> stream_result
          | Error `Permit_wait_expired ->
+           (* The waiter has left the queue. These are the endpoint's current
+              process-local counts, not a reconstruction of the expired wait. *)
+           let admission_snapshot =
+             match Provider_admission.snapshot_for ~config:request_config with
+             | None -> " admission_snapshot=unavailable"
+             | Some snapshot ->
+               Printf.sprintf
+                 " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
+                 snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
+           in
            Error
              (Http_client.TimeoutError
                 { message =
                     Printf.sprintf
                       "admission_timeout_s deadline exceeded after %.17gs before a \
-                       provider admission permit was granted (Complete.complete_stream)"
+                       provider admission permit was granted (Complete.complete_stream)%s"
                       admission_timeout_s
+                      admission_snapshot
                 ; phase = Http_client.Queue
                 }))
     in

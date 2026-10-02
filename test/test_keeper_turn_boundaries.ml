@@ -784,7 +784,8 @@ let test_the_line_that_states_a_position () =
       (Boundaries.witness_line ?through ~trace_id ~end_atom:2 ~last_atom_digest:digest lines)
   in
   check (option int) "the latest line that states it" (Some 6) (found ());
-  check (option int) "only among the lines counted" (Some 1) (found ~through:5 ());
+  check (option int) "a restart invalidates the earlier end witness" None (found ~through:5 ());
+  check (option int) "before the restart the end witness is live" (Some 1) (found ~through:2 ());
   check (option int) "none counted, none found" None (found ~through:0 ());
   check (option int) "another digest is another position" None (found ~digest:"other" ());
   check (option int) "another trace has its own lines" (Some 2) (found ~trace_id:"other" ());
@@ -836,6 +837,14 @@ let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
   in
   check (option int) "a start state before a restart names a history that is gone" None
     (witness restarted_after ~end_atom:5 ~digest:"d5");
+  let repeated_after_restart =
+    [ 1, Ok (record ~turn:1 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" }))
+    ; 2, Ok (history_restarted ())
+    ; 3, Ok (record ~turn:3 ~history_at_start:from_five Boundaries.No_atom_history)
+    ]
+  in
+  check (option int) "only the new history can witness a repeated position" (Some 3)
+    (witness repeated_after_restart ~end_atom:5 ~digest:"d5");
   let later_turn_ended_there =
     official_after_a_failed_save
     @ [ 4, Ok (record ~turn:4 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" })) ]
@@ -948,11 +957,25 @@ let test_admission_context_strict_and_goalless () =
   List.iter (fun context -> match Task_context.of_json (Task_context.to_json context) with
     | Ok decoded -> check bool "typed context roundtrip" true (context = decoded)
     | Error e -> fail (Wire.wire_error_to_string e))
-    [context; Task_context.No_task; unavailable_task; unavailable_goal];
+    [context; Task_context.No_task; Task_context.Admission_not_recorded; unavailable_task; unavailable_goal];
   let json = Boundaries.record_to_json (record atom_history) in
   let json = match json with `Assoc fields -> `Assoc (List.remove_assoc "task_context" fields) | _ -> assert false in
   (match Boundaries.record_of_json json with
-   | Error _ -> () | Ok _ -> fail "missing historical context accepted")
+   | Ok { Boundaries.event = Boundaries.Turn_ended {task_context; position; _}; _ } ->
+     check bool "absent admission is explicit" true (task_context = Task_context.Admission_not_recorded);
+     check bool "position evidence preserved" true (position = atom_history)
+   | Ok _ -> fail "turn boundary changed kind"
+   | Error e -> fail (Wire.wire_error_to_string e));
+  let malformed = match json with
+    | `Assoc fields -> `Assoc (("task_context", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json malformed with
+   | Error _ -> () | Ok _ -> fail "malformed admission accepted");
+  let unknown = match json with
+    | `Assoc fields -> `Assoc (("unknown", `Null) :: fields)
+    | _ -> assert false in
+  (match Boundaries.record_of_json unknown with
+   | Error _ -> () | Ok _ -> fail "unknown boundary field accepted")
 ;;
 
 let () =

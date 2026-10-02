@@ -405,11 +405,17 @@ let workspace_column_width = function
   | Workspace_sync -> workspace_sync_width
   | Workspace_path -> workspace_minimum_path_width
 
+let workspace_columns =
+  [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync; Workspace_path ]
+
+let workspace_minimum_width =
+  Table.used_width
+    (List.map (fun column -> Table.cell ~header:""
+       ~width:(workspace_column_width column) "") workspace_columns)
+
 let workspace_layout ~inner_width =
   Table.fit ~inner_width ~width:workspace_column_width ~flex:Workspace_path
-    ~drop_order:[ Workspace_sync; Workspace_branch ]
-    [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync;
-      Workspace_path ]
+    ~drop_order:[ Workspace_sync; Workspace_branch ] workspace_columns
 
 let workspace_cells ~(layout : workspace_column Table.layout) values =
   List.map

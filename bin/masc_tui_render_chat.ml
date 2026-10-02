@@ -1891,11 +1891,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
           (Masc_tui_keeper_chat_transcript.drawn live.tl_transcript)
     | Some _ | None -> false
   in
-  if Option.is_some (Masc_tui_types.working_chat_for_keeper state keeper_name)
-     || live_text_drawn
-  then []
-  else
-    match List.find_opt
+  match List.find_opt
       (fun (row : Tui_decode.keeper_turn_row) ->
          String.equal row.ktr_keeper_name keeper_name)
       state.keeper_turns with
@@ -1904,7 +1900,9 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
       when String.trim preview.ktp_text_tail <> ""
            && (match lane with
                | Tui_decode.Turn_lane_chat_operation ->
-                   not (Masc_tui_types.observed_turn_text_drawn state keeper_name)
+                   not (Option.is_some (Masc_tui_types.working_chat_for_keeper state keeper_name)
+                        || live_text_drawn
+                        || Masc_tui_types.observed_turn_text_drawn state keeper_name)
                | Tui_decode.Turn_lane_autonomous | Tui_decode.Turn_lane_maintenance -> true) ->
         let style = Message_layout.Keeper in
         let label = keeper_name in
@@ -2862,13 +2860,30 @@ let render_keeper_message (state : state) =
           { block with lb_entries = entries })
       |> List.filter (fun block -> block.lb_entries <> [])
     in
+    (* A new queued request takes msg_live while the previous subscription
+       still runs. Keep those request-owned logs on screen as well. Batch
+       members share one execution, so retain one block per execution. *)
+    let other_live_blocks =
+      List.rev state.msg_inflight
+      |> List.filter (fun entry ->
+          String.equal entry.sent_request.keeper_name keeper_name)
+      |> List.map (fun entry -> held_projection ~committed:false entry.log)
+      |> List.filter (fun block -> block.lb_entries <> [])
+      |> List.fold_left (fun selected block ->
+          let execution_id = Masc_tui_types.turn_log_execution_id block.lb_log in
+          let already_drawn = List.exists (fun drawn ->
+              String.equal execution_id
+                (Masc_tui_types.turn_log_execution_id drawn.lb_log))
+              (settled_blocks @ observed_blocks @ Option.to_list live_block @ selected) in
+          if already_drawn then selected else selected @ [block]) []
+    in
     let open_blocks =
       List.filter (fun block ->
         not (Masc_tui_types.observed_log_has_ended state block.lb_log)
         && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log))
-        observed_blocks @ Option.to_list live_block
+        observed_blocks @ other_live_blocks @ Option.to_list live_block
     in
-    let blocks = settled_blocks @ observed_blocks @ Option.to_list live_block in
+    let blocks = settled_blocks @ observed_blocks @ other_live_blocks @ Option.to_list live_block in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
@@ -3421,7 +3436,9 @@ let render_keeper_message (state : state) =
             "  Keeper roster is unavailable; draft retained; Esc to choose another"
         | None ->
             Printf.sprintf
-              "  Keeper %s is no longer registered; draft retained; Esc to choose another"
+              (if state.keeper_creation_awaiting_roster = Some keeper_name then
+                 "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
+               else "  Keeper %s is no longer registered; draft retained; Esc to choose another")
               display_keeper_name
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message

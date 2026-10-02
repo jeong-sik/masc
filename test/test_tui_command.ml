@@ -961,8 +961,17 @@ let test_autocomplete_subargument_cycling () =
    [handoff_context.summary]. A builder that dropped the summary would pass
    the transport and be refused by the server's schema on every cancel. *)
 let test_cancel_arguments_carry_reason_as_summary () =
+  let expected_workspace : Masc.Tui_decode.server_identity =
+    { sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_base_path = "/fixture";
+      sid_masc_root = "/fixture/.masc";
+      sid_executable_in_worktree = None; sid_state_ready = Some true;
+      sid_uptime = None; sid_sse_clients = None; sid_gc = None;
+      sid_scheduler = None }
+  in
   let arguments =
     Masc_tui_mcp.task_cancel_arguments ~task_id:"task-9" ~reason:"wrong scope"
+      ~expected_workspace
   in
   let assoc key = List.assoc_opt key arguments in
   Alcotest.(check bool) "task id" true (assoc "task_id" = Some (`String "task-9"));
@@ -972,7 +981,10 @@ let test_cancel_arguments_carry_reason_as_summary () =
     (assoc "reason" = Some (`String "wrong scope"));
   Alcotest.(check bool) "summary equals the reason" true
     (assoc "handoff_context"
-    = Some (`Assoc [ ("summary", `String "wrong scope") ]))
+    = Some (`Assoc [ ("summary", `String "wrong scope") ]));
+  Alcotest.(check bool) "cancel is bound to observed workspace" true
+    (assoc "expected_workspace" = Some (`Assoc
+      [ "base_path", `String "/fixture"; "masc_root", `String "/fixture/.masc" ]))
 
 let test_resource_read_keeps_each_part_type () =
   let body =

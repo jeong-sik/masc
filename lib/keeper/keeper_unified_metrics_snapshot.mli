@@ -10,6 +10,7 @@ val append_metrics_snapshot :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
+  keeper_turn_id:int ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
   usage_resolution:Keeper_usage_resolution.t ->

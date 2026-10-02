@@ -6,6 +6,7 @@
 
 ### Upgrade notes
 
+- Existing turn journals remain readable when admission Task/Goal context was not recorded. The final candidate preserves valid turn positions and explicitly marks missing attribution; it does not reconstruct missing context or rewrite journals. This supersedes the earlier #40672 turn-journal incompatibility warning preserved in the detailed change record. (#40716)
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
 - Previously stored single-value step expressions such as `5/10 * * * *` are now rejected on read as well as at admission, including cancelled or succeeded schedule rows. An unsupported row makes its entire schedule file unreadable; if it exists in both primary and last-good files, normal ticks, startup recovery and mutations refuse the store (#40460).
 - Before deploying, stop MASC and every schedule writer, and back up `<base-path>/.masc/schedules.json` and `schedules.json.last-good`. Review both files, confirm the intended timing of every unsupported expression, and explicitly rewrite it to a supported expression. Do not mechanically turn a singleton step into a range step: that may change the timing the old singleton implementation actually used. Validate each existing file with the candidate `deployment_preflight_helper validate-schedule-ledger <file>` command before restarting writers. Leave deployment pending until the operator has reviewed this stored-format change and the validation evidence; this note does not authorize editing or resetting a live store (#40460).
@@ -13,7 +14,6 @@
 
 ### Fresh state required
 
-- Turn boundary rows now require explicit admission context. Old `Turn_ended` rows without `task_context` are unreadable; historical journals are not upgraded. No migration, reset, or deployment is included. (#40672)
 - DOS checkpoints saved before this release are refused on restore: the DOS core now writes machine snapshots in format 3 and does not read format 2. Start the DOS game again (#39944).
 - Prepare `goals.json` and `goals.json.last-good` without `owner`, `notified_refuted_key`, and `notified_overdue_key`, preserving the remaining Goal data. The closed decoder rejects those fields; a rejected row makes the entire store unavailable. (#39975)
 - If `<base-path>/.masc/keeper_chat/<sanitized-keeper-name>.jsonl` contains a row whose `delivery_key.kind` is `goal_notification`, remove that row's `delivery_key` and `transcript_slot` together while preserving its message body and other fields. Otherwise the unsupported identity blocks strict append-once delivery, including unrelated chat deliveries. Prepare data with writers stopped, backups, and atomic replacement; this change performs no data cleanup. (#39975)
@@ -28,7 +28,7 @@
 
 ### Complete change record
 
-The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note and all 49 final-candidate fragments. Read the upgrade and fresh-state instructions above before updating.
+The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
 
 ## [0.48.0] - 2026-09-29
 

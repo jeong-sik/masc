@@ -211,4 +211,5 @@ let transition_known_args =
     "reason";
     "expected_version";
     "handoff_context";
+    "expected_workspace";
   ]

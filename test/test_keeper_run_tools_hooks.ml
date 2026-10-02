@@ -685,6 +685,125 @@ let test_failed_tool_observer_releases_next_completion () =
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
    [post_tool_use] already records that one. *)
+let test_codex_receipts_reach_live_and_cancelled_history () =
+  with_temp_base_path @@ fun base_path ->
+  let module Log = Masc.Keeper_tool_call_log in
+  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  let module Accum = Masc.Keeper_stream_tool_accum in
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let module Events = Masc.Keeper_chat_events in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Log.reset_for_testing ())
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Log.reset_for_testing ();
+      Log.init ~base_path ();
+      let accum = Accum.create () in
+      ignore (Accum.start_runtime_attempt accum);
+      let bridge = ref (Bridge.empty_state ()) in
+      let feed event =
+        Accum.on_event accum event;
+        let translated = Bridge.translate ~redact_text:Fun.id ~base_dir:base_path
+            ~stream_scope:(Accum.current_stream_scope accum) !bridge event in
+        bridge := translated.bridge_state
+      in
+      feed (Agent_core.Types.MessageStart { id="codex-turn"; model="fixture"; usage=None });
+      let received = ref [] in
+      let receipts = Receipts.create ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+        let rows = match Log.read_recent ~keeper_name:"codex-receipts" () with
+          | Ok rows -> rows | Error (Log.Index_unavailable detail) -> fail detail in
+        check bool "receipt only after readable log commit" true
+          (List.exists (fun row ->
+            Yojson.Safe.Util.member "execution_id" row =
+              `String (Ids.Execution_id.to_string execution_id)) rows);
+        let occurrence = match Accum.record_official_execution_id accum
+            ~block_index ~tool_call_id ~execution_id with
+          | Ok occurrence -> occurrence | Error detail -> fail detail in
+        bridge := Bridge.record_tool_result !bridge occurrence;
+        received := execution_id :: !received) in
+      let original = Masc.Keeper_hooks_agent_core.make_hooks
+          ~config:(Masc.Workspace.default_config base_path)
+          ~meta_ref:(ref (make_meta "codex-receipts"))
+          ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
+          ~trace_id:"codex-receipts-trace" ~keeper_turn_id:1
+          ~on_after_turn_ordinal:ignore () in
+      let hooks = Receipts.hooks receipts { original with pre_tool_use=None } in
+      let invoke hook event = match hook with
+        | Some hook -> ignore (hook event) | None -> fail "receipt hook missing" in
+      let start index =
+        Receipts.start receipts ~call_id:"reused-provider-id" ~block_index:index;
+        feed (Agent_core.Types.ContentBlockStart { index; content_type="tool_use";
+          tool_id=Some "reused-provider-id"; tool_name=Some "Read" });
+        feed (Agent_core.Types.ContentBlockDelta { index;
+          delta=Agent_core.Types.InputJsonSnapshot {|{"file_path":"fixture.ml"}|} })
+      in
+      let invocation index = Agent_core.Tool_contract.Invocation.create
+          ~tool_use_id:"reused-provider-id" ~turn:1
+          ~completion:Agent_core.Tool_contract.Continue_after_success
+          ~schedule:{planned_index=index; batch_index=0; batch_size=1;
+                     execution_mode=Agent_core.Tool_contract.Serial} in
+      let execute index output =
+        start index;
+        let invocation = invocation index in
+        invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
+          invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+        invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
+          invocation; tool_name="Read"; input=`Assoc []; output;
+          result_bytes=7; duration_ms=1. });
+        invocation
+      in
+      let first = execute 1 (Ok {Agent_core.Types.content="read ok"; content_blocks=None; _meta=None}) in
+      check bool "receipt observer does not consume event-bus join" true
+        (Option.is_some (Masc.Keeper_execution_join.take ~invocation:first));
+      feed (Agent_core.Types.ContentBlockStop {index=1});
+      Receipts.finish receipts ~call_id:"reused-provider-id";
+      let second = execute 2 (Error { Agent_core.Types.message = "read refused";
+        recoverable = false; error_class = Some Agent_core.Types.Deterministic }) in
+      (* Both post hooks precede ToolCompleted, but this execution owns exactly
+         one readiness receipt and leaves the bus join untouched. *)
+      invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
+        invocation=second; tool_name="Read"; input=`Assoc [];
+        stage=Agent_core.Hooks.Execution; duration_ms=1.; error="read refused" });
+      check int "executed error reports once before turn end" 2 (List.length !received);
+      check bool "reused provider id keeps distinct execution receipts" true
+        (match !received with [a;b] ->
+           not (Ids.Execution_id.equal a b)
+         | _ -> false);
+      check bool "error hooks leave join for ToolCompleted" true
+        (Option.is_some (Masc.Keeper_execution_join.take ~invocation:second));
+      feed (Agent_core.Types.ContentBlockStop {index=2});
+      Receipts.finish receipts ~call_id:"reused-provider-id";
+      start 3;
+      let rejected = invocation 3 in
+      invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
+        invocation=rejected; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+      invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
+        invocation=rejected; tool_name="Read"; input=`Assoc [];
+        stage=Agent_core.Hooks.Validation_before_execution;
+        duration_ms=1.; error="invalid arguments" });
+      check int "validation rejection also delivers its durable result" 3 (List.length !received);
+      (* Cancellation before the rejected call's ContentBlockStop retains its receipt. *)
+      let saved = Accum.to_tool_calls_for_failure accum in
+      check int "cancelled history retains all committed results" 3 (List.length saved);
+      check bool "history uses exact live execution ids" true
+        (List.for_all (fun (row : Masc.Keeper_chat_store.tool_call) ->
+          match row.execution_id with
+          | Some id -> List.exists (Ids.Execution_id.equal id) !received
+          | None -> false) saved);
+      let failed = Bridge.fail_stream !bridge ~reason:"operator interrupted" in
+      check bool "cancellation cannot quarantine committed live rows" false
+        (List.exists (function
+          | Events.Agent_core_stream_protocol_error {quarantined_occurrence=Some _; _} -> true
+          | _ -> false) failed.chat_events);
+      ignore (Accum.start_runtime_attempt accum);
+      check int "fallback retains prior committed history" 3
+        (List.length (Accum.to_tool_calls_for_failure accum)))
+;;
+
 let test_retained_observation_commits_through_production_hook () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
@@ -1156,6 +1275,70 @@ let test_validation_rejection_notifies_after_exact_log_commit () =
       (List.length rows)
 ;;
 
+let test_codex_cancelled_hooks_only_report_committed_rows () =
+  with_temp_base_path @@ fun base_path ->
+  let module Log = Masc.Keeper_tool_call_log in
+  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Log.reset_for_testing ())
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Log.init ~base_path ();
+      List.iter (fun validation ->
+        List.iter (fun commit ->
+          let received = ref [] in
+          let receipts = Receipts.create
+              ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
+                Eio.Fiber.check ();
+                received := execution_id :: !received) in
+          let original = Masc.Keeper_hooks_agent_core.make_hooks
+              ~config:(Masc.Workspace.default_config base_path)
+              ~meta_ref:(ref (make_meta "cancelled-receipt"))
+              ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
+              ~trace_id:"cancelled-receipt-trace" ~keeper_turn_id:1
+              ~on_after_turn_ordinal:ignore () in
+          let invocation = Agent_core.Tool_contract.Invocation.create
+              ~tool_use_id:"cancelled-call" ~turn:1
+              ~completion:Agent_core.Tool_contract.Continue_after_success
+              ~schedule:{planned_index=0; batch_index=0; batch_size=1;
+                         execution_mode=Agent_core.Tool_contract.Serial} in
+          Receipts.start receipts ~call_id:"cancelled-call" ~block_index:0;
+          Eio.Cancel.sub (fun cancellation ->
+            let interrupt hook event =
+              if commit then Option.iter (fun callback -> ignore (callback event)) hook;
+              Eio.Cancel.cancel cancellation (Failure "interrupt post hook");
+              Eio.Fiber.check ();
+              Agent_core.Hooks.Continue in
+            let hooks = Receipts.hooks receipts { original with
+              pre_tool_use=None;
+              post_tool_use=Some (interrupt original.post_tool_use);
+              post_tool_use_failure=Some (interrupt original.post_tool_use_failure) } in
+            let invoke hook event = match hook with
+              | Some callback -> ignore (callback event)
+              | None -> fail "Codex hook missing" in
+            invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
+              invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+            (match (if validation then
+               invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
+                 invocation; tool_name="Read"; input=`Assoc [];
+                 stage=Agent_core.Hooks.Validation_before_execution;
+                 duration_ms=1.; error="invalid arguments" })
+             else
+               invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
+                 invocation; tool_name="Read"; input=`Assoc [];
+                 output=Error "read refused"; result_bytes=12; duration_ms=1. })) with
+             | () -> fail "post hook swallowed cancellation"
+             | exception Eio.Cancel.Cancelled _ -> ());
+            check int "only committed interrupted hooks emit a receipt"
+              (if commit then 1 else 0) (List.length !received);
+            check bool "receipt check leaves the committed join for the event bus"
+              commit (Option.is_some (Masc.Keeper_execution_join.take ~invocation)))
+        ) [false; true]
+      ) [false; true])
+;;
+
 let test_production_post_tool_hook_cancellation_releases_next_completion () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
@@ -1200,6 +1383,14 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
                    second_observed := true))
            ()
        in
+       let received = ref [] in
+       let receipts = Masc.Keeper_codex_tool_receipts.create
+           ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
+             (* Delivery must survive an already-cancelled hook context. *)
+             Eio.Fiber.check ();
+             received := execution_id :: !received) in
+       let hooks = Masc.Keeper_codex_tool_receipts.hooks receipts
+           { hooks with pre_tool_use = None } in
        let post_tool_use =
          match hooks.Agent_core.Hooks.post_tool_use with
          | Some hook -> hook
@@ -1218,6 +1409,14 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
                ; execution_mode = Agent_core.Tool_contract.Serial
                }
          in
+         Masc.Keeper_codex_tool_receipts.start receipts
+           ~call_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+           ~block_index:planned_index;
+         (match hooks.pre_tool_use with
+          | Some hook -> ignore (hook (Agent_core.Hooks.PreToolUse {
+              invocation; tool_name="keeper_lane_status"; input=`Assoc [];
+              accumulated_cost_usd=0. }))
+          | None -> fail "Codex pre-hook missing");
          Agent_core.Hooks.PostToolUse
            { invocation
            ; tool_name = "keeper_lane_status"
@@ -1255,13 +1454,25 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
          "cancellation preempts the observation body"
          false
          !first_body_completed;
+       check int "cancelled committed hook delivers exactly one receipt" 1
+         (List.length !received);
+       let rows = match Masc.Keeper_tool_call_log.read_recent
+           ~keeper_name:"cancelled-observer" () with
+         | Ok rows -> rows
+         | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> fail detail in
+       check (list string) "receipt identifies the durably committed row"
+         (List.map Ids.Execution_id.to_string !received)
+         (List.map (fun row -> Yojson.Safe.Util.(row |> member "execution_id" |> to_string)) rows);
+       Masc.Keeper_codex_tool_receipts.finish receipts ~call_id:"cancel-observer-0";
        (match post_tool_use (event 1) with
         | Agent_core.Hooks.Continue -> ()
         | _ -> fail "later production post-tool hook did not continue");
        check bool
          "cancelled observer releases the mutex for the next production hook"
          true
-         !second_observed)
+         !second_observed;
+       check int "following committed hook delivers one more receipt" 2
+         (List.length !received))
 ;;
 
 (* The post-tool-round predicate is the position of the last message, not
@@ -1911,6 +2122,11 @@ let () =
         ; test_case "no trailing tool message yields no receipt" `Quick
             test_no_trailing_tool_message_yields_no_receipt
         ] )
+    ; ( "Codex result delivery"
+      , [ test_case "committed tools reach live and cancelled history" `Quick
+            test_codex_receipts_reach_live_and_cancelled_history
+        ; test_case "interrupted hooks report only committed rows" `Quick
+            test_codex_cancelled_hooks_only_report_committed_rows ] )
     ; ( "Skills block"
       , [ test_case "a deferred composition is named for search" `Quick
             test_skills_block_names_a_deferred_composition_for_search

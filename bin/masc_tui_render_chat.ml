@@ -2808,10 +2808,6 @@ let render_keeper_message (state : state) =
        corners onto rows that never close. *)
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
-      |> List.filter (fun settled -> match state.msg_live with
-        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name ->
-          Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
-        | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
       |> List.map (held_projection ~committed:true)
       |> List.filter (fun block -> block.lb_entries <> [])
@@ -2869,21 +2865,40 @@ let render_keeper_message (state : state) =
           String.equal entry.sent_request.keeper_name keeper_name)
       |> List.map (fun entry -> held_projection ~committed:false entry.log)
       |> List.filter (fun block -> block.lb_entries <> [])
+    in
+    (* All batch members carry the same journal sequence. A newly selected
+       subscriber may lag behind another member; select by retained journal
+       coverage, with a complete turn authoritative over a partial stream.
+       Equal coverage keeps the earlier source, avoiding selection churn. *)
+    let prefer candidate held =
+      let candidate_complete = Masc_tui_types.turn_log_holds_the_turn candidate.lb_log in
+      let held_complete = Masc_tui_types.turn_log_holds_the_turn held.lb_log in
+      if candidate_complete <> held_complete then candidate_complete
+      else
+        match Masc_tui_keeper_chat_log.resume_position candidate.lb_log.tl_log,
+              Masc_tui_keeper_chat_log.resume_position held.lb_log.tl_log with
+        | Masc.Keeper_chat_event_log.After_seq candidate_seq,
+          Masc.Keeper_chat_event_log.After_seq held_seq -> candidate_seq > held_seq
+        | After_seq _, Whole_turn -> true
+        | Whole_turn, (After_seq _ | Whole_turn) -> false
+    in
+    let blocks =
+      settled_blocks @ observed_blocks @ other_live_blocks @ Option.to_list live_block
       |> List.fold_left (fun selected block ->
-          let execution_id = Masc_tui_types.turn_log_execution_id block.lb_log in
-          let already_drawn = List.exists (fun drawn ->
-              String.equal execution_id
-                (Masc_tui_types.turn_log_execution_id drawn.lb_log))
-              (settled_blocks @ observed_blocks @ Option.to_list live_block @ selected) in
-          if already_drawn then selected else selected @ [block]) []
+          let same_execution other =
+            String.equal (Masc_tui_types.turn_log_execution_id block.lb_log)
+              (Masc_tui_types.turn_log_execution_id other.lb_log) in
+          match List.find_opt same_execution selected with
+          | None -> selected @ [block]
+          | Some held when prefer block held ->
+              List.map (fun other -> if same_execution other then block else other) selected
+          | Some _ -> selected) []
     in
     let open_blocks =
       List.filter (fun block ->
         not (Masc_tui_types.observed_log_has_ended state block.lb_log)
-        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log))
-        observed_blocks @ other_live_blocks @ Option.to_list live_block
+        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log)) blocks
     in
-    let blocks = settled_blocks @ observed_blocks @ other_live_blocks @ Option.to_list live_block in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)

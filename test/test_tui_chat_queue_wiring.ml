@@ -971,6 +971,20 @@ let test_new_input_preserves_running_output () =
     state.msg_inflight <- [queued; old];
     state.msg_live <- Some queued.log;
     assert_old ();
+    let execution_id = old.sent_request.request_id in
+    Tui_types.turn_log_add ~now:3. queued.log ~seq:(Some 1) Live.Run_started;
+    Tui_types.turn_log_add ~now:3. queued.log ~seq:(Some 2)
+      (Live.Batch_bound {operation_id=queued.sent_request.request_id; execution_id});
+    assert_old ();
+    Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 3)
+      (Live.Reply_details {reply="OLD_FINAL_REPLY";
+        turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#1"});
+    Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
+    Tui_types.settle_turn_log state old;
+    state.msg_inflight <- [queued];
+    assert_old ();
+    check bool "complete older batch log stays authoritative" true
+      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" (screen ()));
     state.keeper_turns <-
       [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
         ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;

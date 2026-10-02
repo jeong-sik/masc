@@ -17,10 +17,9 @@ val get_session_manager : unit -> Voice_session_manager.t
 (** [get_session_manager ()] returns the process-wide singleton
     {!Voice_session_manager.t}, lazily initialised on first call:
 
-    + Resolve [config_path] from [Env_config_core.base_path_opt]
-      with fallback chain (git root via
-      [Workspace_utils_backend_setup.find_git_root], then
-      [Common.masc_dirname]).
+    + Resolve [config_path] through the canonical workspace resolver. A missing
+      workspace is rejected instead of writing to a source checkout or a
+      relative [.masc] directory.
     + [Voice_session_manager.create ~config_path].
     + [Voice_session_manager.restore mgr] (rehydrates persisted
       sessions from disk).

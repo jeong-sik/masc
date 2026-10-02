@@ -340,8 +340,9 @@ val apple_work_volume_trim_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
 (** [container run --rm] of [image] as root with every capability dropped
     and [CAP_SYS_ADMIN] added back, no network, a read-only root, and
-    [fstrim] as the entrypoint, trimming the work volume so the host gets
-    back the blocks a guest freed. Run only while no guest has the volume
+    a fixed shell script as entrypoint, setting persistent ext4 discard and
+    trimming the work volume so the host gets back the blocks a guest freed.
+    Subsequent mounts automatically discard freed blocks. Run only while no guest has the volume
     attached: a second ext4 mount of the same volume corrupts it. *)
 
 val remove_apple_work_volume_trim :
@@ -368,7 +369,7 @@ val reclaim_apple_work_volume :
     after success, failure or cancellation. Cleanup failures are reported to
     [on_cleanup_error]; an original cancellation still propagates. [Error]
     refuses the subsequent guest mount when inventory cannot prove cleanup.
-    The returned status describes the trim itself; a failed trim is harmless
+    The returned status describes discard configuration and trim; failure is harmless
     only after cleanup has been confirmed. *)
 
 val keeper_work_root : keeper_name:string -> string

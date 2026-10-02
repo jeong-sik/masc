@@ -73,7 +73,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     else Error "sampling requires an exact instance and nonblank host route" in
   let retain fields = Eio_unix.run_in_systhread (fun () ->
     let* bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) in
-    Store.write_blob store bytes) in
+    Store.write_blob store bytes)
+    |> Result.map_error (fun _ -> "sampling request could not be retained") in
   let handler (params : S.create_message_params) =
     let* () = match params.include_context with
       | None | Some S.None_ -> Ok ()
@@ -95,7 +96,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       "outcome",Option.fold ~none:`Null ~some:Types.evidence_to_json outcome] in
     let save state = Eio_unix.run_in_systhread (fun () ->
       Store.save_sampling_request store ~instance_id ~request_id (record state)) in
-    let* () = save Pending in
+    let* () = save Pending |> Result.map_error (fun _ -> "sampling request could not be indexed") in
     let outcome = try match invoke ~route ~request params with
       | Ok answer ->
           (match Eio_unix.run_in_systhread (fun () ->

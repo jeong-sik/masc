@@ -580,14 +580,29 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
 let test_released_shared_bindings_keep_read_and_cleanup () =
   with_fixture (fun env _sw config dir state ->
     let clock = Eio.Stdenv.clock env in
-    let id = attach config dir "good" in
-    await clock (fun () -> int "observation_seq" (instance config id) = 1);
-    detach config id; await_phase clock config id "detached";
+    let context = Eio_context.snapshot_state () in
+    let id = Fun.protect ~finally:(fun () -> Eio_context.restore_state context) (fun () ->
+      Eio.Switch.run (fun worker_sw ->
+        Eio_context.set_switch worker_sw;
+        let id = attach config dir "good" in
+        await clock (fun () -> int "observation_seq" (instance config id) = 1);
+        detach config id;
+        await_phase clock config id "detached";
+        id)) in
+    (* Detached is visible before cleanup persistence finishes. Join the worker
+       switch before installing a released binding or resetting its manager. *)
     let captured = instance config id |> Yojson.Safe.Util.to_assoc in
     let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-    let before = `Assoc released in
-    unwrap (Store.save_binding store ~instance_id:id before);
+    unwrap (Store.save_binding store ~instance_id:id (`Assoc released));
+    (* Store.bindings reconciles observation_seq at the front of the object.
+       Compare the same read projection on both sides of runtime recognition. *)
+    let before = match unwrap (Store.bindings store) with
+      | [binding] -> binding
+      | _ -> fail "expected exactly one released binding before recognition" in
+    let binding_path = Filename.concat (Store.root store)
+      (Filename.concat "bindings" (Store.digest id ^ ".json")) in
+    let before_bytes = Fs_compat.load_file binding_path in
     Runtime.For_testing.reset ();
     let observed = instance config id in
     check string "released reads carry no operator acquisition authority" "unauthenticated"
@@ -596,6 +611,8 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
       (unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
     check bool "read recognition leaves durable bytes unchanged" true
       (unwrap (Store.bindings store) = [before]);
+    check string "read recognition preserves the exact binding file" before_bytes
+      (Fs_compat.load_file binding_path);
     let set fields key value = (key,value)::List.remove_assoc key fields in
     let record name installation sources =
       released |> fun f -> set f "instance_id" (`String name)

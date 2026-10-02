@@ -37,3 +37,36 @@ maintenance-loop proof remain outstanding. A request submitted after cleanup
 admission can wait until the bounded attempt finishes; zero additional latency
 is not claimed. Existing standalone service remains until a native binary is
 installed and verified.
+
+## Self-review fixes and subsequent verification
+
+The original head b489952fcc used raw `read_meta`, whose decoder deliberately
+returns Docker/None for TOML-owned sandbox fields. Therefore the earlier claim
+of working native automatic cleanup was unsupported. It also lacked a binding
+between the Owner name and the re-read payload name. These findings invalidate
+the original source PASS; the six original guest tests exercised only the shared
+guest algorithm, not its native metadata producer.
+
+The corrected consumer reads effective TOML metadata, checks both names against
+the admitted Owner, and refuses overlay errors. Three native regressions use
+real temporary TOML/runtime JSON fixtures and are wired in test/dune. They are
+parser-checked; linked OCaml execution remains outstanding.
+
+Raw container exec was replaced with the existing framed remote runner. The
+same guest shim owns payload deadlines, stdin EOF cancellation, process-group
+cleanup, and exit receipts. Success requires both exit zero and this call's
+execution receipt; transport failures and missing receipts are errors.
+
+Subsequent isolated Apple fixture: UID502:GID20, all capabilities dropped,
+network none, cached OCaml image, one CPU, 512M memory. Seven shared cleanup
+checks passed in 2.365s, including the previously unexecuted live-checkout case.
+Three real Linux exec-shim tests passed in 2.722s: payload cleanup/exit receipt,
+guest timeout, and EOF cancellation. The latter two used a slow Dune fixture
+with a child process ignoring SIGTERM and checked that neither PID remained
+live at the result trailer. No production checkout was swept.
+
+The tested installed Linux shim SHA256 was
+018254c8ce38a191c70a4c97aa0f530780faec8c7467ff47ef5d995d9c2fdb6b.
+These tests directly drive the shim inside the VM; they do not prove the full
+OCaml Owner/Apple CLI cancellation path or the newly installed native loop.
+Ruff/Pyright, OCaml parser checks, and diff whitespace checks passed.

@@ -1,5 +1,16 @@
 (* Root-switch-owned maintenance. The Owner mailbox, not a process snapshot,
    admits each attempt. The guest payload supplies the separate build locks. *)
+let read_cleanup_meta ~(config : Workspace.config) ~keeper_name =
+  match Keeper_meta_store.read_effective_meta_resolved config keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some (resolved_name, meta)) ->
+    if String.equal resolved_name keeper_name && String.equal meta.name keeper_name
+    then Ok (Some meta)
+    else Error (Printf.sprintf
+      "Keeper cleanup identity mismatch: owner=%s resolved=%s payload=%s"
+      keeper_name resolved_name meta.name)
+
 let sweep ~(config : Workspace.config) () =
   match Keeper_owner_registry.all_projections ~base_path:config.base_path with
   | Error _ -> ()
@@ -10,7 +21,7 @@ let sweep ~(config : Workspace.config) () =
         | None -> ()
         | Some meta ->
           let run () =
-            match Keeper_meta_store.read_meta config meta.name with
+            match read_cleanup_meta ~config ~keeper_name:meta.name with
             | Error detail -> Error detail
             | Ok None -> Ok None
             | Ok (Some current) ->

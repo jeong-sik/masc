@@ -41,14 +41,20 @@ Busy Keepers wait for the next sweep. A paused Keeper may be cleaned without
 resuming it. Requests arriving after admission wait for that bounded maintenance
 attempt; cleanup does not promise zero latency for those requests.
 
+Before dispatch, `read_cleanup_meta` applies the Keeper's TOML profile and
+requires the resolved and payload names to match the Owner holding the slot.
+Invalid profiles or identity mismatches refuse cleanup.
+
 `Keeper_turn_sandbox_runtime.cleanup_attached_builds` attaches only to an
-already running, recorded Apple guest. It never boots, stops, pauses, repairs,
+already running Apple guest selected by that effective profile. It never boots, stops, pauses, repairs,
 or refreshes credentials. The binary embeds the shared guest payload from
 `config/scripts/keeper-build-cleanup.py`; no checkout or daemon installation is
 needed. Inside the guest, process inspection, wrapper/native Dune locks,
 retention, and operator markers remain necessary because external builds are
-outside the Owner mailbox. Scan/execution failure releases the slot and reports
-an error; server cancellation propagates rather than being swallowed.
+outside the Owner mailbox. Execution uses the existing framed `exec-shim` runner. Its guest timer and
+transport EOF terminate the payload process group; a successful report requires
+payload exit zero and that call's execution receipt. Scan/execution failure
+reports an error; server cancellation propagates rather than being swallowed.
 
 Install the binary containing this change before treating this as active
 product behavior. Stop a separately started legacy script service after that
@@ -113,3 +119,10 @@ by trimming.
 stop and restart using a fake container inventory. In a Linux guest with Dune,
 the same suite additionally checks native/wrapper locks, recent output retention,
 symlink/operator retention, source preservation and fail-closed inspection.
+
+The native metadata regressions are in
+`test/test_server_keeper_build_maintenance.ml`: effective TOML settings,
+Owner/payload identity mismatch, and invalid profile refusal. The guest framing
+checks run with `python3 test/test_keeper_build_cleanup_transport.py <Linux-shim>`:
+real cleanup/receipt, guest timeout, and transport EOF terminating cleanup and
+its ordinary descendants. These are distinct from an installed-server proof.

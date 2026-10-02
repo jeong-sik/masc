@@ -761,7 +761,8 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
         (Option.is_some (Masc.Keeper_execution_join.take ~invocation:first));
       feed (Agent_core.Types.ContentBlockStop {index=1});
       Receipts.finish receipts ~call_id:"reused-provider-id";
-      let second = execute 2 (Error "read refused") in
+      let second = execute 2 (Error { Agent_core.Types.message = "read refused";
+        recoverable = false; error_class = Some Agent_core.Types.Deterministic }) in
       (* Both post hooks precede ToolCompleted, but this execution owns exactly
          one readiness receipt and leaves the bus join untouched. *)
       invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {

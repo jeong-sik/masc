@@ -3893,7 +3893,7 @@
 (test
  (name test_tui_command)
  (modules test_tui_command)
- (libraries alcotest masc_tui_command masc_tui_mcp yojson))
+ (libraries alcotest masc masc_tui_command masc_tui_mcp yojson))
 
 (test
  (name test_tui_fetched)

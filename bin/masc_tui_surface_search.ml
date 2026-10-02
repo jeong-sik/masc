@@ -302,6 +302,11 @@ type code_search_count_memo =
 
 let code_search_count_memo : code_search_count_memo option ref = ref None
 
+module For_testing = struct
+  type memo_snapshot = code_search_count_memo option
+  let code_search_count_snapshot () = !code_search_count_memo
+end
+
 let code_file_search_count ~query rows =
   match !code_search_count_memo with
   | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->

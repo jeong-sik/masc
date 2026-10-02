@@ -5997,6 +5997,7 @@
 (include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
+(include stanzas/test_tui_keeper_automation_rows.inc)
 (include stanzas/test_tui_schedule_wake_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)

@@ -4,24 +4,25 @@ module Look = Keeper_portrait_look
 
 type band_size = { rows : int; cols : int }
 
-(* The smallest box each display shows a portrait's face in, judged by
-   rendering Keepers at 16, 24, 32 and 48 px. Placed pixels are scaled by
-   the terminal, and eight rows is a 160 px picture on a 20 px cell. A
-   mosaic draws a pixel per cell across and two per row: at 16 px a candle
-   is its colours alone, and its eyes, mouth and glasses show from 24 px,
-   twelve rows by 24 cells. *)
-let pixel_band = { rows = 8; cols = 16 }
-let mosaic_band = { rows = 12; cols = 24 }
-
-let band_size = function
-  | View.Pixels _ -> Some pixel_band
-  | View.Mosaic -> Some mosaic_band
+(* Info and conversation headers use an icon. Only Items, where the outfit
+   is the subject being inspected, uses the larger preview band. *)
+let preview_band_size = function
+  | View.Pixels _ -> Some { rows = 8; cols = 16 }
+  | View.Mosaic -> Some { rows = 12; cols = 24 }
   | View.No_picture -> None
 
-(* Rows the facts keep below the portrait. In the PTY harness the detail has
-   23 content rows on a 30-row terminal and 17 on a 24-row one, so a mosaic
-   portrait (20) shows on the first and gives every row to facts on the
-   second; placed pixels (16) show on both. *)
+let band_size = function
+  | View.Pixels { cell_width; cell_height } when cell_width > 0 && cell_height > 0 ->
+      let rows = View.min_pixel_rows in
+      Some { rows; cols = (rows * cell_height + cell_width - 1) / cell_width }
+  | View.Pixels _ -> None
+  | View.Mosaic ->
+      (* At sixteen cells, observed glasses quantize into the face colour.
+         Twenty-four is the smallest mosaic retaining equipped features. *)
+      Some { rows = 12; cols = 24 }
+  | View.No_picture -> None
+
+(* Leave room for operational diagnostics below the identity/work/context header. *)
 let rows_kept_for_facts = 8
 let min_content_rows size = size.rows + rows_kept_for_facts
 
@@ -128,7 +129,7 @@ let shown ~name ~equipment ~content_rows ~content_cols =
 
 let preview ~name ~equipment ~content_rows ~content_cols =
   let display = View.current_display () in
-  match band_size display with
+  match preview_band_size display with
   | None -> None
   | Some size when content_rows < size.rows + 2 || content_cols < String.length indent + size.cols + 2 ->
       None

@@ -11,8 +11,10 @@ type t = {
    The portrait yields before that navigation capacity is reduced. *)
 let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
 
+let band_size = Portrait.band_size
+
 let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
-  match portrait, Portrait.band_size display with
+  match portrait, band_size display with
   | Keeper_portrait_equipment.Unavailable _, _
   | Keeper_portrait_equipment.Ready _, None -> None
   | Keeper_portrait_equipment.Ready equipment, Some band ->
@@ -31,7 +33,7 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
             match display with
             | View.Pixels _ -> Some {
                 View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Keeper_portrait;
-                row = roster_rows + 1;
+                row = 1;
                 column = Masc_tui_ansi.framed_content_column + padding;
                 box; image;
               }

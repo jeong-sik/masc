@@ -13,6 +13,7 @@
 
 ### Fresh state required
 
+- Turn boundary rows now require explicit admission context. Old `Turn_ended` rows without `task_context` are unreadable; historical journals are not upgraded. No migration, reset, or deployment is included. (#40672)
 - DOS checkpoints saved before this release are refused on restore: the DOS core now writes machine snapshots in format 3 and does not read format 2. Start the DOS game again (#39944).
 - Prepare `goals.json` and `goals.json.last-good` without `owner`, `notified_refuted_key`, and `notified_overdue_key`, preserving the remaining Goal data. The closed decoder rejects those fields; a rejected row makes the entire store unavailable. (#39975)
 - If `<base-path>/.masc/keeper_chat/<sanitized-keeper-name>.jsonl` contains a row whose `delivery_key.kind` is `goal_notification`, remove that row's `delivery_key` and `transcript_slot` together while preserving its message body and other fields. Otherwise the unsupported identity blocks strict append-once delivery, including unrelated chat deliveries. Prepare data with writers stopped, backups, and atomic replacement; this change performs no data cleanup. (#39975)

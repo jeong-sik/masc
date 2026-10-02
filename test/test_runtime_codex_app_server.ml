@@ -4927,6 +4927,44 @@ let test_anonymous_completion_closes_current_item () =
     [None; Some "first-item"]
 ;;
 
+let test_blank_completion_closes_identity_across_four_messages () =
+  let delta item_id text = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/agentMessage/delta";
+      "params", `Assoc (["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "delta", `String text] @ match item_id with None -> [] | Some id -> ["itemId", `String id])]) in
+  let complete item_id text phase = Yojson.Safe.to_string (`Assoc [
+      "method", `String "item/completed";
+      "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+        "item", `Assoc (["type", `String "agentMessage"; "text", `String text;
+          "phase", `String phase] @ match item_id with None -> [] | Some id -> ["id", `String id])]]) in
+  let terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  List.iter (fun blank ->
+    List.iter (fun first_id ->
+      List.iter (fun first_completion_id ->
+        List.iter (fun second_completion_id ->
+          let events = ref [] in
+          with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+              delta first_id blank; complete first_completion_id blank "commentary";
+              delta None "B"; complete second_completion_id "B" "commentary";
+              delta (Some "n+2") "C"; complete (Some "n+2") "C" "commentary";
+              delta (Some "n+3") "D"; complete (Some "n+3") "D" "final_answer";
+              terminal] (fun path ->
+            match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok result ->
+                let text = List.rev !events |> List.filter_map (function
+                  | Runtime_codex_app_server.Text_delta {delta; _} -> Some delta | _ -> None)
+                  |> String.concat "" in
+                check string "blank completion cannot poison or repeat the next messages"
+                  (blank ^ "BCD") text;
+                check string "last named message remains the final answer" "D" result.text))
+          [None; Some "n+1"])
+        [None; Some "n"])
+      [None; Some "n"])
+    [""; "\n"]
+;;
+
 let test_keeper_preserves_typed_history_on_codex_wire () =
   let capture_path = Filename.temp_file "masc-codex-typed-history-" ".jsonl" in
   Fun.protect
@@ -7291,7 +7329,9 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "RPC capacity", [test_case "anonymous completion closes current item" `Quick
+    [ ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
+            test_blank_completion_closes_identity_across_four_messages
+        ; test_case "anonymous completion closes current item" `Quick
             test_anonymous_completion_closes_current_item
         ; test_case "mixed optional item identities preserve order" `Quick
             test_mixed_item_identity_keeps_delta_order

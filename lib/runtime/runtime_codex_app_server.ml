@@ -975,7 +975,7 @@ let parse_turn_start result =
   required_string stage "id" turn_fields
 ;;
 
-let agent_message_of_item ~stage item =
+let agent_message_content_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
   | Some (`String "agentMessage") ->
@@ -985,10 +985,17 @@ let agent_message_of_item ~stage item =
        item is valid protocol but is not a visible assistant-message candidate. *)
     let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
-    if String.trim text = "" then Ok None else Ok (Some (phase, text))
+    Ok (Some (phase, text))
   | Some (`String _) -> Ok None
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
+;;
+
+let agent_message_of_item ~stage item =
+  let* message = agent_message_content_of_item ~stage item in
+  match message with
+  | Some (_, text) when String.trim text = "" -> Ok None
+  | _ -> Ok message
 ;;
 
 (* Model items and host-owned dynamic calls do not prove a native effect.
@@ -1650,7 +1657,9 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
          | _ :: _ -> ());
         still_open
     in
-    let* message = agent_message_of_item ~stage item in
+    (* Blank messages still close their stream identity, even though they
+       cannot become the turn's final/fallback answer. *)
+    let* message = agent_message_content_of_item ~stage item in
     let* () = match message with
       | None -> Ok ()
       | Some (_, text) ->
@@ -1679,6 +1688,9 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
             Ok ()
           end else protocol_error stage "completed agent message conflicts with streamed text"
     in
+    let message = match message with
+      | Some (_, text) when String.trim text = "" -> None
+      | _ -> message in
     let seen_final, seen_fallback =
       match message with
       | Some (Some "final_answer", text) -> Some text, seen_fallback

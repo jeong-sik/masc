@@ -448,6 +448,14 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
+(* Empty text starts a block; whitespace-only token pieces are content. *)
+let text_value stage fields =
+  let* value = required_member stage "text" fields in
+  match value with
+  | `String text -> Ok text
+  | _ -> protocol_error stage "text must be a string"
+;;
+
 (* Deferred MCP loading is part of how masc drives this client, not an
    operator preference: every posture names [ToolSearch] in [--tools]
    ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
@@ -1011,7 +1019,7 @@ let assistant_blocks ~stage ~mcp_tool_names content =
         let* type_ = required_string stage "type" fields in
         (match type_ with
          | "text" ->
-           let* text = required_string stage "text" fields in
+           let* text = text_value stage fields in
            loop (Assistant_text text :: parsed) rest
          | "tool_use" ->
            let* call_id = optional_string stage "id" fields in
@@ -1321,7 +1329,7 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
    Complete blocks remain the source for terminal text and usage accounting. *)
 type partial_stream =
   { mutable message_id : string option
-  ; mutable text_block : (int * Buffer.t) option
+  ; mutable text_blocks : (string * int * Buffer.t) list
   }
 
 let partial_block_index stage fields =
@@ -1329,14 +1337,6 @@ let partial_block_index stage fields =
   match index with
   | Some index when index >= 0 -> Ok index
   | Some _ | None -> protocol_error stage "index must be a nonnegative integer"
-;;
-
-(* Empty text starts a block; whitespace-only token pieces are content. *)
-let partial_text_value stage fields =
-  let* value = required_member stage "text" fields in
-  match value with
-  | `String text -> Ok text
-  | _ -> protocol_error stage "text must be a string"
 ;;
 
 let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
@@ -1356,7 +1356,6 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* id = required_string stage "id" message in
         let* model = required_string stage "model" message in
         partial.message_id <- Some id;
-        partial.text_block <- None;
         if not !stream_started then begin
           stream_started := true;
           emit_stream_event on_stream_event (Turn_started {turn_id=id; model})
@@ -1369,18 +1368,24 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" block in
         (match kind with
          | "text" ->
-             let* text = partial_text_value stage block in
+             let* text = text_value stage block in
              let buffer = Buffer.create 256 in
              Buffer.add_string buffer text;
-             partial.text_block <- Some (index, buffer);
-             if text <> "" then begin
-               response_emitted := true;
-               emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
-             end;
-             Ok ()
-         | "tool_use" | "thinking" | "redacted_thinking" ->
-             partial.text_block <- None;
-             Ok ()
+             let* message_id = match partial.message_id with
+               | Some id -> Ok id
+               | None -> protocol_error stage "text block has no message start" in
+             if List.exists (fun (id, held_index, _) -> id = message_id && held_index = index)
+                 partial.text_blocks then
+               protocol_error stage "text block index already started"
+             else begin
+               partial.text_blocks <- partial.text_blocks @ [message_id, index, buffer];
+               if text <> "" then begin
+                 response_emitted := true;
+                 emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
+               end;
+               Ok ()
+             end
+         | "tool_use" | "thinking" | "redacted_thinking" -> Ok ()
          | other -> protocol_error stage ("unsupported content block type " ^ other))
     | "content_block_delta" ->
         let* index = partial_block_index stage event in
@@ -1389,9 +1394,11 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" delta in
         (match kind with
          | "text_delta" ->
-             let* text = partial_text_value stage delta in
-             (match partial.message_id, partial.text_block with
-              | Some _, Some (active, buffer) when active = index ->
+             let* text = text_value stage delta in
+             let held = List.find_opt (fun (id, held_index, _) ->
+               Some id = partial.message_id && held_index = index) partial.text_blocks in
+             (match held with
+              | Some (_, _, buffer) ->
                   Buffer.add_string buffer text;
                   if text <> "" then begin
                     response_emitted := true;
@@ -1399,21 +1406,32 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
                   end;
                   Ok ()
               | _ -> protocol_error stage "text delta has no matching message/text block")
-         | "input_json_delta" | "thinking_delta" | "signature_delta" -> Ok ()
+         | "input_json_delta" | "thinking_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
-    | "content_block_stop" | "message_delta" | "message_stop" | "ping" -> Ok ()
+    | "content_block_stop" ->
+        let* index = partial_block_index stage event in
+        (* Empty blocks have no complete assistant envelope. Retain nonempty
+           stopped blocks until their per-block or aggregate envelope lands. *)
+        partial.text_blocks <- List.filter (fun (id, held_index, buffer) ->
+          not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
+          partial.text_blocks;
+        Ok ()
+    | "message_delta" | "message_stop" | "ping" -> Ok ()
     | other -> protocol_error stage ("unsupported partial event type " ^ other)
 ;;
 
 let complete_partial_text partial ~message_id text =
-  match partial.message_id, message_id, partial.text_block with
-  | Some active, Some completed, Some (_, buffer) when active = completed ->
+  if String.equal text "" then Ok text
+  else match List.find_opt (fun (id, _, buffer) ->
+      Some id = message_id && Buffer.length buffer > 0) partial.text_blocks with
+  | Some (id, index, buffer) ->
       let prefix = Buffer.contents buffer in
       if String.starts_with ~prefix text then begin
-        partial.text_block <- None;
+        partial.text_blocks <- List.filter (fun (held_id, held_index, _) ->
+          held_id <> id || held_index <> index) partial.text_blocks;
         Ok (String.sub text (String.length prefix) (String.length text - String.length prefix))
       end else protocol_error "assistant text" "complete block conflicts with streamed text"
-  | _ -> Ok text
+  | None -> Ok text
 ;;
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
@@ -1878,7 +1896,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
-    ~partial_stream:{message_id=None; text_block=None}
+    ~partial_stream:{message_id=None; text_blocks=[]}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
 ;;

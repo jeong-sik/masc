@@ -33,6 +33,21 @@ description = """
 Optional CAS guard (current backlog.version). Transition fails if mismatched"""
 
 [[params]]
+name = "expected_workspace"
+type = "object"
+description = "Optional operator-client precondition binding the transition to the observed base_path and masc_root. The server rejects a changed workspace before reading or changing a Task."
+
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true
+
+[[params]]
 name = "notes"
 type = "string"
 description = """

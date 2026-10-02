@@ -60,7 +60,7 @@ let make_keeper_meta name =
 
 (* Drive the real dashboard router with a POST carrying a bearer token and a
    JSON body, then return the raw HTTP response. *)
-let dispatch_post ~sw ~clock ~state ~token ~keeper ~mode =
+let dispatch_post ?(path = "/api/v1/keepers/tool-approval-mode") ?body_override ~sw ~clock ~state ~token ~keeper ~mode () =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
     let router =
       Server_routes_http_routes_dashboard.add_routes
@@ -74,10 +74,10 @@ let dispatch_post ~sw ~clock ~state ~token ~keeper ~mode =
       Httpun.Server_connection.create (fun reqd ->
         Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
     in
-    let body = Printf.sprintf {|{"name":%S,"mode":%S}|} keeper mode in
+    let body = match body_override with Some body -> body | None -> Printf.sprintf {|{"name":%S,"mode":%S}|} keeper mode in
     let request_str =
       Printf.sprintf
-        "POST /api/v1/keepers/tool-approval-mode HTTP/1.1\r\n\
+        "POST %s HTTP/1.1\r\n\
          Host: 127.0.0.1:8935\r\n\
          Origin: http://127.0.0.1:8935\r\n\
          Authorization: Bearer %s\r\n\
@@ -85,7 +85,7 @@ let dispatch_post ~sw ~clock ~state ~token ~keeper ~mode =
          Content-Length: %d\r\n\
          \r\n\
          %s"
-        token (String.length body) body
+        path token (String.length body) body
     in
     let bytes =
       Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str
@@ -156,7 +156,7 @@ let test_actor_appears_in_approval_mode_log () =
            Eio.Switch.run (fun sw ->
              let before_seq = latest_seq () in
              let response =
-               dispatch_post ~sw ~clock ~state ~token ~keeper ~mode:"yolo"
+               dispatch_post ~sw ~clock ~state ~token ~keeper ~mode:"yolo" ()
              in
              check int "approval-mode POST succeeds" 200
                (status_of_response response);
@@ -190,11 +190,33 @@ let test_actor_appears_in_approval_mode_log () =
                        entry.message)
                   matching)))))
 
+let test_tool_approval_rejects_replaced_workspace () =
+  with_temp_dir (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token, _ = create_token_exn base_path ~agent_name:"approval-operator" ~role:Masc_domain.Admin in
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let body = Yojson.Safe.to_string (`Assoc
+        [ "name", `String "absent-keeper"
+        ; "tool_call_id", `String "held-call"
+        ; "decision", `String "approve"
+        ; "expected_workspace", `Assoc
+            [ "base_path", `String (base_path ^ "-replaced")
+            ; "masc_root", `String (base_path ^ "-replaced/.masc") ] ]) in
+      let response = dispatch_post ~path:"/api/v1/keepers/tool-approval" ~body_override:body
+        ~sw ~clock:(Eio.Stdenv.clock env) ~state ~token ~keeper:"absent-keeper" ~mode:"" () in
+      check int "workspace mismatch precedes keeper lookup and settlement" 400 (status_of_response response);
+      check bool "response identifies refused workspace precondition" true
+        (Astring.String.is_infix ~affix:"workspace precondition failed" response))))
+
 let () =
   Eio_main.run @@ fun _env ->
   run "keeper_tool_approval_mode_actor_log"
     [ ( "actor log"
       , [ test_case "actor appears in approval-mode change log" `Quick
             test_actor_appears_in_approval_mode_log
+        ; test_case "held tool approval rejects replaced workspace" `Quick
+            test_tool_approval_rejects_replaced_workspace
         ] )
     ]

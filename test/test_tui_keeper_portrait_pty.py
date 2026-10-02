@@ -999,6 +999,10 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
                         assert h.wait_for_fixture_state(process, fd, output,
                             lambda: b"MASC Keepers" in frame(output), timeout=10)
                         assert reads == [True], "failed roster resumed detail"
+                        # The failed roster keeps the detail screen while the
+                        # source-bound focus waits. The first Esc exits detail
+                        # to Keepers; the second exits Keepers to Dashboard.
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
                     finally:
                         metadata.write_bytes(original_metadata)

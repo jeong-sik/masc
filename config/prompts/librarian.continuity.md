@@ -75,3 +75,5 @@ template_variables: [continuity, conversation_history, current_memory, keeper_id
 
 ### 이전 상태
 {{continuity}}
+
+`task_context.kind=admission_not_recorded`는 해당 턴의 Task/Goal 진입 관측이 기록되지 않았다는 뜻입니다. Task가 없었다고 해석하거나 현재 Task로 채우지 마세요. 대화와 턴 위치 증거는 그대로 정리합니다.

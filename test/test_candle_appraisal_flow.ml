@@ -503,6 +503,32 @@ let test_disable_during_appraisal_preserves_the_obligation () =
      | Candle_payout.Waiting current -> check bool "the original obligation survives" true (current=waiting)
      | _ -> fail "disable consumed the obligation")) [true;false]
 
+let test_disable_before_ledger_decision_preserves_the_obligation () =
+  with_workspace @@ fun _env config ->
+  let waiting = prepared config "disable-before-append" in
+  let () = match Candle_status.current ~base_path:config.base_path with
+    | Candle_config.Enabled _ -> ()
+    | Candle_config.Off | Candle_config.Disabled _ -> fail "fixture policy is not enabled" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  let policy_text = Fs_compat.load_file policy_path in
+  let before = events config in
+  let calls = ref [] in
+  (* Timestamp generation occurs inside each settlement transaction attempt.
+     Disable there to ensure the subsequent availability read refuses append. *)
+  let disable_now () = Sys.remove policy_path; now () in
+  (match Candle_appraise.settle_one ~now:disable_now ~appraise:(make_runner calls)
+           ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> ()
+   | Candle_appraise.Rejected _ | Candle_appraise.Settled _ | Candle_appraise.Superseded _ ->
+     fail "disable after appraisal did not defer settlement");
+  check bool "disable happened after all appraisal stages" true
+    (List.exists (fun (_, request) -> A.stage request = "weights") !calls);
+  check bool "disabled transaction appended no row" true (events config = before);
+  Fs_compat.save_file policy_path policy_text;
+  ignore (drain config (make_runner calls));
+  ignore (one_payment config waiting.goal_id);
+  check int "restored policy settles once" 1 (List.length (paid config waiting.goal_id))
+
 let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
   let historical_amount = max_int / 1000 in
@@ -823,6 +849,7 @@ let () =
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider
       ;test_case "disable during model call preserves waiting" `Quick test_disable_during_appraisal_preserves_the_obligation
+      ;test_case "disable before ledger decision preserves waiting" `Quick test_disable_before_ledger_decision_preserves_the_obligation
       ;test_case "cumulative overflow refuses the real settlement" `Quick test_cumulative_overflow_refuses_the_real_settlement
       ;test_case "slow Goal cannot hold another or overlap itself" `Quick test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it
       ;test_case "server receipt is durable before dispatch and after answer" `Quick test_server_records_the_request_before_dispatch_and_retains_its_answer]]

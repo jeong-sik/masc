@@ -1870,6 +1870,69 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   in
   pending
 
+(* Autonomous turns have no operation journal to follow. Their polled tail
+   is an excerpt, never an append-only transcript: render it in the same
+   scrollable pane, replace it on refresh, and let durable history take over
+   after settlement. Do not invent a request id or save the excerpt as a reply.
+   A working direct operation or journal text already draws the real output. *)
+let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
+  let live_text_drawn =
+    match state.msg_live with
+    | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name ->
+        List.exists
+          (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+            match item.drawn with
+            | Masc_tui_keeper_chat_transcript.Drawn_text _
+            | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
+            | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+            | Masc_tui_keeper_chat_transcript.Drawn_skill _
+            | Masc_tui_keeper_chat_transcript.Drawn_tools _
+            | Masc_tui_keeper_chat_transcript.Drawn_status _ -> false)
+          (Masc_tui_keeper_chat_transcript.drawn live.tl_transcript)
+    | Some _ | None -> false
+  in
+  if Option.is_some (Masc_tui_types.working_chat_for_keeper state keeper_name)
+     || live_text_drawn
+  then []
+  else
+    match List.find_opt
+      (fun (row : Tui_decode.keeper_turn_row) ->
+         String.equal row.ktr_keeper_name keeper_name)
+      state.keeper_turns with
+    | Some { ktr_state = Tui_decode.Keeper_turn_running
+        { lane; preview = Some preview; _ }; _ }
+      when String.trim preview.ktp_text_tail <> ""
+           && (match lane with
+               | Tui_decode.Turn_lane_chat_operation ->
+                   not (Masc_tui_types.observed_turn_text_drawn state keeper_name)
+               | Tui_decode.Turn_lane_autonomous | Tui_decode.Turn_lane_maintenance -> true) ->
+        let style = Message_layout.Keeper in
+        let label = keeper_name in
+        let note =
+          match state.keeper_turns_error with
+          | None -> "진행 중"
+          | Some _ -> "마지막 관측, 갱신 실패"
+        in
+        [ ({ style
+           ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
+           ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
+           ; span_clock = None
+           ; speaker = label
+           ; role_label =
+               Message_layout.align_role_label ~column:role_label_column ~style label
+           ; role_label_mark_cells =
+               Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
+           ; request_label = ""
+           ; body = Printf.sprintf "%s · %s · 최근 출력 발췌\n%s"
+               note (Masc_tui_answering.lane_word lane)
+               (Masc.Tui_terminal_text.sanitize_terminal_lines preview.ktp_text_tail)
+           ; journal = []
+           ; markdown_source = Message_layout.Markdown_streaming
+           ; turn_rail = Message_layout.Rail_none
+           ; action = Message_layout.Action_none
+           } : Message_layout.entry) ]
+    | Some _ | None -> []
+
 (* One conversation's layout entries, reused per message across a change of
    the conversation.
 
@@ -2772,11 +2835,40 @@ let render_keeper_message (state : state) =
        journal read lands, not on every frame. *)
     let observed_blocks =
       Masc_tui_types.observed_logs_for_keeper state keeper_name
-      |> List.map (held_projection ~committed:false)
+      |> List.map (fun log ->
+          let ended = Masc_tui_types.observed_log_has_ended state log in
+          let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
+          let block = held_projection ~committed:(ended || unavailable) log in
+          let entries =
+            if ended || unavailable then
+              List.map (fun (entry : Message_layout.entry) ->
+                { entry with span_clock = None }) block.lb_entries
+            else block.lb_entries
+          in
+          let entries =
+            match unavailable, List.rev entries with
+            | true, last :: _ ->
+                let style = Message_layout.Status in
+                entries @
+                [{ last with style; speaker = "STATUS";
+                   role_label = Message_layout.align_role_label
+                     ~column:role_label_column ~style "STATUS";
+                   role_label_mark_cells = Message_layout.role_label_mark_cells
+                     ~column:role_label_column ~style ();
+                   body = "저널 갱신 불가 · 받은 기록을 유지합니다";
+                   markdown_source = Message_layout.Markdown_streaming }]
+            | false, _ | true, [] -> entries
+          in
+          { block with lb_entries = entries })
       |> List.filter (fun block -> block.lb_entries <> [])
     in
-    let open_blocks = observed_blocks @ Option.to_list live_block in
-    let blocks = settled_blocks @ open_blocks in
+    let open_blocks =
+      List.filter (fun block ->
+        not (Masc_tui_types.observed_log_has_ended state block.lb_log)
+        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log))
+        observed_blocks @ Option.to_list live_block
+    in
+    let blocks = settled_blocks @ observed_blocks @ Option.to_list live_block in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
@@ -2871,15 +2963,15 @@ let render_keeper_message (state : state) =
           match !merged_blocks_memo with
           | Some memo
             when memo.mbm_committed == committed_layout_entries
-                 && List.length memo.mbm_blocks = List.length settled_blocks
-                 && List.for_all2 ( == ) memo.mbm_blocks settled_blocks ->
+                 && List.length memo.mbm_blocks = List.length blocks
+                 && List.for_all2 ( == ) memo.mbm_blocks blocks ->
               memo.mbm_merged
           | Some _ | None ->
               let merged = merge_blocks () in
               merged_blocks_memo :=
                 Some
                   { mbm_committed = committed_layout_entries;
-                    mbm_blocks = settled_blocks;
+                    mbm_blocks = blocks;
                     mbm_merged = merged;
                   };
               merged)
@@ -2901,6 +2993,7 @@ let render_keeper_message (state : state) =
        move a pin the reader set. *)
     let layout_entries =
       layout_entries
+      @ polled_turn_output_entries state ~keeper_name ~role_label_column
       @ chat_tail_entries state ~keeper_name ~role_label_column
     in
     let inner_width = max 1 (framed_inner_width chat_cols) in

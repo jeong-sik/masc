@@ -53,7 +53,7 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
-     goal_context = Keeper_librarian.No_task;
+     historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
      keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions = "Preserve evidence.";
      current = None; working_context = Keeper_librarian_context.empty;
@@ -152,7 +152,7 @@ let test_prefit_real_continuity ~base_path () =
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-    {B.recorded_at=1000.; event=B.Turn_ended {
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
       turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;
@@ -162,7 +162,7 @@ let test_prefit_real_continuity ~base_path () =
   let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
   let input prepared : Keeper_librarian.input =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
-    {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
      keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions="Preserve evidence.";
      current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
@@ -534,7 +534,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-    {B.recorded_at=1000.; event=B.Turn_ended {
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
       turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
     |> Result.map_error B.append_error_to_string |> get;
@@ -543,7 +543,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
     ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
   let prepared = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
   let input : Keeper_librarian.input =
-    {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
      keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions="Preserve evidence."; current=None;
      working_context=Keeper_librarian_context.empty; messages=P.messages prepared;

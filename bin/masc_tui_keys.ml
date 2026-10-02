@@ -419,6 +419,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Navigate "p" "Usage / Telemetry"
           ~help:"switch between quota and Keeper usage, and engine telemetry"
+      ; b Navigate "v" "Plan / Trend / Keepers" ~help:"cycle the Usage reading"
       ; b Navigate "w" "1d / 7d / 14d"
           ~help:"on Usage: cycle the exact UTC day window for provider report history"
       ; b Navigate "1 / 2 / 3" "telemetry section"
@@ -1071,7 +1072,7 @@ let has_detail_scoped_keys surface =
 let footer_hints_metrics ~telemetry =
   for_surface Metrics
   |> List.filter (fun binding ->
-         if telemetry then not (String.equal binding.key "w")
+         if telemetry then not (List.mem binding.key [ "w"; "v" ])
          else not (String.equal binding.key "1 / 2 / 3"))
   |> hints_of_bindings
 
@@ -1353,7 +1354,7 @@ let footer_hints_resources ~detail_focus =
      focused. *)
   |> List.filter (answers_in_state ~detail_open:detail_focus)
   (* The row search needs a cursor to land on, and with the text focused
-     there is none -- [surface_row_texts] says so too. Dropped here rather
+     there is none -- [Masc_tui_surface_search.surface_row_texts] says so too. Dropped here rather
      than listed and silent. *)
   |> List.filter (fun binding ->
          (not detail_focus)

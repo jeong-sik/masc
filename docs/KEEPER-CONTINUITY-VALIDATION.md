@@ -1,7 +1,7 @@
 # Keeper Continuity Validation
 
 **Status**: operator validation harness
-**Updated**: 2026-07-10
+**Updated**: 2026-10-02
 
 This validation proves per-Keeper lane continuity from typed runtime evidence.
 It does not inspect assistant prose and does not require the model to echo a
@@ -31,11 +31,26 @@ Plumbing-only dry run:
 DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 ```
 
-Isolated live run:
+Isolated live run, after preparing an isolated base with working runtime
+configuration and a promoted sandbox image. This example explicitly chooses
+Apple container microVMs and the host catalog's `base` image:
 
 ```bash
+BASE_PATH="/path/to/prepared-isolated-base" PORT=19452 \
+MASC_CONFIG_DIR="/path/to/prepared-isolated-base/.masc/config" \
+KEEPER_SANDBOX_PROFILE=microvm KEEPER_SANDBOX_IMAGE=base \
+KEEPER_MICROVM_BACKEND=apple_container \
 scripts/harness_keeper_continuity_validation.sh
 ```
+
+The harness chooses no sandbox. `KEEPER_SANDBOX_PROFILE` is required for a live
+run. `docker` and `microvm` require `KEEPER_SANDBOX_IMAGE`; `microvm` also requires
+an explicit `KEEPER_MICROVM_BACKEND`. `remote_ssh` requires
+`KEEPER_REMOTE_ENDPOINT`, naming an endpoint in the isolated runtime config.
+Product admission still validates the actual profile, backend, image and
+endpoint. Missing declarations stop before starting a server. Recovery reuses
+the same Keeper's persisted declaration; it does not select a new sandbox.
+The scenario purpose is part of Keeper instructions, not a Keeper-up `goal` field.
 
 `KEEPER_RUNTIME_NAME` names the runtime the test Keeper starts on; empty uses
 the server's default. `TARGET_PHASES` picks from `bootstrap`, `liveness`,
@@ -51,7 +66,9 @@ Use an existing server:
 
 ```bash
 START_SERVER=0 \
-MCP_URL="http://127.0.0.1:8935/mcp" \
+MCP_URL="http://127.0.0.1:19452/mcp" \
+KEEPER_SANDBOX_PROFILE=microvm KEEPER_SANDBOX_IMAGE=base \
+KEEPER_MICROVM_BACKEND=apple_container \
 scripts/harness_keeper_continuity_validation.sh
 ```
 

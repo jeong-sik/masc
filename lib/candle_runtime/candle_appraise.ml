@@ -109,11 +109,13 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
     | Candle_payout.Waiting current when current = waiting ->
       (* Preserve the payout arithmetic accepted before the model wait, but
          re-read availability and half-life at publication under this CAS. *)
+      (* Read the clock on every CAS attempt, then check availability so a
+         yielding or injected clock cannot leave a pre-clock policy authoritative. *)
+      let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
       let* current_policy = match Candle_status.configured ~base_path with
         | Candle_config.Enabled policy -> Ok policy
         | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
         | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in
-      let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
       let events = Candle_ledger.events view in
       let* prepared = Candle_status.prepare ~at ~half_life:current_policy.half_life events
         |> Result.map_error (preparation_error ~at ~events) in

@@ -26,6 +26,10 @@ val discard : invocation:Agent_core.Tool_contract.Invocation.t -> unit
     cancellation, so a later completion observer cannot stamp a phantom join.
     A missing entry is ignored. *)
 
+val peek : invocation:Agent_core.Tool_contract.Invocation.t -> string option
+(** Read without consuming, inside the post-tool hook after the log commits
+    and before ToolCompleted is published. *)
+
 val take : invocation:Agent_core.Tool_contract.Invocation.t -> string option
 (** Look up and remove the pair. [None] means the event does not belong
     to a keeper execution (or the entry was already consumed). *)

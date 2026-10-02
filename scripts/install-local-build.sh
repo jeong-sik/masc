@@ -22,6 +22,7 @@
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
+#                                       [--keep-build]
 #   --prefix        where masc, masc-tui, masc-browser-host and the deployment
 #                   preflight pair go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
@@ -31,13 +32,17 @@
 #   --base-path     workspace whose runtime.toml the new build must accept
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
+#   --keep-build    retain build artifacts after a successful default build/install
 set -euo pipefail
 
-repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
+keep_build=false
+custom_build_dir=false
 base_path=""
+install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
   Linux) manifest_dir="$HOME/.mozilla/native-messaging-hosts" ;;
@@ -48,13 +53,33 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --manifest-dir) manifest_dir=${2:?--manifest-dir needs a directory}; shift 2 ;;
-    --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
+    --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
+    --keep-build) keep_build=true; shift ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '21,30p' "$0"; exit 0 ;;
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# Use the same lock as dune-local.sh for the complete installation transaction.
+# Releasing it after build permits another install's clean to remove our input
+# while preflight, binary copies or browser refresh are still using it.
+if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
+  repo_lock_key=$(printf '%s' "$repo" | cksum | awk '{print $1}')
+  install_lock="${DUNE_LOCAL_LOCK:-${TMPDIR:-/tmp}/masc-dune-${UID:-$(id -u)}-${repo_lock_key}.lock}"
+  # ${install_args[@]+...} guard: bash 3.2 (macOS /bin/bash) treats
+  # "${empty_array[@]}" as unbound under set -u, and an argument-less
+  # invocation re-execs with zero args.
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf -k "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" ${install_args[@]+"${install_args[@]}"}
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$install_lock" env MASC_DUNE_LOCK_HELD=1 bash "$repo/scripts/install-local-build.sh" ${install_args[@]+"${install_args[@]}"}
+  else
+    echo "install-local-build: a shared build lock requires lockf or flock" >&2
+    exit 1
+  fi
+fi
 
 if [ "$skip_build" = false ]; then
   # Built through dune-local.sh, which stops before Dune runs when the active
@@ -165,7 +190,7 @@ else
   echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
 fi
 
-exec python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -214,3 +239,39 @@ for name, base in registered:
     restart = f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy" if stopped else "no host running"
     print(f"refreshed browser lane host {name} for {base} ({restart})")
 PY
+
+# Installed binaries and browser hosts now hold their own copies. Clean only
+# the default output this invocation built, never externally supplied input.
+# A prefix placed inside the build tree would be removed by Dune's clean.
+if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
+    && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
+    && [ ! -L "$repo/_build" ] \
+    && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
+  if python3 - "$repo/_build" "$prefix" "$manifest_dir" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+build, prefix, manifests = (Path(arg).resolve() for arg in sys.argv[1:])
+destinations = [prefix, manifests]
+if manifests.is_dir():
+    for manifest in manifests.glob("*.json"):
+        try:
+            declared = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            print("install-local-build: retaining output: manifest destination is unreadable", file=sys.stderr)
+            sys.exit(1)
+        if isinstance(declared, dict) and isinstance(declared.get("path"), str):
+            destinations.append(Path(declared["path"]).resolve())
+if any(path == build or build in path.parents for path in destinations):
+    print("install-local-build: retaining output: an installed destination is inside _build")
+    sys.exit(1)
+PY
+  then
+      if (cd "$repo" && scripts/dune-local.sh clean --root "$repo"); then
+        echo "install-local-build: removed default build artifacts after successful installation"
+      else
+        echo "install-local-build: WARN installation succeeded, but build cleanup failed" >&2
+      fi
+  fi
+fi

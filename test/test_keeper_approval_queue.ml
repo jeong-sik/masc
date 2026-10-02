@@ -4315,7 +4315,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
                  ; "decision", `String decision
                  ; "reason", `String "cross-workspace probe"
                  ; "remember_rule", `Bool remember_rule
-                 ])
+                 ]) ()
        in
        List.iter
          (fun (decision, remember_rule) ->
@@ -6152,7 +6152,7 @@ let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
                   [ "id", `String approval_id
                   ; "decision", `String "approve"
                   ; "remember_rule", `Bool true
-                  ])
+                  ]) ()
          with
          | Ok json -> json
          | Error error ->
@@ -6228,7 +6228,7 @@ let test_rule_audit_rows_name_creator_and_deleter () =
                   [ "id", `String approval_id
                   ; "decision", `String "approve"
                   ; "remember_rule", `Bool true
-                  ])
+                  ]) ()
          with
          | Ok json -> json |> member "rule_id" |> to_string
          | Error error ->

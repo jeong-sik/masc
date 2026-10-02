@@ -494,6 +494,32 @@ let test_http_permanent_refusal_then_cli_rest_retries () =
     check_http_failure ~slot ~body ~invalid:false output)
 ;;
 
+(* Exercise the real HTTP refusal decoder and its durable appraiser receipt.
+   Pulse eligibility depends on this classification, not the HTTP status text. *)
+let test_provider_refusal ~status ~rejected () =
+  with_case (fun ~sw ~net ~clock ~base_path ->
+    let body = {|{"error":{"message":"fixture refusal"}}|} in
+    let server = F.start_server ~sw ~net ~clock
+      (F.Reply_with (fun _ _ -> status, body)) in
+    let slot = "candle-refused-request" in
+    publish ~base_path ~cli_slots:[]
+      [ { F.id = slot; base_url = server.base_url } ];
+    let calls = ref [] in
+    (match run_declared ~base_path (unavailable_cli calls) with
+     | Error (A.Invalid_response _) ->
+       check bool "refusal parks until an explicit event" true rejected
+     | Error (A.Transport_unavailable _) ->
+       check bool "availability remains pulse retryable" false rejected
+     | Ok _ -> fail "provider refusal produced an appraisal");
+    check int "one HTTP request was dispatched" 1 (F.post_count server);
+    check (list string) "no undeclared CLI dispatch" [] !calls;
+    let code = if rejected then "candle_appraisal_rejected"
+      else "candle_appraisal_unavailable" in
+    let output, selected = check_failure code (recorded_run ~base_path) in
+    check (option string) "receipt retains the refusing slot" (Some slot) selected;
+    check_http_failure ~slot ~body ~invalid:rejected output)
+;;
+
 let test_invalid_http_then_valid_successor_keeps_both_slots () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let bad = F.start_server ~sw ~net ~clock (F.Reply malformed_body) in
@@ -719,6 +745,14 @@ let () =
             "valid HTTP successor preserves failed predecessor evidence"
             `Quick
             test_invalid_http_then_valid_successor_keeps_both_slots
+        ; test_case "provider rejects unchanged request" `Quick
+            (test_provider_refusal ~status:`Bad_request ~rejected:true)
+        ; test_case "provider refuses authorization" `Quick
+            (test_provider_refusal ~status:`Forbidden ~rejected:true)
+        ; test_case "provider payment rest remains retryable" `Quick
+            (test_provider_refusal ~status:`Payment_required ~rejected:false)
+        ; test_case "provider rate limit remains retryable" `Quick
+            (test_provider_refusal ~status:`Too_many_requests ~rejected:false)
         ; test_case
             "declared official CLI can answer after HTTP failure"
             `Quick

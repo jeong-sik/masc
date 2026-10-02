@@ -226,6 +226,16 @@ type observation =
 
 val observation_to_yojson : observation -> Yojson.Safe.t
 
+val evaluation_request_to_yojson
+  :  direction:direction
+  -> destinations:Typesafeai_client.destination_id list
+  -> state:Yojson.Safe.t
+  -> questions:(string * Typesafeai_types.question) list
+  -> Yojson.Safe.t
+(** The exact request fields, without a provider response. This is persisted
+    before dispatch so an in-flight evaluation remains reconstructible after
+    a process restart. *)
+
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
 
 val without_copies
@@ -261,6 +271,15 @@ val failure_detail
 
 val run
   :  ?observe:(observation -> unit)
+  -> ?before_evaluate:
+       (direction:direction
+        -> destinations:Typesafeai_client.destination_id list
+        -> state:Yojson.Safe.t
+        -> questions:(string * Typesafeai_types.question) list
+        -> string)
+  -> ?after_evaluate:(evaluation_id:string -> evaluation -> unit)
+  -> ?on_evaluation_aborted:
+       (evaluation_id:string -> [ `Cancelled | `Failed of string ] -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
   -> facts:Keeper_memory_os_types.fact list
@@ -275,4 +294,8 @@ val run
     for the existing durable Librarian run detail. [observe] is called after
     each returned evaluation, before another request can yield, then with
     [Complete] on normal return. It must only update the caller's in-memory
-    observation without I/O or yielding. Cancellation is propagated unchanged. *)
+    observation without I/O or yielding. [before_evaluate] runs before each
+    provider dispatch and must durably record the exact request, returning its
+    identity. [after_evaluate] closes that record after a provider result;
+    [on_evaluation_aborted] closes it when dispatch raises. Cancellation is
+    propagated unchanged. *)

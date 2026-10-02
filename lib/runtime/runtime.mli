@@ -359,7 +359,14 @@ val load_exact_output_resolver_snapshot :
 (** Build a resolver snapshot from [catalog], excluding targets whose provider
     or model has no catalog row. *)
 
+val exact_output_runtime_observations :
+  origin:exact_output_target_source -> t list ->
+  (string * Runtime_exact_output_registry.runtime_observation) list
+(** Observation cells for targets built from these same runtimes. Binding
+    equality preserves existing cells; replacement catalog targets get none. *)
+
 val publish_exact_output_registry :
+  ?runtime_observations:(string * Runtime_exact_output_registry.runtime_observation) list ->
   ?required_lane_ids:string list ->
   ?excused_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->

@@ -1738,6 +1738,36 @@ let test_dynamic_tool_callback () =
           (Yojson.Safe.to_string !observed_input))
 ;;
 
+let test_partial_text_streams_before_complete_block () =
+  let partial event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  let complete =
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"id":"msg-partial","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_ OK"}]}}|} in
+  with_fixture
+    [Emit (partial {|{"type":"message_start","message":{"id":"msg-partial","model":"claude-fixture"}}|});
+     Emit (partial {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"MASC_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CLAUDE_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" "}}|});
+     Emit complete;
+     Emit (partial {|{"type":"content_block_stop","index":0}|});
+     Emit (partial {|{"type":"message_delta","delta":{"stop_reason":"end_turn"}}|});
+     Emit (partial {|{"type":"message_stop"}|}); Emit {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_ OK","api_error_status":null}|}]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        match List.rev !events with
+        | [Turn_started {turn_id="msg-partial"; model="claude-fixture"};
+           Text_delta {message_id=Some "msg-partial"; text="MASC_"};
+           Text_delta {message_id=Some "msg-partial"; text="CLAUDE_"};
+           Text_delta {message_id=Some "msg-partial"; text=" "};
+           Text_delta {message_id=Some "msg-partial"; text="OK"};
+           Turn_finished {text="MASC_CLAUDE_ OK"}] -> ()
+        | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
+;;
+
 let test_stream_events_preserve_text_and_tool_identity () =
   let events = ref [] in
   let tool : Runtime_claude_code.dynamic_tool =
@@ -2660,6 +2690,8 @@ let () =
             "stream preserves text and tool identity"
             `Quick
             test_stream_events_preserve_text_and_tool_identity
+        ; test_case "partial text precedes complete block without duplication" `Quick
+            test_partial_text_streams_before_complete_block
         ; test_case
             "stream preserves native tool origin"
             `Quick

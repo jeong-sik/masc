@@ -171,22 +171,23 @@ def full_http_loss_retains_local_work_and_draft(executable):
         fixtures.lost.set()
         # Observe separate failed polling rounds while the composer is open.
         for _round in (1, 2):
-            before = fixtures.failures(cards.OPERATOR_PATH)
+            before = fixtures.failures("/health")
             assert h.wait_for_fixture_state(
                 process, fd, output,
-                lambda: fixtures.failures(cards.OPERATOR_PATH) > before,
+                lambda: fixtures.failures("/health") > before,
                 timeout=12,
             ), fixtures.failed_paths
             h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
-            assert b"MASC Keepers (not loaded)" in screen and draft not in screen, screen
+            assert draft in screen, "identity outage discarded the unsent local draft"
             home.assert_no_decision_posts(requests)
         assert_no_chat_delivery()
-        h.send_and_wait(process, fd, output, b"\x1b", b"Last conversation beta unavailable")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Goal confirmations not read")
         visible = cards.frame(process, fd, output, "all-http-503-local-work")
-        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode(),
-                      b"Last conversation beta unavailable", b"not fully read"):
+        for label in (b"Goal confirmations not read", b"Operator tasks not read", b"not fully read"):
             assert label in visible, (label, visible)
+        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
+            assert label not in visible, ("unverified Home retained an actionable card", label, visible)
         assert b"No decision is waiting" not in visible, visible
         assert b"workspace identity not read" in visible, visible
         # Unverified Home offers no history reader; the unsent draft was
@@ -196,6 +197,9 @@ def full_http_loss_retains_local_work_and_draft(executable):
         assert_no_chat_delivery()
         fixtures.lost.clear()
         h.send_and_wait(process, fd, output, b"r", b"Continue with beta")
+        recovered = h.screen_text(bytes(output))
+        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
+            assert label in recovered, ("admitted Home did not restore its cards", label, recovered)
         cards.select_home(process, fd, output, b"Continue with beta", destinations=6)
         h.send_and_wait(process, fd, output, b"\r", draft)
         assert draft in h.screen_text(bytes(output)), "the original workspace did not restore its draft"

@@ -24,6 +24,9 @@ module U = Yojson.Safe.Util
    in the same library and is reached unqualified through it. *)
 module Keeper_ask = Masc.Keeper_ask
 module Keeper_ask_store = Masc.Keeper_ask_store
+module Workspace = Masc.Workspace
+module Keeper_tool_approval_registry = Masc.Keeper_tool_approval_registry
+module Keeper_late_approval = Masc.Keeper_late_approval
 
 let temp_dir_counter = ref 0
 
@@ -320,6 +323,146 @@ let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state 
   check string "the response echoes the token owner as actor" "probe-operator"
     (U.member "actor" json |> U.to_string)
 
+let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path:_ ~state ~token ~keeper:_ =
+  let config = Mcp_server.workspace_config state in
+  let base = Unix.realpath config.base_path in
+  let root = Unix.realpath (Workspace.masc_root_dir config) in
+  let expected base_path masc_root =
+    `Assoc [ ("base_path", `String base_path); ("masc_root", `String masc_root) ]
+  in
+  let dispatch_with_id ~tool_call_id fields =
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+           ([ ("name", `String "decision-canary")
+            ; ("tool_call_id", `String tool_call_id)
+            ; ("decision", `String "approve")
+            ] @ fields))
+    in
+    dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/tool-approval" ~body
+  in
+  let dispatch fields = dispatch_with_id ~tool_call_id:"call-actor-1" fields in
+  (* 1. Matching expected_workspace -> 200 OK *)
+  let res_matching = dispatch [ ("expected_workspace", expected base root) ] in
+  check int "matching workspace succeeds" 200 (status_of_response res_matching);
+
+  (* 2. Foreign base_path -> 400 Bad Request ("workspace precondition failed") *)
+  let res_foreign_base = dispatch [ ("expected_workspace", expected (base ^ "-foreign") root) ] in
+  check int "foreign base fails" 400 (status_of_response res_foreign_base);
+  check bool "foreign base error message" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_foreign_base));
+
+  (* 3. Foreign masc_root -> 400 Bad Request ("workspace precondition failed") *)
+  let res_foreign_root = dispatch [ ("expected_workspace", expected base (root ^ "-foreign")) ] in
+  check int "foreign root fails" 400 (status_of_response res_foreign_root);
+  check bool "foreign root body" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_foreign_root));
+
+  (* 4. Duplicate expected_workspace -> 400 Bad Request ("invalid expected_workspace precondition") *)
+  let res_duplicate =
+    dispatch
+      [ ("expected_workspace", expected base root)
+      ; ("expected_workspace", expected base root) ]
+  in
+  check int "duplicate expected_workspace fails" 400 (status_of_response res_duplicate);
+  check bool "duplicate body" true
+    (Astring.String.is_infix ~affix:"invalid expected_workspace precondition" (body_of_response res_duplicate));
+
+  (* 5. Foreign workspace check runs before keeper registry lookup *)
+  let body_unregistered =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("name", `String "not-a-registered-keeper")
+         ; ("tool_call_id", `String "call-actor-1")
+         ; ("decision", `String "approve")
+         ; ("expected_workspace", expected (base ^ "-foreign") root)
+         ])
+  in
+  let res_unregistered =
+    dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/tool-approval" ~body:body_unregistered
+  in
+  check int "foreign workspace fails before keeper lookup" 400 (status_of_response res_unregistered);
+  check bool "foreign workspace error precedes not found" true
+    (Astring.String.is_infix ~affix:"workspace precondition failed" (body_of_response res_unregistered));
+
+  (* 6. Seed a pending held wait: foreign rejection leaves it pending; matching settles it *)
+  let registry = Keeper_tool_approval_registry.shared () in
+  let held_call_id = "call-held-workspace-1" in
+  let held_settled = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       match
+         Keeper_tool_approval_registry.await registry ~clock
+           ~tool_name:"Execute" ~args:"{}"
+           ~question:"Run Execute?" ~because:"test held wait"
+           ~keeper_name:"decision-canary" ~tool_call_id:held_call_id
+           ~timeout_sec:5.0
+       with
+       | Keeper_tool_approval_registry.Answered Keeper_tool_approval_registry.Approve ->
+           held_settled := true
+       | _ -> ())
+    (fun () ->
+       let rec wait_pending attempts =
+         if List.exists (fun (w : Keeper_tool_approval_registry.pending) ->
+             String.equal w.tool_call_id held_call_id) (Keeper_tool_approval_registry.pending registry)
+         then ()
+         else if attempts > 0 then begin
+           Eio.Time.sleep clock 0.005;
+           wait_pending (attempts - 1)
+         end else Alcotest.fail "held call was not registered in pending list"
+       in
+       wait_pending 200;
+       (* Foreign workspace dispatch rejects and preserves the pending wait *)
+       let res_held_foreign =
+         dispatch_with_id ~tool_call_id:held_call_id
+           [ ("expected_workspace", expected (base ^ "-foreign") root) ]
+       in
+       check int "foreign workspace on held wait fails with 400" 400 (status_of_response res_held_foreign);
+       check bool "held wait still pending after foreign refusal" true
+         (List.exists (fun (w : Keeper_tool_approval_registry.pending) ->
+             String.equal w.tool_call_id held_call_id) (Keeper_tool_approval_registry.pending registry));
+       check bool "held wait not yet settled" false !held_settled;
+       (* Matching workspace dispatch succeeds and settles the pending wait *)
+       let res_held_matching =
+         dispatch_with_id ~tool_call_id:held_call_id
+           [ ("expected_workspace", expected base root) ]
+       in
+       check int "matching workspace on held wait succeeds" 200 (status_of_response res_held_matching);
+       let held_json = Yojson.Safe.from_string (body_of_response res_held_matching) in
+       check bool "response settled is true" true (U.member "settled" held_json |> U.to_bool);
+       check bool "response remembered is false" false (U.member "remembered" held_json |> U.to_bool));
+  check bool "fiber observed approval" true !held_settled;
+
+  (* 7. Seed a timed-out ask: foreign rejection leaves it unconsumed; matching consumes and remembers it *)
+  let late_store = Keeper_late_approval.shared () in
+  let late_call_id = "call-late-workspace-1" in
+  Keeper_late_approval.note_timed_out late_store
+    ~keeper_name:"decision-canary" ~tool_call_id:late_call_id
+    ~tool_name:"Execute" ~args:(`Assoc []) ();
+  (* Foreign workspace dispatch rejects and leaves the late ask unconsumed *)
+  let res_late_foreign =
+    dispatch_with_id ~tool_call_id:late_call_id
+      [ ("expected_workspace", expected (base ^ "-foreign") root) ]
+  in
+  check int "foreign workspace on late ask fails with 400" 400 (status_of_response res_late_foreign);
+  (* Matching workspace dispatch succeeds and remembers the late answer *)
+  let res_late_matching =
+    dispatch_with_id ~tool_call_id:late_call_id
+      [ ("expected_workspace", expected base root) ]
+  in
+  check int "matching workspace on late ask succeeds" 200 (status_of_response res_late_matching);
+  let late_json = Yojson.Safe.from_string (body_of_response res_late_matching) in
+  check bool "late answer settled is false" false (U.member "settled" late_json |> U.to_bool);
+  check bool "late answer remembered is true" true (U.member "remembered" late_json |> U.to_bool);
+  (* A subsequent dispatch cannot reuse the consumed late answer *)
+  let res_late_reused =
+    dispatch_with_id ~tool_call_id:late_call_id
+      [ ("expected_workspace", expected base root) ]
+  in
+  check int "subsequent dispatch succeeds with 200" 200 (status_of_response res_late_reused);
+  let reused_json = Yojson.Safe.from_string (body_of_response res_late_reused) in
+  check bool "reused answer is not remembered" false (U.member "remembered" reused_json |> U.to_bool)
+
 let () =
   run "keeper_decision_actor_log"
     [ ( "decision actor"
@@ -328,6 +471,9 @@ let () =
                with_actor_test_setup test_ask_answer_records_the_token_owner)
         ; test_case "tool-approval stamps the token owner" `Quick
             (fun () -> with_actor_test_setup test_tool_approval_stamps_the_token_owner)
+        ; test_case "tool-approval validates expected workspace admission" `Quick
+            (fun () ->
+               with_actor_test_setup test_tool_approval_expected_workspace_admission)
         ; test_case "turn-interrupt stamps the token owner" `Quick
             (fun () -> with_actor_test_setup test_interrupt_stamps_the_token_owner)
         ; test_case "a cancelled turn's response carries the actor" `Quick

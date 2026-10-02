@@ -10,6 +10,8 @@ type approval_observation = {
 }
 
 type http_scoped_surface_results = {
+  http_refresh_ticket: Http_refresh_order.ticket;
+  http_scoped_server_identity: (Masc.Tui_decode.server_identity, string) result;
   http_transport: (Masc.Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
@@ -58,10 +60,11 @@ type http_surface_results = {
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
-      { detail : string; unreachable : bool;
+      { refresh_ticket : Http_refresh_order.ticket; detail : string; unreachable : bool;
         approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option }
   | Refresh_server_booting of
-      { identity : (Masc.Tui_decode.server_identity, string) result
+      { refresh_ticket : Http_refresh_order.ticket
+      ; identity : (Masc.Tui_decode.server_identity, string) result
       ; (* The ticket [start_http_refresh] took before the probe went
            out. Carried so the approvals panel learns why its rows are stale,
            the same way a failed refresh tells it. *)
@@ -147,10 +150,12 @@ type async_msg =
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
-  | Http_refresh_failed of string * Masc_tui_operator_projection.Listing_order.ticket option
+  | Http_refresh_failed of
+      string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
-      workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option
+      workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
@@ -311,7 +316,7 @@ type async_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
-      Snapshot_read.request * (Masc.Tui_decode.keeper_tool_approval list, string) result
+      Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -336,18 +341,19 @@ type async_msg =
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
-  | Gate_snapshot_loaded of Snapshot_read.request * (Masc.Tui_decode.gate_snapshot, string) result
+  | Gate_snapshot_loaded of Snapshot_read.request * Masc.Tui_decode.server_identity *
+      (Masc.Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
   | Gate_approval_resolved of
-      string * bool * (unit, string) result * Masc_tui_operator_projection.Flow.generation
+      string * bool * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
       (** approval id, approve, the resolve result, and the in-flight
           generation this decision holds. Completion releases that slot, so
           the header stops drawing [submitting] and a second press is admitted
           again. *)
   | Gate_auto_judge_retried of
-      string * (unit, string) result * Masc_tui_operator_projection.Flow.generation
-      (** approval id, rearm outcome, and the action slot this explicit retry
+      string * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
+      (** approval id, captured workspace, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
   | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
@@ -425,7 +431,7 @@ type async_msg =
       string * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
       string * (Masc.Tui_decode.task_history_event list, string) result
-  | Task_cancel_done of string * (string, string) result
+  | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
   | Verification_evidence_loaded of
       string * (Masc.Tui_decode.verification_evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
@@ -527,6 +533,7 @@ type async_msg =
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Task_dispatched of {
+      expected_workspace : Masc.Tui_decode.server_identity;
       keeper : string;
       task_id : string;
       title : string;

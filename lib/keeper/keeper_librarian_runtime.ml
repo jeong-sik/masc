@@ -409,9 +409,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
         (Exact_lane_preference_unavailable detail))
     |> Result.map Runtime_exact_lane_backpressure.order
   in
-  Ok
-    ( resolved.Runtime_exact_output_registry.selected_slots
-    , resolved.Runtime_exact_output_registry.cli_slots )
+  Ok resolved
 ;;
 
 let prepare_attempt ~requirement ~selected_slots messages =
@@ -639,8 +637,9 @@ let extraction_cli_input_limit = function
 
 let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
-  let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
+  let* resolved = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
+  let cli_slots = resolved.Runtime_exact_output_registry.cli_slots in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
@@ -831,7 +830,9 @@ let execute_answer
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let* resolved = resolve_librarian_slots ~base_path ~keeper_id in
+  let selected_slots = resolved.Runtime_exact_output_registry.selected_slots in
+  let cli_slots = resolved.Runtime_exact_output_registry.cli_slots in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
@@ -882,7 +883,7 @@ let execute_answer
       ~validate:validate_flow
       attempt
   in
-  Runtime_exact_lane_backpressure.observe flow;
+  Runtime_exact_lane_backpressure.observe ~resolved flow;
   match flow with
   | Ok success ->
     let selected_slot =

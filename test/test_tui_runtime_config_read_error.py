@@ -14,7 +14,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_runtime_config_view.ml",
 )
 
-ERROR_PREFIX = b"runtime config load failed: fetch:"
+ERROR_PREFIX = b"fetch:"
 ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"
 
 

@@ -129,7 +129,14 @@ A round is three acceptance-runner bundles on one pinned binary. One passing
 run is evidence, never a score.
 
 1. Run `keeper_multi_collaboration_acceptance.py --run` three times with the
-   same `--expected-source-sha`; keep every `bundle.json`. Each run installs
+   same `--expected-source-sha`; keep every `bundle.json`. Fresh fleet creation
+   requires an explicit `--sandbox-profile` plus `--sandbox-image` for Docker;
+   microVM also requires `--microvm-backend`; SSH requires `--remote-endpoint`
+   instead of image/backend. Choose names configured on the campaign host.
+   The shell wrapper forwards `KEEPER_COLLAB_SANDBOX_PROFILE`,
+   `KEEPER_COLLAB_SANDBOX_IMAGE`, `KEEPER_COLLAB_MICROVM_BACKEND` and
+   `KEEPER_COLLAB_REMOTE_ENDPOINT`. A retained Keeper restart reuses its saved
+   declaration. Each run installs
    the composition Skills it measures from
    `scripts/fixtures/keeper-multi-collaboration/skills/` into the campaign
    workspace's `project-masc` skill source through `/api/v1/skills/editor/*`,

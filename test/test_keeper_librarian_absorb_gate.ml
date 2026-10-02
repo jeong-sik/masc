@@ -883,8 +883,11 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let module F = Exact_output_fixture in
   let response = {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":1.0}}}|} in
   let alternate = F.start_server ~sw ~net ~clock (F.Reply response) in
+  let events = ref [] in
   let initial = F.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () ->
+        Alcotest.(check bool) "pre-dispatch record exists before HTTP" true
+          (List.exists (fun event -> String.equal event "started") !events);
         (* A new table published mid-run must not move the run's requests. *)
         Runtime_typesafeai_policy.publish
           { (Runtime_typesafeai_policy.current ()) with
@@ -913,6 +916,13 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let observations = ref [] in
   let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~superseding:[] ~facts:[ first; second ]
       ~observe:(fun observation -> observations := observation :: !observations)
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+        events := "started" :: !events;
+        "snapshot-evaluation")
+      ~after_evaluate:(fun ~evaluation_id _evaluation ->
+        Alcotest.(check string) "the completed callback closes the same request" "snapshot-evaluation"
+          evaluation_id;
+        events := "finished" :: !events)
       ~new_claims:[ merged; other ] ~absorbed () in
   (match run with
    | Gate.Skipped _ -> Alcotest.fail "expected evaluations"
@@ -935,6 +945,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
        (Yojson.Safe.to_string report) (Gate.run_result_to_yojson final |> Yojson.Safe.to_string)
    | _ -> Alcotest.fail "expected two incremental observations and one final result");
   Alcotest.(check int) "both requests use the endpoint captured before dispatch" 2 (F.post_count initial);
+  Alcotest.(check int) "both pre-dispatch records are closed" 4 (List.length !events);
   Alcotest.(check int) "the later configuration is not used by this run" 0 (F.post_count alternate);
   let open Yojson.Safe.Util in
   List.iter (fun raw ->

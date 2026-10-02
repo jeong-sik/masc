@@ -1,0 +1,24 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  03:4…  
+ ────────────────────────────────────────────────────────────────────────────── 
+   Connecting to workspace…                                                     
+   Work: not observed                                                           
+                                                                                
+   Needs your decision                                                          
+    Goal confirmations not read · inspect sources; Operator tasks not read · …  
+    Approvals and questions: confirm queue not fully read; held calls not ful…  
+                                                                                
+   Continue                                                                     
+    Choose a Keeper  · start a conversation                                     
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose                                      

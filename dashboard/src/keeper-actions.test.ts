@@ -42,6 +42,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeKeeperName,
   keeperActionErrors,
+  keeperChatHistoryErrors,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -154,7 +155,7 @@ describe('noteKeeperChatAppended', () => {
     fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
-    expect(keeperActionErrors.value.echo).toContain('이전 대화 불러오기 실패')
+    expect(keeperChatHistoryErrors.value.echo).toContain('이전 대화 불러오기 실패')
 
     // A subsequent append for the open panel must converge (drop -> re-fetch)
     // rather than be skipped until the panel remounts.
@@ -169,6 +170,19 @@ describe('noteKeeperChatAppended', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread).toHaveLength(2)
     expect(thread[1]?.text).toBe('recovered')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+  })
+
+  it('preserves a newer action error when history recovers', async () => {
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
+    await hydrateKeeperChatHistory('echo')
+    keeperActionErrors.value = { echo: keeperChatHistoryErrors.value.echo ?? null }
+    fetchKeeperChatHistory.mockResolvedValueOnce([])
+
+    await hydrateKeeperChatHistory('echo', { force: true })
+
+    expect(keeperActionErrors.value.echo).toBe('이전 대화 불러오기 실패: HTTP 502')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
   })
 
   it('debounces a burst of appends into one forced refetch', async () => {
@@ -336,7 +350,7 @@ describe('hydrateKeeperChatHistory', () => {
     ])
 
     await hydrateKeeperChatHistory('echo')
-    expect(keeperActionErrors.value.echo).toContain('이전 대화 불러오기 실패')
+    expect(keeperChatHistoryErrors.value.echo).toContain('이전 대화 불러오기 실패')
 
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)

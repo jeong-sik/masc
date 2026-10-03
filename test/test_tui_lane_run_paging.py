@@ -118,7 +118,8 @@ def run(
     columns: int,
     split: bool,
     refresh_error: bool,
-    preflight: Literal["context", "continuity", "memory"] | None = None,
+    preflight: Literal["context", "continuity", "memory", "failed_memory"]
+    | None = None,
 ) -> None:
     scenario = ("split" if split else "stacked") + (
         " cached refresh error" if refresh_error else ""
@@ -153,7 +154,31 @@ def run(
                 "elapsed_s": None,
             },
         }
-        if preflight == "memory":
+        if preflight == "failed_memory":
+            record.update(
+                status="failed",
+                code="provider_failure",
+                detail="fixture generation failure",
+            )
+            observed_output["jev_preflight"] = {
+                "status": "judged",
+                "decision": "needs_generation",
+                "confidence": 0.8,
+                "probabilities": {
+                    "keep_current": 0.1,
+                    "needs_generation": 0.8,
+                    "uncertain": 0.1,
+                },
+                "destination": {
+                    "destination_uri": "https://fixture.invalid/evaluate",
+                    "model": "requested-model",
+                },
+                "model": "received-model",
+                "request_body_sha256": "a" * 64,
+                "passed_over": [],
+                "elapsed_s": 0.05,
+            }
+        elif preflight == "memory":
             observed_output["after"] = {
                 "commit": "unchanged",
                 "revision": 4,
@@ -245,11 +270,15 @@ def run(
 
             screen = completed_screen()
             marker = b"retained-generation-answer"
-            if preflight == "memory":
-                if marker in screen:
-                    raise AssertionError("memory snapshot must start compact")
-                if "변경 없음".encode() not in screen:
+            if preflight in ("memory", "failed_memory"):
+                if marker in screen or b"received-model" in screen:
+                    raise AssertionError(
+                        "memory evidence must start compact even without a snapshot"
+                    )
+                if preflight == "memory" and "변경 없음".encode() not in screen:
                     raise AssertionError("compact memory snapshot result is missing")
+                if preflight == "failed_memory" and b"needs_generation" not in screen:
+                    raise AssertionError("failed memory status summary is missing")
             else:
                 for key in (b"memory_write", b"context_write", b"committed"):
                     if key not in screen:
@@ -381,7 +410,7 @@ if __name__ == "__main__":
     run(executable, columns=180, split=True, refresh_error=False)
     run(executable, columns=100, split=False, refresh_error=False)
     run(executable, columns=180, split=True, refresh_error=True)
-    for preflight in ("context", "continuity", "memory"):
+    for preflight in ("context", "continuity", "memory", "failed_memory"):
         run(
             executable,
             columns=180,

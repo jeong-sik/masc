@@ -1659,6 +1659,7 @@ type librarian_preflight_reading =
   ; lp_model : string option
   ; lp_domain_rejection : string option
   ; lp_memory_result : librarian_memory_result option
+  ; lp_context_only : bool
   }
 
 type lane_run_detail =

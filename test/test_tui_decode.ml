@@ -9992,6 +9992,22 @@ let test_librarian_preflight_detail_reports_actual_route () =
      = Some (Tui_decode.Librarian_memory_unchanged (4,2)));
   Alcotest.(check bool) "unchanged snapshot cannot report additions" true
     (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
+  Alcotest.(check bool) "memory no-change is not context-only" false
+    (Option.get recorded.lrd_librarian_preflight).lp_context_only;
+  let context_only = match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> `Assoc
+          (("memory_write", `String "skipped_context_only") ::
+           ("jev_preflight", `Assoc ["status", `String "ineligible";
+             "reason", `String "context pass"; "elapsed_s", `Null]) ::
+           List.remove_assoc "jev_preflight" fields)
+        | _ -> Alcotest.fail "invalid fixture" in
+      `Assoc ["run", `Assoc (("output", output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let context_only = Tui_decode.decode_lane_run_detail context_only |> Result.get_ok in
+  Alcotest.(check bool) "context-only scope comes from recorded output, not absent snapshot" true
+    (Option.get context_only.lrd_librarian_preflight).lp_context_only;
   let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with

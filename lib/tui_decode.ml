@@ -5502,6 +5502,7 @@ type librarian_preflight_reading =
   ; lp_model : string option
   ; lp_domain_rejection : string option
   ; lp_memory_result : librarian_memory_result option
+  ; lp_context_only : bool
   }
 
 (* Decode the retained observation with the same alternatives emitted by
@@ -5633,6 +5634,10 @@ let decode_librarian_preflight output =
         Error "domain rejection is only valid when Keep_current falls back to full lane"
       | _ -> Ok ()
     in
+    let* lp_context_only = match Json_util.assoc_member_opt "memory_write" output with
+      | None -> Ok false
+      | Some (`String "skipped_context_only") -> Ok true
+      | Some _ -> Error "unknown Librarian memory write scope" in
     let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
       | None -> Ok None
       | Some after ->
@@ -5646,7 +5651,7 @@ let decode_librarian_preflight output =
          | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
          | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
          | _ -> Error "unknown or inconsistent Librarian snapshot result") in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result})
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only})
 
 type lane_run_detail =
   { lrd_run_id : string

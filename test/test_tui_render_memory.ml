@@ -1625,6 +1625,7 @@ let test_category_rail_bounds_large_label_preview () =
   let category = Option.get (Cat.category_of_string name) in
   let filter = Types.Category_ordinary category in
   let state = three_kinds_state ~extra_ordinary:[make_memory_fact category "bounded preview"] () in
+  state.memory_facts_categories_open <- true;
   state.memory_facts_category <- filter;
   Masc_tui_hit.reset Masc_tui_press.press_marks;
   let lines = ref [] in

@@ -16,7 +16,7 @@ let params : S.create_message_params = {
   temperature=Some 0.25;max_tokens=37;stop_sequences=None;metadata=None;
   tools=None;tool_choice=None;_meta=None}
 
-let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
+let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?primary_error_bytes ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -71,7 +71,10 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?i
       | `Quota -> Cohttp_eio.Server.respond_string ~status:(Cohttp.Code.status_of_code 402)
           ~body:{|{"error":{"message":"synthetic quota exhaustion"}}|} ()
       | `Bad_request -> Cohttp_eio.Server.respond_string ~status:`Bad_request
-          ~body:{|{"error":{"message":"synthetic primary unavailable"}}|} ())
+          ~body:(match primary_error_bytes with
+            | None -> {|{"error":{"message":"synthetic primary unavailable"}}|}
+            | Some bytes -> Yojson.Safe.to_string (`Assoc ["error",`Assoc [
+                "message",`String (String.make bytes 'x')]])) ())
     else Cohttp_eio.Server.respond_string ~status:`OK
       ~body:{|{"id":"actual-response","model":"actual-secondary-model","choices":[{"index":0,"message":{"role":"assistant","content":"The image comparison is retained."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":6,"total_tokens":15}}|} () in
   let socket = Eio.Net.listen env#net ~sw ~backlog:4 ~reuse_addr:true
@@ -199,6 +202,19 @@ max_reply_bytes=4194304
   if Option.is_none initial_pressure then
     check string "failed attempt identifies the primary configured runtime" "primary.sample"
       (List.hd failed |> text "runtime_id");
+  if Option.is_none initial_pressure then (
+    let diagnostic_ref = List.hd failed |> member "error_evidence"
+      |> Lane_addon_types.evidence_of_json |> require in
+    let diagnostic = Store.read_blob store diagnostic_ref |> require |> Yojson.Safe.from_string in
+    check string "failed attempt diagnostic belongs to this sampling request"
+      (member "request" refs |> text "uri") (member "request" diagnostic |> text "uri");
+    check bool "full failure diagnostics stay out of the response" true
+      (member "error" (List.hd failed) = `Null);
+    match primary_error_bytes with
+    | None -> ()
+    | Some bytes ->
+        check bool "large HTTP failure remains retained separately" true
+          (String.length (text "error" diagnostic) >= bytes));
   if primary_reply=`Thinking then
     check string "thinking-only failure preserves its exact provider stop reason" "max_tokens"
       (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "provider_stop_reason");
@@ -381,5 +397,7 @@ let () = run "Server Lane sampling HTTP composition" ["host boundary",[
     (test_actual_http_route_and_durable_sampling ~turn_timeout_s:30.);
   test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick
     (test_actual_http_route_and_durable_sampling ~primary_reply:`Thinking ~fixed_temperature:0.75);
+  test_case "oversized primary diagnostics do not reject a small fallback answer" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_error_bytes:(4194304 + 1));
   test_case "fixed model temperature survives an omitted request value" `Quick
     (test_actual_http_route_and_durable_sampling ~fixed_temperature:0.75 ~omit_temperature:true)]]

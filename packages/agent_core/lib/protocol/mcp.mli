@@ -111,7 +111,10 @@ val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
     from an optional server. [list_tools] retains its all-pages behavior.
     [call_tool_full] preserves [is_error]; callers must inspect it.
     A connection's optional [max_response_bytes] is enforced by the NDJSON
-    reader before allocating/parsing a complete server message. *)
+    reader before allocating/parsing a complete server message. The same limit
+    applies to complete outgoing JSON-RPC envelopes, including sampling reply IDs.
+    Oversized responses use a neutral bounded error; if its ID alone prevents
+    that error from fitting, the transport closes without writing it. *)
 val list_tools_full : t -> (Mcp_schema.Sdk_types.tool list, Error.t) result
 val call_tool_full :
   t -> name:string -> arguments:Yojson.Safe.t ->

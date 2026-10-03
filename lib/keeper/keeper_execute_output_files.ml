@@ -76,6 +76,7 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
     | None -> Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" f
   in
   run (fun () ->
+    let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
     let temporary_files = ref [] in
     let temporary_file () =
       let path = Filename.temp_file ~temp_dir:(Filename.dirname stdout_path)

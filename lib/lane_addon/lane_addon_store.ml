@@ -263,18 +263,18 @@ let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes"
 let save_sampling_outcome t ~instance_id ~request_id json =
   write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
     (Yojson.Safe.to_string json)
-let restore_sampling_outcome t = function
+let sampling_inline_outcome = function
   | `Assoc fields ->
       (match List.assoc_opt "outcome_bytes" fields with
-       | None -> Ok ()
+       | None -> Ok None
        | Some (`String bytes) ->
            let* expected = match List.assoc_opt "outcome" fields with
              | Some json -> evidence_of_json json
              | None -> Error "sampling outcome reference is missing" in
            if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
-           else write_sampling_blob t bytes |> Result.map (fun _ -> ())
+           else Ok (Some (expected, bytes))
        | Some _ -> Error "sampling outcome bytes must be a string")
-  | _ -> Ok ()
+  | _ -> Ok None
 let iter_sampling_requests t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
@@ -292,7 +292,10 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                   let json = Yojson.Safe.from_string bytes in
                   (* The first terminal write includes exact outcome bytes, so a
                      crash before blob publication is recoverable. *)
-                  let* () = restore_sampling_outcome t json in
+                  let* inline = sampling_inline_outcome json in
+                  let* () = match inline with
+                    | None -> Ok ()
+                    | Some (_, bytes) -> write_sampling_blob t bytes |> Result.map (fun _ -> ()) in
                   let* () = f json in
                   next ()
               | _ -> next ()
@@ -426,26 +429,28 @@ let sequence_of_row ~instance_id id =
         (match int_of_string_opt digits with
          | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
          | _ -> Error "row identity has an invalid observation sequence")
+let read_durable_record_bounded ~sync_file ~sync_parent ~budget path = bounded_protect (fun () ->
+  with_record_fd path (fun fd ->
+    let stat = Unix.fstat fd in
+    if stat.Unix.st_kind <> Unix.S_REG then
+      Error (Read_failed "retained file is not a regular file")
+    else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
+    else begin
+      budget.remaining <- budget.remaining - stat.Unix.st_size;
+      read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
+      |> Result.map_error (fun detail -> Read_failed detail)
+    end))
 let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
-  let path_in directory = Filename.concat t.root
-    (Filename.concat (directory instance_id) (digest request_id ^ ".json")) in
-  let outcome_path = path_in sampling_outcome_directory in
-  let path = match Fs_compat.exact_path_kind outcome_path with
-    | Fs_compat.Exact_missing -> path_in sampling_directory
-    | _ -> outcome_path in
+  let relative_in directory = Filename.concat (directory instance_id) (digest request_id ^ ".json") in
+  let outcome_relative = relative_in sampling_outcome_directory in
+  let relative = match Fs_compat.exact_path_kind (Filename.concat t.root outcome_relative) with
+    | Fs_compat.Exact_missing -> relative_in sampling_directory
+    | _ -> outcome_relative in
+  let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
   | _ ->
-      let* bytes = with_record_fd path (fun fd ->
-        let stat = Unix.fstat fd in
-        if stat.Unix.st_kind <> Unix.S_REG then
-          Error (Read_failed "retained file is not a regular file")
-        else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
-        else begin
-          budget.remaining <- budget.remaining - stat.Unix.st_size;
-          read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
-          |> Result.map_error (fun detail -> Read_failed detail)
-        end) in
+      let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget path in
       let* json = try Ok (Yojson.Safe.from_string bytes)
         with Yojson.Json_error detail -> Error (Read_failed detail) in
       let* () = match json with
@@ -456,8 +461,40 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
       (* The journal read and durability check above precede reconstruction.
          A cold downstream read can finish interrupted blob publication without
          a directory scan, test helper or repeated provider call. *)
-      let* () = restore_sampling_outcome t json
+      let* inline = sampling_inline_outcome json
         |> Result.map_error (fun detail -> Read_failed detail) in
+      let* () = match inline with
+        | None -> Ok ()
+        | Some (reference, bytes) ->
+            let hash = digest bytes in
+            let missing relative = Fs_compat.exact_path_kind (Filename.concat t.root relative)
+              = Fs_compat.Exact_missing in
+            let publish () = write_sampling_blob t bytes
+              |> Result.map (fun _ -> ()) |> Result.map_error (fun detail -> Read_failed detail) in
+            let verify relative =
+              let* bytes = read_durable_record_bounded ~sync_file ~sync_parent ~budget
+                (Filename.concat t.root relative) in
+              if blob_reference bytes = reference then Ok ()
+              else Error (Read_failed "sampling outcome blob digest mismatch") in
+            let* () =
+              if missing (blob_path hash) && missing (recovery_blob_path hash) then publish ()
+              else match (match verify (blob_path hash) with
+                | Ok () as result -> result
+                | Error Read_limit_exceeded as result -> result
+                | Error (Read_failed _) -> verify (recovery_blob_path hash)) with
+                | Ok _ -> Ok ()
+                | Error Read_limit_exceeded as error -> error
+                | Error (Read_failed _) -> publish () in
+            (* Once the blob is durable, remove the duplicate body so later
+               queries can read a large outcome once. Compaction is optional:
+               failure keeps the complete journal and its original outcome. *)
+            (match json with
+             | `Assoc fields -> ignore (write t relative
+                 (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
+             | _ -> ());
+            Ok () in
+      (* Return the inline bytes from this read even after compaction. The
+         caller can share them with other references without rereading them. *)
       Ok (Some json))
 let load_sampling_request_bounded =
   load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync

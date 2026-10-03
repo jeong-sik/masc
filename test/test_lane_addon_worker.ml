@@ -1036,7 +1036,28 @@ let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _en
   check int "request and row share one terminal read within the 4 MiB envelope" 1 (List.length receipts);
   check bool "projection preserves the complete 3 MiB answer" true
     (Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response")
-     = S.create_message_result_to_yojson answer))
+     = S.create_message_result_to_yojson answer);
+  let receipt = List.hd receipts in
+  let reference key = require (Types.evidence_of_json (Yojson.Safe.Util.member key receipt)) in
+  let request = reference "request" and outcome = reference "outcome" in
+  let request_id = require (Store.read_blob store request) |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "request_id" |> Yojson.Safe.Util.to_string in
+  let record = match Store.load_sampling_request_bounded store ~instance_id:"large-worker"
+    ~request_id ~budget:(Store.read_budget ~max_bytes) with
+    | Ok (Some (`Assoc fields)) -> fields
+    | _ -> fail "missing compact sampling record" in
+  let bytes = require (Store.read_blob store outcome) in
+  require (Store.save_sampling_outcome store ~instance_id:"large-worker" ~request_id
+    (`Assoc (("outcome_bytes",`String bytes) :: record)));
+  Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ Store.digest bytes ^ ".json"));
+  let cold = Store.create ~root:(Store.root store) in
+  let recovered = require (Sampling.retained_receipts ~store:cold ~instance_id:"large-worker"
+    ~max_bytes output) in
+  check bool "cold journal supplies the large outcome within the same envelope" true (recovered = receipts);
+  let reopened = Store.create ~root:(Store.root store) in
+  let repeated = require (Sampling.retained_receipts ~store:reopened ~instance_id:"large-worker"
+    ~max_bytes output) in
+  check bool "repeated cold read does not reread an inline journal body" true (repeated = receipts))
 
 let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in

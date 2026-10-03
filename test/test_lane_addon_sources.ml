@@ -312,7 +312,17 @@ let test_cold_sampling_journal_reaches_downstream_source () =
       let reference = member "evidence" observation |> list |> List.hd |> own_reference in
       let retained = require (Store.read_blob cold reference) |> Yojson.Safe.from_string in
       check bool "frozen downstream source includes recovered receipt" true
-        (member "sampling_receipts" retained = `List [receipt]))) [true;false])
+        (member "sampling_receipts" retained = `List [receipt]);
+      (* A previous compaction may have failed after the blob was published.
+         Reading this state must not require replacing the intact blob. *)
+      require (save store ~instance_id ~request_id (terminal bytes));
+      let blob_path = Filename.concat (Store.root store) ("evidence/" ^ Store.digest bytes ^ ".json") in
+      let before = Unix.stat blob_path in
+      check bool "an intact blob remains usable with an inline journal" true
+        (member "complete" (acquire ()) = `Bool true);
+      let after = Unix.stat blob_path in
+      check bool "an intact blob is verified without replacement" true
+        (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino))) [true;false])
     ["request-1",true;"request-3",false]
 
 let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->

@@ -28,8 +28,12 @@ val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:strin
     verify the exact file and parent durability before accepting a receipt.
     Failed verification consumes the bytes read and never falls back to pending.
     A matching record containing [outcome_bytes] restores its content-addressed
-    blob after verifying the recorded digest. Recovery failures remain errors;
-    the journal is preserved for another read and no model invocation occurs. *)
+    blob after verifying the recorded digest. Intact existing blobs are read
+    without replacement. Successful recovery attempts to compact this index;
+    compaction failure preserves the full journal. The returned JSON still
+    includes its verified inline bytes, which callers can reuse without a
+    second read charge. Recovery failures remain errors and no model invocation
+    occurs. *)
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
 val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a list ->
   encode:('a -> string) -> (jsonl_snapshot, string) result

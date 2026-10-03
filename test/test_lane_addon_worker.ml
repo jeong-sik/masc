@@ -955,6 +955,45 @@ let test_pending_sampling_recovery_syncs_reopened_root () = with_fixture (fun _e
   check int "later recovery still delivers both requests" 4 (List.length !delivered);
   check int "one failed and one successful root sync, no duplicate obligation" 2 !syncs)
 
+let test_sampling_recovery_rejects_replaced_root_parent () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  List.iter (fun replace_parent ->
+    let parent = Filename.concat dir (if replace_parent then "swapped-parent" else "swapped-root") in
+    Unix.mkdir parent 0o700;
+    let root = Filename.concat parent "store" in
+    let store = Store.create ~root in
+    let instance_id = "pending" in
+    require (Store.save_sampling_request store ~instance_id ~request_id:"one"
+      (`Assoc ["state", `String "pending"]));
+    let reopened = Store.create ~root in
+    let target = if replace_parent then parent else root in
+    let saved = target ^ ".saved" in
+    let swapped = ref false and visited = ref 0 and syncs = ref 0 in
+    let recover ~swap =
+      Store.For_testing.iter_sampling_requests reopened ~instance_id ~max_bytes:65536
+        ~sync_file:Unix.fsync ~sync_parent:(fun fd ->
+          incr syncs;
+          if swap then (
+            Unix.rename target saved;
+            swapped := true;
+            Unix.mkdir target 0o700;
+            if replace_parent then Unix.mkdir root 0o700);
+          Unix.fsync fd)
+        ~f:(fun _ -> incr visited; Ok ()) in
+    Fun.protect ~finally:(fun () ->
+      if !swapped then (
+        if replace_parent then Unix.rmdir root;
+        Unix.rmdir target;
+        Unix.rename saved target)) (fun () ->
+      check bool "directory replacement invalidates root sync" true
+        (Result.is_error (recover ~swap:true));
+      check int "old root records are not delivered after replacement" 0 !visited);
+    require (recover ~swap:false);
+    check int "restored root can retry on the same handle" 1 !visited;
+    check int "identity failure retains the root sync obligation" 2 !syncs)
+    [false; true])
+
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
@@ -1280,6 +1319,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "pending sampling recovery syncs reopened root" `Quick test_pending_sampling_recovery_syncs_reopened_root;
+  test_case "sampling recovery rejects replaced root and parent" `Quick test_sampling_recovery_rejects_replaced_root_parent;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;

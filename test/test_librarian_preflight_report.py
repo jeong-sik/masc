@@ -175,7 +175,10 @@ class ReportCliTest(unittest.TestCase):
                     "attribution": {"kind": "unattributed"},
                     "first_message": 0, "after_message": 1,
                     "first_tool_observation": 0, "after_tool_observation": 0}]
-        for rendered in (json.dumps(history, indent=2, sort_keys=True), "[]", "null", "not-json"):
+        wrong_type = copy.deepcopy(history)
+        wrong_type[0]["first_message"] = False
+        for rendered in (json.dumps(history, indent=2, sort_keys=True),
+                         json.dumps(wrong_type), "[]", "null", "not-json"):
             manifest = fixture()
             for arm in ("baseline", "preflight"):
                 actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]

@@ -1,7 +1,6 @@
 (** The Usage surface's Plan usage section: one card per provider account.
     Each card labels the reported used percentage and the window's role,
-    says when it resets, and shows the last observation time after a reset
-    has passed.
+    says when it resets, and shows the last report time beside every window.
 
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a

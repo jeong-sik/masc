@@ -182,11 +182,14 @@ status: reference
   [Pause_status_backend](../../lib/pause_status_backend.mli)
 
 **Usage**
-: provider quota 창·보고 이력은 scope별로, Keeper 토큰·비용은 기록 여부와 함께
-  보여주는 TUI 화면. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
+: provider quota 창·보고 이력은 scope별로, 워크스페이스 Candle 공급 상태는
+  워크스페이스 단위로, Keeper 토큰·비용은 기록 여부와 함께 보여주는 TUI 화면.
+  워크스페이스 공급과 선택한 Keeper의 개인 잔액은 서로 다른 값이며, 개인 잔액은
+  Keeper Info에서 본다. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
   Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
   Work에서 본다.
-  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md) ·
+  [Masc_tui_render](../../bin/masc_tui_render.ml)
 
 **Attention (Dashboard)**
 : 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
@@ -375,16 +378,18 @@ status: reference
   소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
   이름 기반 시작 장비로 복원한다. 서버와 원격 TUI, 대시보드는 `Keeper_portrait_equipment` 스냅숏을
   공유해 일관된 착용 모습을 렌더한다.
-  TUI의 Keeper 상세 화면과 대화 머리글에는 작은 아이콘으로 표시한다. 대화 화면에서는
-  `현재 대화` 표식과 초상화가 선택 가능한 Keeper 목록 위에 놓인다. Items에서는 장비를
-  살펴보는 큰 미리보기를 쓰며, `/about`에는 마스코트를 표시한다. 터미널 능력에 따라
-  실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
-  `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  TUI Keeper Info와 대화 머리글에는 얼굴 중심의 작은 식별 아이콘을 표시한다. 대화 화면의 아이콘과
+  이름은 현재 대화 소유자를 나타내며, `현재 대화` 표식과 초상화는 선택 가능한 Keeper 목록 위에 놓인다.
+  목록 커서가 움직여도 현재 대화 소유자는 바뀌지 않는다. Items에서는 착용 장비 전체를 보여주는 큰
+  미리보기를 쓴다. 터미널 능력에 따라 아이콘은 실제 픽셀, 반블록 모자이크로 그리거나 생략한다.
+  `/about`에는 마스코트를 표시하며 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted` 스타일을 쓴다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
   [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
+  [Masc_tui_keeper_portrait](../../bin/masc_tui_keeper_portrait.mli) ·
+  [Masc_tui_chat_portrait](../../bin/masc_tui_chat_portrait.mli) ·
   [TUI candle styles](../TUI-GUIDE.md)
 
 **Ask (질문)**

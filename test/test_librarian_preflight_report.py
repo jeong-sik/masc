@@ -276,6 +276,8 @@ class ReportCliTest(unittest.TestCase):
                 manifest = fixture()
                 run = manifest["pairs"][0]["preflight"]["run"]
                 run.update(status=status, selected_slot="fixture-cli" if path == "full_lane" else None)
+                if status == "failed":
+                    run.update(code="fixture_interrupted", detail="fixture failed before selection")
                 run["output"].update(
                     generation_path=path,
                     full_llm_skipped=False,
@@ -310,6 +312,8 @@ class ReportCliTest(unittest.TestCase):
                 manifest = fixture()
                 run = manifest["pairs"][0]["baseline"]["run"]
                 run.update(status=status, selected_slot=None)
+                if status == "failed":
+                    run.update(code="fixture_interrupted", detail="fixture failed before selection")
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
@@ -345,6 +349,8 @@ class ReportCliTest(unittest.TestCase):
                     manifest = fixture()
                     run = manifest["pairs"][0]["preflight"]["run"]
                     run.update(status=status, selected_slot=None)
+                    if status == "failed":
+                        run.update(code="fixture_interrupted", detail="fixture failed before selection")
                     run["output"].update(
                         jev_preflight=observation(observed_status, "needs_generation"),
                         generation_path="not_entered",

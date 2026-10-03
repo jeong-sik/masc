@@ -49,9 +49,10 @@ type bucket_metric = {
     (** error_count / entry_count; 0.0 when bucket is empty. *)
   b_total_cost_usd : float option;
   b_cache_hit_ratio : float option;
-    (** cache_read_tokens / (cache_read_tokens + input_tokens); [Some 0.0]
-        when the denominator is explicitly zero, [None] when no bucket entry
-        reported either field. *)
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
 }
 
 type model_bucketed = {

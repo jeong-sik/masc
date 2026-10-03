@@ -40,6 +40,9 @@ val render : Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> size
 (** The portrait: {!render_posed} with {!still}. Deterministic: the same
     arguments always give the same bytes. *)
 
+val render_icon : Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> size -> image
+(** Face-centred identity thumbnail. Full outfit inspection uses [render]. *)
+
 (** {2 Motion}
 
     For animated uses such as the /about candle. There is no clock in here: the

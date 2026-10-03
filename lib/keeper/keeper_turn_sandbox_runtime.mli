@@ -357,3 +357,11 @@ val sweep_abandoned_microvm_guests :
     teardown. The lock covers listing through deletion: stable guest names
     may otherwise be reused between observing a dead owner and removing it.
     Guest commands and unrelated Keeper lanes do not acquire this lock. *)
+
+type build_cleanup_report = { cleaned : int; failed : int }
+
+(** Attach-only artifact cleanup. Caller must hold the Owner maintenance slot.
+    Unsupported or absent guests are skipped; this never boots a guest. *)
+val cleanup_attached_builds : config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> retention_sec:float -> unit ->
+  (build_cleanup_report option, string) result

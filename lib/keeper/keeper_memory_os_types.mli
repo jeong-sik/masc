@@ -197,7 +197,8 @@ val all_categories : category list
 
 (** Parse a lowercase snake_case name: starts with a letter, followed by
     letters/digits and single underscores separating nonempty words.
-    New canonical names become {!Custom}; malformed names reject. *)
+    New canonical names become {!Custom}; malformed names and the TUI labels
+    [all], [source], and [dropped] reject. *)
 val category_of_string : string -> category option
 
 (** Row-level provenance. [Authored]: explicit keeper memory_write.

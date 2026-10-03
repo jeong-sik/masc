@@ -88,12 +88,15 @@ let open_bound ~operation ~parameter ~clock = function
     |> Result.map Deadline_window.open_
 ;;
 
+type model_identity = Reported_model | Configured_model_fallback
+
 let complete_prepared_sync
       ~sw
       ~net
       ?clock
       ?(transport : Llm_transport.t option)
       ~(prepared : Prepared_completion_request.t)
+      ?(model_identity = Configured_model_fallback)
       ?(cache : Cache.t option)
       ?(connection_cache : Http_client.cache option)
       ?(metrics : Metrics.t option)
@@ -104,6 +107,7 @@ let complete_prepared_sync
       ?admitted_body
       ()
   =
+  let cache = match model_identity with Reported_model -> None | Configured_model_fallback -> cache in
   let request = Prepared_completion_request.request prepared in
   let request =
     match request_wire_observer with
@@ -298,7 +302,11 @@ let complete_prepared_sync
           let resp =
             Pricing.annotate_response_cost ?provider_id:config.provider_id resp
           in
+          let reported_model = resp.Types.model in
           let resp = patch_telemetry resp ~config latency_ms in
+          let resp = match model_identity with
+            | Reported_model -> {resp with model=reported_model}
+            | Configured_model_fallback -> resp in
           m.on_request_end ~model_id ~latency_ms;
           emit_tool_call_metrics
             m
@@ -360,6 +368,7 @@ let complete
       ~(messages : Types.message list)
       ?(tools = [])
       ?(trace_context = [])
+      ?model_identity
       ?cache
       ?connection_cache
       ?metrics
@@ -376,6 +385,7 @@ let complete
     ?clock
     ?transport
     ~prepared
+    ?model_identity
     ?cache
     ?connection_cache
     ?metrics
@@ -607,13 +617,24 @@ let complete_prepared_stream
          with
          | Ok stream_result -> stream_result
          | Error `Permit_wait_expired ->
+           (* The waiter has left the queue. These are the endpoint's current
+              process-local counts, not a reconstruction of the expired wait. *)
+           let admission_snapshot =
+             match Provider_admission.snapshot_for ~config:request_config with
+             | None -> " admission_snapshot=unavailable"
+             | Some snapshot ->
+               Printf.sprintf
+                 " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
+                 snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
+           in
            Error
              (Http_client.TimeoutError
                 { message =
                     Printf.sprintf
                       "admission_timeout_s deadline exceeded after %.17gs before a \
-                       provider admission permit was granted (Complete.complete_stream)"
+                       provider admission permit was granted (Complete.complete_stream)%s"
                       admission_timeout_s
+                      admission_snapshot
                 ; phase = Http_client.Queue
                 }))
     in

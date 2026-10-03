@@ -377,6 +377,7 @@ let category_of_string s =
   | "constraint" -> Some Constraint
   | "validated_approach" -> Some Validated_approach
   | "lesson" -> Some Lesson
+  | "all" | "source" | "dropped" -> None
   | _ ->
     let letter = function 'a' .. 'z' -> true | _ -> false in
     let word_char c = letter c || (c >= '0' && c <= '9') in

@@ -1562,7 +1562,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
   let balance = required_internal_descriptor "keeper_candle_balance" in
   Alcotest.(check bool) "balance policy sync is a serial mutation" true
     (balance.execution = Descriptor.Ordinary Descriptor.Serial);
-  let metadata = Masc.Tool_catalog.metadata "keeper_candle_balance" in
+  let metadata = Tool_catalog.metadata "keeper_candle_balance" in
   Alcotest.(check bool) "balance policy sync is not read-only" true
     (metadata.readonly = Some false);
   Alcotest.(check bool) "balance policy sync requires write-class permission" true

@@ -1257,19 +1257,8 @@ let test_the_row_badge_says_what_the_store_says () =
     (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
 ;;
 
-(* Every badge this cell can draw has to be told apart from every other one.
-
-   The cell is ten cells wide and cuts what runs past it, which was the right
-   shape while the category was a wire string nobody could enumerate. It is a
-   closed set of eight now, plus the pane's own two words, and two of the ten
-   are longer than the cell: [CODE_CHANGE] draws as "CODE_CHAN..." and
-   [VALIDATED_APPROACH] as "VALIDATED...". Nothing collides today, and this
-   is what says so -- a category added later whose first nine characters
-   repeat another's would draw the same cell for two different things, which
-   is the whole job of the column.
-
-   Walked from [all_categories], so a ninth is measured without this file
-   changing. *)
+(* Built-in badges and dynamic labels with the same topic prefix must remain
+   distinct. Dynamic labels retain their suffix within the fixed-width cell. *)
 let test_every_badge_this_cell_draws_is_its_own () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
@@ -1315,7 +1304,11 @@ let test_every_badge_this_cell_draws_is_its_own () =
   let named =
     List.map (fun category ->
         (Cat.category_to_string category, badge (fact_row category)))
-      Cat.all_categories
+      (Cat.all_categories @ List.map (fun name ->
+         match Cat.category_of_string name with
+         | Some category -> category
+         | None -> Alcotest.failf "invalid fixture category: %s" name)
+         ["architecture_decision"; "architecture_pattern"])
     @ [ ("source", badge source_row); ("dropped", badge dropped_row) ]
   in
   List.iter
@@ -2207,6 +2200,48 @@ let test_the_default_memory_block_keeps_state_save_and_actions () =
        (joined (render ~detail:false unreadable)))
 ;;
 
+let test_memory_state_tracks_current_pass_not_history () =
+  let module H = Masc.Tui_decode_memory_health in
+  let base = make_keeper_health ~keeper_id:"recovered" ~facts:10 ~snapshot_bytes:262144 in
+  let recovered = { base with H.mkh_librarian_failures = 3 } in
+  check bool "history does not keep a recovered snapshot degraded" true
+    (Types.memory_state recovered = Types.Memory_ordinary);
+  let stopped = { base with H.mkh_librarian =
+      { base.mkh_librarian with H.mlh_state = Some (H.Pass_stopped "model unavailable") } } in
+  check bool "current error is visible before a counter update" true
+    (Types.memory_state stopped = Types.Memory_degraded);
+  check bool "empty current failure is starving" true
+    (Types.memory_state { stopped with H.mkh_snapshot_present = false } = Types.Memory_starving);
+  check bool "empty recovered memory is not starving from historical failures" true
+    (Types.memory_state { recovered with H.mkh_snapshot_present = false } = Types.Memory_no_current);
+  check bool "store read error overrides a recovered pass" true
+    (Types.memory_state { recovered with H.mkh_read_error = Some "EACCES" } = Types.Memory_read_error);
+  let empty_recovered = { recovered with H.mkh_snapshot_present = false } in
+  let source_only = { empty_recovered with H.mkh_source_snapshot_present = true } in
+  let stopped_empty = { stopped with H.mkh_snapshot_present = false } in
+  List.iter (fun (keeper, expected) ->
+    check (option int) "fleet count follows current row state" (Some expected)
+      (Types.current_memory_starving_count (make_fleet_health keeper)))
+    [empty_recovered, 0; source_only, 0; stopped_empty, 1];
+  check bool "failure-history alert does not color current memory as an error" true
+    (H.memory_alert_is_history H.Librarian_starvation
+     && H.memory_alert_is_history H.Librarian_failures);
+  check bool "current store read errors retain error semantics" false
+    (H.memory_alert_is_history H.Snapshot_read_error);
+  let refused = { (make_fleet_health recovered) with H.mhs_refused_keepers =
+      [{ H.mkr_keeper_id = Some "unread"; mkr_reason = "invalid payload" }] } in
+  check (option int) "refused rows keep fleet count unknown" None
+    (Types.current_memory_starving_count refused);
+  let history_keeper = { recovered with H.mkh_alerts =
+      [{ H.ma_code = H.Librarian_failures; ma_label = "Librarian failures";
+         ma_message = "3 failures since server start" }] } in
+  let state = make_state () in
+  state.memory_health <- Some (make_fleet_health history_keeper);
+  check bool "historical alert retains severity with an explicit history label" true
+    (contains "[history warn]" (String.concat "\n" (body_lines ~cols:140 ~budget:40 state)));
+  check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -2248,6 +2283,8 @@ let () =
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "the default block folds the ledger behind detail" `Quick
             test_the_default_memory_block_keeps_state_save_and_actions
+        ; test_case "memory recovery does not inherit historical failure state" `Quick
+            test_memory_state_tracks_current_pass_not_history
         ; test_case "the row classifier keeps unread readings as actions" `Quick
             test_memory_row_visibility
         ; test_case "the librarian line names a stalled gap" `Quick

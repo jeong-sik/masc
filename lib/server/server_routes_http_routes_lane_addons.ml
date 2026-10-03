@@ -55,6 +55,20 @@ let source_access state request caller =
   | Agent_credential -> Lane_addon_sources.Keeper caller
   | Player_credential | No_credential -> Lane_addon_sources.Unauthenticated
 
+let broadcast_principal_for_standing standing caller =
+  match standing with
+  | Operator_credential when String.trim caller <> "" ->
+      Ok ("principal:operator:" ^ caller)
+  | Agent_credential when String.trim caller <> "" ->
+      Ok ("principal:keeper:" ^ caller)
+  | Operator_credential | Agent_credential
+  | Player_credential | No_credential ->
+      Error "Broadcast recovery requires an authenticated operator or Keeper principal"
+
+let broadcast_principal ~base_path request caller =
+  broadcast_principal_for_standing
+    (request_credential_standing ~base_path request) caller
+
 let read_context state request =
   let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
   match dashboard_actor_resolution_for_request ~base_path request with
@@ -341,6 +355,12 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
+  |> Http.Router.get "/api/v1/lane-addons/broadcast-principal"
+       (with_tool_actor_auth ~tool_name:"masc_lane_evidence" (fun state caller request reqd ->
+         let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+         let result = broadcast_principal ~base_path request caller
+           |> Result.map (fun principal -> `Assoc ["principal",`String principal]) in
+         respond request reqd result))
   |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
   |> Http.Router.post "/api/v1/lane-addons/subscriptions"
        (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->

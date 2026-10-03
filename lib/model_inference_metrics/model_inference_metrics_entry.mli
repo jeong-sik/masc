@@ -50,6 +50,14 @@ type model_bucketed =
   ; mb_buckets : bucket_metric list
   }
 
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
 type model_stats =
   { model_id : string
   ; entry_count : int
@@ -70,6 +78,7 @@ type model_stats =
   ; total_input_tokens : int option
   ; total_output_tokens : int option
   ; total_cache_read_tokens : int option
+  ; cached_input : cached_input option
   ; total_cache_creation_tokens : int option
   ; total_reasoning_tokens : int option
   ; usage_sample_count : int

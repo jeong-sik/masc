@@ -139,6 +139,10 @@ def validate_runtime(raw, plan):
             'prepared runtime slots disagree with plan')
     provider_id, model_id = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
+    # Both retained measurements used this concrete Z.AI HTTP destination.
+    require(provider.get('protocol') == 'openai-compatible-http'
+            and provider.get('endpoint') == 'https://api.z.ai/api/coding/paas/v4',
+            'prepared provider destination disagrees with frozen measurement')
     require(config['models'][model_id]['api-name'] == model_id,
             'prepared API model disagrees with declared runtime')
     require(type(lane['max_output_tokens']) is int

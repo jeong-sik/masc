@@ -130,7 +130,7 @@ class CandleEvidenceAudits(unittest.TestCase):
             write_json(bundle/filename, record)
         self.run_audit(script, bundle, bundle, error='CI artifact source commit mismatch')
 
-    def test_runtime_api_model_matches_declared_measurement(self):
+    def test_runtime_provider_and_model_match_declared_measurement(self):
         for name, source, script_name in [('candidate', CANDIDATE, 'audit-candidate.py'),
                                            ('survey', SURVEY, 'audit-provenance.py')]:
             with self.subTest(bundle=name):
@@ -138,23 +138,32 @@ class CandleEvidenceAudits(unittest.TestCase):
                 hydrate(source, bundle)
                 runtime_path = bundle/'.masc/config/runtime.toml'
                 self.run_audit(source/script_name, bundle, bundle)
-                raw = runtime_path.read_text().replace('"api-name" = "glm-5.3-flash"',
-                                                       '"api-name" = "another-model"')
-                runtime_path.write_text(raw)
-                plan = json.loads((bundle/'plan.json').read_text())
-                plan['runtime_config_sha256'] = hashlib.sha256(raw.encode()).hexdigest()
-                write_json(bundle/'plan.json', plan)
-                metadata = json.loads((bundle/'metadata.json').read_text())
-                metadata['plan'] = plan
-                write_json(bundle/'metadata.json', metadata)
-                if source == SURVEY:
-                    for filename in ('freeze.json', 'frozen-audit.json'):
-                        record = json.loads((bundle/filename).read_text())
-                        record.update(plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest(),
-                                      runtime_config_sha256=plan['runtime_config_sha256'])
-                        write_json(bundle/filename, record)
-                self.run_audit(source/script_name, bundle, bundle,
-                               error='prepared API model disagrees with declared runtime')
+                original = runtime_path.read_text()
+                for before, after, error in [
+                    ('"api-name" = "glm-5.3-flash"', '"api-name" = "another-model"',
+                     'prepared API model disagrees with declared runtime'),
+                    ('"endpoint" = "https://api.z.ai/api/coding/paas/v4"',
+                     '"endpoint" = "https://unrelated.example/v1"',
+                     'prepared provider destination disagrees with frozen measurement'),
+                    ('"protocol" = "openai-compatible-http"', '"protocol" = "messages-http"',
+                     'prepared provider destination disagrees with frozen measurement'),
+                ]:
+                    with self.subTest(field=before):
+                        raw = original.replace(before, after)
+                        runtime_path.write_text(raw)
+                        plan = json.loads((bundle/'plan.json').read_text())
+                        plan['runtime_config_sha256'] = hashlib.sha256(raw.encode()).hexdigest()
+                        write_json(bundle/'plan.json', plan)
+                        metadata = json.loads((bundle/'metadata.json').read_text())
+                        metadata['plan'] = plan
+                        write_json(bundle/'metadata.json', metadata)
+                        if source == SURVEY:
+                            for filename in ('freeze.json', 'frozen-audit.json'):
+                                record = json.loads((bundle/filename).read_text())
+                                record.update(plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest(),
+                                              runtime_config_sha256=plan['runtime_config_sha256'])
+                                write_json(bundle/filename, record)
+                        self.run_audit(source/script_name, bundle, bundle, error=error)
 
     def test_comparison_binds_each_plan_to_frozen_and_effective_prompt(self):
         candidate = self.root/'candidate'

@@ -2,7 +2,7 @@ module Inbox = Masc_tui_queue_inspection
 let get = function Ok value -> value | Error error -> Alcotest.fail error
 let contains text part = Astring.String.is_infix ~affix:part text
 let test_pause_and_work_are_separate () =
-  let snapshot = `Assoc ["keepers", `List [`Assoc [
+  let snapshot = `Assoc ["global_waiting_on", `List []; "keepers", `List [`Assoc [
     "state", `String "busy"; "paused", `Bool true;
     "waiting_on", `List [`Assoc ["source", `String "event_queue_pending";
       "what", `String "campaign wake"; "next_action", `String "keeper_drain_event_queue";
@@ -25,7 +25,7 @@ let test_pause_and_work_are_separate () =
 let test_a_schedule_group_reads_as_one_row_with_its_span () =
   let occurrence n = `Assoc ["source_ref", `String ("ref-" ^ n); "source_incarnation", `String n;
                              "due_at_unix", `Float (float_of_string n)] in
-  let snapshot = `Assoc ["keepers", `List [`Assoc [
+  let snapshot = `Assoc ["global_waiting_on", `List []; "keepers", `List [`Assoc [
     "state", `String "busy"; "paused", `Bool false;
     "waiting_on", `List [
       `Assoc ["source", `String "event_queue_pending";
@@ -48,7 +48,7 @@ let test_a_schedule_group_reads_as_one_row_with_its_span () =
        (contains blocker "autonomous turn")
    | _ -> Alcotest.fail "expected a header and a blocker line")
 
-let inventory rows = `Assoc ["keepers", `List [`Assoc [
+let inventory rows = `Assoc ["global_waiting_on", `List []; "keepers", `List [`Assoc [
   "state", `String "waiting"; "paused", `Bool false; "waiting_on", `List rows]]]
 
 let inventory_row ?(detail = []) ?due_at source what =
@@ -96,13 +96,24 @@ let test_unknown_inventory_data_is_not_pending () =
 let test_pending_event_is_not_inferred_admitted_from_kind () =
   let row = inventory_row ~detail:["payload_kind", `String "keeper_delegate_completed"]
       "event_queue_pending" "unacknowledged delegate result" in
-  let snapshot = `Assoc ["keepers", `List [`Assoc [
+  let snapshot = `Assoc ["global_waiting_on", `List []; "keepers", `List [`Assoc [
     "state", `String "busy"; "paused", `Bool false; "waiting_on", `List [row];
     "current_execution", `Assoc ["run_state", `Assoc ["kind", `String "in_turn";
       "stimulus_kinds", `List [`String "keeper_delegate_completed"]]]]]] in
   let text = get (Inbox.waiting_lines ~now:1000. snapshot) |> String.concat "\n" in
   Alcotest.(check bool) "pending retains its durable meaning" true (contains text "1 pending");
   Alcotest.(check bool) "matching payload kind is not an exact admission proof" false (contains text "admitted")
+let test_global_inventory_errors_are_visible () =
+  let rows = [inventory_row "read_error" "schedule store unreadable";
+              inventory_row "read_error" "approval store unreadable"] in
+  let snapshot = `Assoc ["global_waiting_on", `List rows; "keepers", `List []] in
+  let text = get (Inbox.waiting_lines ~now:1000. snapshot) |> String.concat "\n" in
+  List.iter (fun needle -> Alcotest.(check bool) needle true (contains text needle))
+    ["Workspace inventory: 0 pending · 2 unavailable";
+     "schedule store unreadable · unavailable"; "approval store unreadable · unavailable"];
+  Alcotest.(check bool) "missing global inventory is not an empty workspace" true
+    (Result.is_error (Inbox.waiting_lines ~now:1000. (`Assoc ["keepers", `List []])))
+
 let test_edit_retains_media_and_turn_context () =
   let module Input = Masc.Keeper_multimodal_input in
   let image = Input.User_image (Input.Url_ref {value="https://example.test/frame.png";mime_type=Some "image/png"}) in
@@ -150,7 +161,8 @@ let test_dashboard_sender_uses_typed_route () =
   Alcotest.(check bool) "dashboard route is named even with empty channel label" true (contains output "dashboard");
   Alcotest.(check bool) "submitting actor remains visible" true (contains output "masc-tui")
 let () = Alcotest.run "TUI queue controls"
-  ["inbox", [Alcotest.test_case "dashboard sender and route" `Quick test_dashboard_sender_uses_typed_route;
+  ["inbox", [Alcotest.test_case "global source failures remain visible" `Quick test_global_inventory_errors_are_visible;
+    Alcotest.test_case "dashboard sender and route" `Quick test_dashboard_sender_uses_typed_route;
     Alcotest.test_case "inventory counts and schedule lifecycle" `Quick test_inventory_counts_and_schedule_lifecycle;
     Alcotest.test_case "unknown inventory data is not pending" `Quick test_unknown_inventory_data_is_not_pending;
     Alcotest.test_case "event kind does not infer admission" `Quick test_pending_event_is_not_inferred_admitted_from_kind;

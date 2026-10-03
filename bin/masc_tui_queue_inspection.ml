@@ -150,22 +150,10 @@ let describe_row ~now row =
   Ok { source; count; phase;
        line = Printf.sprintf "  %s%s%s%s%s" clock (safe what) span timing address }
 
-let waiting_lines ~now json =
-  let* keepers = list "keepers" json in
-  let* groups = map_result (fun keeper ->
-    let* state = string "state" keeper in
-    let* paused = field "paused" keeper in
-    let* consumption = match paused with
-      | `Bool true -> Ok "paused"
-      | `Bool false -> Ok "open"
-      | `Null -> Ok "unknown"
-      | _ -> Error "Queue paused field must be boolean or null" in
-    let* rows = list "waiting_on" keeper in
-    let* described = map_result (describe_row ~now) rows in
+let inventory_counts described =
     let count_phase matches =
       List.fold_left (fun total row -> if matches row.phase then total + row.count else total) 0 described in
     let pending = count_phase (function Pending -> true | Running | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false) in
-    let counts =
       [ "running", count_phase (function Running -> true | Pending | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false)
       ; "scheduled", count_phase (function Scheduled _ -> true | Pending | Running | Due _ | Settling | Terminal | Unavailable -> false)
       ; "due", count_phase (function Due _ -> true | Pending | Running | Scheduled _ | Settling | Terminal | Unavailable -> false)
@@ -176,7 +164,23 @@ let waiting_lines ~now json =
       |> List.filter (fun (_, count) -> count > 0)
       |> List.map (fun (label, count) -> Printf.sprintf "%d %s" count label)
       |> List.cons (Printf.sprintf "%d pending" pending)
-      |> String.concat " · " in
+      |> String.concat " · "
+
+let waiting_lines ~now json =
+  let* keepers = list "keepers" json in
+  let* global_rows = list "global_waiting_on" json in
+  let* global = map_result (describe_row ~now) global_rows in
+  let* groups = map_result (fun keeper ->
+    let* state = string "state" keeper in
+    let* paused = field "paused" keeper in
+    let* consumption = match paused with
+      | `Bool true -> Ok "paused"
+      | `Bool false -> Ok "open"
+      | `Null -> Ok "unknown"
+      | _ -> Error "Queue paused field must be boolean or null" in
+    let* rows = list "waiting_on" keeper in
+    let* described = map_result (describe_row ~now) rows in
+    let counts = inventory_counts described in
     let header =
       Printf.sprintf "Queue consumption: %s; inventory: %s \xc2\xb7 %s in %d %s"
         consumption (safe state) counts (List.length described)
@@ -194,7 +198,11 @@ let waiting_lines ~now json =
         [ "  pending events are unacknowledged; they may already be in the current turn" ]
       else [] in
     Ok (header :: blocker @ event_note @ List.map (fun row -> row.line) described)) keepers in
-  Ok (List.concat groups)
+  let global_lines = match global with
+    | [] -> []
+    | rows -> ("Workspace inventory: " ^ inventory_counts rows)
+        :: List.map (fun row -> row.line) rows in
+  Ok (global_lines @ List.concat groups)
 let operation_lines json =
   let* operations = list "operations" json in
   let* lines = map_result (fun operation ->

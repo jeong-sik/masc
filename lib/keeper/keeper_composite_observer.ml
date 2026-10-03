@@ -206,32 +206,25 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
    here explicitly rather than silently inheriting a catch-all arm. *)
 let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
     : run_state =
-  (* Lifecycle and execution are separate observations: a prior failure or a
-     pause of future admissions does not erase a turn still executing. *)
-  match entry.current_turn_observation with
-  | Some obs ->
+  (* Only phases with a potentially live owner may retain executing work.
+     Terminal/offline phases override observations left by a failed finish write. *)
+  match entry.phase, entry.current_turn_observation with
+  | (Keeper_state_machine.Offline | Stopped | Crashed | Restarting), _ ->
+    Suspended entry.phase
+  | (Running | Failing | Draining | Paused), Some obs ->
     In_turn
       {
         rs_wake = obs.wake;
         rs_started_at = obs.started_at;
         rs_active_tool_count = obs.active_tool_count;
       }
-  | None ->
-    (match entry.phase with
-    | Keeper_state_machine.Running ->
-      Waiting
-        {
-          rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
-          rs_last_skip = last_skip;
-        }
-    | Keeper_state_machine.Offline
-    | Keeper_state_machine.Failing
-    | Keeper_state_machine.Draining
-    | Keeper_state_machine.Paused
-    | Keeper_state_machine.Stopped
-    | Keeper_state_machine.Crashed
-    | Keeper_state_machine.Restarting ->
-      Suspended entry.phase)
+  | Running, None ->
+    Waiting
+      {
+        rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
+        rs_last_skip = last_skip;
+      }
+  | (Failing | Draining | Paused), None -> Suspended entry.phase
 
 (* [wake_kind] + [stimulus_kinds] pair for [run_state_to_json]'s
    [In_turn] arm. *)

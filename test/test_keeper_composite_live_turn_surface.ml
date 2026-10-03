@@ -401,6 +401,28 @@ let test_live_turn_survives_non_running_lifecycle () =
     Keeper_state_machine.[Failing; Paused; Draining]
 ;;
 
+let test_nonlive_lifecycle_overrides_stale_turn () =
+  let base = temp_base () in
+  List.iter (fun phase ->
+    let name = "stale-" ^ Keeper_state_machine.phase_to_string phase in
+    ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+    let token = Masc.Keeper_turn_observation_token.fresh () in
+    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+      ~wake:Keeper_registry.Chat_request name;
+    (* Simulate a finish write failure followed by a supervisor phase change. *)
+    (match Keeper_registry.update_entry ~base_path:base name (fun entry -> {entry with phase}) with
+     | Ok () -> () | Error _ -> fail "could not set terminal lifecycle");
+    let entry = match Keeper_registry.get ~base_path:base name with
+      | Some entry -> entry | None -> fail "keeper disappeared" in
+    check bool "stale observation remains in registry fixture" true
+      (Option.is_some entry.current_turn_observation);
+    let rs = Observer.snapshot_to_json (Observer.observe entry) |> J.member "run_state" in
+    check string "nonlive owner cannot be in_turn" "suspended" (J.member "kind" rs |> J.to_string);
+    check string "suspended phase is authoritative" (Keeper_state_machine.phase_to_string phase)
+      (J.member "phase" rs |> J.to_string))
+    Keeper_state_machine.[Offline; Stopped; Crashed; Restarting]
+;;
+
 (* ── Idle default shape: additive fields degrade to null/zero ───────── *)
 
 let test_idle_defaults_are_null_or_zero () =
@@ -447,6 +469,8 @@ let () =
             test_chat_turn_clears_live_turn_on_finish;
           test_case "waiting for a Running keeper with no live turn" `Quick
             test_run_state_waiting_when_running_idle;
+          test_case "stale turns cannot override nonlive phases" `Quick
+            test_nonlive_lifecycle_overrides_stale_turn;
           test_case "suspended for a non-Running phase" `Quick
             test_run_state_suspended_for_non_running_phase;
           test_case "live execution survives a non-running lifecycle" `Quick

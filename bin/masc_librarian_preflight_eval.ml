@@ -78,7 +78,7 @@ let run () =
     ["--input", Arg.Set_string input, "Synthetic corpus JSON";
      "--output", Arg.Set_string output, "New private report file";
      "--config", Arg.Set_string config, "Explicit runtime TOML (preflight opt-in required)";
-     "--prompt-dir", Arg.Set_string prompts, "Exact candidate config/prompts directory";
+     "--prompt-dir", Arg.Set_string prompts, "Candidate config/prompts directory; persisted overrides are not loaded";
      "--keeper", Arg.Set_string keeper, "Keeper identity whose configured exclusion applies"]
     (fun value -> raise (Arg.Bad ("unexpected argument " ^ value)))
     "masc-librarian-preflight-eval --input FILE --output FILE --config FILE --prompt-dir DIR --keeper NAME";
@@ -136,6 +136,7 @@ let run () =
      "input_sha256", `String Digestif.SHA256.(to_hex (digest_string bytes));
      "fact_observed_at", `Float fact_observed_at;
      "keeper_instructions", `String keeper_instructions;
+     "prompt_mode", `String "candidate_directory_no_persisted_overrides";
      "config_revision", `String (Runtime.config_source_revision_to_string config_observation.source_revision);
      "memory_mutated", `Bool false; "range_consumed", `Bool false;
      "goal_completion", `String "not_established";

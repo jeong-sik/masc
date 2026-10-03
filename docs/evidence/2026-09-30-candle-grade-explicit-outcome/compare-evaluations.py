@@ -125,8 +125,10 @@ def main():
     candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids, candidate_order = load_run(args.candidate, args.candidate_resources or args.candidate)
     require(base_order == candidate_order, "baseline and candidate trial order differs")
     require(base_ids.isdisjoint(candidate_ids), "baseline and candidate reuse run IDs")
-    require({key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
-        key: value for key, value in candidate.items() if key != "prompt_sha256"}, "Evidence validation failed: {key: value for key, value in baseline.items() if key != 'prompt_sha256'} == {key: value for key, value in candidate.items() if key != 'prompt_sha256'}")
+    require(same_json(
+        {key: value for key, value in baseline.items() if key != "prompt_sha256"},
+        {key: value for key, value in candidate.items() if key != "prompt_sha256"}),
+        "baseline and candidate plans differ outside prompt hashes")
     require(base_meta["build"]["executable_sha256"] == candidate_meta["build"]["executable_sha256"], "Evidence validation failed: base_meta['build']['executable_sha256'] == candidate_meta['build']['executable_sha256']")
     changed = [name for name in baseline["prompt_sha256"] if baseline["prompt_sha256"][name] != candidate["prompt_sha256"][name]]
     require(changed == ["candle_appraiser_grade.md"], "only the reviewed Grade prompt may change")

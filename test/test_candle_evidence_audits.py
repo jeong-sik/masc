@@ -184,6 +184,15 @@ class CandleEvidenceAudits(unittest.TestCase):
                      'prepared provider destination disagrees with frozen measurement'),
                     ('"protocol" = "openai-compatible-http"', '"protocol" = "messages-http"',
                      'prepared provider destination disagrees with frozen measurement'),
+                    *((('"api-name" = "glm-5.3-flash"',
+                         '"api-name" = "glm-5.3-flash"\n' + setting,
+                         'prepared model settings disagree with frozen measurement')
+                        for setting in ('"temperature" = 0.0', '"top-p" = 0.5',
+                                        '"top-k" = 10', '"min-p" = 0.1',
+                                        '"reasoning-effort" = "low"',
+                                        '"reasoning-uncontrolled" = true'))),
+                    ('"thinking-support" = true', '"thinking-support" = false',
+                     'prepared model settings disagree with frozen measurement'),
                 ]:
                     with self.subTest(field=before):
                         raw = original.replace(before, after)
@@ -245,6 +254,18 @@ class CandleEvidenceAudits(unittest.TestCase):
         script = CANDIDATE/'compare-evaluations.py'
         valid = self.run_audit(script, baseline, candidate, '--baseline-resources', resources)
         self.assertEqual(valid['changed_prompt_files'], ['candle_appraiser_grade.md'])
+        candidate_plan = json.loads((candidate/'plan.json').read_text())
+        candidate_metadata = json.loads((candidate/'metadata.json').read_text())
+        changed_plan = copy.deepcopy(candidate_plan)
+        changed_plan['planned_calls'] = float(changed_plan['planned_calls'])
+        write_json(candidate/'plan.json', changed_plan)
+        changed_metadata = copy.deepcopy(candidate_metadata)
+        changed_metadata['plan'] = changed_plan
+        write_json(candidate/'metadata.json', changed_metadata)
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources,
+                       error='baseline and candidate plans differ outside prompt hashes')
+        write_json(candidate/'plan.json', candidate_plan)
+        write_json(candidate/'metadata.json', candidate_metadata)
         write_rows(baseline/'results.jsonl', list(reversed(rows)))
         self.run_audit(script, baseline, candidate, '--baseline-resources', resources,
                        error='trial order disagrees with registry')
@@ -325,6 +346,19 @@ class CandleEvidenceAudits(unittest.TestCase):
                 write_json(bundle/'metadata.json', metadata)
                 expected = 'duplicate case IDs' if duplicate else 'raw corpus count disagrees'
                 self.run_audit(script, bundle, bundle, error=expected)
+
+    def test_survey_actor_matches_frozen_fixture(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        self.run_audit(script, bundle, bundle)
+        rows = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        for row in rows:
+            row['receipt']['actor'] = '/live/production'
+        write_rows(bundle/'results.jsonl', rows)
+        rewrite_fixture_registry(bundle, rows)
+        self.run_audit(script, bundle, bundle,
+                       error='receipt actors disagree with frozen container fixture')
 
     def test_survey_binary_hash_matches_frozen_provenance(self):
         bundle = self.root/'survey'

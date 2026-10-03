@@ -817,6 +817,13 @@ let test_prompt_mutation_retries_rejected_payout ?(preset=false) ~clear () =
           ~name:"repaired" ~description:"repaired appraisal prompt") in
         ok (Prompt_preset.save ~base_path:config.base_path snapshot));
       applied (Server_prompt_override_request.Set {key;value=bad});
+      let unchanged_key = if key = Prompt_names.candle_appraiser_grade
+        then Prompt_names.candle_appraiser_relation else Prompt_names.candle_appraiser_grade in
+      applied (Server_prompt_override_request.Clear {key=unchanged_key});
+      if preset then (
+        let snapshot = ok (Prompt_preset.capture ~base_path:config.base_path
+          ~name:"unchanged" ~description:"unchanged refused appraisal prompt") in
+        ok (Prompt_preset.save ~base_path:config.base_path snapshot));
       let waiting = prepared config "prompt-recovery" in
       let calls = ref [] and refusals = ref 0 in
       let appraise ~identity request =
@@ -838,6 +845,13 @@ let test_prompt_mutation_retries_rejected_payout ?(preset=false) ~clear () =
         applied (Server_prompt_override_request.Set {key;value=bad});
         idle env;
         check int "identical successful save does not retry rejection" 1 !refusals;
+        applied (Server_prompt_override_request.Clear {key=unchanged_key});
+        idle env;
+        check int "clearing an already default appraisal prompt does not retry" 1 !refusals;
+        if preset then (
+          ignore (ok (Prompt_preset.restore ~base_path:config.base_path "unchanged"));
+          idle env;
+          check int "identical preset restore does not retry" 1 !refusals);
         applied (Server_prompt_override_request.Clear {key=Prompt_names.keeper});
         idle env;
         check int "unrelated successful mutation does not retry" 1 !refusals;

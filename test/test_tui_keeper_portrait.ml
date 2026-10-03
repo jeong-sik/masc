@@ -220,7 +220,7 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
   check bool "removing face equipment restores the cached icon" true
     (restored.Portrait.image == bare.Portrait.image)
 
-let test_mosaic_previews_every_catalog_accessory () =
+let test_mosaic_preserves_equipped_pixels () =
   let cache = Portrait.cache () in
   let bare = Option.get (band ~cache ()) in
   List.iter (fun item ->
@@ -337,5 +337,6 @@ let () =
         ] )
     ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded;
         test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels;
+        test_case "Mosaic preserves equipped pixels" `Quick test_mosaic_preserves_equipped_pixels;
         test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory ])
     ]

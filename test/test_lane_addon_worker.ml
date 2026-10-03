@@ -664,7 +664,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     |> Yojson.Safe.Util.member "request_id" |> Yojson.Safe.Util.to_string in
   let pending_intent = Yojson.Safe.from_file
     (Filename.concat index_directory (Masc.Lane_addon_store.digest request_id ^ ".json")) in
-  check string "primary index also records the terminal answer" "finished"
+  (* Restoring the saved pre-invocation primary index restores its pending
+     intent; the independently committed terminal journal remains authority. *)
+  check string "restored unavailable primary retains its original intent" "pending"
     Yojson.Safe.Util.(pending_intent |> member "state" |> to_string);
   let projected_refs = ["request";"outcome"] |> List.map (fun key ->
     match Types.evidence_of_json (Yojson.Safe.Util.member key recovered_references) with

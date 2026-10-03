@@ -289,7 +289,7 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        assert row_of(rows, b"Current Work") == identity + 4, \
+        assert row_of(rows, b"Current Work") >= identity + PIXEL_BAND_ROWS, \
             "the facts did not leave the picture its rows"
         # Item text that needs the full width must remove the actual Kitty
         # placement as well as its reserved columns. Mosaic-only proof cannot

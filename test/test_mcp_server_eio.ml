@@ -2388,7 +2388,7 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
       Keeper_registry.For_testing.clear ();
       let config = Masc.Workspace.default_config base_path in
       let meta_path = Masc.Keeper_types_profile.keeper_meta_path config "alpha" in
-      Masc.Fs.ensure_dir (Filename.dirname meta_path);
+      Fs_compat.mkdir_p (Filename.dirname meta_path);
       Yojson.Safe.to_file meta_path (Masc.Keeper_meta_json.meta_to_json (make_keeper_meta "alpha"));
       let token = Auth.ensure_internal_keeper_token base_path in
       let access ~internal_keeper_runtime ~token ~name =

@@ -15140,22 +15140,35 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
         raise AssertionError("briefing fixture must be a response tuple")
-    completed = 0
     slow_next = threading.Event()
     slow_started = threading.Event()
     release_slow = threading.Event()
     fail_next = threading.Event()
+    prompt_health = None
+    health_response = fixtures["/health?full=1"]
+    if not isinstance(health_response, tuple):
+        raise AssertionError("health fixture must be a response tuple")
+    health_requested_at = 0.0
+    prompt_started_at: dict[str, float] = {}
+
+    def answer_health() -> HttpResponse:
+        nonlocal health_requested_at
+        health_requested_at = time.monotonic()
+        return health_response
+
+    fixtures["/health?full=1"] = answer_health
 
     def answer_briefing() -> HttpResponse:
-        nonlocal completed
         if slow_next.is_set():
             slow_started.set()
             release_slow.wait(timeout=4.0)
-        else:
-            time.sleep(0.08)
-        completed += 1
         if fail_next.is_set():
             return (503, {"error": "refresh refused"})
+        if prompt_health is not None:
+            prompt_started_at.setdefault(prompt_health, health_requested_at)
+            payload = json.loads(json.dumps(briefing[1]))
+            payload["summary"]["workspace_health"] = prompt_health
+            return briefing[0], payload
         return briefing
 
     fixtures["/api/v1/dashboard/briefing"] = answer_briefing
@@ -15176,24 +15189,31 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        nonlocal prompt_health
         # The badge colours its status, so the raw PTY bytes split HTTP from [connected].
         connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
         wait_for_output(
             process, master_fd, output, connected, start=0, timeout=3.0
         )
-        first_completed = completed
+        refreshing = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]")
         prompt_start = len(output)
-        if not wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: completed >= first_completed + 2,
-            timeout=4.0,
-        ):
-            raise AssertionError("two prompt HTTP refreshes did not complete")
-        # Let the terminal drain the second answer before arming the slow one.
-        time.sleep(0.12)
-        read_available(master_fd, output)
+        # Overview health is applied only when the entire HTTP bundle lands.
+        # A briefing callback alone precedes the remaining surface reads and
+        # cannot establish prompt refresh completion.
+        for health in ("warning", "ok"):
+            prompt_health = health
+            wait_for_output(
+                process, master_fd, output,
+                b"Health: " + health.encode(), start=len(output), timeout=3.0,
+            )
+            elapsed = time.monotonic() - prompt_started_at[health]
+            print(f"prompt HTTP full refresh ({health}): {elapsed:.3f}s", flush=True)
+            if elapsed >= 0.5:
+                raise AssertionError(
+                    f"prompt fixture full refresh exceeded the 0.5s cadence: {elapsed:.3f}s"
+                )
         slow_next.set()
-        if b"refreshing..." in output[prompt_start:]:
+        if refreshing.search(output[prompt_start:]):
             raise AssertionError("a prompt refresh flashed the warning badge")
 
         if not wait_for_fixture_state(
@@ -15203,7 +15223,7 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         slow_start = len(output)
         wait_for_output(
             process, master_fd, output,
-            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]"),
+            refreshing,
             start=slow_start, timeout=2.0,
         )
         connected_start = len(output)

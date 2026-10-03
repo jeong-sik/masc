@@ -1601,14 +1601,14 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
-  (* Both an unconfirmed request identity and a failed full refresh withdraw
+  (* Unconfirmed request identity, Schedule form refusal, and failed full refresh withdraw
      through the same transition owner. *)
-  check int "unconfirmed identity and failed refresh both withdraw through their owner" 2
+  check int "all three refusal paths withdraw through their owner" 3
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading");
   (* Failed refreshes must feed Error through the same transition. The pure
      server-identity test proves that this projection turns Error into None. *)
-  check int "unconfirmed identity and failed refresh both clear current identity" 2
+  check int "all three refusal paths clear current identity" 3
     (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
        ~module_path:main_path ~binding_name:"apply_async_message"
        ~callee:"apply_server_identity_reading" ~position:1

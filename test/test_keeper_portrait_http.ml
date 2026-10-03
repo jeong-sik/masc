@@ -882,6 +882,14 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       let icon equipment =
+         let size = Option.get (Keeper_portrait_draw.size_of_int 160) in
+         let image = Keeper_portrait_draw.render_icon
+           (Keeper_portrait_look.body_of_name keeper) equipment size in
+         Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
+       in
+       Fs_compat.save_file (Filename.concat evidence "before-icon.png") (icon starting);
+       Fs_compat.save_file (Filename.concat evidence "equipped-icon.png") (icon expected);
        Fs_compat.save_file (Filename.concat evidence "before-roster.json")
          (Yojson.Safe.pretty_to_string before_roster);
        Fs_compat.save_file (Filename.concat evidence "equipped-roster.json")

@@ -56,7 +56,7 @@ def run(executable, no_color):
                 visible = screen(output)
                 if not all_runtimes:
                     default_block = visible.split("[runtime].default", 1)[1].split("ROUTE / PROBE", 1)[0]
-                    route_block, marker, _ = default_block.partition("f replaces")
+                    route_block, marker, _ = default_block.partition("media_")
                     assert marker, (columns, default_block)
                     readable = "".join(route_block.split())
                     assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)

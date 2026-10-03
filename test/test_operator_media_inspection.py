@@ -11,13 +11,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_MODULES = (
-    "bin/masc_cli_inspect_file.ml",
-    "lib/verification_media_inspection.ml",
-    "lib/verification_pdf_inspection.ml",
-    "lib/verification_presentation_inspection.ml",
-    "lib/verification_video_inspection.ml",
-)
+
+
 BINARY = None
 PRESENTATION_BASE = None
 if __name__ == '__main__':

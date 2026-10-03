@@ -10,7 +10,7 @@ import time
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_image_preview.ml")
+
 MODES = ("success", "refused", "malformed", "wrong-digest", "wrong-bytes",
          "corrupt-content", "missing-envelope", "cancel", "queued", "queued-clock-skew",
          "delayed-history", "delayed-history-clock-skew", "settled-history")

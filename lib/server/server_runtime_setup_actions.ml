@@ -455,6 +455,16 @@ let model_spec ~reported_models template request =
     | None -> Ok []
     | Some (`Bool _ as value) -> Ok ["supports_image_input", value]
     | Some _ -> Error Invalid_request in
+  let* image = match reported_models with
+    | None -> Ok image
+    | Some models ->
+      (match List.find_opt (fun model -> String.equal model.id id) models with
+       | None -> Error Invalid_request
+       | Some model ->
+         let authoritative = match model.supports_image_input with
+           | None -> [] | Some value -> ["supports_image_input", `Bool value] in
+         if image = [] || image = authoritative then Ok authoritative
+         else Error Invalid_request) in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
       "tools",`Bool true;"streaming",streaming] @ image)) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =

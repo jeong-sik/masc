@@ -3188,6 +3188,7 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
 let runtime_lane_notice_style = function
   | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
   | Masc_tui_types.Lane_write_pending -> Theme.warn ()
+  | Masc_tui_types.Lane_write_confirmed -> Theme.info ()
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
@@ -3384,10 +3385,10 @@ let render_exact_lane_provider_editor (state : state) editor =
         "CLI slots · tried after every HTTP slot"
   in
   box_top buf cols;
-  box_line buf cols (screen_title " MASC Lanes / Providers");
+  box_line buf cols (screen_title (" MASC / " ^ lane ^ " / Model order"));
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
+    (Printf.sprintf "  %s · HTTP candidates first, then CLI candidates"
        (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
@@ -3404,13 +3405,22 @@ let render_exact_lane_provider_editor (state : state) editor =
     (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
-  (match Masc_tui_types.runtime_picker_projection state with
+  (match state.runtime_lane_write with
+   | Masc_tui_types.Lane_write_posting ->
+     box_line_styled buf cols ~style:(Theme.info ()) "  Saving candidate order..."
+   | Masc_tui_types.Lane_write_rereading _ ->
+     box_line_styled buf cols ~style:(Theme.info ()) "  Reloading saved candidate order..."
+   | Masc_tui_types.Lane_write_idle -> ());
+  (match Masc_tui_types.runtime_picker_projection
+     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows) state with
    | Some picker ->
+     let action = match picker.Masc_tui_types.rlp_pick with
+       | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
+       | _ -> "Add fallback candidate", "Enter add" in
      box_line_styled buf cols ~style:(Theme.info ())
-       (Printf.sprintf "  add provider — %s — %s"
-          picker.Masc_tui_types.rlp_summary
-          (Masc_tui_types.runtime_picker_keys "Enter append"
-             picker.Masc_tui_types.rlp_filter));
+       ("  " ^ fst action);
+     box_line_styled buf cols ~style:(Theme.recede ())
+       ("  " ^ picker.Masc_tui_types.rlp_summary);
      if picker.Masc_tui_types.rlp_choices = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
          (Masc_tui_types.runtime_picker_empty_note picker)
@@ -3418,22 +3428,22 @@ let render_exact_lane_provider_editor (state : state) editor =
        picker.Masc_tui_types.rlp_choices
        |> List.iteri (fun offset (runtime : Tui_decode.runtime_option) ->
             let destination =
-              match runtime.ro_exact_slot_group with
-              | Tui_decode.Exact_http_slots -> "HTTP tail"
-              | Tui_decode.Exact_cli_slots -> "CLI tail"
-              | Tui_decode.Exact_output_unsupported -> "no output schema"
+              match picker.rlp_pick, runtime.ro_exact_slot_group with
+              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_http_slots -> "HTTP replacement"
+              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_cli_slots -> "CLI replacement"
+              | _, Tui_decode.Exact_http_slots -> "HTTP tail"
+              | _, Tui_decode.Exact_cli_slots -> "CLI tail"
+              | _, Tui_decode.Exact_output_unsupported -> "no output schema"
             in
             let line bracket note =
-              Printf.sprintf "  %s [%s] %s · %s / %s%s"
+              Printf.sprintf "  %s [%s] %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
                  then ">" else " ")
                 bracket
-                (Terminal_text.single_line runtime.ro_id)
-                (Terminal_text.single_line runtime.ro_provider)
-                (Terminal_text.single_line runtime.ro_model)
+                (Masc_tui_types.runtime_model_picker_title runtime)
                 note
             in
-            match
+            (match
               Masc_tui_types.runtime_pick_availability
                 picker.Masc_tui_types.rlp_pick runtime
             with
@@ -3443,16 +3453,34 @@ let render_exact_lane_provider_editor (state : state) editor =
               box_line_styled buf cols ~style:(Theme.recede ())
                 (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
             | Masc_tui_types.Pick_available ->
-              box_line buf cols
+              (if picker.rlp_selected_row = Some offset
+               then box_line_selected buf cols
+               else box_line buf cols)
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
-                    then "  (already declared)" else "")))
+                    then "  (already declared)" else "")));
+            box_line_styled buf cols ~style:(Theme.recede ())
+              (Printf.sprintf "      Account %s · %s context"
+                (Masc_tui_message_layout.fit_middle (max 1 (cols - 32))
+                   (Terminal_text.single_line runtime.ro_provider_id))
+                (format_context_tokens runtime.ro_effective_max_context)));
+     (match picker.rlp_selected_row with
+      | Some offset ->
+        (match List.nth_opt picker.rlp_choices offset with
+         | Some runtime ->
+           box_line_styled buf cols ~style:(Theme.recede ())
+             ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16))
+                (Terminal_text.single_line runtime.ro_id))
+         | None -> ())
+      | None -> ());
+     box_line_styled buf cols ~style:(Theme.info ())
+       ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
      let visible =
-       let reserved = if entries <> [] && Option.is_none selected_index then 4 else 3 in
+       let reserved = if entries <> [] && Option.is_none selected_index then 8 else 7 in
        max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
      in
      let selected_display_index =
@@ -3488,7 +3516,10 @@ let render_exact_lane_provider_editor (state : state) editor =
                 Printf.sprintf "  %s %d/%d  [%s] %s%s"
                   (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
-                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
+                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) state.runtime_catalog with
+                   | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
+                   | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
                    else "  (not admitted)")
               in
@@ -3498,8 +3529,27 @@ let render_exact_lane_provider_editor (state : state) editor =
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())
          "  no slot selected; j/k selects a current slot";
+     (match Masc_tui_types.slot_editor_cursor_row state with
+      | None -> ()
+      | Some row ->
+        let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
+        (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
+           String.equal runtime.ro_id row.sr_slot) state.runtime_catalog with
+         | Some runtime ->
+           box_line_styled buf cols ~style:(Theme.info ())
+             (Printf.sprintf "  Account %s · %s context"
+                (Masc_tui_message_layout.fit_middle (max 1 (cols - 28))
+                   (Terminal_text.single_line runtime.ro_provider_id))
+                (format_context_tokens runtime.ro_effective_max_context))
+         | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
+        box_line_styled buf cols ~style:(Theme.recede ())
+          ("  Selected: " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 16)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  j/k select · a add · x drop · J/K reorder in group · Enter/d slot config · e lane config · Esc close");
+       "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  J/K reorder · x remove · Enter/d settings · e TOML · Esc back";
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  Changes save immediately; success is shown after the saved order reloads");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
@@ -3777,7 +3827,7 @@ let render_lanes_overview (state : state) =
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s%s"
                    mark refusal_prefix
-                   (Masc_tui_types.runtime_picker_label runtime)
+                   (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
            picker.Masc_tui_types.rlp_choices);
@@ -9798,6 +9848,8 @@ let render_runtime (state : state) =
          | Masc_tui_types.Pick_media_failover ->
              ( "adding to [runtime].media_failover, the order the vision runtimes are called in"
              , "Enter append" )
+         | Masc_tui_types.Pick_exact_lane_replacement _ ->
+             ("Replace selected candidate at its current position", "Enter replace")
          | Masc_tui_types.Pick_route_default ->
              (* Replaces rather than appends, and the row it replaces is
                 marked "(already a candidate)" in the choices below. *)
@@ -9826,7 +9878,7 @@ let render_runtime (state : state) =
            c.push
              (Printf.sprintf "  %s %s%s%s%s"
                 (if picker.rlp_selected_row = Some offset then ">" else " ")
-                (Masc_tui_types.runtime_picker_label runtime)
+                (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
                 ctx def
                 (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
        c.push_divider ());

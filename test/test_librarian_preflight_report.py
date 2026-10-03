@@ -128,11 +128,81 @@ class ReportCliTest(unittest.TestCase):
                     full_llm_skipped=False,
                     preflight_domain_rejection=rejection,
                     jev_preflight={"status": "judged", "decision": "keep_current"}
-                    if path == "full_lane" else {"status": "failed"},
+                    if path == "full_lane" else {"status": "awaiting_answer"},
                 )
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["recorded_generation_skips"], 0)
+
+    def test_successful_full_lane_requires_a_nonblank_selected_slot(self) -> None:
+        for arm in ("baseline", "preflight"):
+            for slot in (None, "", "   ", 123, False, {}, []):
+                with self.subTest(arm=arm, slot=slot):
+                    manifest = fixture()
+                    run = manifest["pairs"][0][arm]["run"]
+                    if arm == "preflight":
+                        run["output"].update(
+                            jev_preflight={
+                                "status": "judged",
+                                "decision": "needs_generation",
+                            },
+                            generation_path="full_lane",
+                            full_llm_skipped=False,
+                        )
+                    run["selected_slot"] = slot
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
+
+    def test_preselection_failure_and_cancellation_keep_null_slot(self) -> None:
+        for status in ("failed", "cancelled"):
+            with self.subTest(status=status):
+                manifest = fixture()
+                run = manifest["pairs"][0]["baseline"]["run"]
+                run.update(status=status, selected_slot=None)
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    json.loads(result.stdout)["pairs"][0]["baseline_status"], status
+                )
+
+    def test_unevaluated_candidate_is_refused(self) -> None:
+        for status, reason in (
+            ("skipped", "librarian_preflight_disabled"),
+            ("skipped", "lane_disabled"),
+            ("skipped", "no_armed_destination"),
+            ("skipped", "keeper_excluded"),
+            ("ineligible", "working context requires generation"),
+            ("question_unavailable", "invalid choice set"),
+        ):
+            with self.subTest(status=status, reason=reason):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                run["selected_slot"] = "fixture-cli"
+                run["output"].update(
+                    jev_preflight={"status": status, "reason": reason},
+                    generation_path="full_lane",
+                    full_llm_skipped=False,
+                )
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+
+    def test_completed_assessment_cannot_leave_generation_not_entered(self) -> None:
+        for status in ("failed", "cancelled"):
+            for observation in ("judged", "skipped", "ineligible", "failed", "invalid_answer"):
+                with self.subTest(status=status, observation=observation):
+                    manifest = fixture()
+                    run = manifest["pairs"][0]["preflight"]["run"]
+                    run.update(status=status, selected_slot=None)
+                    run["output"].update(
+                        jev_preflight={"status": observation, "decision": "needs_generation"},
+                        generation_path="not_entered",
+                        full_llm_skipped=False,
+                    )
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
 
     def test_mismatched_or_contradictory_evidence_is_refused(self) -> None:
         for mode in (

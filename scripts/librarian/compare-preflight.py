@@ -63,6 +63,12 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
         raise ValueError("run must have a durably recorded terminal result")
     if "selected_slot" not in run:
         raise ValueError("terminal run must explicitly record selected_slot")
+    selected_slot = run["selected_slot"]
+    if selected_slot is not None:
+        text(selected_slot, "selected_slot")
+    output = obj(run.get("output"), "output")
+    if run["status"] == "succeeded" and output.get("generation_path") == "full_lane":
+        text(selected_slot, "successful full-lane selected_slot")
     elapsed = run.get("elapsed_s")
     if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
         raise ValueError("elapsed_s must be numeric")
@@ -74,7 +80,7 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     )
     prompt = obj(actual_input.get("prompt"), "prompt")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
-    return run, payload, obj(run.get("output"), "output"), float(elapsed)
+    return run, payload, output, float(elapsed)
 
 
 def compare(manifest: Json) -> dict[str, Json]:
@@ -129,13 +135,10 @@ def compare(manifest: Json) -> dict[str, Json]:
         path = preflight_output.get("generation_path")
         skipped = preflight_output.get("full_llm_skipped")
         status = observation.get("status")
-        if status == "skipped" and observation.get("reason") == "librarian_preflight_disabled":
-            raise ValueError("preflight arm must not disable preflight")
+        if status in ("skipped", "ineligible", "question_unavailable"):
+            raise ValueError("preflight arm must enter preflight evaluation")
         if status not in (
             "awaiting_answer",
-            "skipped",
-            "ineligible",
-            "question_unavailable",
             "failed",
             "invalid_answer",
             "judged",
@@ -166,10 +169,11 @@ def compare(manifest: Json) -> dict[str, Json]:
         elif rejection is not None:
             raise ValueError("domain rejection requires keep-current full-lane fallback")
         if path == "not_entered" and (
-            preflight.get("status") not in ("failed", "cancelled")
+            status != "awaiting_answer"
+            or preflight.get("status") not in ("failed", "cancelled")
             or preflight.get("selected_slot") is not None
         ):
-            raise ValueError("generation not entered requires failed or cancelled run without slot")
+            raise ValueError("generation not entered requires interrupted awaiting preflight without slot")
         if skipped:
             if (
                 path != "jev_no_change"

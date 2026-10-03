@@ -268,6 +268,7 @@ let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
       let stat = Unix.fstat fd in
       if stat.Unix.st_kind <> Unix.S_REG
+         || stat.Unix.st_nlink <> 1
          || stat.Unix.st_dev <> before.snapshot.device
          || stat.Unix.st_ino <> before.snapshot.inode then
         Error "sampling outcome blob changed before sync"
@@ -283,7 +284,8 @@ let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
             sync_parent parent_fd;
             let* after = read () in
             let parent_now = Unix.lstat parent in
-            if not (Fs_compat.equal_owned_regular_file_snapshot before.snapshot after.snapshot)
+            if (Unix.fstat fd).Unix.st_nlink <> 1
+               || not (Fs_compat.equal_owned_regular_file_snapshot before.snapshot after.snapshot)
                || before.content <> after.content
                || parent_now.Unix.st_kind <> Unix.S_DIR
                || parent_stat.Unix.st_dev <> parent_now.Unix.st_dev

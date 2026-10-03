@@ -27,13 +27,15 @@ The server exports each retained detail at
   "pairs": [
     {
       "sample_id": "one",
-      "baseline": {"run": "<paste the full unmodified exported run object here>"},
-      "preflight": {"run": "<paste the full unmodified exported run object here>"}
+      "baseline": "<replace this value with the complete baseline response object>",
+      "preflight": "<replace this value with the complete preflight response object>"
     }
   ]
 }
 ```
 
+Each response has the shape `{"generated_at": "...", "run": {...}}`. Assign
+that entire object directly to the arm; do not wrap it in another `run` object.
 Replace the placeholders with the actual full objects. The input payloads,
 including the rendered prompt SHA, must match exactly. Each run and sample ID
 may occur only once. Missing/unavailable payloads, missing timings and
@@ -51,6 +53,12 @@ binary's source identity or the operator's environment declaration. The
 manifest digest and pair-level input hashes bind the report to its supplied
 exports without copying prompts into the report. Preserve the manifest
 privately: its raw exports can contain Keeper instructions and conversation.
+
+Each pair retains `preflight_observation`, including its own `status`, decision
+or failure, independently of `preflight_status` (the whole Librarian run).
+A successful fallback can therefore still show a failed JEV evaluation.
+Received judgments require complete typed provenance and a valid probability
+distribution; incomplete exports are rejected for every evidence kind.
 
 `recorded_generation_skips` counts accepted skip records. It is not an actual
 provider-request counter. `full_lane` may refuse admission before dispatch or

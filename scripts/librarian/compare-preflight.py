@@ -284,6 +284,16 @@ def validate_observation(observation: dict[str, Json]) -> None:
     status = observation.get("status")
     received_fields = ("destination", "model", "request_body_sha256", "decision",
                        "probabilities", "confidence", "passed_over")
+    forbidden = {
+        "awaiting_answer": ("reason", "failure"),
+        "skipped": ("failure",), "ineligible": ("failure",),
+        "question_unavailable": ("failure",), "failed": ("reason",),
+        "invalid_answer": ("failure", "decision", "confidence", "probabilities"),
+        "judged": ("failure", "reason"),
+    }
+    for key in forbidden.get(str(status), ()):
+        if key in observation:
+            raise ValueError(f"preflight {status} must not report {key}")
     if status in ("awaiting_answer", "failed", "skipped", "ineligible", "question_unavailable") and any(key in observation for key in received_fields):
         raise ValueError("answerless preflight cannot contain received-answer evidence")
     if status in ("awaiting_answer", "skipped", "ineligible", "question_unavailable"):

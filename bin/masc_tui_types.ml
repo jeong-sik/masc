@@ -5647,6 +5647,7 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: (string * string) option;
+  mutable schedule_form_refusal: (string * string * float) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -8304,6 +8305,7 @@ let create_state
   keeper_schedules_error = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
   standalone_lanes = None;

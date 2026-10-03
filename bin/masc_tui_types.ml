@@ -156,6 +156,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
+;;
+
 (* Retained input belongs to the complete observed server workspace. Local
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function
@@ -3358,28 +3373,48 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"
@@ -5201,11 +5236,18 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
+  (* Navigation intent only: never a retained Keeper row or read authority. *)
+  mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
+  mutable keeper_sandbox_logs_origin: Tui_decode.server_identity option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5238,6 +5280,8 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  (* Polling intent contains no consent URL or presentation from the old read. *)
+  mutable identity_login_intents: (Tui_decode.server_identity * string * string) list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -5711,6 +5755,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -6202,10 +6247,73 @@ type state = {
   refresh_interval: float;
 }
 
+(* Pending reads and post-action offers belong to the workspace that admitted
+   them. A successful health response with missing paths is still unread;
+   only comparable paths can confirm that an origin has been replaced. *)
+let server_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+let reconcile_detail_intent_origins (state : state) reading =
+  match reading with
+  | Error _ -> ()
+  | Ok (current : Tui_decode.server_identity) ->
+      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let foreign = function
+          | None -> false
+          | Some (origin : Tui_decode.server_identity) ->
+              not (String.equal (canonical_path origin.sid_base_path)
+                     (canonical_path current.sid_base_path)
+                   && String.equal (canonical_path origin.sid_masc_root)
+                        (canonical_path current.sid_masc_root))
+        in
+        state.identity_login_intents <- List.filter
+          (fun (origin, _, _) -> not (foreign (Some origin)))
+          state.identity_login_intents;
+        (match state.detail_focus_recovery with
+         | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
+         | Some _ | None -> ());
+        if foreign state.connector_unbind_offer_origin then begin
+          state.connector_unbind_offer_pending <- [];
+          state.connector_unbind_offer_origin <- None
+        end;
+        if foreign state.keeper_sandbox_logs_origin then begin
+          state.keeper_sandbox_logs_requested <- None;
+          state.keeper_sandbox_logs_origin <- None
+        end
+      end
+
+
+(* Keeper/provider keys do not include a workspace. Authority withdrawal must
+   retire both queued responses and consent already presented by that origin. *)
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
+
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun (origin, keeper, _) ->
+       String.equal keeper keeper_name
+       && server_workspace_matches ~expected:(Some origin)
+            (match state.server_identity with Some current -> Ok current | None -> Error "unread"))
+       state.identity_login_intents
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -6238,6 +6346,10 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider) ->
+      not (String.equal keeper keeper_name && String.equal provider provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6248,9 +6360,19 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       state.identity_login_intents <-
+         (origin, login.ils_keeper, login.ils_provider) :: state.identity_login_intents
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider_id) ->
+      not (String.equal keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6618,16 +6740,48 @@ let settled_log_for_request state ~keeper_name request_id =
     state.msg_settled_logs
 ;;
 
-let settled_logs_for_keeper state keeper_name =
-  state.msg_settled_logs
+(* Choose one execution source before classifying it as settled or observed.
+   Canonical identity only breaks equal coverage; it cannot discard a sibling
+   that already holds the ending or more of the journal. *)
+let turn_log_preferred ~candidate ~held =
+  let candidate_complete = turn_log_holds_the_turn candidate in
+  let held_complete = turn_log_holds_the_turn held in
+  if candidate_complete <> held_complete then candidate_complete
+  else
+    let coverage =
+      match Masc_tui_keeper_chat_log.resume_position candidate.tl_log,
+            Masc_tui_keeper_chat_log.resume_position held.tl_log with
+      | Masc.Keeper_chat_event_log.After_seq candidate_seq,
+        Masc.Keeper_chat_event_log.After_seq held_seq -> Int.compare candidate_seq held_seq
+      | After_seq _, Whole_turn -> 1
+      | Whole_turn, After_seq _ -> -1
+      | Whole_turn, Whole_turn -> 0
+    in
+    if coverage <> 0 then coverage > 0
+    else
+      turn_log_request_id candidate = turn_log_execution_id candidate
+      && turn_log_request_id held <> turn_log_execution_id held
+;;
+
+let selected_source_logs_for_keeper state keeper_name =
+  (state.msg_settled_logs
+   @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+   @ Option.to_list state.msg_live)
   |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
   |> List.fold_left (fun selected log ->
     let execution_id = turn_log_execution_id log in
     match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
     | None -> selected @ [log]
-    | Some _ when turn_log_request_id log = execution_id ->
+    | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
       List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
     | Some _ -> selected) []
+;;
+
+(* Existing consumers ask for held sources, but selection must also account
+   for every subscription that the renderer can draw. *)
+let settled_logs_for_keeper state keeper_name =
+  selected_source_logs_for_keeper state keeper_name
+  |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
 ;;
 
 (* The requests a history load for [keeper_name] reads no journal for: every
@@ -6858,10 +7012,9 @@ let loaded_turn_has_ended state ~keeper_name request_id =
 
    A log a request of this pane
    is feeding is the live block, not this ([in_flight]); so is a journal log
-   bound to the same execution as the live one -- a batch member's journal
-   carries [Batch_bound], so the two can share an execution while the pane
-   holds only its own request in flight ([is_live], the test the settled
-   blocks apply). A stream this pane opened and lost -- settled without hearing
+   bound to an execution whose selected source is a pane-owned subscription.
+   Source selection compares every held and in-flight sibling before this
+   classification. A stream this pane opened and lost -- settled without hearing
    the end, [msg_live] let go of it ([settle_turn_log]) -- is observed from
    then on: the journal reads feed that same log in place
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
@@ -6888,13 +7041,6 @@ let observed_logs_for_keeper state keeper_name =
         String.equal entry.sent_request.request_id (turn_log_request_id log))
       state.msg_inflight
   in
-  let is_live log =
-    match state.msg_live with
-    | Some live ->
-        String.equal (turn_log_keeper_name live) keeper_name
-        && String.equal (turn_log_execution_id live) (turn_log_execution_id log)
-    | None -> false
-  in
   settled_logs_for_keeper state keeper_name
   |> List.filter (fun log ->
          (match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
@@ -6903,8 +7049,7 @@ let observed_logs_for_keeper state keeper_name =
           | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
           | Masc_tui_keeper_chat_transcript.Waiting -> false)
          && not (turn_log_holds_the_turn log)
-         && (not (in_flight log))
-         && (not (is_live log)))
+         && (not (in_flight log)))
 ;;
 
 (* Whether the pane draws an observed turn's reply text itself. The footer's
@@ -7386,6 +7531,39 @@ let detail_read_waiting state ~tab ~keeper =
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
+
+let remember_keeper_detail_focus state =
+  match state.detail_focus_recovery, state.view, state.workspace_identity,
+        state.server_identity, selected_keeper state with
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
+      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+  | _ -> ()
+
+let restore_keeper_detail_focus state =
+  match state.detail_focus_recovery with
+  | None -> false
+  | Some _ when state.view <> Keepers Keeper_detail && state.view <> Keepers Keeper_list ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (_, _, tab) when state.detail_tab <> tab ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (origin, name, tab)
+    when state.workspace_identity = Workspace_identity_match
+      && state.local_workspace = Local_workspace_read
+      && Option.is_none state.keepers_error
+      && server_workspace_matches ~expected:(Some origin)
+           (match state.server_identity with Some value -> Ok value | None -> Error "unread") ->
+      state.detail_focus_recovery <- None;
+      (match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers with
+       | None -> false
+       | Some cursor ->
+           state.keeper_cursor <- cursor;
+           state.detail_tab <- tab;
+           state.view <- Keepers Keeper_detail;
+           true)
+  | Some _ -> false
 
 let keeper_detail_target_matches state keeper_name =
   match selected_keeper state with
@@ -7919,11 +8097,15 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
+  detail_focus_recovery = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
+  keeper_sandbox_logs_origin = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -7936,6 +8118,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_intents = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;
@@ -8180,6 +8363,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;
@@ -8676,18 +8860,18 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       state.msg_history
   in
   let held =
-    settled_logs_for_keeper state keeper_name
+    selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
     |> List.map held_turn_of_log
   in
   let loaded = rows_the_logs_do_not_draw ~held loaded in
   let session = rows_the_logs_do_not_draw ~held session in
-  (* Reply_details can reach a partial journal before RUN_FINISHED. That log
-     already draws the exact final reply, so the durable row must not repeat
-     it while the rest of the journal is still being read. Earlier progress
-     text without Reply_details has no authority to replace the final row. *)
+  (* Reply_details can reach a selected partial source before RUN_FINISHED.
+     That source already draws the exact final reply, so the durable row must
+     not repeat it. A losing sibling's reply cannot suppress a durable row
+     when the selected source has only progress text. *)
   let partial_replies =
-    observed_logs_for_keeper state keeper_name
+    selected_source_logs_for_keeper state keeper_name
     |> List.filter_map (fun log ->
          if turn_log_holds_the_turn log then None
          else if
@@ -8722,10 +8906,10 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
    loaded keeper, the session rows, the settled logs (whose held turns leave
    the timeline), and which requests still wait in the queue. The lists are
    replaced rather than mutated in place when the conversation changes, so
-   physical equality on them says whether
-   the last answer still holds; the queue reading is compared by value, so a
-   queue or an inflight turn that changed in a way the rows do not depend on
-   (a live turn streaming, another keeper's line) keeps the answer.
+   physical equality on them says whether the last answer still holds.
+   Selected transcripts also carry their revision: an in-place Reply_details
+   arrival changes durable suppression even without a list replacement.
+   The queue reading is compared by value.
 
    Module state rather than a field on [state], like the renderer's markdown
    cache: a derived reading is not authority, and the input layer that reads
@@ -8736,7 +8920,7 @@ type chat_rows_memo = {
   crm_loaded : msg_entry list;
   crm_history : msg_entry list;
   crm_settled_logs : turn_log list;
-  crm_observed_logs : turn_log list;
+  crm_selected_sources : (turn_log * int) list;
   crm_queued_request_ids : string list;
   crm_rows : msg_entry list;
 }
@@ -8744,7 +8928,8 @@ type chat_rows_memo = {
 let chat_rows_memo : chat_rows_memo option ref = ref None
 
 let chat_rows_for (state : state) keeper_name =
-  let observed_logs = observed_logs_for_keeper state keeper_name in
+  let selected_sources = selected_source_logs_for_keeper state keeper_name
+    |> List.map (fun log -> log, Masc_tui_keeper_chat_transcript.revision log.tl_transcript) in
   let queued_request_ids =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
@@ -8757,7 +8942,9 @@ let chat_rows_for (state : state) keeper_name =
          && memo.crm_loaded == state.msg_loaded
          && memo.crm_history == state.msg_history
          && memo.crm_settled_logs == state.msg_settled_logs
-         && List.equal ( == ) memo.crm_observed_logs observed_logs
+         && List.equal (fun (held, revision) (log, current_revision) ->
+              held == log && revision = current_revision)
+              memo.crm_selected_sources selected_sources
          && List.equal String.equal memo.crm_queued_request_ids
               queued_request_ids ->
       memo.crm_rows
@@ -8772,7 +8959,7 @@ let chat_rows_for (state : state) keeper_name =
             crm_loaded = state.msg_loaded;
             crm_history = state.msg_history;
             crm_settled_logs = state.msg_settled_logs;
-            crm_observed_logs = observed_logs;
+            crm_selected_sources = selected_sources;
             crm_queued_request_ids = queued_request_ids;
             crm_rows = rows;
           };

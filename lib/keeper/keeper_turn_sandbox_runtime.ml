@@ -2945,3 +2945,53 @@ let cleanup (t : t) =
     set_state t Not_started;
     ignore container_name
 ;;
+
+type build_cleanup_report = { cleaned : int; failed : int }
+
+(* Called only while the Owner holds its exclusive maintenance slot. Attach to
+   the recorded guest; never boot, stop, pause, or refresh its credentials. *)
+let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~retention_sec () =
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Keeper_types_profile_sandbox.Micro_vm, Some Keeper_microvm_backend.Apple_container ->
+    let backend = Keeper_microvm_backend.Apple_container in
+    let container_name = microvm_container_name ~config ~keeper_name:meta.name
+        ~network_mode:meta.network_mode in
+    let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io () in
+    (match probe_microvm_container_state ~timeout_sec ~backend container_name with
+     | Ok Keeper_sandbox_runtime.Docker_container_running ->
+       (match Embedded_config.read "scripts/keeper-build-cleanup.py" with
+        | None -> Error "embedded Keeper cleanup payload missing"
+        | Some stdin_content ->
+          let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name in
+          (match microvm_attached_endpoint ~config ~meta () with
+           | Error _ as error -> error
+           | Ok endpoint ->
+             let observation = ref (Keeper_sandbox_remote.Execution_unavailable
+                                      Keeper_sandbox_remote.Request_not_sent) in
+             let run = Keeper_sandbox_remote.runner ~timeout_sec
+                 ~on_receipt:(fun receipt -> observation := receipt) endpoint in
+             let outcome = run ~on_stdout_chunk:None ~on_stderr_chunk:None
+                 ~stdin_content:(Some stdin_content) ~env:[||] ~cwd:None
+                 ~argv:["python3"; "-"; "--guest-root"; root; "--idle-hours";
+                        string_of_float (retention_sec /. Masc_time_constants.hour); "--apply"] in
+             match outcome, !observation with
+             | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ },
+               Keeper_sandbox_remote.Execution_observed _ ->
+             (try
+                let open Yojson.Safe.Util in
+                let entries = Yojson.Safe.from_string stdout |> member "entries" |> to_list in
+                let count action = List.fold_left (fun n entry ->
+                    if member "action" entry = `String action then n + 1 else n) 0 entries in
+                Ok (Some { cleaned = count "cleaned"; failed = count "clean failed" })
+              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+                Error "invalid Keeper cleanup report")
+             | Masc_exec.Sandbox_target.Transport_failed { reason; _ }, _ ->
+               Error ("Keeper guest cleanup transport failed: " ^ reason)
+             | _, Keeper_sandbox_remote.Execution_unavailable _ ->
+               Error "Keeper guest cleanup exit receipt missing"
+             | _ -> Error "Keeper guest cleanup command failed"))
+     | Ok (Keeper_sandbox_runtime.Docker_container_stopped
+          | Keeper_sandbox_runtime.Docker_container_absent) -> Ok None
+     | Error detail -> Error detail)
+  | _ -> Ok None

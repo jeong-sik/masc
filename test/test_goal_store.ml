@@ -78,7 +78,7 @@ let test_delete_goal_bumps_version () =
   with_workspace @@ fun config ->
   let g = make_goal "g-1" "to delete" in
   Goal_store.write_state config
-    { version = 10; updated_at = iso_now (); goals = [g] };
+    { pending_events = []; version = 10; updated_at = iso_now (); goals = [g] };
   let v_before = (available config).version in
   check int "initial version" 10 v_before;
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
@@ -94,7 +94,7 @@ let test_multiple_deletes_each_bump () =
   let goals = List.init 3 (fun i ->
     make_goal (Printf.sprintf "g-%d" i) (Printf.sprintf "goal %d" i)) in
   Goal_store.write_state config
-    { version = 5; updated_at = iso_now (); goals };
+    { pending_events = []; version = 5; updated_at = iso_now (); goals };
   let v0 = (available config).version in
   List.iter (fun i ->
     let _ = Goal_store.delete_goal config
@@ -108,7 +108,7 @@ let test_delete_nonexistent_does_not_bump () =
   with_workspace @@ fun config ->
   let g = make_goal "exists" "one goal" in
   Goal_store.write_state config
-    { version = 42; updated_at = iso_now (); goals = [g] };
+    { pending_events = []; version = 42; updated_at = iso_now (); goals = [g] };
   let v_before = (available config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
    | Error (Goal_store.Unknown_goal _) -> ()
@@ -123,7 +123,7 @@ let test_updated_at_also_refreshed () =
   let g = make_goal "g-1" "x" in
   let stale_ts = "2020-01-01T00:00:00Z" in
   Goal_store.write_state config
-    { version = 1; updated_at = stale_ts; goals = [g] };
+    { pending_events = []; version = 1; updated_at = stale_ts; goals = [g] };
   let _ = Goal_store.delete_goal config ~goal_id:"g-1" in
   let after = available config in
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
@@ -135,7 +135,7 @@ let test_delete_goal_prunes_goal_task_links () =
   let preserved = make_goal "g-2" "preserved goal" in
   Goal_store.write_state
     config
-    { version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
   Workspace_goal_index.write_goal_task_links
     config
     [ "g-1", [ "task-a"; "task-b" ]; "g-2", [ "task-c" ] ];
@@ -162,7 +162,7 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
   @@ fun config ->
   let deleted = make_goal "g-1" "deleted goal" in
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ deleted ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ deleted ] };
   Workspace_goal_index.write_goal_task_links config [ "g-1", [ "task-a" ] ];
   let links_path = Workspace_goal_index.goal_task_links_path config in
   Sys.remove links_path;
@@ -281,7 +281,7 @@ let test_other_unknown_goal_field_still_fails () =
   with_workspace @@ fun config ->
   let goal = make_goal "unknown-field" "unknown field fails" in
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   add_goal_field config "unexpected_assignment" (`String "still-closed");
   (match unavailable config with
    | { reason = Goal_store.Schema_rejected { field; _ };
@@ -305,7 +305,7 @@ let test_undecodable_store_read_error_names_path () =
   with_workspace @@ fun config ->
   let goal = make_goal "read-error" "read error names the store path" in
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   add_goal_field config "unexpected_assignment" (`String "still-closed");
   match Goal_store.list_goals_result config () with
   | Ok _ -> fail "undecodable store listed goals"
@@ -448,7 +448,7 @@ let test_update_missing_goal_does_not_bump () =
   with_workspace @@ fun config ->
   let goal = make_goal "exists" "one goal" in
   Goal_store.write_state config
-    { version = 9; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; version = 9; updated_at = iso_now (); goals = [ goal ] };
   let before = available config in
   (match
      Goal_store.update_goal_if_phase config ~goal_id:"ghost"
@@ -465,7 +465,7 @@ let test_update_goal_if_phase_refuses_stale_phase () =
   with_workspace @@ fun config ->
   let goal = make_goal "cas" "concurrent transition refusal" in
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   let before = available config in
   (* A concurrent transition lands first: the goal leaves Executing. *)
   (match
@@ -513,7 +513,7 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
     }
   in
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
   let raw = Fs_compat.load_file (Goal_store.goals_path config) in
   check bool "raw file has no original invalid byte" false
     (String.contains raw '\255');
@@ -535,7 +535,7 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
   with_workspace @@ fun config ->
   Unix.mkdir (goals_recovery_path config) 0o755;
   let goal = make_goal "recovery-mirror-fail" "recovery mirror fail" in
-  let state = { Goal_store.version = 3; updated_at = iso_now (); goals = [ goal ] } in
+  let state = { Goal_store.pending_events = []; version = 3; updated_at = iso_now (); goals = [ goal ] } in
   (match Goal_store.write_state_result config state with
    | Ok () -> ()
    | Error msg ->
@@ -559,7 +559,7 @@ let test_criterion_edits_invalidate_proof_phase () =
   check bool "creation has revision" true (original.criterion_revision <> "");
   let completed = { original with phase = Goal_phase.Completed;
     last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
-  Goal_store.write_state config { version = 1; updated_at = iso_now (); goals = [completed] };
+  Goal_store.write_state config { pending_events = []; version = 1; updated_at = iso_now (); goals = [completed] };
   let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
       ~target_value:"400ms" ~priority:1 ~due_date:"2026-09-23" () in
   check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
@@ -573,11 +573,11 @@ let test_criterion_edits_invalidate_proof_phase () =
   check bool "ABA cannot restore old proof identity" false
     (Goal_store.criterion_equal (Goal_store.criterion_of_goal original) (Goal_store.criterion_of_goal restored));
   let verifying = { restored with phase = Goal_phase.Verifying } in
-  Goal_store.write_state config { version = 4; updated_at = iso_now (); goals = [verifying] };
+  Goal_store.write_state config { pending_events = []; version = 4; updated_at = iso_now (); goals = [verifying] };
   let renamed = upsert_exn config ~id:original.id ~title:"Another measurement" () in
   check bool "title edit supersedes active review" true (renamed.phase = Goal_phase.Executing);
   let dropped = { renamed with phase = Goal_phase.Dropped } in
-  Goal_store.write_state config { version = 6; updated_at = iso_now (); goals = [dropped] };
+  Goal_store.write_state config { pending_events = []; version = 6; updated_at = iso_now (); goals = [dropped] };
   let updated = upsert_exn config ~id:original.id ~metric:"p95" () in
   check bool "criterion edit does not reopen dropped Goal" true (updated.phase = Goal_phase.Dropped)
 
@@ -799,7 +799,7 @@ let test_source_missing_after_init () =
   with_workspace @@ fun config ->
   let stamp = "2026-09-08T16:20:13Z" in
   Goal_store.write_state config
-    { version = 7; updated_at = stamp; goals = [ make_goal "g-1" "survivor" ] };
+    { pending_events = []; version = 7; updated_at = stamp; goals = [ make_goal "g-1" "survivor" ] };
   Sys.remove (Goal_store.goals_path config);
   (match unavailable config with
    | { file; reason = Goal_store.Missing_after_init;
@@ -852,7 +852,7 @@ let test_source_unreadable_eacces () =
   end;
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ make_goal "g-1" "locked out" ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ make_goal "g-1" "locked out" ] };
   let path = Goal_store.goals_path config in
   Unix.chmod path 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) (fun () ->
@@ -866,7 +866,7 @@ let test_source_unreadable_eacces () =
 let test_source_available_never_consults_the_mirror () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { version = 2; updated_at = iso_now ();
+    { pending_events = []; version = 2; updated_at = iso_now ();
       goals = [ make_goal "g-1" "first"; make_goal "g-2" "second" ] };
   write_raw (mirror_path config) "{broken";
   let state = available config in
@@ -896,7 +896,7 @@ let test_mirror_four_states_are_evidence () =
   Unix.rmdir mirror;
   let stamp = "2026-09-09T00:10:29Z" in
   Goal_store.write_state config
-    { version = 3; updated_at = stamp; goals = phase_fixture_goals () };
+    { pending_events = []; version = 3; updated_at = stamp; goals = phase_fixture_goals () };
   write_raw primary "{broken";
   expect "decodes" (function
     | Goal_store.Mirror_decodes { goal_count = 5; updated_at } -> String.equal updated_at stamp
@@ -973,7 +973,7 @@ let test_writers_refuse_unavailable_and_keep_bytes () =
 let test_find_goal_three_arms () =
   with_workspace @@ fun config ->
   Goal_store.write_state config
-    { version = 1; updated_at = iso_now (); goals = [ make_goal "known" "found" ] };
+    { pending_events = []; version = 1; updated_at = iso_now (); goals = [ make_goal "known" "found" ] };
   (match Goal_store.find_goal config ~goal_id:"known" with
    | Goal_store.Goal_found goal -> check string "found the row" "found" goal.title
    | Goal_store.Goal_absent -> fail "known id read as absent"
@@ -1039,9 +1039,207 @@ let test_first_write_creates_the_store () =
   check int "first write holds one goal" 1 (List.length state.goals);
   check int "first write starts the version counter" 2 state.version
 
+let event_rows path =
+  Fs_compat.load_file path |> String.split_on_char '\n'
+  |> List.filter (fun line -> line <> "") |> List.map Yojson.Safe.from_string
+
+let test_audit_outbox_retains_creation_and_deduplicates_retry () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
+  Unix.mkdir path 0o700;
+  let goal, events = match Goal_store.upsert_goal_with_events config ~actor:"original-creator"
+      ~title:"durable attribution" ~metric:"proof" ~target_value:"1" () with
+    | Ok (goal, `created, events) -> goal, events
+    | Ok _ -> fail "expected a creation"
+    | Error error -> fail (write_error_msg error) in
+  check int "snapshot intent committed with the Goal" 1 (List.length events);
+  (match Goal_store.flush_pending_events config with
+   | Error _ -> () | Ok () -> fail "a directory cannot accept audit rows");
+  let retained = available config in
+  check int "failed append keeps the intent" 1 (List.length retained.pending_events);
+  let event = List.hd retained.pending_events in
+  check string "creator survives a disk reload" "original-creator"
+    Yojson.Safe.Util.(event.payload |> member "actor" |> to_string);
+  check string "pending snapshot belongs to committed Goal" goal.id event.goal_id;
+  check int "revision is assigned by the Goal commit" retained.version event.store_revision;
+  check int "strict snapshot reader receives that same committed witness" retained.version
+    Yojson.Safe.Util.(event.payload |> member "store_version" |> to_int);
+  let mirror = Yojson.Safe.from_file (goals_recovery_path config) in
+  check int "recovery mirror also holds the audit intent" 1
+    Yojson.Safe.Util.(mirror |> member "pending_events" |> to_list |> List.length);
+  Unix.rmdir path;
+  (* Crash window: ledger publication completed, but the durable Goal intent
+     still exists because its acknowledgement did not commit. *)
+  Fs_compat.append_jsonl path (Goal_store.pending_event_to_yojson event);
+  (match Goal_store.flush_pending_events config with
+   | Ok () -> () | Error detail -> fail detail);
+  let rows = event_rows path in
+  check int "retry never duplicates the creator event" 1 (List.length rows);
+  check string "creation did not become an update" "goal_created"
+    Yojson.Safe.Util.(List.hd rows |> member "event_type" |> to_string);
+  let acknowledged = available config in
+  check int "successful delivery acknowledges its intent" 0 (List.length acknowledged.pending_events);
+  check int "acknowledgement advances the store version" (retained.version + 1) acknowledged.version;
+  check int "event retains the original mutation revision" retained.version
+    Yojson.Safe.Util.(List.hd rows |> member "store_revision" |> to_int);
+  let collision = { event with payload = `Assoc [ "actor", `String "another-creator" ] } in
+  Goal_store.write_state config { acknowledged with pending_events = [collision] };
+  (match Goal_store.flush_pending_events config with
+   | Error _ -> () | Ok () -> fail "one event ID cannot acknowledge different content");
+  check int "conflicting identity remains pending" 1 (List.length (available config).pending_events);
+  check int "conflicting identity does not append" 1 (List.length (event_rows path));
+  Goal_store.write_state config { acknowledged with pending_events = [event; collision] };
+  (match Goal_store.load_source config with
+   | Goal_store.Unavailable { reason = Schema_rejected { field = "pending_events"; _ }; _ } -> ()
+   | _ -> fail "duplicate IDs in one pending batch must refuse the source");
+  (match Goal_store.flush_pending_events config with
+   | Error _ -> () | Ok () -> fail "a duplicate pending batch cannot publish");
+  check int "duplicate pending batch leaves the ledger untouched" 1 (List.length (event_rows path))
+
+let test_audit_outbox_preserves_malformed_complete_rows () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
+  let prefix = "{\"event_id\":\"old-before\"}\nBROKEN\n{\"event_id\":\"old-after\"}\n" in
+  let write contents =
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents) in
+  write prefix;
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"audit continues" ~metric:"proof" ~target_value:"1" () with
+    | Ok (_, _, events) -> events
+    | Error error -> fail (write_error_msg error) in
+  let event = List.hd events in
+  let flush () = match Goal_store.flush_pending_events config with
+    | Ok () -> () | Error detail -> fail detail in
+  flush ();
+  check int "first tick acknowledges delivery" 0
+    (List.length (available config).pending_events);
+  let delivered = Fs_compat.load_file path in
+  flush ();
+  check string "second tick does not duplicate delivery" delivered (Fs_compat.load_file path);
+  let other = upsert_exn config ~title:"another Goal" ~metric:"proof" ~target_value:"1" () in
+  let phase = `Assoc ["goal_id", `String other.id; "event_type", `String "goal_phase";
+      "payload", `Assoc ["phase", Goal_phase.to_yojson Goal_phase.Dropped]] in
+  (match Goal_store.append_audit_event_after_pending config phase with
+   | Ok () -> () | Error detail -> fail detail);
+  let contents = Fs_compat.load_file path in
+  check string "historical bytes remain intact" prefix
+    (String.sub contents 0 (String.length prefix));
+  let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
+  check int "reader still reports malformed evidence" 1 malformed;
+  check int "both historical rows and both new events readable" 4 (List.length rows);
+  check int "creation delivered exactly once" 1
+    (List.filter (fun row -> Json_util.get_string row "event_id" = Some event.event_id)
+       rows |> List.length);
+  check bool "unrelated phase delivered" true (List.exists (Yojson.Safe.equal phase) rows);
+  let acknowledged = available config in
+  Goal_store.write_state config { acknowledged with pending_events = [event] };
+  write (contents ^ "{\"torn\":");
+  let torn = Fs_compat.load_file path in
+  (match Goal_store.flush_pending_events config with
+   | Error _ -> () | Ok () -> fail "incomplete tail must still refuse delivery");
+  check string "incomplete tail unchanged" torn (Fs_compat.load_file path);
+  check int "incomplete tail retains intent" 1
+    (List.length (available config).pending_events);
+  write contents;
+  let collision = { event with payload = `Assoc ["actor", `String "different"] } in
+  Goal_store.write_state config { acknowledged with pending_events = [collision] };
+  (match Goal_store.flush_pending_events config with
+   | Error _ -> () | Ok () -> fail "malformed history must not conceal an ID collision");
+  check string "collision keeps every byte" contents (Fs_compat.load_file path);
+  check int "collision retains intent" 1 (List.length (available config).pending_events)
+
+let test_pending_phase_precedes_drop_and_survives_retry () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
+  let goal = upsert_exn config ~title:"Changed criterion then dropped"
+      ~metric:"proof" ~target_value:"1" () in
+  let state = available config in
+  Goal_store.write_state config
+    { state with goals = [{ goal with phase = Goal_phase.Verifying }] };
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"editor"
+      ~id:goal.id ~target_value:"2" () with
+    | Ok (updated, _, events) ->
+        check bool "criterion edit returns to execution" true
+          (updated.phase = Goal_phase.Executing);
+        events
+    | Error error -> fail (write_error_msg error) in
+  (match Goal_store.update_goal_if_phase config ~goal_id:goal.id
+      ~expected_phase:Goal_phase.Executing (fun current ->
+        { current with phase = Goal_phase.Dropped }) with
+   | Ok _ -> () | Error error -> fail (write_error_msg error));
+  let closed_at = "2026-10-01T12:00:00Z" in
+  let dropped = `Assoc
+    [ "ts", `String closed_at; "goal_id", `String goal.id;
+      "event_type", `String "goal_phase";
+      "payload", `Assoc ["phase", `String "dropped"; "actor", `String "operator"] ] in
+  (match Goal_store.append_audit_event_after_pending config dropped with
+   | Ok () -> () | Error detail -> fail detail);
+  let rows = event_rows path in
+  let phases = List.filter_map (fun row ->
+    let open Yojson.Safe.Util in
+    if member "event_type" row = `String "goal_phase" then
+      Some (row |> member "payload" |> member "phase" |> to_string)
+    else None) rows in
+  check (list string) "pending execution precedes terminal drop"
+    ["executing"; "dropped"] phases;
+  (* Restore acknowledged IDs to model a failed acknowledgement followed by retry. *)
+  let acknowledged = available config in
+  Goal_store.write_state config { acknowledged with pending_events = events };
+  (match Goal_store.flush_pending_events config with
+   | Ok () -> () | Error detail -> fail detail);
+  check string "retry leaves ledger order and bytes intact"
+    (String.concat "\n" (List.map Yojson.Safe.to_string rows))
+    (String.concat "\n" (List.map Yojson.Safe.to_string (event_rows path)));
+  (match Goal_store.delete_goal config ~goal_id:goal.id with
+   | Ok _ -> () | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  let history = Dashboard_goals.unlisted_goal_history_of_rows
+      ~listed:[] ~rows:(event_rows path) ~malformed_lines:0 in
+  let open Yojson.Safe.Util in
+  let row = List.hd (history |> member "unlisted" |> to_list) in
+  check string "deleted Goal retains terminal outcome" "dropped"
+    (row |> member "final_phase" |> to_string);
+  check string "deleted Goal retains closing timestamp" closed_at
+    (row |> member "closed_at" |> to_string)
+
+let test_audit_intents_survive_other_goal_mutations () =
+  with_workspace @@ fun config ->
+  let goal, initial = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"retained" ~metric:"proof" ~target_value:"1" () with
+    | Ok (goal, _, events) -> goal, events
+    | Error error -> fail (write_error_msg error) in
+  let check_pending label =
+    check (list string) label (List.map (fun e -> e.Goal_store.event_id) initial)
+      (List.map (fun e -> e.Goal_store.event_id) (available config).pending_events) in
+  (match Goal_store.upsert_goal config ~id:goal.id ~priority:1 () with
+   | Ok _ -> () | Error error -> fail (write_error_msg error));
+  check_pending "ordinary upsert preserves audit intents";
+  (match Goal_store.update_goal_if_phase config ~goal_id:goal.id
+       ~expected_phase:Goal_phase.Executing (fun current ->
+         { current with phase = Goal_phase.Dropped }) with
+   | Ok _ -> () | Error error -> fail (write_error_msg error));
+  check_pending "conditional phase update preserves audit intents";
+  (match Goal_store.transact_goal config ~goal_id:goal.id (fun current ->
+       Ok ({ current with priority = 2 }, ())) with
+   | Ok _ -> () | Error error -> fail (write_error_msg error));
+  check_pending "transaction preserves audit intents";
+  (match Goal_store.delete_goal config ~goal_id:goal.id with
+   | Ok _ -> () | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  check_pending "deletion preserves audit attribution"
+
 let () =
   run "Goal_store"
-    [ ( "proof identity",
+    [ ( "audit outbox",
+        [ test_case "malformed complete history preserves delivery and refusals" `Quick
+            test_audit_outbox_preserves_malformed_complete_rows;
+          test_case "failed creation delivery and duplicate-safe retry" `Quick
+            test_audit_outbox_retains_creation_and_deduplicates_retry;
+          test_case "intents survive every mutator" `Quick
+            test_audit_intents_survive_other_goal_mutations;
+          test_case "pending phase precedes drop and retry preserves history" `Quick
+            test_pending_phase_precedes_drop_and_survives_retry ] );
+      ( "proof identity",
         [ test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
           test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;

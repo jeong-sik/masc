@@ -2614,6 +2614,27 @@ let test_chat_stop_after_a_failed_settle_names_nothing_current () =
    an operator cancellation. The slot it holds carries a token like any other
    running turn, so the TUI offers Esc for it; the Owner answers and cancels
    nothing. *)
+let test_background_maintenance_defers_to_queued_chat () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:None ~keeper_name:"maintenance-queued"
+    ~initial_meta:(Some (make_meta "maintenance-queued")) ()) in
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:(operation_id "maintenance-queued-op") ~source:operation_source
+    ~input:(operation_input "user waiting")));
+  (match Owner.run_maintenance_if_idle ~defer_to_chat:true owner
+      (fun () -> fail "maintenance ran ahead of queued chat") with
+   | Ok (`Busy _) -> ()
+   | Ok (`Ran _) -> fail "background maintenance took the slot"
+   | Error error -> fail (Owner.error_to_string error));
+  (* Existing explicit maintenance remains usable for queue operations. *)
+  match Owner.run_maintenance_if_idle owner (fun () -> 7) with
+  | Ok (`Ran 7) -> ()
+  | _ -> fail "explicit maintenance no longer admits its transaction"
+;;
+
 let test_chat_stop_leaves_a_maintenance_run_alone () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -5091,6 +5112,8 @@ let () =
             test_stale_chat_interrupt_cannot_cancel_a_successor
         ; test_case "chat stop during the settle has nothing to cancel" `Quick
             test_chat_interrupt_during_settle_has_nothing_to_cancel
+        ; test_case "background maintenance yields to queued chat" `Quick
+            test_background_maintenance_defers_to_queued_chat
         ; test_case "chat stop leaves a maintenance run alone" `Quick
             test_chat_stop_leaves_a_maintenance_run_alone
         ; test_case "chat stop after a failed settle names nothing current" `Quick

@@ -407,8 +407,32 @@ type surface = {
   param_keys : string list;
 }
 
+let keeper_build_cleanup_enabled =
+  register_bool ~key:"keeper_build_cleanup_enabled" ~default:(fun () -> true) ()
+
+let register_cleanup_duration ~key ~default =
+  Runtime_params.register ~key ~default
+    ~validate:(fun value ->
+      if Float.is_finite value && value > 0. then Ok ()
+      else Error (key ^ " must be finite and positive"))
+    ~serialize:(fun value -> `Float value) ~deserialize:deserialize_float ()
+
+let keeper_build_cleanup_interval_sec =
+  register_cleanup_duration ~key:"keeper_build_cleanup_interval_sec"
+    ~default:(fun () -> Masc_time_constants.hour)
+
+let keeper_build_cleanup_retention_sec =
+  register_cleanup_duration ~key:"keeper_build_cleanup_retention_sec"
+    ~default:(fun () -> Masc_time_constants.day)
+
 let surfaces =
   [
+    {
+      id = "keeper_build_cleanup";
+      description = "Idle guest build artifact cleanup";
+      param_keys = [ "keeper_build_cleanup_enabled";
+        "keeper_build_cleanup_interval_sec"; "keeper_build_cleanup_retention_sec" ];
+    };
     {
       id = "keeper_lifecycle";
       description = "Keeper heartbeat and supervisor timing";

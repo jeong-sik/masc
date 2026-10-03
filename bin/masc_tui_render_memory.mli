@@ -67,6 +67,9 @@ val facts_title :
     name folds to its floor and the counts and filters are cut before the name
     goes further ({!Masc_tui_ansi.detail_heading}). *)
 
+val storage_size : int -> string
+(** Observed snapshot bytes rendered as B/KiB/MiB; never a model-token estimate. *)
+
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list

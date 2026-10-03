@@ -403,10 +403,13 @@ let recover_keeper_msg_requests_on_startup ~base_path =
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  Server_keeper_build_maintenance.start ~sw ~clock ~config;
   Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
+  Server_lane_addon_sampling.register ~config ~net:env#net;
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
+  Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
   (* Exclusive startup ownership: before any new server request can submit a
      worker, settle disk-only nonterminal rows left by the prior process.  Poll
      and cancel deliberately cannot infer process death, so this bootstrap
@@ -774,6 +777,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             report.rejected
             report.corrupt_rows
     in
+    let reconcile_goal_events () =
+      match Goal_store.flush_pending_events (Mcp_server.workspace_config state) with
+      | Ok () -> ()
+      | Error detail -> Log.Server.warn "goal audit outbox delivery deferred: %s" detail
+    in
+    reconcile_goal_events ();
     project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
@@ -792,6 +801,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Candle_payout_worker.pulse ();
       project_transition_outboxes Maintenance_projection;
       reconcile_broadcast_mentions ();
+      reconcile_goal_events ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

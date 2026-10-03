@@ -35,6 +35,13 @@ let reads_in ~module_path ~binding_name ~fields =
 let reads ~binding_name ~fields =
   reads_in ~module_path:(renderer_for binding_name) ~binding_name ~fields
 
+(* The call-site twin of {!reads_in}: a callee a binding must reach, named
+   with its module because the guard is about that file's binding. #40827
+   wrote the guard before the helper and main has not compiled this suite
+   since. *)
+let calls_in ~module_path ~binding_name ~callee =
+  Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+
 (* A row two surfaces share is drawn by the primitives, not by either of
    them, so the guard over it names that file. *)
 let reads_prim ~binding_name ~fields =
@@ -681,7 +688,7 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
-  (* Starvation depends on ordinary absence and failed Librarian runs, while a
+  (* Starvation depends on ordinary absence and the current Librarian pass, while a
      source-bound snapshot changes the truthful row label from memoryless to
      source-only. Keep all three axes in the renderer. *)
   List.iter
@@ -692,10 +699,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
          > 0))
     [ "mkh_snapshot_present"
     ; "mkh_source_snapshot_present"
-    ; "mkh_librarian_failures"
+    ; "mkh_librarian"
     ];
   Alcotest.(check bool) "the title names the starving count" true
-    (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
+    (calls_in ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_memory"
+       ~callee:"current_memory_starving_count" > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
     (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true
@@ -1223,24 +1231,41 @@ let test_the_loader_stops_opening_keys_no_screen_draws () =
     still_read
 ;;
 
-(* The request clock distinguishes repeated Automation rows. The renderer
-   reads the persisted field and uses the terminal's shared projection. *)
+(* The storage context and the occurrence's two clocks are what the tab was
+   rewritten to state: who asked and when, when the last wake started, when
+   the ledger saw the stimulus arrive. Each field is read where the row is
+   built; the stamps go through the terminal's shared projection. *)
 let test_an_automation_row_says_when_it_was_asked_for () =
   Alcotest.(check int) "the row reads the request clock" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
        ~binding_name:"automation_lines" ~field_name:"sch_requested_at_iso");
-  Alcotest.(check int) "and spells it with the shared stamp" 1
+  Alcotest.(check int) "the row reads who asked" 2
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~field_name:"sch_requested_by");
+  Alcotest.(check int) "the row reads when the last wake started" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines"
+       ~field_name:"sch_last_wake_started_at_iso");
+  Alcotest.(check int) "the row reads when the stimulus arrived" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines"
+       ~field_name:"sch_stimulus_recorded_at_iso");
+  Alcotest.(check int) "and spells both clocks with the shared stamp" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"automation_lines" ~callee:"Terminal_text.short_timestamp")
 ;;
 
-(* The renderer delegates the variable width to the pure schedule-row layout.
-   It keeps the request clock and the payload summary beside each other when
-   a long recurrence needs a continuation. *)
+(* The renderer delegates the widths to the pure keeper-automation table.
+   The recurrence folds in its own cell the way the Schedules list's does --
+   no continuation rows, so one long cron cannot take another row's summary
+   space. *)
 let test_the_automation_row_cuts_the_columns_it_draws () =
   Alcotest.(check int) "the row uses the width-aware layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"automation_lines" ~callee:"Layout.automation_schedule_lines");
+       ~binding_name:"automation_lines" ~callee:"Render_schedule.kauto_layout");
+  Alcotest.(check int) "and draws each row through the table" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"Render_schedule.kauto_row");
   (* The clock width is read off the format. A number typed here would drift
      from it the first time the format changed. *)
   Alcotest.(check int) "the clock width is read off the format" 1
@@ -1255,45 +1280,6 @@ let test_the_automation_row_cuts_the_columns_it_draws () =
   Alcotest.(check int) "the status width is read off the contract" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"schedule_status_word_cells" ~callee:"List.fold_left")
-;;
-
-let has_substring haystack needle =
-  let n = String.length needle and h = String.length haystack in
-  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
-  n = 0 || scan 0
-
-(* A valid comma-list cron is much wider than one_shot. At eighty columns it
-   must not make the one_shot row's payload disappear; its own full expression
-   remains visible on a continuation. These are the exact pre-box layout
-   lines, so their cell widths prove the frame will not cut them. *)
-let test_one_long_cron_does_not_hide_any_schedule_identity () =
-  let inner_width = Masc_tui_frame.inner_width ~cols:80 in
-  let cron = "cron 0,5,10,15,20,25,30,35,40,45,50,55 * * * * UTC" in
-  let row status requested_clock recurrence summary : Masc_tui_layout.automation_schedule_row =
-    { status; requested_clock; recurrence; summary }
-  in
-  let lines =
-    Masc_tui_layout.automation_schedule_lines ~inner_width
-      ~status_cells:9 ~clock_cells:19
-      [ row "scheduled" "2026-09-24 03:55:20" cron "#38891 full cron task"
-      ; row "cancelled" "2026-09-14 22:43:50" "one_shot" "#36319 review registration"
-      ]
-  in
-  let painted =
-    List.map (fun line -> Masc_tui_message_layout.fit_width line inner_width) lines
-  in
-  Alcotest.(check int) "eighty columns has a 76-cell box content" 76 inner_width;
-  Alcotest.(check int) "one continuation only for the long cron" 3
-    (List.length lines);
-  Alcotest.(check bool) "cron row retains its payload" true
-    (has_substring (List.nth painted 0) "#38891 full cron task");
-  Alcotest.(check bool) "continuation retains the full recurrence" true
-    (has_substring (List.nth painted 1) cron);
-  Alcotest.(check bool) "one_shot row retains its payload" true
-    (has_substring (List.nth painted 2) "#36319 review registration");
-  List.iter (fun line ->
-    Alcotest.(check int) "the painted line fills the actual box content" inner_width
-      (Masc_tui_message_layout.display_width line)) painted
 ;;
 
 (* Three lists draw a Fusion run's start: the Fusion list, the run detail and
@@ -1416,8 +1402,6 @@ let () =
             `Quick test_an_automation_row_says_when_it_was_asked_for
         ; Alcotest.test_case "the automation row cuts the columns it draws"
             `Quick test_the_automation_row_cuts_the_columns_it_draws
-        ; Alcotest.test_case "one long cron cannot hide schedule identities"
-            `Quick test_one_long_cron_does_not_hide_any_schedule_identity
         ; Alcotest.test_case
             "both task history panes say which row each is" `Quick
             test_both_task_history_panes_say_which_row_each_is

@@ -32,6 +32,7 @@ val order_at :
 (** {!order} read at [now] instead of the wall clock. *)
 
 val observe :
+  resolved:Runtime_exact_output_registry.resolved_lane ->
   ( ('accepted, 'rejection) Agent_core.Exact_output.validated_flow_success
   , ('callback_error, 'rejection) Agent_core.Exact_output.validated_flow_error )
   result ->
@@ -39,5 +40,5 @@ val observe :
 (** Record what one finished flow observed: every candidate refused as
     [Rate_limited] notes a rate limit on its runtime with the provider's
     Retry-After when one was sent, and every candidate that returned a
-    response -- accepted or semantically rejected -- clears its runtime's
-    evidence. *)
+    response -- accepted or semantically rejected -- clears the frozen runtime
+    observation captured in [resolved]. No live ID lookup occurs at completion. *)

@@ -688,6 +688,15 @@ let with_execution_metadata ~config ?cache_key ~query json =
 
 let execution_default_light_response_json ~config =
   Server_dashboard_http_cache.cached_surface_json execution_cache
+  (* The reuse gate below serves these bytes only while re-projecting them
+     changes nothing, so the body is built through the same projection the
+     gate reads back -- keeper-row overlays, the Candle summary, and the
+     observation sequence stamp it sets. The producer's own fill carries all
+     three already (its snapshot is projected and its sequence copied); a
+     fill that reaches this surface any other way -- a test fixture, a
+     future publisher -- becomes a fixed point of the gate here instead of
+     silently losing prepared-bytes reuse. *)
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config
   |> with_execution_metadata
        ~config
        ~cache_key:execution_default_light_cache_key
@@ -1659,6 +1668,14 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
     in
     let compute_with_generation () =
       compute ?actor ?fixture ~light ()
+      (* The request wrapper below re-projects every non-fixture response and
+         serves the cached payload's bytes only when that changes nothing, so
+         the parameterized fill projects here first -- same rule as the
+         default-light body above. Without it a fill whose keepers came from
+         the fixture-seeded cache rather than a projected snapshot carries no
+         observation stamp, and every repeat request recomputes instead of
+         reusing the bytes it already prepared. *)
+      |> Dashboard_projection_cache.with_current_keeper_observations ~config
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
       |> fun json ->

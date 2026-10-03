@@ -13,42 +13,150 @@ on:
           - macos-arm64
           - stagehand-model-macos-arm64
 
+      capture_item_http:
+        description: Exercise Item TUI and isolated HTTP routes with the compiled binaries and production dashboard
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
 jobs:
   linux-x64-probe:
-    if: inputs.target == 'linux-x64'
-    name: Build Linux x64 probe
-    runs-on: ubuntu-24.04
+    if: inputs.target == 'linux-x64' || (inputs.target == 'macos-arm64' && inputs.capture_item_http)
+    name: Build ${{ inputs.target }} runtime probe
+    runs-on: ${{ inputs.target == 'macos-arm64' && 'macos-14' || 'ubuntu-24.04' }}
     timeout-minutes: 90
+    env:
+      PROBE_OUT: ${{ github.workspace }}/artifacts/runtime-probe
 
     steps:
       - uses: actions/checkout@v7
 
+      - name: Setup OCaml for macOS runtime probe
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native macOS release dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep poppler ffmpeg
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Install OCaml release dependencies for macOS
+        if: runner.os == 'macOS'
+        run: |
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
+          opam install ./masc.opam --deps-only --with-test --yes
+
+      - name: Build release binaries for macOS arm64
+        if: runner.os == 'macOS'
+        run: |
+          opam exec -- dune build --release bin/main_eio.exe bin/masc_tui.exe \
+            bin/masc_browser_host.exe bin/deployment_preflight_helper.exe
+          mkdir -p "$PROBE_OUT"
+          cp _build/default/bin/{main_eio,masc_tui,masc_browser_host,deployment_preflight_helper}.exe "$PROBE_OUT/"
+          test "$("$PROBE_OUT/main_eio.exe" build-commit)" = "$GITHUB_SHA"
+          test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
+          otool -L "$PROBE_OUT/main_eio.exe" > "$PROBE_OUT/native-dependencies.txt"
+
       - name: Build release binaries for Linux x64
-        env:
-          PROBE_OUT: ${{ runner.temp }}/masc-linux-x64-probe
+        if: runner.os == 'Linux'
         run: |
           chmod +x scripts/build-linux-release.sh
           scripts/build-linux-release.sh --out "$PROBE_OUT"
 
       - name: Write and verify SHA-256 manifest
-        env:
-          PROBE_OUT: ${{ runner.temp }}/masc-linux-x64-probe
         run: |
           set -euo pipefail
           cd "$PROBE_OUT"
-          sha256sum deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
-          sha256sum --check SHA256SUMS
+          shasum -a 256 deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
+          shasum -a 256 --check SHA256SUMS
 
-      - name: Upload Linux x64 probe
+      - name: Upload runtime probe
         uses: actions/upload-artifact@v7
         with:
-          name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/masc-linux-x64-probe/
+          name: ${{ inputs.target == 'macos-arm64' && 'macos-arm64-item' || inputs.target }}-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.PROBE_OUT }}/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Exercise Item TUI with the matching compiled binary
+        if: inputs.capture_item_http
+        shell: bash
+        run: |
+          test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
+          python3 -u test/test_tui_keeper_portrait_pty.py "$PROBE_OUT/masc_tui.exe" 2>&1 \
+            | tee "$RUNNER_TEMP/keeper-items-tui.log"
+
+      - name: Set up Node for Item HTTP acceptance
+        if: inputs.capture_item_http
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build exact-source production dashboard for Item HTTP acceptance
+        if: inputs.capture_item_http
+        working-directory: dashboard
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            pnpm exec playwright install --with-deps chromium
+          else
+            pnpm exec playwright install chromium
+          fi
+
+      - name: Exercise isolated Item HTTP routes
+        if: inputs.capture_item_http
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/item-http-acceptance.py \
+            --binary "$PROBE_OUT/main_eio.exe" \
+            --dashboard assets/dashboard --source-sha "$SOURCE_SHA" \
+            --output "$RUNNER_TEMP/item-http-evidence" --capture-browser
+
+      - name: Upload Item HTTP evidence without workspace credentials
+        if: always() && inputs.capture_item_http
+        uses: actions/upload-artifact@v7
+        with:
+          name: item-http-${{ inputs.target }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/keeper-items-tui/manifest.json
+            ${{ runner.temp }}/keeper-items-tui/*.txt
+            ${{ runner.temp }}/keeper-items-tui/*.pty
+            ${{ runner.temp }}/keeper-items-tui.log
+            ${{ runner.temp }}/item-http-evidence/browser-evidence.json
+            ${{ runner.temp }}/item-http-evidence/item-server-*.png
+            ${{ runner.temp }}/item-http-evidence/http-evidence.json
+            ${{ runner.temp }}/item-http-evidence/tool-calls.json
+            ${{ runner.temp }}/item-http-evidence/paid-account*.json
+            ${{ runner.temp }}/item-http-evidence/paid-portrait*.png
+            ${{ runner.temp }}/item-http-evidence/ledger-*.jsonl
+            ${{ runner.temp }}/item-http-evidence/account.json
+            ${{ runner.temp }}/item-http-evidence/account-after.json
+            ${{ runner.temp }}/item-http-evidence/account-restarted.json
+            ${{ runner.temp }}/item-http-evidence/portrait.png
+            ${{ runner.temp }}/item-http-evidence/portrait-equipped.png
+            ${{ runner.temp }}/item-http-evidence/portrait-restarted.png
+            ${{ runner.temp }}/item-http-evidence/server.log
+          if-no-files-found: error
+          retention-days: 14
+
 
   macos-arm64-probe:
     if: inputs.target == 'macos-arm64'

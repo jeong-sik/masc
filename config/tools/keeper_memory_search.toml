@@ -7,7 +7,9 @@ words) by BM25. History needs a non-empty query, matched whole or by every \
 term, newest first. The default reads only current facts; source='all' \
 adds absorbed originals and history. Source-bound files are revalidated \
 only for query-matching candidates; unrelated claims remain stored and \
-unverified. total_candidates counts stored claims, not verified results. \
+unverified. source_verification.status='incomplete' means matching claims \
+were withheld because their sources could not be verified; it is not proof \
+of no relevant memory. total_candidates counts stored claims, not verified results. \
 Fact results name their store and \
 original basis; current facts include exact memory_id, category and origin \
 (authored is yours to supersede). Use a memory_id as a derived \

@@ -1692,7 +1692,10 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          reusing the bytes it already prepared. An explicit fixture is the
          exception both places: its Candle, portraits and balances are
          synthetic by contract, and the wrapper skips its gate for fixture
-         requests -- so the fill leaves them alone too. *)
+         requests -- so the fill leaves them alone too. One projection, not
+         two: each one takes a fresh Candle ledger read, and a second pass
+         over an already-projected body only re-observed what the first had
+         stamped. *)
       |> (match fixture with
           | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
           | Some _ -> fun json -> json)

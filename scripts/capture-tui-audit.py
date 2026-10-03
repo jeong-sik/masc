@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--binary-file', help='optional alias for the same executable; wrappers are refused')
     parser.add_argument('--ttyd', default='ttyd', help='ttyd executable name on PATH or explicit path')
     parser.add_argument('--board-only', action='store_true')
+    parser.add_argument('--rows', type=int, default=32)
     parser.add_argument('--author', default='wkbl-layout-reviewer-with-long-name')
     args = parser.parse_args()
     out = ROOT / args.out
@@ -91,6 +92,8 @@ def main():
     fixtures = h.overview_event_http_fixtures()
     fixtures.update(h.keeper_runtime_http_fixtures())
     fixtures.update(h.row_budget_http_fixtures())
+    fixtures["/api/v1/gate/keepers?detailed=true"] = h.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
+    fixtures["/api/v1/runtime/config/raw"] = (503, {"error": "runtime config load failed: fixture configuration unavailable"})
     fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
     goal = h.planning_goal('goal-audit-ready', 'Audit goal')
     goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
@@ -114,11 +117,7 @@ def main():
                 author=args.author)]
     post['comment_count'] = 1
     fixtures['/api/v1/board?sort_by=hot'] = (200, {'posts': [post]})
-    fixtures['/api/v1/board/post-layout?format=flat'] = (200, {
-        'post': post, 'comments': comments,
-        'comment_page': {'offset': 0, 'returned': len(comments), 'total': len(comments),
-                         'has_more': False, 'next_offset': None},
-    })
+    fixtures['/api/v1/board/post-layout?format=flat'] = (200, h.board_detail_page(post, comments))
     manifest['fixture_sha256'] = hashlib.sha256(json.dumps(fixtures, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     write_manifest(out, manifest)
 
@@ -182,15 +181,37 @@ def main():
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 try:
-                    with c.ttyd_session(browser, Path(base), port, 120, 38, 'tui-audit-fixture') as page:
+                    with c.ttyd_session(browser, Path(base), port, 120, args.rows, 'tui-audit-fixture') as page:
                         for width in ((240,) if args.board_only else (80, 120, 240)):
-                            page.set_viewport_size({'width': int(width*8.5)+24, 'height': 38*17+24})
+                            geometry = page.evaluate('''() => {
+                                const rect = document.querySelector('.xterm-screen').getBoundingClientRect();
+                                return {cols: window.term.cols, rows: window.term.rows,
+                                        cellWidth: rect.width / window.term.cols,
+                                        cellHeight: rect.height / window.term.rows};
+                            }''')
+                            viewport = page.viewport_size
+                            page.set_viewport_size({
+                                'width': round(viewport['width'] + (width - geometry['cols']) * geometry['cellWidth']),
+                                'height': round(viewport['height'] + (args.rows - geometry['rows']) * geometry['cellHeight']),
+                            })
+                            page.wait_for_function('(size) => window.term.cols === size[0] && window.term.rows === size[1]',
+                                                   arg=[width, args.rows], timeout=15000)
                             for name, query, title, ready in ([surfaces[4]] if args.board_only else surfaces):
                                 if name == 'board':
                                     board_list(page)
                                 elif not c.goto_surface(page, query, title):
                                     raise RuntimeError((query, c.screen_text(page)))
                                 shot(page, f'{name}-{width}', ready)
+                                if name == 'keepers':
+                                    page.keyboard.press('Home')
+                                    page.keyboard.press('Enter')
+                                    shot(page, f'keeper-info-{width}', ['Name:', 'alpha'])
+                                    page.keyboard.press('Escape')
+                                    wait_ready(page, ['MASC Keepers'])
+                                    page.keyboard.press('c')
+                                    shot(page, f'keeper-chat-{width}', ['Keepers ▸ alpha ▸ chat', 'Context'])
+                                    page.keyboard.press('Escape')
+                                    wait_ready(page, ['MASC Keepers'])
                             board_list(page)
                             page.keyboard.press('Enter')
                             shot(page, f'board-detail-{width}', ['Comments', '긴 댓글 본문은'])

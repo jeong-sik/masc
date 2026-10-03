@@ -291,11 +291,13 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
+        # Disabled Candle diagnostics are a full-width section between the
+        # portrait band and Current failure; they must also stay below pixels.
         candle_details = row_of(rows, b"Candle details")
-        assert candle_details >= identity + PIXEL_BAND_ROWS + 1, \
-            "Candle details did not leave the picture its rows"
+        assert candle_details == identity + PIXEL_BAND_ROWS + 1, \
+            f"the Candle facts did not leave the picture its rows: {rows!r}"
         assert row_of(rows, CURRENT_FAILURE) > candle_details, \
-            "current failure did not follow Candle details"
+            f"Current failure did not follow the Candle diagnostics: {rows!r}"
         # Item text that needs the full width must remove the actual Kitty
         # placement as well as its reserved columns. Mosaic-only proof cannot
         # detect a pixel overlay left above the text.

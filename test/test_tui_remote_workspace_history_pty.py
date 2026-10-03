@@ -898,7 +898,7 @@ def schedule_editor_workspace_change(binary: str) -> None:
                 release.touch()
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"modify: Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
-                    "post-editor identity change was not visibly refused"
+                    f"post-editor identity change was not visibly refused: {screen(output)!r}"
                 assert not [p for p, _ in posts if p == "/api/v1/tools/masc_schedule_update"], \
                     "the edited A schedule was posted to cloned workspace B"
                 os.write(fd, b"q")

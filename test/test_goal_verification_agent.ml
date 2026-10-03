@@ -1583,6 +1583,16 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
           Eio.Switch.run (fun sw ->
             Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
             await_within "the boot scan's deferral" deferred_once;
+            (* The durable run record precedes scheduling and its Board
+               notice. Wait for that observable side effect, not the earlier
+               registry notification. *)
+            (match Eio.Time.with_timeout (clock ()) hung_review_wait_s (fun () ->
+               let rec await_notice () =
+                 if stall_posts () <> [] then Ok ()
+                 else (Eio.Fiber.yield (); await_notice ()) in
+               await_notice ()) with
+             | Ok () -> ()
+             | Error `Timeout -> fail "deferral notice was not published");
             (match stall_posts () with
              | [ (post, fields) ] ->
                let text name =

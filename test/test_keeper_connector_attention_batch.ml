@@ -425,9 +425,15 @@ let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
         assert_read_failure first;
         check int "unread connector sources are not admitted" 0
           (Keeper_heartbeat_source_batch.count first.source_batch);
-        check bool "no turn is spent on unread connector content alone" false
+        check bool "unread connector sources add no scheduling trigger" true
+          (first.event_queue_triggers = []);
+        check bool "independently scheduled work survives unread connector content" true
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
              ~scheduled:true ~consumed_stimulus_count:0
+             ~event_queue_intake_error:first.event_queue_intake_error);
+        check bool "unread content does not create an unscheduled turn" false
+          (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+             ~scheduled:false ~consumed_stimulus_count:0
              ~event_queue_intake_error:first.event_queue_intake_error);
         let bootstrap : Q.stimulus =
           { post_id = "readable-other-work"; urgency = Q.Low; arrived_at = 10.; payload = Q.Bootstrap } in
@@ -474,6 +480,38 @@ let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
         complete restored.source_batch;
         check (list string) "only successful restored delivery drains the messages" [] (pending_ids ())))
     [ 1; 2 ]
+;;
+
+(* A shared store failure needs one diagnostic, regardless of backlog size.
+   The independent source behind that backlog must still reach the next turn. *)
+let test_failed_connector_batch_skips_shared_store_without_starving_other_work () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
+  with_ctx "connector-failed-backlog" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let messages = List.init 5 (fun index ->
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"failed-batch"
+        ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 1))
+        ~content:(Printf.sprintf "retained body %d" index)) in
+    let bootstrap : Q.stimulus =
+      { post_id="independent-after-backlog";urgency=Q.Low;arrived_at=10.;payload=Q.Bootstrap } in
+    List.iter (enqueue_exn ~base_path keeper_name) (messages @ [bootstrap]);
+    let path = A.attention_path ~base_path ~keeper_name in
+    Fs_compat.save_file path (Fs_compat.load_file path ^ "{");
+    let cursor = match Log.Ring.recent ~limit:1 () with
+      | entry :: _ -> entry.Log.Ring.seq | [] -> -1 in
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let warnings = Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
+      |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn) in
+    check int "one shared read failure emits one warning, not one per pending message"
+      1 (List.length warnings);
+    check (list string) "independent work behind unread backlog is admitted"
+      [bootstrap.post_id]
+      (Keeper_heartbeat_source_batch.stimuli intake.source_batch
+       |> List.map (fun (source : Q.stimulus) -> source.post_id));
+    check int "intake preserves every durable source" 6
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> Result.map Q.length |> Result.value ~default:(-1)))
 ;;
 
 let test_proactive_yields_only_to_ready_intake () =
@@ -1483,6 +1521,8 @@ let () =
             "transient Board prefix preserves bounded connector content"
             `Quick
             test_transient_board_prefix_keeps_connector_content_within_admission_limit
+        ; test_case "shared connector read failure skips backlog and admits independent work" `Quick
+            test_failed_connector_batch_skips_shared_store_without_starving_other_work
         ; test_case "torn connector store survives other completed work and restoration" `Quick
             (test_unread_connector_sources_survive_other_completed_work ~torn_tail:true)
         ; test_case "unreadable connector store survives other completed work and restoration" `Quick

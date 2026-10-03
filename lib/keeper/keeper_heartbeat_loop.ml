@@ -83,9 +83,8 @@ let should_run_turn_after_event_intake
   scheduled
   &&
   match event_queue_intake_error with
-  | None -> true
-  | Some (Stimulus_intake.Transient_board_read _ | Stimulus_intake.Connector_read_failed _) ->
-    consumed_stimulus_count > 0
+  | None | Some (Stimulus_intake.Connector_read_failed _) -> true
+  | Some (Stimulus_intake.Transient_board_read _) -> consumed_stimulus_count > 0
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 

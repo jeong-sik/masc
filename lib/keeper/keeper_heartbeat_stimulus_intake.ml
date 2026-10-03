@@ -1026,6 +1026,11 @@ let heartbeat_event_intake
                 | None -> Some (selection, Connector_read_failed error)
                 | Some _ as kept -> kept
               in
+              (* Every Connector row uses the same failed store snapshot. Leave
+                 the rest pending without repeating reconciliation and warnings;
+                 independent source kinds can still fill the admission batch. *)
+              let rest = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                Option.is_none (connector_attention_event_id selection.source)) rest in
               loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the

@@ -28,7 +28,6 @@ type 'scheduler entry =
   { key : key
   ; scheduler : 'scheduler
   ; declared_max : int
-  ; conflict_reported : bool
   }
 
 type 'scheduler t = 'scheduler entry list
@@ -36,7 +35,7 @@ type 'scheduler t = 'scheduler entry list
 let empty = []
 
 let conflict_for entry ~declared_max =
-  if entry.declared_max = declared_max || entry.conflict_reported
+  if entry.declared_max = declared_max
   then None, entry
   else
     ( Some
@@ -45,7 +44,7 @@ let conflict_for entry ~declared_max =
         ; authoritative_max = entry.declared_max
         ; declared_max
         }
-    , { entry with conflict_reported = true } )
+    , entry )
 ;;
 
 let resolve_existing key ~declared_max state =
@@ -68,7 +67,6 @@ let install key ~declared_max ~candidate state =
       { key
       ; scheduler = candidate
       ; declared_max
-      ; conflict_reported = false
       }
     in
     entry :: state, { scheduler = candidate; conflict = None }
@@ -93,7 +91,7 @@ let%test "first declaration installs its scheduler" =
   && Option.equal String.equal (find_scheduler test_key state) (Some "first")
 ;;
 
-let%test "a conflicting declaration reports once and keeps the first scheduler" =
+let%test "a conflicting declaration remains conflicting and keeps the first scheduler" =
   let state, _ = install test_key ~declared_max:1 ~candidate:"first" empty in
   match resolve_existing test_key ~declared_max:5 state with
   | None -> false
@@ -104,7 +102,11 @@ let%test "a conflicting declaration reports once and keeps the first scheduler" 
           conflict.authoritative_max = 1 && conflict.declared_max = 5
         | None -> false)
     && (match resolve_existing test_key ~declared_max:5 state with
-        | Some (_, resolution) -> Option.is_none resolution.conflict
+        | Some (_, resolution) ->
+          (match resolution.conflict with
+           | Some conflict ->
+             conflict.authoritative_max = 1 && conflict.declared_max = 5
+           | None -> false)
         | None -> false)
 ;;
 

@@ -746,12 +746,12 @@ let read_complete_rows ~allow_torn_tail path =
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
     log_settlement_failure ~path cleanup_failure;
     of_rows value
-  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed exn) ->
-    Error (Journal_unreadable (Printexc.to_string exn))
+  | Fs_compat.Private_file_failed error ->
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
   | Fs_compat.Private_file_failed_with_cleanup_failure
-      { error = Fs_compat.Private_jsonl_rows.Io_failed exn; cleanup_failure } ->
+      { error; cleanup_failure } ->
     log_settlement_failure ~path cleanup_failure;
-    Error (Journal_unreadable (Printexc.to_string exn))
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
 ;;
 
 let read_journal_path ~allow_torn_tail path =

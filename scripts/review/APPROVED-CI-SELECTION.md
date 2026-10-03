@@ -36,9 +36,10 @@ Supply the preparation receipt as the `selection` JSON input. Select any of
 explicit nonempty `suites` and uses the minimal runner. Prefer short, lightweight
 checks; about two minutes illustrates their intended size, not a fixed cap,
 job timeout or pass/fail boundary. Existing runner hang guards are separate
-resource safeguards. Broad release-profile, dashboard,
-TLA, lint and full behavior checks remain in `release-candidate.yml` on a
-release branch or version tag. There is no changed-file heuristic choosing
+resource safeguards. Broad release-profile, dashboard, distribution and full
+behavior checks remain in `release-candidate.yml` on a release branch or version
+tag. TLA model checks are explicitly dispatched through `model-check.yml` when
+state-machine specifications change. There is no changed-file heuristic choosing
 work for the leader.
 
 The runner rechecks current source approvals using the integrated main guard,
@@ -54,7 +55,10 @@ Keeper runtime leadership role.
 
 Repository CI workflows have no PR/push/tag/scheduled triggers. Specialized
 proof and packaging workflows retain manual dispatch. Release publication is
-an explicit `publish=true` dispatch on an existing v* tag. Issue taxonomy is
+an explicit `publish=true` dispatch on an existing v* tag with `rc_run_id` naming
+its latest successful full RC. It promotes the verified artifacts without another
+build or test cycle; publication success is not a substitute for RC evidence.
+Issue taxonomy is
 operational issue automation and remains independent of CI. Disabled GitHub
 workflow states remain disabled until these definitions are integrated;
 reenabling an old automatic definition would violate this policy.

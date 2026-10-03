@@ -4,10 +4,10 @@ run-name: Verify release candidate ${{ github.sha }}
 on:
   workflow_dispatch: {}
 
-# Called workflows cannot elevate the caller's permissions. Release still
-# requires contents:write for its tag-push job, which is ineligible here.
+# Called workflows cannot elevate the caller's permissions. Publication is a
+# separate manual workflow and consumes this run's successful artifacts.
 permissions:
-  contents: write
+  contents: read
   actions: write
   issues: write
   pull-requests: read
@@ -44,9 +44,7 @@ jobs:
 
   installation:
     needs: validate
-    uses: ./.github/workflows/release.yml
-    with:
-      candidate_verification: true
+    uses: ./.github/workflows/release-build.yml
 
   evidence:
     name: Record candidate verification
@@ -89,11 +87,19 @@ jobs:
               summary.write('\nPublication: not performed.\n')
           PYCODE
 
+      - name: Preserve the checked release body with successful verification
+        if: needs.installation.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: rc-release-body-${{ github.sha }}-${{ github.run_id }}
+
       - name: Upload candidate receipt
         uses: actions/upload-artifact@v7
         with:
           name: candidate-verification-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: candidate-verification.json
+          path: |
+            candidate-verification.json
+            release-body.md
           if-no-files-found: error
 
       - name: Require all candidate checks to pass

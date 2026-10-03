@@ -1,0 +1,36 @@
+Testing `Dashboard cache cancellation'.
+This run has ID `CG1HIKZE'.
+
+> [FAIL]        offload          0   request timeout stops a fill worker.
+  [FAIL]        offload          1   request timeout stops a lazy payload wor...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        offload          0   request timeout stops a fill worker.      │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-09-30 12:44:27] [WARN] [Dashboard] cache compute timeout: cancel-fill-worker (0s)
+ASSERT request returns a timeout envelope
+ASSERT request timeout stops its worker
+File "test/test_dashboard_cache_cancellation.ml", line 55, character 14:
+FAIL request timeout stops its worker
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_dashboard_cache_cancellation.test_request_timeout_stops_worker.( in file "test/test_dashboard_cache_cancellation.ml", line 55, characters 14-83
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Dune__exe__Test_dashboard_cache_cancellation.test_request_timeout_stops_worker.( in file "test/test_dashboard_cache_cancellation.ml", lines 39-59, characters 10-35
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Dashboard cache cancellation/offload.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Dashboard cache cancellation'.
+2 failures! in 2.074s. 2 tests run.
+Fatal error: exception Alcotest_engine__Core.Make(P)(M).Test_error

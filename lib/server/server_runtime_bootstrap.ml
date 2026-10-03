@@ -234,7 +234,7 @@ let exact_output_lanes_and_catalog ?config_path ?config_root () =
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes
+  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes, runtimes
 ;;
 
 let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
@@ -261,13 +261,15 @@ let exact_output_registry_refused detail =
 ;;
 
 let configure_exact_output_registry ?config_path ?config_root () =
-  let lanes, catalog = exact_output_lanes_and_catalog ?config_path ?config_root () in
+  let lanes, catalog, runtimes = exact_output_lanes_and_catalog ?config_path ?config_root () in
   (* Logged before the registry is published, so it is said even when
      publication fails. *)
   Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
   let resolver_snapshot = exact_output_resolver_snapshot catalog in
   match
     Runtime.publish_exact_output_registry
+      ~runtime_observations:(Runtime.exact_output_runtime_observations
+        ~origin:catalog.Runtime.catalog_origin runtimes)
       ~required_lane_ids:Standalone_lane.required_ids
       ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
       ~lanes
@@ -284,7 +286,7 @@ let configure_exact_output_registry ?config_path ?config_root () =
 ;;
 
 let check_exact_output_registry ?config_root () =
-  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+  let lanes, catalog, _runtimes = exact_output_lanes_and_catalog ?config_root () in
   let resolver_snapshot = exact_output_resolver_snapshot catalog in
   match
     Runtime_exact_output_registry.check_publication

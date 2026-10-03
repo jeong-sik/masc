@@ -977,9 +977,10 @@ let assemble_hooks
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
-                   Never scan a growing queue or serialize all pockets while
-                   the user is waiting for the first model request. Only offer
-                   a reference when its in-process reader is on this surface. *)
+                   Ordinary recall reads this index without scanning the queue;
+                   damaged derived artifacts are repaired on this IO worker
+                   from authoritative context. Only offer a reference when
+                   its in-process reader is on this surface. *)
                 let working_context_recall = if not post_tool_round
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -991,11 +992,11 @@ let assemble_hooks
                 (if not post_tool_round
                  then
                    let ordinary_recall =
-                     (* Memory OS recall publishes every persisted current fact
-                        in a paged artifact and injects its retrieval index. Source-bound
-                        facts are revalidated here; a changed source atomically
-                        replaces its fact with an invalidation before the block
-                        is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
+                     (* Search-capable recall injects store availability and
+                        lookup guidance only. Source claims are revalidated at
+                        retrieval, not while preparing every turn. Artifact-only
+                        surfaces use a retained paged projection instead.
+                        On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
                         turns it off.
                         The work is skipped, not just filtered, on post-tool
                         rounds: the block would be dropped at assembly anyway. *)

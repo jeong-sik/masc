@@ -360,7 +360,7 @@ let test_muse_save_rechecks_selected_catalog ?supported () = fixture (fun base r
   let reported = match row (`Int 8192) with
     | `Assoc fields -> `Assoc (fields @ (match supported with None -> []
         | Some value -> ["supports_image_input", `Bool value]))
-    | _ -> fail "fixture model is not an object" in
+    | _ -> Alcotest.fail "fixture model is not an object" in
   let catalog_path=Filename.concat account_home "fixture-muse-catalog.json" in
   List.iter (fun (name,models,id,context) ->
     save catalog_path (Yojson.Safe.to_string (`List models));
@@ -384,7 +384,7 @@ let test_muse_save_rechecks_selected_catalog ?supported () = fixture (fun base r
     let model = match row (`Int 8192) with `Assoc fields ->
       `Assoc (fields @ (match capability with None -> []
         | Some value -> ["supports_image_input", `Bool value]))
-      | _ -> fail "fixture model is not an object" in
+      | _ -> Alcotest.fail "fixture model is not an object" in
     save catalog_path (Yojson.Safe.to_string (`List [model]));
     Alcotest.check Alcotest.bool (name ^ " refuses capability tampering") true
       (Actions.save ~binary ~base_path:base

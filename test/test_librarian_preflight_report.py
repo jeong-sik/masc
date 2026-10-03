@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -64,10 +65,10 @@ def fixture() -> dict[str, Any]:
                             "keeper_instructions": "",
                             "prompt": {"key": "librarian", "source": "file", "file_path": "prompts/librarian.md",
                                        "effective_template": "{{conversation_history}}", "rendered_bytes": 13,
-                                       "rendered_sha256": "a" * 64},
+                                       "rendered_sha256": hashlib.sha256(b"frozen source").hexdigest()},
                             "rendered_prompt_variables": {
                                 "keeper_id": "fixture-keeper", "facts_budget": "max=100; current ordinary=1",
-                                "keeper_instructions": "", "historical_task_contexts": "[]", "continuity": "null",
+                                "keeper_instructions": "[no keeper instructions]", "historical_task_contexts": "[]", "continuity": "null",
                                 "working_context": '{"sources":[],"previous":null,"unavailable":[]}',
                                 "working_contexts_rule": "fixture rule", "goal_context": '{"status":"no_task"}',
                                 "current_memory": "frozen memory", "conversation_history": "frozen source",
@@ -121,6 +122,82 @@ class ReportCliTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+    def test_rendered_prompt_matches_producer_substitution(self) -> None:
+        cases = (
+            ("{{conversation_history}}", {}, "frozen source"),
+            ("{{ \tconversation_history\n}}/{{conversation_history}}", {}, "frozen source/frozen source"),
+            ("{{conversation_history}}", {"conversation_history": "{{unknown}}\\1"}, "{{unknown}}\\1"),
+            ("{{extra}}", {"extra": "한글🙂"}, "한글🙂"),
+            ("{{ extra }}", {" extra ": "trimmed key"}, "trimmed key"),
+            ("{{extra}}", {" extra ": "first", "extra": "second"}, "first"),
+            ("{{extra}}", {"extra": "", " extra ": "second"}, ""),
+            ("{{}}/{{   }}/{{broken", {}, "{{}}/{{   }}/{{broken"),
+            ("{{   }}", {"": "blank key"}, "blank key"),
+            ("\u00a0", {}, "\u00a0"),
+            ("{{\vextra\v}}", {"\vextra\v": "vertical"}, "vertical"),
+        )
+        for template, extra, rendered in cases:
+            with self.subTest(template=template, extra=extra):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                    actual["rendered_prompt_variables"].update(extra)
+                    actual["prompt"].update(
+                        effective_template=template,
+                        rendered_bytes=len(rendered.encode("utf-8")),
+                        rendered_sha256=hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
+                    )
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_impossible_rendered_prompt_evidence_is_refused(self) -> None:
+        for update in (
+            {"effective_template": "{{does_not_exist}}"},
+            {"effective_template": "{{known}}/{{unknown}}"},
+            {"rendered_sha256": "0" * 64},
+            {"rendered_bytes": 999},
+            {"effective_template": "{{extra}}", "rendered_bytes": 3,
+             "rendered_sha256": hashlib.sha256("한글🙂".encode()).hexdigest()},
+        ):
+            with self.subTest(update=update):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                    actual["rendered_prompt_variables"].update(extra="한글🙂", known="present")
+                    actual["prompt"].update(update)
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+
+    def test_keeper_instructions_match_native_prompt_normalization(self) -> None:
+        cases = (
+            ("", "[no keeper instructions]", True),
+            (" \t\n\r\f", "[no keeper instructions]", True),
+            (" \tkeep sources\r\n\f", "keep sources", True),
+            ("\u00a0keep\u00a0", "\u00a0keep\u00a0", True),
+            ("\vkeep\v", "\vkeep\v", True),
+            ("keep\n sources", "keep\n sources", True),
+            ("preserve sources", "ignore sources", False),
+            ("", "", False),
+            (" \t\n\r\f", "", False),
+            (" \tkeep sources\r\n\f", " \tkeep sources\r\n\f", False),
+            ("\u00a0keep\u00a0", "keep", False),
+            ("\vkeep\v", "keep", False),
+            ("keep\n sources", "keep sources", False),
+        )
+        for typed, rendered, accepted in cases:
+            with self.subTest(typed=typed, rendered=rendered):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                    actual["keeper_instructions"] = typed
+                    actual["rendered_prompt_variables"]["keeper_instructions"] = rendered
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+                if not accepted:
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("keeper instructions", result.stderr)
 
     def test_unresolved_prompts_are_refused(self) -> None:
         for source, template in (("missing", "resolved"), ("file", ""), ("override", " \n ")):

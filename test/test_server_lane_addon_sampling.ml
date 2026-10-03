@@ -192,9 +192,12 @@ max_reply_bytes=4194304
     (read "outcome" |> member "response" |> text "model");
   check string "outcome preserves the original request reference"
     (member "request" refs |> text "uri") (read "outcome" |> member "request" |> text "uri");
-  check string "provider stop reason survives host metadata merging" "end_turn"
-    (member "masc.lane_provider" metadata |> text "stop_reason");
-  let host = member "masc.lane_host" metadata in
+  check (list string) "package response exposes only sampling references" ["masc.lane_sampling"]
+    (Yojson.Safe.Util.to_assoc metadata |> List.map fst);
+  let retained_metadata = read "outcome" |> member "response" |> member "_meta" in
+  check string "provider stop reason survives in private retained metadata" "end_turn"
+    (member "masc.lane_provider" retained_metadata |> text "stop_reason");
+  let host = member "masc.lane_host" retained_metadata in
   check string "selected concrete runtime is retained" "secondary.sample" (text "runtime_id" host);
   let failed = member "failed_attempts" host |> Yojson.Safe.Util.to_list in
   check int "only actually attempted failures are retained" (if Option.is_none initial_pressure then 1 else 0)

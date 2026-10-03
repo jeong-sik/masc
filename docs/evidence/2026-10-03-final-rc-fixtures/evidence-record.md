@@ -1,0 +1,35 @@
+# Final RC fixture repair evidence
+
+## 공통 헤더
+- 날짜(ISO8601): 2026-10-03T03:32:00Z
+- 작성자: Codex root
+- 결정 ID: masc-v0490-final-fixtures
+- 적용 대상: release/v0.49.0-verified-fixtures-20261003
+- 결정 상태: 추적 필요
+
+## 근거 (Evidence)
+- 항목: reconcile six remaining behavioral failures before final release verification
+- 출처: https://github.com/jeong-sik/masc/actions/runs/37037420526 ; full test-suite-log artifact11243381075
+- 확인일시: 2026-10-03T03:32:00Z
+- 신뢰도: High
+- 제한조건: failed run87573926149e68b3de0d207e6c90159e148bc12c; initialce7 had the same product sources; canonical base moved during verification to25a44ab25620bf2267c2d6c08769725f563b889c, incorporating later main changes. Native875 replay is historical component evidence, not execution proof for the reconciled candidate
+
+## 검증 (Verification)
+- 1차: independently reviewed Item/private-account authority, actual chat return/selection, Gate settings readiness, startup-followup scoped ledger and focused chat exit components. Source fixes were present in initial preparationce7. This recut adds fixture contracts and release notes to canonical25; the canonical merge itself carries newer main product changes. Item retains fresh GET checks with current account-unavailable diagnosis; metadata retains canonical current-screen Gate readiness with typed fixtures; scoped startup retains locked accounting and the applied follow-up baseline.
+- 2차: native macOS ARM artifact11240978742 source875; TUI SHA25698c4727ba2d242bb0d80b709dcc4ff970babe0234a1ff411bfd30779946e8924 matches native-preflight.json. Diff checks pass; Ruff reports only pre-existing scoped unused re and remote two E701 diagnostics; metadata Pyright0; scoped remains101, remote243 (baseline244) and Item12 baseline Pyright diagnostics; shared keyboard remains57 baseline diagnostics. Other existing fixture diagnostics are compared separately, not represented as a clean repository type check.
+- 3차: full latest875native Item, scopedHome8, metadata and Chat clarity suites pass. Root general suite passes on b996native, whose inspected cursor/visibility product consumers are unchanged in this scope. Latest875native live identity chat/pause/boot-recovery scenarios pass; remote Schedule, Ask, GitHub and primary history/draft recovery focused replays pass after observing their actual refusal surfaces and avoiding redundant Escape; both base-path and MASC-root-only retained-queue scenarios also pass using the current NEXT row, exact retained payload and unchanged admission-phase ledger; staged media scenarios also pass both base-path and root-only transitions, with exact alpha bytes/IDs/references and no alpha media admitted to beta; superseded scoped roster now also passes: foreign B response is held while a newer C identity matching the prepared workspace is applied, then c-only roster is selected after B release and all post-boundary b-only bytes are rejected; armed Schedule/runtime, observer retirement and identity refresh chain focused replays pass. Schedule fixtures had overwritten the runtime roster; retain the original roster, admit the runtime picker under matching A and then withdraw under foreign B. Identity reacquires its read-only detail and a fresh B provider snapshot after release before asserting only the original A:first POST, then A health/fresh provider snapshot precede explicit retry with exact A:first/A:second requests. Final whole remote suite PASS with fixture head031c121b847f424b08c4c6cc76faa30da62c3888 on875native. Log/tmp/rc-875-remote-final-full.log SHA25611866c506c0efb563a01c7837649a548b547aebc50e4dc0a9c5fe21526901a0f. No-write and stale-response assertions are unchanged. Primary history replay uses 300 columns so macOS temporary-path identity and refusal text stay visible; i checks its own composer admission hint, metadata corruption withdraws alpha into the remaining valid beta roster and exact repair restores both rows before original draft/history recovery.
+- 재현 결과: latest failed RC and old compiled artifact support fixture root causes; current final integrated SHA still requires full compilation/behavior/installation verification. No local Dune run or test exclusions. Full RC37093550421 was started for141eb35f095f72a8747b3b8ade39495f192625a5 before canonical movement; it does not verify the reconciled successor. A new final-head Full RC is required.
+
+## 불확실성 (Uncertainty)
+- 미확인 항목: exact final integration Full RC, independent Release approval, tag/publication and live installation
+- 영향: old native replays cannot authorize publication
+- 추가 확인 필요: explicit final-head Full RC and completion readback at a work boundary; no watch/poll loops
+
+## 적용범위 (Scope)
+- 영향 받는 영역: remaining RC fixture failures and factual release notes
+- 제약/배제: no runtime writes, current server stop, tag or main merge. Existing latest published releasev0.48.0. Livehealth8935 reports existing0.49.0 binary83d23c96c01f2505fe0bad39c699b330a3f9df93 under/Users/dancer/me/.masc, distinct from candidate.
+- 롤백 조건: any failed exact-head Full RC prevents publication. Read-only full deployment preflight using installedhelper stops at currently owned writer leasepid49101; repeat with final artifact at authorized replacement boundary, without changing live data to evade validation.
+
+## Supplemental local evidence
+
+Raw full CI log/native provenance under/tmp/masc-rc-37037420526; replays/tmp/masc-chat-latest-fixed.log,/tmp/masc-metadata-latest-fixed.log,/tmp/masc-scoped-ledger-full-latest.log,/tmp/rc-875-item-public.log,/tmp/rc-875-live-identity.log. Immutable original artifact/run remains linked above. Source support PRs40851,40852,40853,40854. Two independent reviewers passed all composition and supplemental tuple/remote deltas. Unrelated stale Ask action footer recorded at https://github.com/jeong-sik/masc/issues/40856.

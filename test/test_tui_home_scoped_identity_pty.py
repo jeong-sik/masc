@@ -211,6 +211,7 @@ def superseded_scoped_match_journey(executable):
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
+    assert isinstance(briefing, tuple)
     initial_briefing = copy.deepcopy(briefing)
     initial_briefing[1]["summary"]["workspace_health"] = "initializing"
 

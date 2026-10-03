@@ -60,7 +60,7 @@
 
 ### Complete change record
 
-- Final RC repairs retain local chat drafts across unread identity, preserve pre-tool progress and dispatch spans, and withdraw Item monetary facts without a current roster revision. Typed Librarian capacity evidence, Candle refusal classification and narrow Work backlog counts are also corrected. (#40820, #40829, #40831, #40833, #40838)
+- Final RC repairs retain local chat drafts across unread identity, preserve pre-tool progress and dispatch spans, and withdraw Item monetary facts when current Keeper presence is unobserved. The authenticated account endpoint permits read-state access without admin-only public Candle revision observations. Typed Librarian capacity evidence, Candle refusal classification and narrow Work backlog counts are also corrected. (#40820, #40829, #40831, #40833, #40838, #40843)
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
 - The final main integration (a4e3b9478a, the Lane Add-ons stack and the latest fixes) folded #40210, #40222, #40227, #40233, #40237, #40239, #40243, #40253, #40254, #40257, #40269, #40273, #40330, #40343, #40405, #40408, #40409, #40410, #40614, #40844, #40863, #40871, #40939, #40955. Each PR's fragment is preserved verbatim in the unabridged notes below.

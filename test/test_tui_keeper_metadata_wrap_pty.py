@@ -22,9 +22,9 @@ def prepare(base):
     path.write_text(json.dumps(meta), encoding="utf-8")
 
 
-def fixtures(gate_response_ready):
+def fixtures(gate_response_ready: threading.Event) -> h.HttpFixtures:
     served = h.keeper_runtime_http_fixtures()
-    def gate_settings():
+    def gate_settings() -> h.HttpResponse:
         response = (503, {"error": "설정 읽기 실패 " * 20 + " GATE-END 한글끝"})
         gate_response_ready.set()
         return response
@@ -56,6 +56,7 @@ def scan(process, fd, output, expected):
     h.drain_until_quiet(process, fd, output)
     seen = set()
     previous = None
+    current = h.screen_text(bytes(output))
     for _ in range(80):
         current = h.screen_text(bytes(output))
         for token in expected:

@@ -88,7 +88,7 @@ let test_policy_boundaries () =
     (match Candle_config.of_toml_string (text ~weight ~amount:max_int) with
      | Enabled policy -> Alcotest.(check int) "largest representable amount" max_int policy.payout.trivial_milli
      | Off | Disabled _ -> Alcotest.fail "representable grade amount rejected");
-    let beyond = Int64.(to_string (add (of_int max_int) 1L)) in
+    let beyond = Int64.(to_string (add (of_int Stdlib.max_int) 1L)) in
     let oversized = Printf.sprintf
       "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %s\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight beyond in
     ignore (disabled_reason (Candle_config.of_toml_string oversized)))

@@ -68,6 +68,8 @@ def retained(value, label):
 def model_references(value, *, pending=False):
     value = object_value(value, "model evidence")
     keys = ("request",) if pending and "outcome" not in value else ("request", "outcome")
+    if set(value) != set(keys):
+        raise InvalidInput("model evidence must contain exactly the retained request and permitted outcome")
     return {key: retained([value.get(key)], f"model {key}")[0]
             for key in keys}
 

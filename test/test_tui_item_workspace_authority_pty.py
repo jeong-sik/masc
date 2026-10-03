@@ -46,6 +46,7 @@ class ItemWire(authority.WorkspaceWire):
         self.missing_revision = False
         self.booting = False
         self.ready_after_boot = False
+        self.returned_balance = "3250"
 
     def set_booting(self, booting):
         with self.lock:
@@ -112,6 +113,7 @@ class ItemWire(authority.WorkspaceWire):
     def items(self):
         with self.lock:
             phase, state = self.phase, self.account_state
+            returned_balance = self.returned_balance
             held = self.hold_next and phase == "a"
             if held:
                 self.hold_next = False
@@ -131,7 +133,7 @@ class ItemWire(authority.WorkspaceWire):
         if phase == "a":
             return account("12500", "glasses", "1000", "a")
         if phase == "a-returned":
-            return account("3250", "quill", "1750", "c")
+            return account(returned_balance, "quill", "1750", "c")
         return account("7500", "crown", "2000", "b")
 
 
@@ -255,13 +257,15 @@ def run(binary, captures):
             # Public Candle revision observations do not authorize this
             # authenticated account endpoint. Missing/malformed public fields
             # must not suppress a fresh, strictly decoded private account.
-            for public_revision in ("missing", "malformed"):
+            for public_revision, balance, rendered_balance in (
+                ("missing", "4250", b"Balance 4.250 Candle"),
+                ("malformed", "5250", b"Balance 5.250 Candle"),
+            ):
                 with wire.lock:
                     before_events = len(wire.events)
-                if public_revision == "missing":
-                    wire.set_missing_revision(True)
-                else:
-                    wire.set_malformed_revision(True)
+                    wire.missing_revision = public_revision == "missing"
+                    wire.malformed_revision = public_revision == "malformed"
+                    wire.returned_balance = balance
                 os.write(fd, b"r")
                 def fresh_items():
                     with wire.lock:
@@ -270,11 +274,13 @@ def run(binary, captures):
                             for event in wire.events[before_events:])
                 assert h.wait_for_fixture_state(process, fd, output, fresh_items,
                     timeout=authority.WAIT_SECONDS), "public revision blocked the authenticated Item read"
-                wait(lambda text: b"Balance 3.250 Candle" in text and b"quill" in text and b"owned" in text,
+                wait(lambda text: rendered_balance in text and b"quill" in text and b"owned" in text,
                      "private Item facts disappeared with " + public_revision + " public revision")
                 capture("a-public-revision-" + public_revision)
                 wire.set_missing_revision(False)
                 wire.set_malformed_revision(False)
+            with wire.lock:
+                wire.returned_balance = "3250"
             wire.set_booting(True)
             wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,

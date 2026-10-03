@@ -1159,6 +1159,18 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
     check bool "matching external symlink is not owned recovery evidence" true
       (Result.is_error (sampling_requests store ~instance_id:"journal-failure")));
+  Unix.rename blob_path saved_blob;
+  Unix.link external_path blob_path;
+  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
+    check bool "matching external hardlink is not owned recovery evidence" true
+      (Result.is_error (sampling_requests store ~instance_id:"journal-failure")));
+  let added_link = blob_path ^ ".linked" in
+  visited := 0;
+  Fun.protect ~finally:(fun () -> Unix.unlink added_link) (fun () ->
+    check bool "hardlink created during sync cannot satisfy recovery" true
+      (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
+        Unix.fsync fd; Unix.link blob_path added_link)));
+    check int "multiply linked evidence is not delivered" 0 !visited);
   visited := 0;
   Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
     check bool "a symlink swap during file sync cannot satisfy recovery" true

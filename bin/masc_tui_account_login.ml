@@ -41,6 +41,7 @@ type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
+  mutable result_scroll : int;
   mutable saved_scroll_max : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
@@ -61,13 +62,13 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; result_scroll=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
-  t.login_id <- None; t.recovery <- Login_status;
+  t.login_id <- None; t.recovery <- Login_status; t.result_scroll <- 0;
   t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- []; t.connected_models <- [];
   t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
@@ -242,7 +243,7 @@ let inventory ?view t json =
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t message =
-  t.recovery <- Refresh_configuration; t.phase <- Failed;
+  t.recovery <- Refresh_configuration; t.result_scroll <- 0; t.phase <- Failed;
   (* The reason leads; the key to press is also in the hints. *)
   t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
@@ -252,7 +253,7 @@ let refresh_retry t result =
   t.recovery <- Refresh_configuration;
   match refreshed with
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
-  | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
+  | Error _ -> t.result_scroll <- 0; t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let saved_notice = function
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
   | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
@@ -294,11 +295,11 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved -> t.result_scroll <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
-  t.cursor <- 0;
+  t.result_scroll <- 0;
   t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
@@ -387,7 +388,7 @@ let receipt t json =
      | `String ("running" | "failed" | "cancelled" | "interrupted"), _, None
        when field "account_ref" json=`Null || Option.is_some selected ->
        t.account_ref <- selected;
-       t.phase <- Failed; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
+       t.result_scroll <- 0; t.phase <- Failed; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
      | _ -> Error "로그인 결과를 확인하지 못했습니다.")
   | _ -> Error "다른 계정의 로그인 결과입니다."
 let event ~generation t message =
@@ -402,10 +403,10 @@ let event ~generation t message =
     t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading;
     t.notice <- (match authentication with Authenticated -> "계정 인증을 확인했습니다." | Login_completed | Credential_captured -> "로그인 자료를 받았습니다."); Discover
   | Login_failed (id, reference) ->
-    t.login_id <- Some id; t.account_ref <- reference; t.phase <- Failed;
+    t.login_id <- Some id; t.account_ref <- reference; t.result_scroll <- 0; t.phase <- Failed;
     t.draft <- ""; t.input_pending <- false;
     t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하거나 e로 다시 로그인하세요."; Nothing
-  | Login_error -> t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
+  | Login_error -> t.result_scroll <- 0; t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
 let append_draft t text =
   let value = t.draft ^ text in
   if String.is_valid_utf_8 value && String.length value <= 65536 then t.draft <- value
@@ -505,10 +506,10 @@ let key t key =
     let all_selected = List.for_all (fun (model:model) -> List.mem model.id t.selected_models) eligible in
     t.selected_models <- (if all_selected then [] else List.map (fun (model:model) -> model.id) eligible);
     Nothing
-  | Finished _ when key="up" || key="k" ->
-    t.cursor <- max 0 (t.cursor - 1); Nothing
-  | Finished _ when key="down" || key="j" ->
-    t.cursor <- min t.saved_scroll_max (t.cursor + 1); Nothing
+  | (Finished _ | Failed) when key="up" || key="k" ->
+    t.result_scroll <- max 0 (t.result_scroll - 1); Nothing
+  | (Finished _ | Failed) when key="down" || key="j" ->
+    t.result_scroll <- min t.saved_scroll_max (t.result_scroll + 1); Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -583,8 +584,8 @@ let hints t = match t.phase with
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Finished _ -> "j/k:스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
-  | Loading | Saving | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Finished _ | Failed -> "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Loading | Saving -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
@@ -649,23 +650,34 @@ let visible_lines ~height ~width t =
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
     | wrapped -> List.map (fun line -> Text line) wrapped in
-  let body = match t.phase with
-    | Finished _ -> List.concat_map (fun row ->
-        Masc_tui_message_layout.wrap_words ~max_cells:width (row_text row)
-        |> List.map (fun text -> Text text)) (body_rows t)
-    | _ -> body_rows t in
+  let results = match t.phase with Finished _ | Failed -> true | _ -> false in
+  let body = if results then
+    List.concat_map (function
+      | Text text -> List.map (fun line -> Text line)
+          (Masc_tui_message_layout.wrap_words ~max_cells:width text)
+      | Terminal _ as row -> [row]) (body_rows t)
+    else body_rows t in
   let rows = notice @ body in
-  let skip = match t.phase with
-    | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
-    (* The account and what goes with it read from the top. *)
-    | Removal _ -> 0
-    | Finished _ ->
-      t.saved_scroll_max <- max 0 (List.length rows - height);
-      let skip = min t.cursor t.saved_scroll_max in
-      t.cursor <- skip;
-      skip
-    | Loading | Logging | Documented_context _ | Saving | Failed -> max 0 (List.length rows - height) in
-  List.filteri (fun index _ -> index >= skip && index < skip + height) rows
+  if results then (
+    let count = List.length rows in
+    let overflow = height >= 2 && count > height in
+    let content_height = height - if overflow then 1 else 0 in
+    t.saved_scroll_max <- max 0 (count - content_height);
+    let scroll = min t.saved_scroll_max (max 0 t.result_scroll) in
+    t.result_scroll <- scroll;
+    let visible = List.filteri (fun index _ -> index >= scroll && index < scroll + content_height) rows in
+    visible @ if overflow then
+      [Text (Masc_tui_message_layout.fit_width
+        (Printf.sprintf "[결과 %d-%d/%d · j/k:스크롤]" (scroll + 1)
+          (min count (scroll + content_height)) count) width)]
+      else [])
+  else
+    let skip = match t.phase with
+      | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
+      | Removal _ -> 0
+      | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed -> max 0 (List.length rows - height) in
+    List.filteri (fun index _ -> index >= skip && index < skip + height) rows
+
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in
   let name=ref "" and ended=ref false and started=ref false in

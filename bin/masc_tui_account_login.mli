@@ -50,6 +50,7 @@ type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
+  mutable result_scroll : int;
   mutable saved_scroll_max : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
@@ -133,6 +134,9 @@ type row =
 val lines : t -> row list
 val row_text : row -> string
 (** The row's characters without colour. *)
+(** Finished and failed results wrap every row, start at the summary, and
+    retain a separate scroll position. Rendering clamps it to the current
+    viewport and includes an overflow indicator when space allows. *)
 val visible_lines : height:int -> width:int -> t -> row list
 (** The rows that fit [height], the notice wrapped at [width] cells so a
     server's reason is read whole. *)

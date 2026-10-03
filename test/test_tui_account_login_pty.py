@@ -1,6 +1,7 @@
 """Four official clients: remote login input stays outside Keeper chat."""
 from __future__ import annotations
 import json
+import base64
 import os
 import sys
 import threading
@@ -164,7 +165,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
-def reopen_existing_without_login(binary):
+def reopen_existing_without_login(binary, *, scroll_results=False):
     requests = []
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
@@ -190,6 +191,15 @@ def reopen_existing_without_login(binary):
             {"id": "bound-b", "label": "Bound model B", "context": 32768, "tools": True, "bound": True},
             {"id": "new-model", "label": "New account model", "context": 65536, "tools": True, "bound": False}]}
 
+    result_ids = [f"codex-account-model-{index:02d}-long-runtime-identifier" for index in range(12)]
+    if scroll_results:
+        fixtures["/api/v1/setup/connections"] = (200, {
+            "configured": True, "readiness": "usage_limited",
+            "runtime_id": result_ids[0], "runtime_ids": result_ids,
+            "unverified": [{"runtime_id": runtime_id, "code": "quota_exhausted",
+                            "message": "fixture quota", "detail": None}
+                           for runtime_id in result_ids]})
+
     fixtures["/api/v1/setup/accounts/select"] = h.RequestHttpResponse(select)
     fixtures["/api/v1/setup/accounts/login"] = (500, {"error": "login must not start"})
     fixtures["/api/v1/setup/models"] = h.RequestHttpResponse(models)
@@ -207,6 +217,34 @@ def reopen_existing_without_login(binary):
         assert "[연결됨] Bound model A".encode() in plain and "[연결됨] Bound model B".encode() in plain, "connected models were hidden"
         assert b"[x] New account model" in plain, "the remaining model was not preselected"
         assert not any(path == LOGIN for path, _ in requests), "opening an existing account started login"
+        if scroll_results:
+            h.send_and_wait(process, fd, output, b"\r", "저장했습니다".encode())
+            def capture(name, needle):
+                h.resize_and_wait(process, fd, output, rows=16, columns=81,
+                                  needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                raw = h.resize_and_wait(process, fd, output, rows=16, columns=80,
+                                       needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                print("STUDIO_CAPTURE=" + json.dumps({"name": name, "rows": 16, "columns": 80,
+                    "provenance": "local candidate fixture PTY", "frame_b64": base64.b64encode(raw).decode(),
+                    "screen": b"\n".join(h.screen_rows(raw).get(row, b"") for row in range(1, 17)).decode(errors="replace")}), flush=True)
+                return h.screen_text(raw)
+            top = capture("login-result-top", "저장했습니다".encode())
+            assert "[결과".encode() in top, "result overflow was hidden"
+            last = result_ids[-1].encode()
+            for _ in range(40):
+                current = h.press_and_settle(process, fd, output, b"j")
+                if last in current and b"quota_exhausted" in current:
+                    break
+            else:
+                raise AssertionError("last runtime result was unreachable")
+            capture("login-result-bottom", last)
+            for _ in range(40):
+                current = h.press_and_settle(process, fd, output, b"k")
+                if "저장했습니다".encode() in current:
+                    break
+            else:
+                raise AssertionError("result summary was unreachable")
+            assert not any(path == LOGIN for path, _ in requests), "result scroll started login"
         leave_login_and_arm_quit(process, fd, output)
 
     h.run_terminal_scenario(binary, description="existing account opens remaining models without login",
@@ -292,4 +330,5 @@ if __name__ == "__main__":
     scenario(str(Path(sys.argv[1]).resolve()), "claude", "claude-code", usage_limited_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", multi_models=True)
     reopen_existing_without_login(str(Path(sys.argv[1]).resolve()))
-    print("tui account login: PASS (10 scenarios)")
+    reopen_existing_without_login(str(Path(sys.argv[1]).resolve()), scroll_results=True)
+    print("tui account login: PASS (11 scenarios)")

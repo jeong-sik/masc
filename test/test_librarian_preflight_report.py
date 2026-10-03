@@ -122,6 +122,84 @@ class ReportCliTest(unittest.TestCase):
                 text=True,
             )
 
+    def test_unresolved_prompts_are_refused(self) -> None:
+        for source, template in (("missing", "resolved"), ("file", ""), ("override", " \n ")):
+            with self.subTest(source=source, template=template):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    prompt = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["prompt"]
+                    prompt.update(source=source, effective_template=template)
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+
+    def test_historical_task_variants_reject_foreign_fields(self) -> None:
+        for context in ({"kind": "no_task"}, {"kind": "admission_not_recorded"},
+                        {"kind": "task_source_unavailable", "detail": "unreadable"},
+                        {"kind": "task", "task_id": "task-1", "goals": {"kind": "observed", "goals": []}}):
+            for corrupt in (False, True):
+                with self.subTest(context=context, corrupt=corrupt):
+                    manifest = fixture()
+                    frozen = copy.deepcopy(context)
+                    if corrupt:
+                        frozen["detail" if context["kind"] == "task" else "task_id"] = "stale"
+                    for arm in ("baseline", "preflight"):
+                        actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                        actual["historical_task_contexts"] = [{
+                            "source": {"kind": "official_turn"},
+                            "attribution": {"kind": "observed", "turn_ref": "fixture-trace#1", "task_context": frozen},
+                            "first_message": 0, "after_message": 1,
+                            "first_tool_observation": 0, "after_tool_observation": 0,
+                        }]
+                        actual["rendered_prompt_variables"]["historical_task_contexts"] = json.dumps(actual["historical_task_contexts"])
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, int(corrupt), result.stderr)
+                    if corrupt:
+                        self.assertEqual(result.stdout, "")
+
+    def test_rendered_goal_context_matches_typed_input(self) -> None:
+        for rendered in (' { "status" : "no_task" } ',
+                         '{"status":"available","task_id":"task-stale","goals":[]}',
+                         '{"status":"no_task","status":"no_task"}'):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                actual["rendered_prompt_variables"]["goal_context"] = rendered
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 0 if rendered.startswith(' ') else 1, result.stderr)
+            if result.returncode:
+                self.assertEqual(result.stdout, "")
+
+    def test_rendered_history_matches_typed_input(self) -> None:
+        history = [{"source": {"kind": "official_turn"},
+                    "attribution": {"kind": "unattributed"},
+                    "first_message": 0, "after_message": 1,
+                    "first_tool_observation": 0, "after_tool_observation": 0}]
+        for rendered in (json.dumps(history, indent=2, sort_keys=True), "[]", "null", "not-json"):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                actual["historical_task_contexts"] = copy.deepcopy(history)
+                actual["rendered_prompt_variables"]["historical_task_contexts"] = rendered
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 0 if rendered.startswith("[\n") else 1, result.stderr)
+            if result.returncode:
+                self.assertEqual(result.stdout, "")
+
+    def test_http_refusal_matches_attempt_destination(self) -> None:
+        for destination in ("https://fixture.invalid/jev", "https://other.invalid/jev"):
+            manifest = fixture()
+            observed = manifest["pairs"][0]["preflight"]["run"]["output"]["jev_preflight"]
+            observed["passed_over"] = [{
+                "destination_uri": "https://fixture.invalid/jev", "model": "fixture-model",
+                "refusal": {"kind": "http_response", "status": 503, "detail": "unavailable",
+                            "destination_uri": destination, "body": "unavailable"},
+            }]
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, int(destination.startswith("https://other")), result.stderr)
+            if result.returncode:
+                self.assertEqual(result.stdout, "")
+
     def test_actor_must_match_each_frozen_keeper(self) -> None:
         for arms in (("baseline",), ("preflight",), ("baseline", "preflight")):
             with self.subTest(arms=arms):
@@ -216,6 +294,8 @@ class ReportCliTest(unittest.TestCase):
         for arm in ("baseline", "preflight"):
             manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"].update(
                 goal_context=copy.deepcopy(context), historical_task_contexts=copy.deepcopy(history))
+            manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["rendered_prompt_variables"]["goal_context"] = json.dumps(context)
+            manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["rendered_prompt_variables"]["historical_task_contexts"] = json.dumps(history)
         result = self.execute(manifest)
         self.assertEqual(result.returncode, 0, result.stderr)
         for arm in ("baseline", "preflight"):
@@ -283,6 +363,7 @@ class ReportCliTest(unittest.TestCase):
             for arm in ("baseline", "preflight"):
                 actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
                 actual["goal_context"] = copy.deepcopy(context)
+                actual["rendered_prompt_variables"]["goal_context"] = json.dumps(context)
             valid = self.execute(manifest)
             self.assertEqual(valid.returncode, 0, valid.stderr)
             for field, value in (("task_id", "task-1"), ("goals", []), ("detail", "stale error")):

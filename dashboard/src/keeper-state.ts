@@ -60,6 +60,7 @@ export function isKeeperChatHistoryPending(keeperName: string): boolean {
 export const keeperSending = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
+export const keeperChatHistoryErrors = signal<Record<string, string | null>>({})
 export const keeperActionErrors = signal<Record<string, string | null>>({})
 export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
 // Wall-clock ms of the most recent SSE event observed for an in-flight

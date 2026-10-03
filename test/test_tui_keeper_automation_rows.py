@@ -10,13 +10,7 @@ from typing import Any, cast
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_schedule.ml",
-    "bin/masc_tui_loader.ml",
-    "lib/tui_decode.ml",
-    "lib/schedule/schedule_domain.ml",
-)
+
 
 SCHEDULES = h.SCHEDULES_PATH
 

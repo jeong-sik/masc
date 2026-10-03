@@ -5524,6 +5524,8 @@ let decode_librarian_preflight_attempt json =
     | "http_response" ->
       let* status = required_int_field refusal "status" in
       let* destination_uri = required_string_field refusal "destination_uri" in
+      let* () = if String.equal destination_uri destination.sljd_destination_uri
+        then Ok () else Error "preflight HTTP refusal destination differs from attempted destination" in
       let* body = required_member refusal "body" in
       let* body = match body with
         | `String body -> Ok body
@@ -5557,7 +5559,10 @@ let preflight_fields_absent json fields =
 let decode_librarian_preflight output =
   let ( let+ ) result f = Result.map f result in
   match Json_util.assoc_member_opt "jev_preflight" output with
-  | None -> Ok None
+  | None ->
+    let* () = preflight_fields_absent output
+      ["generation_path"; "full_llm_skipped"; "preflight_domain_rejection"] in
+    Ok None
   | Some preflight ->
     let* status = required_string_field preflight "status" in
     let* lp_status = match status with
@@ -5885,6 +5890,10 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
     | _, _ -> Ok None
   in
+  let* () = match lrd_librarian_preflight, summary.lrs_status with
+    | Some {lp_generation_path = Generation_not_entered; _}, Lane_run_succeeded ->
+      Error "successful Librarian run cannot await preflight without entering generation"
+    | _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"

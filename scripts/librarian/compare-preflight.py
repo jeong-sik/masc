@@ -176,13 +176,21 @@ def goal_source_error(value: Json) -> None:
 def task_context(value: Json) -> None:
     context = obj(value, "historical task context")
     kind = context.get("kind")
+    fields = {
+        "no_task": {"kind"},
+        "admission_not_recorded": {"kind"},
+        "task_source_unavailable": {"kind", "detail"},
+        "task": {"kind", "task_id", "goals"},
+    }
+    if not isinstance(kind, str) or kind not in fields:
+        raise ValueError("unknown historical task context kind")
+    if context.keys() != fields[kind]:
+        raise ValueError("historical task context fields do not match kind")
     if kind in ("no_task", "admission_not_recorded"):
         return
     if kind == "task_source_unavailable":
         string(context.get("detail"), "task source detail")
         return
-    if kind != "task":
-        raise ValueError("unknown historical task context kind")
     text(context.get("task_id"), "historical task_id")
     observation = obj(context.get("goals"), "historical goals")
     if observation.get("kind") == "observed":
@@ -234,12 +242,12 @@ def input_payload(value: Json, actor: str) -> None:
     prompt = obj(actual.get("prompt"), "prompt")
     if prompt.get("key") != "librarian":
         raise ValueError("preflight comparison requires the eligible librarian prompt")
-    if prompt.get("source") not in ("override", "file", "missing"):
-        raise ValueError("unknown prompt source")
+    if prompt.get("source") not in ("override", "file"):
+        raise ValueError("preflight comparison requires a resolved prompt source")
     path = required(prompt, "file_path")
     if path is not None:
         string(path, "prompt file_path")
-    string(prompt.get("effective_template"), "effective_template")
+    text(prompt.get("effective_template"), "effective_template")
     count(prompt.get("rendered_bytes"), "rendered_bytes")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
     variables = obj(actual.get("rendered_prompt_variables"), "rendered_prompt_variables")
@@ -251,6 +259,13 @@ def input_payload(value: Json, actor: str) -> None:
         string(variable, "rendered variable " + key)
     if variables["keeper_id"] != actor:
         raise ValueError("run actor must match the frozen keeper_id")
+    rendered_history = json.loads(string(variables["historical_task_contexts"], "rendered historical_task_contexts"), object_pairs_hook=unique_object)
+    if rendered_history != actual["historical_task_contexts"]:
+        raise ValueError("rendered historical task context disagrees with frozen typed context")
+    rendered_goal = json.loads(string(variables["goal_context"], "rendered goal_context"), object_pairs_hook=unique_object)
+    goal_context(rendered_goal)
+    if rendered_goal != actual["goal_context"]:
+        raise ValueError("rendered goal context disagrees with frozen typed context")
     continuity = json.loads(string(variables["continuity"], "continuity"), object_pairs_hook=unique_object)
     if continuity is not None:
         raise ValueError("evaluated preflight requires null frozen continuity")
@@ -284,6 +299,8 @@ def attempts(value: Json, name: str) -> list[Json]:
             if type(refusal.get("status")) is not int:
                 raise ValueError("HTTP refusal status must be an integer")
             text(refusal.get("destination_uri"), "HTTP refusal destination")
+            if refusal["destination_uri"] != attempt["destination_uri"]:
+                raise ValueError("HTTP refusal destination disagrees with attempted destination")
             body = refusal.get("body")
             if not isinstance(body, str):
                 encoded = obj(body, "HTTP refusal body")

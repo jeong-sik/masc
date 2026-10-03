@@ -63,6 +63,7 @@ class ItemWire(authority.WorkspaceWire):
         payload = json.loads(response.body)
         with self.lock:
             booting = self.booting
+            self.events.append({"event": "item-health", "booting": booting})
         payload["startup"] = {"state_ready": not booting}
         return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
@@ -169,6 +170,11 @@ def run(binary, captures):
                     and event["malformed_revision"] == malformed
                     for event in wire.events)
 
+        def booting_observed():
+            with wire.lock:
+                return any(event["event"] == "item-health" and event["booting"]
+                    for event in wire.events)
+
         def item_row(name):
             rows = [line for line in visible().splitlines() if name in line]
             assert rows, f"{name!r} absent: {visible()!r}"
@@ -271,15 +277,22 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
-            wait(lambda text: b"No keeper selected." in text
+            wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,
                  "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
+            # Item authority requires a fresh explicit detail read; unlike
+            # other detail tabs, it is not automatically restored on recovery.
+            wait(lambda text: b"MASC Keepers" in text and b"a.boot.ready" in text
+                 and "▸Items".encode() not in text,
+                 "ready server did not publish its fresh roster after boot")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            open_items()
             wait(lambda text: "▸ alpha".encode() in text and "▸Items".encode() in text
                  and b"Balance 3.250 Candle" in text,
-                 "ready server did not restore the selected Keeper Item tab and account after boot")
+                 "explicit readmission did not reload the Keeper Item account")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")

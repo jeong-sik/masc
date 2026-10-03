@@ -21,6 +21,9 @@
 
 ### Release highlights
 
+- Keep incomplete memory-search acceptance checks valid when optional no-match and verification diagnostics are absent (#40929).
+- Preserve the selected Keeper when returning from palette chat after roster refresh, and retain Item authority and portrait layout acceptance coverage (#40932).
+
 - Keeper Items remain readable with read-state permission when public roster currency observations are omitted; workspace and response ownership checks remain enforced. Repair RC behavioral fixtures without excluding suites or increasing timeouts. (#40843)
 
 - Follow Keeper work through the shared Goal model, task activity, and clearer TUI navigation.
@@ -60,6 +63,8 @@
 - Final RC repairs retain local chat drafts across unread identity, preserve pre-tool progress and dispatch spans, and withdraw Item monetary facts without a current roster revision. Typed Librarian capacity evidence, Candle refusal classification and narrow Work backlog counts are also corrected. (#40820, #40829, #40831, #40833, #40838)
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
+- The final main integration (a4e3b9478a, the Lane Add-ons stack and the latest fixes) folded #40210, #40222, #40227, #40233, #40237, #40239, #40243, #40253, #40254, #40257, #40269, #40273, #40330, #40343, #40405, #40408, #40409, #40410, #40614, #40844, #40863, #40871, #40939, #40955. Each PR's fragment is preserved verbatim in the unabridged notes below.
+- The release review folded the fragments that accumulated while main kept moving: #40163, #40168, #40173, #40175, #40176, #40177, #40178, #40179, #40180, #40185, #40188, #40193, #40198, #40212, #40225, #40231, #40266, #40302, #40303, #40310, #40522, #40525, #40547, #40568, #40571, #40572, #40579, #40582, #40584, #40585, #40654, #40655, #40686, #40691, #40699, #40702, #40703, #40705, #40706, #40711, #40715, #40721, #40732, #40736, #40739, #40741, #40742, #40750, #40761, #40777, #README. Each PR's fragment is preserved verbatim in the unabridged notes below.
 
 ## [0.48.0] - 2026-09-29
 

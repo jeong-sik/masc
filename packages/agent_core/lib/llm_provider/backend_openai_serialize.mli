@@ -104,7 +104,8 @@ val build_openai_tool_json : Yojson.Safe.t -> Yojson.Safe.t
 
 (** [conformant_tool_json tool] is {!build_openai_tool_json} with the
     function's parameter schema projected to the conformant subset (enum
-    values folded into the description; oneOf/anyOf/allOf dropped) for
-    providers whose function-tool validation rejects those JSON-Schema
-    constructs. The dispatcher's [[params]] validation stays authoritative. *)
+    values folded into the description; oneOf/anyOf/allOf dropped recursively)
+    for providers requiring that subset. No variant is selected or merged;
+    type information held only inside a combinator is lost, while sibling
+    fields remain. The dispatcher's [[params]] validation stays authoritative. *)
 val conformant_tool_json : Yojson.Safe.t -> Yojson.Safe.t

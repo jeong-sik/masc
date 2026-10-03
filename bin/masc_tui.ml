@@ -1568,7 +1568,7 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
-let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
@@ -1576,7 +1576,10 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      let withdrawal = match schedule_form_action with
+        | None -> Workspace_identity_unconfirmed detail
+        | Some action -> Schedule_form_authority_refused {action; detail} in
+      enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
       Error detail
     end
 
@@ -9962,6 +9965,9 @@ let revoke_detail_readings state =
   Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. *)
+  state.schedule_form_refusal <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
 
 let same_currency_workspace source current =
@@ -10246,6 +10252,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_config_view_error <- None;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. *)
+  state.schedule_form_refusal <- None;
   state.keeper_usage <- Keeper_usage_unread;
   Masc_tui_types.withdraw_identity_readings state;
   state.github_token_input <- None;
@@ -10546,6 +10555,16 @@ let apply_http_surfaces state ~mailbox results =
          Masc_tui_resources_requests.launch_list state ~host:server_peer_host
            ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
            ~check:(capture_workspace_check state ~mailbox)
+     (* Code and Changes reads settle through the workspace queue, so a pane
+        opened before the identity reading failed as unverified; the
+        cadence reload only the surfaces it owns, not these. *)
+     | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
+         ~deliver:(workspace_enqueue state mailbox)
+     | Changes ->
+         (* The pane holds its chosen scope; replay whatever it was showing. *)
+         state.repository_changes_scope
+         |> Option.iter (fun scope ->
+                launch_repository_changes_load state ~mailbox ~scope)
      | _ -> ());
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -12922,6 +12941,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
+  | Schedule_form_authority_refused {action; detail} ->
+      (* This receipt belongs to the guard's withdrawal, and is presented
+         only after that withdrawal retires the former workspace readings.
+         Its Workspace_scoped envelope rejects delivery to a successor. *)
+      apply_server_identity_reading state (Error detail);
+      state.schedule_form_refusal <- Some (action, detail, Unix.gettimeofday ());
+      report_action state "error" (action ^ ": " ^ detail)
   | Lane_package_preview_loaded (generation,path,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -13269,9 +13295,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         || Option.is_some state.keepers_error
       in
       let previous_detail_authority = state.detail_read_authority in
+      let was_unconfirmed = state.workspace_identity <> Workspace_identity_match in
       apply_http_surfaces state ~mailbox results;
-      refresh_visible_detail_after_authority_recovery state ~mailbox
-        ~previous_authority:previous_detail_authority;
+      (* Navigation can precede the first confirmed identity. Its cancelled
+         Lane read belongs to the old authority; start a fresh read now that
+         the visible surface can use this workspace. Steady refreshes do not
+         repeat it, and the loader retains its existing in-flight guard. *)
+      if was_unconfirmed && state.workspace_identity = Workspace_identity_match
+         && state.view = Lanes then launch_lanes_load state ~mailbox;
+      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority:previous_detail_authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (match state.view with
@@ -13891,9 +13923,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && item_authority_ready state
+         (* The same reading the dispatch guard makes: a partial roster's
+            silence is not absence, so a read this TUI legitimately launched
+            for an Unobserved Keeper is accepted here too. A complete
+            roster's Absent and this Keeper's own decode failure still
+            refuse their answers. *)
          && (match Keeper_control.liveness_of_roster state.keeper_roster request.drr_keeper with
-             | Present _ -> true
-             | Unobserved | Invalid _ | Absent -> false) then
+             | Present _ | Unobserved -> true
+             | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
@@ -18331,7 +18368,8 @@ and is loaded on demand through keeper_skill.
             report_form_refusal ("body is not JSON: " ^ message)
           | `Assoc _ ->
             (match Result.bind
-               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (check_workspace_request ~schedule_form_action:action state
+                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
                (fun () -> post declaration) with
              | Error detail -> report_form_refusal detail
              | Ok response ->

@@ -1,0 +1,718 @@
+{
+  "get_events": [
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "history",
+      "phase": "a",
+      "held": false
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "memory",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "history",
+      "phase": "a",
+      "held": true
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "publish",
+      "phase": "b"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "roster",
+      "phase": "b"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "roster",
+      "phase": "b"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "publish",
+      "phase": "b-after-late"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "roster",
+      "phase": "b-after-late"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "roster",
+      "phase": "b-after-late"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "health",
+      "phase": "b-after-late",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv/different-server-workspace"
+    },
+    {
+      "event": "publish",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "history",
+      "phase": "a-returned",
+      "held": false
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "memory",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "history",
+      "phase": "a-returned",
+      "held": false
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "memory",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "roster",
+      "phase": "a-returned"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    },
+    {
+      "event": "health",
+      "phase": "a-returned",
+      "base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-du8bwxmv"
+    }
+  ],
+  "posts": [
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    }
+  ]
+}

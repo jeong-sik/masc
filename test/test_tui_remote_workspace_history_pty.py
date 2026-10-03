@@ -209,6 +209,10 @@ def run(binary: str, captures: Path | None) -> None:
             with wire.lock:
                 assert not [event for event in wire.events
                     if event["event"] == "memory" and str(event["phase"]).startswith("b")],                     "a withdrawn A history read continued into B's memory journal"
+            # The mismatch path is pinned ahead of action feedback in a narrow
+            # footer. Give the refusal room before asserting its complete text.
+            h.resize_and_wait(process, fd, output, rows=35, columns=300,
+                             needle=b"b.settled", controls=(h.FULL_REDRAW,))
             refusal = b"Chat requires a matching workspace"
             for key in (b"m", b"i"):
                 # A repeated refusal leaves identical footer cells, so the
@@ -216,11 +220,16 @@ def run(binary: str, captures: Path | None) -> None:
                 # Require the previous notice to leave the current screen
                 # before asking this entry path for its own visible refusal.
                 if refusal in screen(output):
-                    h.write_all(fd, output, b"\x1b")
+                    h.select_keeper_row(process, fd, output, b"beta")
+                    h.select_keeper_row(process, fd, output, b"alpha")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
                 h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
+            h.select_keeper_row(process, fd, output, b"beta")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            await_screen(lambda text: refusal not in text,
+                         "previous chat refusal did not clear before palette entry")
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
                 assert not [event for event in wire.events
@@ -237,10 +246,18 @@ def run(binary: str, captures: Path | None) -> None:
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
             await_screen(lambda text: b"MISMATCH" not in text
-                         and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
+                         and b"MASC Keepers" in text
+                         and "▸Info".encode() not in text
+                         and b"b.settled" not in text
+                         and b"keeper metadata read failed" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
+            await_screen(lambda text: b"keeper metadata read failed" not in text
+                         and b"a.returned" in text,
+                         "repaired A metadata was not reloaded into the roster")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
             h.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
                              needle=b"Total Turns:", controls=(h.FULL_REDRAW,))
             await_screen(lambda text: b"Total Turns:" in text

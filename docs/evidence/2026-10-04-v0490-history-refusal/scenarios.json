@@ -1,0 +1,6 @@
+[
+  {
+    "description": "workspace change withdraws held chat history and retains its unsent draft",
+    "status": "PASS"
+  }
+]

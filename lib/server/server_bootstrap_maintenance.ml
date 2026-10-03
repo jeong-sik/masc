@@ -778,9 +778,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             report.corrupt_rows
     in
     let reconcile_goal_events () =
-      match Goal_store.flush_pending_events (Mcp_server.workspace_config state) with
+      match Goal_delivery.flush (Mcp_server.workspace_config state) with
       | Ok () -> ()
-      | Error detail -> Log.Server.warn "goal audit outbox delivery deferred: %s" detail
+      | Error detail -> Log.Server.warn "goal effect outbox delivery deferred: %s" detail
     in
     reconcile_goal_events ();
     project_transition_outboxes Startup_projection;

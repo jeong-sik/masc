@@ -42,9 +42,10 @@ type schedule_source = Schedule_contract_values.schedule_source =
     [minute hour day-of-month month day-of-week]. It supports wildcards,
     comma lists, numeric ranges, and step syntax such as [*/15] and [1-5/2].
     Single-value steps such as [5/10] are rejected; spell out the range.
-    Day-of-week accepts [0] or [7] for Sunday. When both day-of-month and
-    day-of-week are restricted, matching follows Vixie cron semantics: either
-    field may match. *)
+    Day-of-week accepts [0] or [7] for Sunday. Following Vixie cron semantics,
+    if either day field starts with a wildcard (including [*/s] or a leading
+    wildcard in a list), both fields must match their selected values.
+    Otherwise either day-of-month or day-of-week may match. *)
 type recurrence =
   | One_shot
   | Interval of { interval_sec : int }

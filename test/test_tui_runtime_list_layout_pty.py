@@ -62,9 +62,10 @@ def run(executable, no_color):
                     assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)
                     assert "…" not in route_block, (columns, route_block)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                status = "ready / reach" if columns == 30 else "ready / reachable"
+                # The fixture has no account usage scope, so the folded row
+                # reports usage unknown; reachability remains in detail.
                 candidate_rows = [row for row in visible.splitlines()
-                                  if suffix in row and status in row]
+                                  if suffix in row and "usage unknown" in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
                 cells = sum(0 if unicodedata.combining(char) else
                             2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
@@ -79,6 +80,15 @@ def run(executable, no_color):
                 field = detail.split("Runtime ID:", 1)[1].split("Provider:", 1)[0]
                 recovered = "".join(field.split())
                 assert RUNTIME_ID in recovered, (columns, recovered, detail)
+                probe_detail = detail
+                if "Probe status:" not in probe_detail:
+                    h.press_and_settle(process, fd, output, b"\x1b[F")
+                    probe_detail = screen(output)
+                    if "Probe status:" not in probe_detail:
+                        h.send_and_wait(process, fd, output, b"\x1b[5~", b"Probe status:")
+                        probe_detail = screen(output)
+                probe_field = probe_detail.split("Probe status:", 1)[1].split("Probe transport:", 1)[0]
+                assert "reachable" in "".join(probe_field.split()), (columns, probe_detail)
                 h.send_and_wait(process, fd, output, b"\x1b", b"ROUTE / PROBE")
         os.write(fd, b"q")
 

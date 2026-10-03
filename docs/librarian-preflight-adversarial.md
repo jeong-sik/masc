@@ -21,6 +21,14 @@ production Keeper write. The evaluation honors the runtime's preflight opt-in,
 lane/destination credentials and the supplied Keeper's exclusion. Use a separate
 test TOML with preflight enabled; do not change the production TOML for this run.
 
+All current facts receive the same timestamp captured at evaluation startup,
+so epoch-zero ages cannot reward generation merely for refreshing a stale fact.
+The synthetic Keeper instructions are empty for every case, independent of the
+expected labels. `--keeper` supplies identity and exclusion policy only; this
+corpus does not evaluate a production Keeper's configured instructions. The
+report records `fact_observed_at` and `keeper_instructions` alongside each fully
+rendered prompt so both input choices can be inspected.
+
 After a focused native build is explicitly requested under repository policy:
 
 ```sh

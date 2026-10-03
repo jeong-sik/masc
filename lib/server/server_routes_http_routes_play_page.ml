@@ -165,6 +165,7 @@ const canvas = el('screen');
 const ctx = canvas.getContext('2d');
 let me = null;
 let controller = null;
+let controllerError = null;
 let machine = false;
 let since = null;
 let lastActivityKey = null;
@@ -214,10 +215,13 @@ async function api(method, path, body) {
 
 function renderTurn() {
   const turn = el('turn');
-  setControlsEnabled(machine && !ended);
+  setControlsEnabled(machine && controllerError === null && !ended);
   if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
+  } else if (controllerError !== null) {
+    turn.className = '';
+    turn.textContent = '조종권을 확인하지 못했어요. 다시 읽고 있어요.';
   } else if (controller === null) {
     turn.className = '';
     turn.textContent = '조종권이 비어 있어요. 먼저 누르는 사람이 가져가요.';
@@ -266,6 +270,7 @@ async function refreshSeat() {
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
       || typeof r.json.name !== 'string'
       || !(r.json.controller === null || typeof r.json.controller === 'string')
+      || !(r.json.controller_error === undefined || typeof r.json.controller_error === 'string')
       || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
       || !Array.isArray(r.json.participants)
       || !r.json.participants.every(name => typeof name === 'string')) {
@@ -274,12 +279,13 @@ async function refreshSeat() {
   }
   me = r.json.name;
   controller = r.json.controller;
+  controllerError = r.json.controller_error ?? null;
   machine = r.json.machine;
   renderTurn();
   renderPassTargets(r.json.participants);
   seatSavesName = r.json.saves_name;
-  setStatus('seat', '');
-  return true;
+  setStatus('seat', controllerError ?? '');
+  return controllerError === null;
 }
 
 // A pointer opening also focuses the select. Those events share one read;
@@ -434,7 +440,7 @@ async function poll() {
 
 function send(path, body) {
   sending = sending.then(async () => {
-    if (ended || !machine) return;
+    if (ended || !machine || controllerError !== null) return;
     const r = await api('POST', path, body);
     if (ended) return;
     if (!r.json || r.json.ok !== true) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));

@@ -351,3 +351,37 @@ test('reopening a focused handoff selector refreshes new invites once per openin
   await page.settle();
   assert.equal(seatReads, reopened + 1, 'keyboard reopening refreshes too');
 });
+
+
+test('an unreadable controller disables moves and recovers without new machine activity', async () => {
+  let unreadable = false;
+  const page = fixture(({ url, method }) => {
+    if (url === '/api/v1/play/seat') return response(unreadable
+      ? { ...seat, controller: null, saves_name: null, controller_error: 'DOS save unreadable' }
+      : { ...seat, controller: 'operator' });
+    if (url === '/api/v1/play/pad') return response(layout);
+    if (method === 'POST') return response({ ok: true });
+    return response(url.includes('since=') ? { ...frame, state: 'unchanged' } : frame);
+  });
+  await page.settle();
+  assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
+  unreadable = true;
+  page.get('pass-to').handlers.focus();
+  await page.settle();
+  assert.match(page.get('turn').textContent, /조종권을 확인하지 못했어요/);
+  assert.doesNotMatch(page.get('turn').textContent, /비어 있어요/);
+  assert.equal(page.get('status').textContent, 'DOS save unreadable');
+  assert.equal(page.padButton.disabled, true);
+  assert.equal(page.get('pass').disabled, true);
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+  await page.poll();
+  assert.equal(page.get('pass').disabled, true, 'an unchanged frame cannot clear the read failure');
+  unreadable = false;
+  await page.poll();
+  assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
+  assert.equal(page.get('status').textContent, '');
+  assert.equal(page.get('pass').disabled, false);
+  assert.equal(page.padButton.disabled, false);
+});

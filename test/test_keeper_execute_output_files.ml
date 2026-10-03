@@ -17,7 +17,7 @@ let complete_path expected = function
   | Capture.Incomplete_file _ -> Alcotest.fail "child stream did not reach EOF"
   | Capture.Capture_failed { message; _ } -> Alcotest.fail message
 
-let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) f =
+let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) ?secret f =
   let base_path = Filename.temp_dir "keeper-output-publication-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env ->
@@ -39,9 +39,16 @@ let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) f 
            Alcotest.fail "the real child's nonzero exit was changed");
         let stdout_path = complete_path stdout files.stdout in
         let stderr_path = complete_path stderr files.stderr in
+        let additional_secret_files = match secret with
+          | None -> []
+          | Some value ->
+            let path = Filename.concat base_path "publication-secret.txt" in
+            Out_channel.with_open_bin path (fun channel -> output_string channel value);
+            [ path ]
+        in
         let redaction =
           Redaction.snapshot_with_additional_secret_files
-            ~redact_identity_scalars:false ~additional_secret_files:[]
+            ~redact_identity_scalars:false ~additional_secret_files
             ~base_path ~keeper_name:"output-publication-fixture"
         in
         let run () = f ~base_path ~redaction ~stdout_path ~stderr_path files in
@@ -176,6 +183,23 @@ let test_non_utf8_child_output_is_preserved () =
         (blob_bytes ~base_path "stderr_artifact" fields);
       publication.release_sources ())
 
+let test_worker_publication_preserves_secret_snapshot () =
+  let secret = "publication-exact-secret-value" in
+  with_process_output ~stdout:(secret ^ "\n") ~stderr:(secret ^ "\n")
+    ~pool:true ~secret (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
+      Alcotest.(check string) "caller has already matched the snapshot"
+        "[REDACTED]" (Redaction.redact_text redaction secret);
+      match Publish.publish ~inline_ceiling_bytes:0 ~base_path ~redaction files with
+      | Error error -> Alcotest.fail (Publish.error_to_string error)
+      | Ok publication ->
+        let fields = publication.Publish.fields in
+        Alcotest.(check string) "worker redacts both captured streams"
+          "[REDACTED]\n[REDACTED]\n"
+          (blob_bytes ~base_path "output_artifact" fields);
+        Alcotest.(check string) "caller snapshot remains usable"
+          "[REDACTED]" (Redaction.redact_text redaction secret);
+        publication.release_sources ())
+
 let test_claude_lane_returns_20000_bytes_inline () =
   publish_payload ~lane:claude_lane 20_000 (fun ~base_path:_ ~payload fields ->
     Alcotest.(check bool) "20,000 bytes come back inline on the Claude Code lane" true
@@ -209,6 +233,8 @@ let () =
           test_changed_eof_source_is_not_published
       ; Alcotest.test_case "publication waits for the caller to release sources" `Quick
           test_publication_retains_sources_until_release
+      ; Alcotest.test_case "worker publication preserves captured secret values" `Quick
+          test_worker_publication_preserves_secret_snapshot
       ; Alcotest.test_case "non-UTF-8 child output survives JSON transport" `Quick
           test_non_utf8_child_output_is_preserved
       ]

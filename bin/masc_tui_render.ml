@@ -10770,7 +10770,7 @@ let usage_lines ~cols (state : state) =
             (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
             generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
         ; " Bars compare reported totals; each metric scales to its largest Keeper."
-        ; " Missing or malformed samples can understate totals; bars are not quota."
+        ; " Missing, malformed or unread samples can understate totals; bars are not quota."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
             (Option.fold ~none:"unreported" ~some:(Printf.sprintf "%.0f") token_max)
             (Option.fold ~none:"unreported" ~some:(Printf.sprintf "$%.4f") cost_max)
@@ -10786,8 +10786,9 @@ let usage_lines ~cols (state : state) =
                 let coverage =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
-                  | Keeper_usage_partial count ->
-                      Printf.sprintf "partial (%d malformed rows)" count
+                  | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
+                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · totals are lower bounds"
+                        malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
                       "unavailable: " ^ Terminal_text.single_line reason
                 in

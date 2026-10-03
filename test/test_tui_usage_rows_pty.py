@@ -3,11 +3,11 @@ import os
 import sys
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_message_layout.ml")
+SOURCE_MODULES = ("lib/tui_decode_usage.ml", "bin/masc_tui_render.ml", "bin/masc_tui_message_layout.ml")
 
 
 def run(executable):
-    fixtures = {
+    fixtures: h.HttpFixtures = {
         "/api/v1/dashboard/keeper-costs?window=1440": (200, {
             "cache": {"state": "fresh"}, "generated_at": 1,
             "window_minutes": 1440, "keepers": [{
@@ -16,7 +16,7 @@ def run(executable):
                 "tokens_reported_samples": 9, "tokens_unreported_samples": 2,
                 "tokens_unread_samples": 1, "cost_reported_samples": 8,
                 "cost_unreported_samples": 3, "cost_unread_samples": 1,
-                "metrics_read": {"state": "read", "malformed_rows": 7},
+                "metrics_read": {"state": "read", "malformed_rows": 7, "unread_turn_rows": 5},
             }],
         }),
     }
@@ -34,7 +34,7 @@ def run(executable):
             screen = h.unwrapped(h.screen_text(frame))
             for evidence in (b"Tokens 9876 \xc2\xb7 9 reported, 3 missing",
                              b"Cost $0.1234 \xc2\xb7 8 reported, 4 missing",
-                             b"7 malformed rows"):
+                             b"7 malformed rows", b"5 unread turn rows", b"totals are lower bounds"):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")
         # Make the wrapped content exceed the body, then reach its final row.

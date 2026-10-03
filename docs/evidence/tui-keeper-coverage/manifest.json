@@ -1,0 +1,37 @@
+{
+  "captured_at": "2026-10-03T06:34:24.781724+00:00",
+  "provenance": "local candidate fixture PTY, exact browser row replay",
+  "base_sha": "bc2347e9ad26a54e6610f85be94e20a8e24ffbfe",
+  "source_sha256": {
+    "lib/tui_decode_usage.ml": "afe0c9f42fd8d998bf97d6da6685437159a7657fbd495ccabc01031bdf6c9fbb",
+    "lib/tui_decode_usage.mli": "3733fa30ef702b0040a50fb7a368d284f09b5321d09b009033f991fc4189f564",
+    "bin/masc_tui_render.ml": "66e2873d0b8e1465052535a40e1bbe8b3c547f53dbcfc0e7433cd07adc71da86",
+    "test/test_tui_usage_rows_pty.py": "ec6566f8fae66eb42033c7748b5737b48f5fd894f8750f17b3c95a002b0c8adc",
+    "test/test_tui_usage_studio_pty.py": "16df6432eab005c5058942c137726746c6140feeab7471e8971c578e1d8e94d0",
+    "test/test_tui_surface_studio_pty.py": "8b58c3bcf51c6fb3e6fb3ace4ce38a0034e68ac2aaba95142e2449a85a47e5cd"
+  },
+  "candidate_binary_sha256": "4f38e8e9fb7dbe4a45f7218f0043b62742835536b03c82130ccf9fbfaa63706b",
+  "before_binary_sha256": "5724a98ec9e031378439076a03d7f0b67f1af14e7dbb83c696c9ad1a1f4107dc",
+  "before_result": "expected failure: missing partial (2 malformed rows, 3 unread turn rows)",
+  "after_result": "Usage studio six journeys PASS; narrow coverage journey PASS",
+  "frames": [
+    "keeper-comparison-wide",
+    "keeper-comparison-compact",
+    "keeper-comparison-bottom",
+    "keeper-comparison-wide-before",
+    "work-narrow"
+  ],
+  "live_snapshot": {
+    "captured_at": "2026-10-03T06:28:46.607202+00:00",
+    "rows": 28,
+    "unread_turn_rows": 0,
+    "sha256": "9197646bab4022d9a03720bd089170b3e6bf81a6168ee36be7bf9d34ef2f8da9",
+    "candidate_replay": "PASS"
+  },
+  "production_installed": false,
+  "work_audit": {
+    "result": "FAIL done=15 absent at80x24",
+    "issue": 40947,
+    "subsequent_surfaces": "not reached"
+  }
+}

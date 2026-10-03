@@ -90,9 +90,11 @@ val decode_provider_usage_windows :
     error, as is a reported account without windows or an unreported one with
     windows. *)
 
+(** Unplaced/unread turn rows and malformed rows can both understate totals.
+    Preserve the producer counts separately; neither is complete coverage. *)
 type keeper_usage_coverage =
   | Keeper_usage_complete
-  | Keeper_usage_partial of int
+  | Keeper_usage_partial of { malformed_rows : int; unread_turn_rows : int }
   | Keeper_usage_failed of string
 
 type keeper_usage_row = {

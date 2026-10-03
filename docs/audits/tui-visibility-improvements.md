@@ -13,10 +13,10 @@ No row below implies a production rollout.
 | Usage Trend | Daily values and missing samples hard to distinguish | Implemented | #40906; fixed-scale daily plots, UTC labels, zero versus missing, responsive paired charts |
 | Login results | Small terminal loses summary and cannot reach every result | Implemented | #40924; 32 workflow tests, 11 PTY scenarios, exact browser frame replay |
 | Usage Keepers | Text-only tokens/cost; comparison and measurement coverage hard to scan | Implemented; candidate verified | #40930; separate metric scales, reported/missing evidence and generated UTC time; real HTTP snapshot found all costs unreported |
-| Keeper coverage | Decoder omits `metrics_read.unread_turn_rows` from partial coverage | Pending fix | #40931; source producer/decoder mismatch; no live affected sample observed |
-| Recent sidebar | Distinguish no events, disconnected observer and current inactivity | Pending audit | `masc_tui_observer.{ml,mli}` and sidebar rendering; trace typed data before changing labels |
+| Keeper coverage | Decoder omits `metrics_read.unread_turn_rows` from partial coverage | Implemented; candidate verified | #40931; both counts retained, partial lower-bound label, before FAIL/after seven PTY journeys PASS; live affected row absent |
+| Recent sidebar | Distinguish no events, disconnected observer and current inactivity | Source inspected; runtime audit pending | `masc_tui_acting_pane.ml` separately labels feed opening/closed and no observed events; audit live/closed/no-record cases |
 | Dashboard | Health/work summaries already distinguish some missing/partial states | Partially inspected | Audit source timestamps, denominator and navigation to details |
-| Work | Task, Goal, schedule and verification state comprehension | Pending audit | Trace list/detail views and supported interactions |
+| Work | 80x24 summary clips done/cancelled counters and net changes | Measured defect; pending fix | #40947; surface studio work-narrow FAIL, wide/medium retain counts; resume broader Work audit after fix |
 | Keepers | Lane state, run progress and failure visibility | Pending audit | Inspect list/detail/chat and runtime observation views |
 | Board | Unread, relevance and thread navigation | Pending audit | Inspect list/detail and unavailable-data states |
 | Workspace | Repositories, memory, files and diffs | Pending audit | Inspect narrow layouts and source/error labels |

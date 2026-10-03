@@ -209,7 +209,7 @@ let decode_provider_usage_history json =
 
 type keeper_usage_coverage =
   | Keeper_usage_complete
-  | Keeper_usage_partial of int
+  | Keeper_usage_partial of { malformed_rows : int; unread_turn_rows : int }
   | Keeper_usage_failed of string
 
 type keeper_usage_row = {
@@ -254,8 +254,9 @@ let decode_keeper_usage_row json =
     match read_state with
     | "read" ->
         let* malformed = required_int_field metrics_read "malformed_rows" in
-        Ok (if malformed = 0 then Keeper_usage_complete
-            else Keeper_usage_partial malformed)
+        let* unread = required_int_field metrics_read "unread_turn_rows" in
+        Ok (if malformed = 0 && unread = 0 then Keeper_usage_complete
+            else Keeper_usage_partial { malformed_rows = malformed; unread_turn_rows = unread })
     | "failed" ->
         let* reason = required_string_field metrics_read "reason" in
         Ok (Keeper_usage_failed reason)

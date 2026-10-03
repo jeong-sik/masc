@@ -9977,12 +9977,12 @@ let runtime_picker_label_for = function
   | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> runtime_model_picker_label
   | _ -> runtime_picker_label
 
-(* The picker opens on the first row with no filter, and closing it drops
-   both. *)
+(* The picker opens on the first row. Exact lanes start typing a filter
+   immediately; the other pickers wait for [/]. Closing drops both. *)
 let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
-      { Masc_tui_pick_list.closed with query = Some "" }
+      Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
     | _ -> Masc_tui_pick_list.closed in
   state.runtime_lane_pick <- Some (pick, list)
 

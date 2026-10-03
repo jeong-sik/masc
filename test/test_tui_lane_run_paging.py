@@ -215,6 +215,8 @@ def run(
             "status",
             "elapsed_s",
             "selected_slot",
+            "code",
+            "detail",
         )
         if key in record
     }

@@ -1115,7 +1115,23 @@ let test_default_route_picker_keeps_the_lane_name () =
   let rows, selected, _ = drawn state in
   Alcotest.(check (list string)) "filter finds the route name" ["primary"] rows;
   Alcotest.(check (option string)) "the lane is the selectable row"
-    (Some "primary") selected
+    (Some "primary") selected;
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "resolved routes are unread"
+   | Some snapshot ->
+     let lanes = List.map (fun lane ->
+       if lane.Tui_decode.rrl_id = "primary" then
+         { lane with rrl_id = "a"; rrl_runtime_ids = ["b"; "a"] }
+       else lane) snapshot.rss_resolved.rrs_lanes in
+     state.runtime_surface <- Some {snapshot with rss_resolved =
+       {snapshot.rss_resolved with rrs_lanes = lanes}});
+  let _, _, collision_choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check int) "a colliding route has one selectable row" 1
+    (List.length (List.filter (fun choice -> runtime_picker_choice_id choice = "a") collision_choices));
+  Alcotest.(check bool) "the colliding route preserves lane precedence" true
+    (match List.find_opt (fun choice -> runtime_picker_choice_id choice = "a") collision_choices with
+     | Some (Lane_choice lane) -> lane.rrl_runtime_ids = ["b"; "a"]
+     | Some (Runtime_choice _) | None -> false)
 
 (* The operator types part of a runtime id and the drawn choices are the ones
    that carry it; the header says how many of the catalogue those are. *)

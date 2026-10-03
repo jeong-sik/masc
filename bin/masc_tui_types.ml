@@ -9871,8 +9871,14 @@ let runtime_picker_rows (state : state) pick =
     | (Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
       | Pick_media_failover | Pick_route_default), (None | Some _) -> []
   in
-  ( already, providers,
-    lanes @ List.map (fun runtime -> Runtime_choice runtime) (landing @ refused) )
+  let runtime_choices =
+    landing @ refused
+    |> List.filter (fun runtime ->
+         not (List.exists (fun choice ->
+           String.equal (runtime_picker_choice_id choice) runtime.Tui_decode.ro_id) lanes))
+    |> List.map (fun runtime -> Runtime_choice runtime)
+  in
+  (already, providers, lanes @ runtime_choices)
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different

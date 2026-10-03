@@ -1,7 +1,7 @@
 # Final RC fixture repair evidence
 
 ## 공통 헤더
-- 날짜(ISO8601): 2026-10-03T03:05:00Z
+- 날짜(ISO8601): 2026-10-03T03:32:00Z
 - 작성자: Codex root
 - 결정 ID: masc-v0490-final-fixtures
 - 적용 대상: release/v0.49.0-verified-fixtures-20261003
@@ -10,14 +10,14 @@
 ## 근거 (Evidence)
 - 항목: reconcile six remaining behavioral failures before final release verification
 - 출처: https://github.com/jeong-sik/masc/actions/runs/37037420526 ; full test-suite-log artifact11243381075
-- 확인일시: 2026-10-03T03:05:00Z
+- 확인일시: 2026-10-03T03:32:00Z
 - 신뢰도: High
 - 제한조건: failed run87573926149e68b3de0d207e6c90159e148bc12c; currentce7 has the same product sources and only notes/base reconciliation changes
 
 ## 검증 (Verification)
 - 1차: independently reviewed Item/private-account authority, actual chat return/selection, Gate settings readiness, startup-followup scoped ledger and focused chat exit components. Source fixes were already present in final preparationce7; this recut changes fixture contracts and release notes only.
-- 2차: native macOS ARM artifact11240978742 source875; TUI SHA25698c4727ba2d242bb0d80b709dcc4ff970babe0234a1ff411bfd30779946e8924 matches native-preflight.json. Diff checks pass; Ruff reports only pre-existing scoped unused re and remote two E701 diagnostics; metadata Pyright0; scoped remains101, remote244 and Item12 baseline Pyright diagnostics; shared keyboard remains57 baseline diagnostics. Other existing fixture diagnostics are compared separately, not represented as a clean repository type check.
-- 3차: full latest875native Item, scopedHome8, metadata and Chat clarity suites pass. Root general suite passes on b996native, whose inspected cursor/visibility product consumers are unchanged in this scope. Latest875native live identity chat/pause/boot-recovery scenarios pass; remote Schedule, Ask and GitHub focused replays pass after observing their actual refusal surfaces and avoiding redundant Escape; full remote replay is pending. No-write and stale-response assertions are unchanged.
+- 2차: native macOS ARM artifact11240978742 source875; TUI SHA25698c4727ba2d242bb0d80b709dcc4ff970babe0234a1ff411bfd30779946e8924 matches native-preflight.json. Diff checks pass; Ruff reports only pre-existing scoped unused re and remote two E701 diagnostics; metadata Pyright0; scoped remains101, remote243 (baseline244) and Item12 baseline Pyright diagnostics; shared keyboard remains57 baseline diagnostics. Other existing fixture diagnostics are compared separately, not represented as a clean repository type check.
+- 3차: full latest875native Item, scopedHome8, metadata and Chat clarity suites pass. Root general suite passes on b996native, whose inspected cursor/visibility product consumers are unchanged in this scope. Latest875native live identity chat/pause/boot-recovery scenarios pass; remote Schedule, Ask, GitHub and primary history/draft recovery focused replays pass after observing their actual refusal surfaces and avoiding redundant Escape; both base-path and MASC-root-only retained-queue scenarios also pass using the current NEXT row, exact retained payload and unchanged admission-phase ledger; staged media scenarios also pass both base-path and root-only transitions, with exact alpha bytes/IDs/references and no alpha media admitted to beta; superseded scoped roster now also passes: foreign B response is held while a newer C identity matching the prepared workspace is applied, then c-only roster is selected after B release and all post-boundary b-only bytes are rejected; armed Schedule/runtime, observer retirement and identity refresh chain focused replays pass. Schedule fixtures had overwritten the runtime roster; retain the original roster, admit the runtime picker under matching A and then withdraw under foreign B. Identity reacquires its read-only detail and a fresh B provider snapshot after release before asserting only the original A:first POST, then A health/fresh provider snapshot precede explicit retry with exact A:first/A:second requests. Final whole remote suite PASS with fixture head031c121b847f424b08c4c6cc76faa30da62c3888 on875native. Log/tmp/rc-875-remote-final-full.log SHA25611866c506c0efb563a01c7837649a548b547aebc50e4dc0a9c5fe21526901a0f. No-write and stale-response assertions are unchanged. Primary history replay uses 300 columns so macOS temporary-path identity and refusal text stay visible; i checks its own composer admission hint, metadata corruption withdraws alpha into the remaining valid beta roster and exact repair restores both rows before original draft/history recovery.
 - 재현 결과: latest failed RC and old compiled artifact support fixture root causes; current final integrated SHA still requires full compilation/behavior/installation verification. No local Dune run or test exclusions.
 
 ## 불확실성 (Uncertainty)

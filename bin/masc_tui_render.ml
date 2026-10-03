@@ -9872,9 +9872,17 @@ let render_runtime (state : state) =
            c.push
              (Printf.sprintf "  %s %s%s%s%s"
                 (if picker.rlp_selected_row = Some offset then ">" else " ")
-                (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
+                (match picker.rlp_pick with
+                 | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                     Masc_tui_types.runtime_model_picker_title runtime
+                 | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
                 ctx def
-                (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
+                (Ansi.dim ^ note ^ Ansi.reset));
+           (match picker.rlp_pick with
+            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                c.push ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                  ^ " · " ^ Terminal_text.single_line runtime.ro_id)
+            | _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =

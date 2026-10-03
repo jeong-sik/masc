@@ -9711,6 +9711,7 @@ type runtime_picker_projection = {
   rlp_selected_row : int option;
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
+  rlp_source_total : int;
       (* The catalogue before the filter: zero is an unread catalogue, not an
          empty match. *)
   rlp_summary : string;
@@ -9726,13 +9727,20 @@ let runtime_picker_page = 3
 (* The text a runtime's picker row draws before its notes, made terminal
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
+  else Printf.sprintf "%d" tokens
+
 let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
       runtime.Tui_decode.ro_declared_reasoning_effort in
   Masc.Tui_terminal_text.sanitize_terminal_text
-    (Printf.sprintf "%s %s · %s · %d ctx · %s"
+    (Printf.sprintf "%s %s · %s · %s context · %s"
        runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
-       runtime.Tui_decode.ro_effective_max_context runtime.Tui_decode.ro_id)
+       (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
 
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
   Masc.Tui_terminal_text.sanitize_terminal_text
@@ -9886,7 +9894,9 @@ let runtime_picker_rows (state : state) pick =
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 then "  (runtime catalogue unread)"
+  if picker.rlp_total = 0 && picker.rlp_source_total > 0 then
+    "  (no eligible replacement in this candidate group)"
+  else if picker.rlp_total = 0 then "  (runtime catalogue unread)"
   else
     Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
 
@@ -9926,6 +9936,7 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
       rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;
       rlp_selected_row = view.Masc_tui_pick_list.selected_row;
       rlp_total = view.Masc_tui_pick_list.total;
+      rlp_source_total = List.length state.runtime_catalog;
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
@@ -10419,13 +10430,6 @@ let runtime_pick_min_column_cells = 24
    because the width calculation below measures the same string the renderer
    draws; a format that changed in one place and not the other would put the
    row back over the frame. *)
-let format_context_tokens tokens =
-  if tokens >= 1_000_000 then
-    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
-    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
-  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
-  else Printf.sprintf "%d" tokens
-
 (* What the row says after the two columns. [rpf_warn] asks the renderer for
    the warning colour; the text is the same either way, and the width below
    counts it either way. *)

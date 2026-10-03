@@ -33,7 +33,7 @@
       "id": "unfinished-obligation",
       "expectation": "must_generate",
       "current": [],
-      "messages": ["I still owe the operator the failed release's logs. This is unfinished; send the logs when the investigation ends."],
+      "messages": ["You still owe me the failed release's logs. This is unfinished; send me the logs when the investigation ends."],
       "rationale": "An unresolved obligation is durable even without a new Task ID."
     },
     {
@@ -47,7 +47,7 @@
       "id": "obligation-hidden-in-repetition",
       "expectation": "must_generate",
       "current": [{"claim": "The operator requires current-head review before release.", "category": "constraint"}],
-      "messages": ["Current-head review remains required. Current-head review remains required. Also, the reviewer asked for a regression reproduction and I have not delivered it yet. Current-head review remains required."],
+      "messages": ["Current-head review remains required. Current-head review remains required. Also, the reviewer asked you for a regression reproduction and you have not delivered it yet. Current-head review remains required."],
       "rationale": "Repeated known facts must not hide a new unfinished obligation."
     },
     {

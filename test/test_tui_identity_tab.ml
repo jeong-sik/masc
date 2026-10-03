@@ -103,6 +103,118 @@ let identity_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935
     ~refresh_interval:2.0 ()
 
+module Decode = Masc.Tui_decode
+
+(* A [server_identity] carrying only what workspace equality reads, built
+   through the real decoder path so a field rename here is a compile error
+   instead of a silently-empty comparison. *)
+let workspace_identity ~base_path ~masc_root : Decode.server_identity =
+  Decode.decode_server_identity
+    (`Assoc
+      [ ("build", `Assoc [ ("version", `String "test") ])
+      ; ( "paths"
+        , `Assoc
+            [ ("effective_base_path", `String base_path)
+            ; ("effective_masc_root", `String masc_root) ] )
+      ])
+  |> function
+  | Ok identity -> identity
+  | Error detail -> failwith ("test fixture: " ^ detail)
+
+let hold_expectation state ~keeper ~provider ~base_path ~masc_root =
+  Masc_tui_types.remember_identity_login_expectation state
+    { Masc_tui_types.ile_origin = workspace_identity ~base_path ~masc_root
+    ; Masc_tui_types.ile_keeper = keeper
+    ; Masc_tui_types.ile_provider = provider }
+
+let held_expectations state keeper =
+  Masc_tui_types.identity_expectations_for_keeper state keeper
+  |> List.map (fun expectation -> expectation.Masc_tui_types.ile_provider)
+
+let test_withdrawal_retires_the_display_but_keeps_the_wait () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/consent");
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  Masc_tui_types.withdraw_identity_readings state;
+  check (Alcotest.list Alcotest.string) "consent display is withdrawn" []
+    (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "the login is still owed" [ "slack" ]
+    (held_expectations state "A")
+
+let test_only_its_own_workspace_reopens_the_poll () =
+  let state = identity_state () in
+  let admitted = workspace_identity ~base_path:"/w/a" ~masc_root:"/r" in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/next" ~masc_root:"/r");
+  check Alcotest.bool "a different workspace does not reopen the poll" false
+    (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state);
+  state.server_identity <- Some admitted;
+  check Alcotest.bool "the same workspace returning does" true
+    (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state);
+  state.server_identity <- None;
+  check Alcotest.bool "an unread workspace polls nothing" false
+    (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state)
+
+let test_the_recovery_read_retires_only_the_landed_login () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
+  check (Alcotest.list Alcotest.string) "the landed login stops being owed"
+    [ "atlassian" ] (held_expectations state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "atlassian" "read failed"];
+  check (Alcotest.list Alcotest.string) "an unreadable read is not completion"
+    [ "atlassian" ] (held_expectations state "A")
+
+let test_a_workspace_change_keeps_only_its_own_expectations () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/next"
+    ~masc_root:"/r";
+  (* The server read confirming /w/next runs before [state.server_identity]
+     is updated; a held /w/a expectation must not survive it, the one held
+     for the confirmed workspace must, and the filter must not lean on the
+     stale field. *)
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok (workspace_identity ~base_path:"/w/next" ~masc_root:"/r"));
+  check (Alcotest.list Alcotest.string)
+    "only the confirmed workspace keeps its expectations" [ "atlassian" ]
+    (held_expectations state "A");
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/next" ~masc_root:"/r");
+  check (Alcotest.list Alcotest.string)
+    "the surviving expectation is unaffected by the identity update"
+    [ "atlassian" ] (held_expectations state "A")
+
+let test_restart_and_forget_end_the_waiting_login () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A" ~provider_id:"slack";
+  check (Alcotest.list Alcotest.string) "a stopped login is no longer owed" []
+    (held_expectations state "A")
+
+let test_a_rework_rerun_ends_every_admitted_login () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  hold_expectation state ~keeper:"B" ~provider:"slack" ~base_path:"/w/b"
+    ~masc_root:"/r";
+  Masc_tui_types.retire_identity_login_expectations state;
+  check (Alcotest.list Alcotest.string) "the rerun leaves nothing held" []
+    (held_expectations state "A");
+  check (Alcotest.list Alcotest.string) "no other keeper keeps one either" []
+    (held_expectations state "B")
+
 let test_workspace_withdrawal_retires_identity_consent () =
   let state = identity_state () in
   Masc_tui_types.remember_identity_login state
@@ -112,7 +224,7 @@ let test_workspace_withdrawal_retires_identity_consent () =
   let old = Masc_tui_types.start_identity_login_request state
     ~keeper_name:"A" ~provider_id:"slack" in
   Masc_tui_types.withdraw_identity_readings state;
-  check (Alcotest.list Alcotest.string) "new workspace does not show old consent"
+  check (Alcotest.list Alcotest.string) "new workspace neither shows nor polls old consent"
     [] (pending_urls state "A");
   check Alcotest.bool "old provider list withdrawn" true (state.identity_view = None);
   check Alcotest.bool "old GitHub reading withdrawn" true (state.github_identity_view = None);
@@ -670,10 +782,10 @@ let () =
             `Quick test_another_service_landing_does_not_end_this_login;
         ] );
       ( "pending consent lifecycle",
-        [ Alcotest.test_case "OAuth polling survives unread authority"
-            `Quick test_oauth_polling_survives_unread_authority;
-          Alcotest.test_case "workspace withdrawal retires identity consent"
+        [ Alcotest.test_case "workspace withdrawal retires identity consent"
             `Quick test_workspace_withdrawal_retires_identity_consent;
+          Alcotest.test_case "OAuth polling survives unread authority"
+            `Quick test_oauth_polling_survives_unread_authority;
           Alcotest.test_case "switching Keepers retains each consent URL"
             `Quick test_switching_keepers_retains_each_consent_url;
           Alcotest.test_case "multiple providers complete independently"
@@ -684,5 +796,19 @@ let () =
             `Quick test_inverse_retry_responses_keep_the_newest_consent;
           Alcotest.test_case "failed restart preserves existing consent"
             `Quick test_failed_restart_preserves_the_existing_consent;
+        ] );
+      ( "a login survives a transient authority loss",
+        [ Alcotest.test_case "withdrawal retires the display but keeps the wait"
+            `Quick test_withdrawal_retires_the_display_but_keeps_the_wait;
+          Alcotest.test_case "only its own workspace reopens the poll" `Quick
+            test_only_its_own_workspace_reopens_the_poll;
+          Alcotest.test_case "the recovery read retires only the landed login"
+            `Quick test_the_recovery_read_retires_only_the_landed_login;
+          Alcotest.test_case "restart and forget end the waiting login" `Quick
+            test_restart_and_forget_end_the_waiting_login;
+          Alcotest.test_case "a rework rerun ends every admitted login" `Quick
+            test_a_rework_rerun_ends_every_admitted_login;
+          Alcotest.test_case "a workspace change keeps only its own expectations"
+            `Quick test_a_workspace_change_keeps_only_its_own_expectations;
         ] );
     ]

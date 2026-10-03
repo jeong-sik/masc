@@ -10242,6 +10242,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
+  if not keep_detail_navigation then
+    Masc_tui_types.retire_identity_login_expectations state;
   state.identity_login_requests <- [];
   state.identity_app_form <- None;
   state.identity_attempt_error <- None;

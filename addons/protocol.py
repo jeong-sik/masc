@@ -406,11 +406,16 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32602, "message": "JSON nesting exceeds the decoder limit"}}
         try:
-            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
-        except RecursionError:
-            response = {"jsonrpc": "2.0", "id": request_id,
-                        "error": {"code": -32602, "message": "JSON nesting exceeds the encoder limit"}}
-            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+            encoded = encode_output(response)
+        except InvalidInput:
+            if method == "tools/call":
+                response = {"jsonrpc": "2.0", "id": request_id, "result": {
+                    "content": [{"type": "text", "text": "Tool response must be valid UTF-8 JSON"}],
+                    "isError": True}}
+            else:
+                response = {"jsonrpc": "2.0", "id": request_id,
+                            "error": {"code": -32602, "message": "Response must be valid UTF-8 JSON"}}
+            encoded = encode_output(response)
         if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
             if method == "tools/call":
                 response = {"jsonrpc": "2.0", "id": request_id, "result": {

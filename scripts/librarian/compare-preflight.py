@@ -259,6 +259,9 @@ def input_payload(value: Json, actor: str) -> None:
         string(variable, "rendered variable " + key)
     if variables["keeper_id"] != actor:
         raise ValueError("run actor must match the frozen keeper_id")
+    rendered_history = json.loads(string(variables["historical_task_contexts"], "rendered historical_task_contexts"), object_pairs_hook=unique_object)
+    if rendered_history != actual["historical_task_contexts"]:
+        raise ValueError("rendered historical task context disagrees with frozen typed context")
     rendered_goal = json.loads(string(variables["goal_context"], "rendered goal_context"), object_pairs_hook=unique_object)
     goal_context(rendered_goal)
     if rendered_goal != actual["goal_context"]:

@@ -4069,6 +4069,7 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
 ;;
 
 let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
+  let slot = String.trim slot in
   let replacement = String.trim replacement in
   if String.equal replacement "" || contains_newline replacement
   then Error "replacement must be a non-empty runtime id without newlines"

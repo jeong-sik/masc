@@ -75,8 +75,9 @@ jobs:
           scripts/build-dashboard-if-needed.sh --force
       - uses: actions/upload-artifact@v7
         with:
-          name: release-dashboard-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
           path: assets/dashboard/
+          overwrite: true
           include-hidden-files: true
           if-no-files-found: error
 
@@ -322,7 +323,7 @@ jobs:
       - name: Download verified-source dashboard assets
         uses: actions/download-artifact@v8
         with:
-          name: release-dashboard-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
           path: assets/dashboard/
 
       - name: Source quickstart onboarding smoke

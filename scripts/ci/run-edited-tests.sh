@@ -708,13 +708,6 @@ bounded_by_budget() {
 # after that build was linked from this checkout, and one absent failed to
 # link.
 run_selected() {
-  local known_failures_file="test/ci-known-failures.txt"
-  local known_failures=""
-  if [ -f "${known_failures_file}" ]; then
-    known_failures=$( { grep -vE '^[[:space:]]*(#|$)' "${known_failures_file}" \
-      || [ $? -eq 1 ]; } | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//')
-  fi
-
   ran=0
   skipped=0
   failed=""
@@ -758,15 +751,6 @@ EOF
       *.py) name=$(basename "${source}" .py) ;;
       *) name=$(basename "${source}" .ml) ;;
     esac
-    # The suites main is known not to pass. The nightly ratchet holds this
-    # list in both directions -- a suite that fails unlisted is a new break, a
-    # listed one that passes has to come off -- so it is the record of what a
-    # pull request is not answerable for.
-    if printf '%s\n' "${known_failures}" | grep -Fxq "${dir}/${name}"; then
-      echo "-- ${dir}/${name}: listed in ${known_failures_file}"
-      skipped=$((skipped + 1))
-      continue
-    fi
     case "${source}" in
       *.py)
         python_sources[python_count]="${source}"
@@ -1319,10 +1303,8 @@ self_test() {
   # wrote. The same gap was found for the five node rules (#34837) and closed
   # by building them unconditionally; a scenario that boots a terminal costs
   # 9s against their 0.7s, so it is attributed instead.
-  # The harness brings the suites that name it: scenario selection and
-  # request teardown are checked without opening a terminal.
   check "an edited terminal scenario is selected" \
-    "test/test_tui_fixture_shutdown.py test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py test/test_tui_stall_observation.py" \
+    "test/test_tui_keyboard_input.py" \
     "test/test_tui_keyboard_input.py"
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \

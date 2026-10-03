@@ -44,5 +44,10 @@
     "resolved_sha256": "5bc4362261b208359abc9a4e9b8b73ae7e96ed8f35395cbded8199181d652ced",
     "history_sha256": "ebd8f62390b1ee49568d538d4a8d181e8e1e88a63e92d9d3018b9f0732b45be7"
   },
-  "check_output_sha256": "6e84bee7aace4a1a070328db85af172a4c6e3e775278dad993ec5e5c0b415506"
+  "check_output_sha256": "6e84bee7aace4a1a070328db85af172a4c6e3e775278dad993ec5e5c0b415506",
+  "source_evidence_boundary": {
+    "captured_candidate_commit": "a842a515",
+    "applies_to_current_pr_head": false,
+    "note": "The source and binary hashes above identify the pre-integration candidate capture only. The integrated tree and review repairs changed build/source inputs; no binary or PTY was rebuilt for those changes. Do not use these captures as exact-current-head execution evidence."
+  }
 }

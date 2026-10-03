@@ -3521,9 +3521,13 @@ module Private_jsonl_rows = struct
         ; end_offset : int
         }
 
-  type error = Io_failed of exn
+  type error =
+    | Non_regular_file of Unix.file_kind
+    | Io_failed of exn
 
   let error_to_string = function
+    | Non_regular_file kind ->
+      "private JSONL store is not a regular file: " ^ file_kind_to_string kind
     | Io_failed exn -> Printexc.to_string exn
   ;;
 end
@@ -3545,7 +3549,7 @@ let read_private_jsonl_rows_locked_with_io ~io path =
       ~path
       (fun () ->
          Stdlib.Mutex.protect path_mu (fun () ->
-           match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+           match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
            | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
              Private_file_succeeded Rows_missing
            | fd ->
@@ -3555,6 +3559,11 @@ let read_private_jsonl_rows_locked_with_io ~io path =
                fd
                (fun () ->
                   try
+                    match (Unix.fstat fd).Unix.st_kind with
+                    | (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                      | Unix.S_FIFO | Unix.S_SOCK) as kind ->
+                      Error (Non_regular_file kind)
+                    | Unix.S_REG ->
                     lock_whole_file_shared fd;
                     let bytes = read_fd_chunks fd (Buffer.create 65536) in
                     let end_offset = String.length bytes in
@@ -3578,10 +3587,14 @@ let read_private_jsonl_rows_locked_result path =
   read_private_jsonl_rows_locked_with_io ~io:private_jsonl_transaction_unix_io path
 ;;
 
-let update_private_file_durable_locked_with_io ~io path decide =
+let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
+  read_private_jsonl_rows_locked_with_io ~io path
+;;
+
+let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
-  mkdir_p_memoized dir;
+  if create then mkdir_p_memoized dir;
   let path_mu = get_append_path_mutex path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-update"
@@ -3590,7 +3603,7 @@ let update_private_file_durable_locked_with_io ~io path decide =
     Stdlib.Mutex.protect path_mu (fun () ->
       let fd =
         Unix.openfile path
-          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+          ([ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC ] @ if create then [Unix.O_CREAT] else [])
           0o600
       in
       private_jsonl_with_fd_outcome
@@ -3606,6 +3619,19 @@ let update_private_file_durable_locked_with_io ~io path decide =
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let recovered =
+             if not recover_incomplete_tail || existing = ""
+                || existing.[String.length existing - 1] = '\n' then Ok existing
+             else
+               let complete_length = private_jsonl_last_complete_row_length existing in
+               let ( let* ) = Result.bind in
+               let failure append_failure = {append_failure; rollback_failures=[]} in
+               let* () = run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+                 Unix.ftruncate fd complete_length) |> Result.map_error failure in
+               let* () = run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
+                 |> Result.map_error failure in
+               Ok (String.sub existing 0 complete_length) in
+           Result.bind recovered (fun existing ->
            let suffix, result = decide existing in
            match suffix with
             | None -> Ok result
@@ -3617,18 +3643,105 @@ let update_private_file_durable_locked_with_io ~io path decide =
                 ~fd
                 ~original_length
                 suffix
-              |> Result.map (fun () -> result))))
+              |> Result.map (fun () -> result)))))
 ;;
 
-let update_private_file_durable_locked_result path decide =
-  update_private_file_durable_locked_with_io
+let update_private_file_durable_locked_result ?(create=true) path decide =
+  update_private_file_durable_locked_with_io ~create
     ~io:private_jsonl_transaction_unix_io
     path
     decide
 ;;
 
-let update_private_file_durable_locked_with_io_for_testing ~io path decide =
-  update_private_file_durable_locked_with_io ~io path decide
+let recover_and_update_private_jsonl_durable_locked_result path decide =
+  update_private_file_durable_locked_with_io ~recover_incomplete_tail:true
+    ~io:private_jsonl_transaction_unix_io path decide
+;;
+
+let update_private_file_durable_locked_with_io_for_testing ?(create=true) ~io path decide =
+  update_private_file_durable_locked_with_io ~create ~io path decide
+;;
+
+let update_existing_private_file_durable_locked_with_io ~io path decide =
+  test_exec_home_guard ~op:"update_existing_private_file_durable_locked" path;
+  let path_mu = get_append_path_mutex path in
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-existing-durable-update"
+    ~path
+    (fun () ->
+       Stdlib.Mutex.protect path_mu (fun () ->
+         (* Reject special files before opening them; O_NONBLOCK also prevents a
+            raced FIFO substitution from blocking before descriptor validation. *)
+         let inspected =
+           match Unix.lstat path with
+           | stats ->
+             if stats.Unix.st_kind <> Unix.S_REG
+             then Error (Unexpected_transaction_file_kind stats.Unix.st_kind)
+             else Ok (Some stats)
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+           | exception (Eio.Cancel.Cancelled _ as cancellation) -> raise cancellation
+           | exception exception_ ->
+             Error
+               (Private_jsonl_operation_failed
+                  (private_jsonl_failure Inspect_transaction_path exception_))
+         in
+         match inspected with
+         | Error error -> Private_file_failed error
+         | Ok None -> Private_file_succeeded None
+         | Ok (Some _) ->
+           match
+             private_jsonl_open_existing ~close_fd:io.close_fd path
+               [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_NONBLOCK ]
+           with
+           | Error error -> Private_file_failed error
+           | Ok None -> Private_file_succeeded None
+           | Ok (Some fd) ->
+             private_jsonl_with_fd_outcome
+               ~close_operation:Close_transaction_data
+               ~close_fd:io.close_fd fd
+               (fun () ->
+                  let ( let* ) = Result.bind in
+                  let* () =
+                    private_jsonl_capture Read_transaction_data (fun () ->
+                      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+                      lock_whole_file fd)
+                    |> Result.map_error (fun failure ->
+                      Private_jsonl_operation_failed failure)
+                  in
+                  let* () =
+                    private_jsonl_validate_open_binding
+                      ~operation:Inspect_transaction_path ~path fd
+                  in
+                  let* existing =
+                    private_jsonl_capture Read_transaction_data (fun () ->
+                      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+                      read_fd_chunks fd (Buffer.create 4096))
+                    |> Result.map_error (fun failure ->
+                      Private_jsonl_operation_failed failure)
+                  in
+                  let suffix, result = decide existing in
+                  match suffix with
+                  | None -> Ok (Some result)
+                  | Some suffix ->
+                    let* original_length =
+                      private_jsonl_capture Read_transaction_data (fun () ->
+                        Unix.lseek fd 0 Unix.SEEK_END)
+                      |> Result.map_error (fun failure ->
+                        Private_jsonl_operation_failed failure)
+                    in
+                    append_fd_durable ~io:durable_append_unix_io
+                      ~fd ~original_length suffix
+                    |> Result.map_error (fun error -> Transaction_append_failed error)
+                    |> Result.map (fun () -> Some result))))
+;;
+
+let update_existing_private_file_durable_locked_result path decide =
+  update_existing_private_file_durable_locked_with_io
+    ~io:private_jsonl_transaction_unix_io path decide
+;;
+
+let update_existing_private_file_durable_locked_with_io_for_testing ~io path decide =
+  update_existing_private_file_durable_locked_with_io ~io path decide
 ;;
 
 let rewrite_private_file_durable_locked_result path decide =

@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+   MASC System  9:Runtime  p:next  ▸runtime.toml  models  params  prompts  presets  2›  16:00:58  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    base /var/folders/bv/cjrbl0…b63400000gp/T/masc-tui-audit-fixture-8ccsbhys   masc <base>/.masc   binary age unknown
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    fetch: HTTP 503: runtime config load failed: fixture configuration unavailable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:select / scroll  PgUp/PgDn:page  v:read status  e:edit  a:fragments / voice / account  Esc:back  q:quit  …?
+ › to alpha   (i to write)

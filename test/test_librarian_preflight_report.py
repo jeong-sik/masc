@@ -20,6 +20,7 @@ def fixture() -> dict[str, Any]:
             "run": {
                 "run_id": run_id,
                 "lane": "librarian_exact",
+                "actor": "fixture-keeper",
                 "status": "succeeded",
                 "selected_slot": None if enabled else "fixture-cli",
                 "elapsed_s": elapsed,

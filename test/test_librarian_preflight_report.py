@@ -227,6 +227,23 @@ class ReportCliTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 1)
                     self.assertEqual(result.stdout, "")
 
+    def test_answerless_observations_reject_received_answer_fields(self) -> None:
+        for status in ("failed", "awaiting_answer"):
+            for field in ("destination", "model", "request_body_sha256", "decision",
+                          "probabilities", "confidence", "passed_over"):
+                with self.subTest(status=status, field=field):
+                    manifest = fixture()
+                    run = manifest["pairs"][0]["preflight"]["run"]
+                    run.update(status="failed", selected_slot=None)
+                    evidence = observation(status)
+                    evidence[field] = observation()[field]
+                    run["output"].update(jev_preflight=evidence, full_llm_skipped=False,
+                        generation_path="not_entered" if status == "awaiting_answer" else "full_lane")
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("answerless preflight", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
     def test_completed_judgment_requires_typed_provenance(self) -> None:
         for field in ("destination", "model", "request_body_sha256", "passed_over", "elapsed_s", "probabilities", "confidence"):
             with self.subTest(field=field):

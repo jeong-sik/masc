@@ -51,8 +51,9 @@ python3 test/test_librarian_preflight_report.py -v
 `declared_*` fields repeat manifest labels; the reporter does not verify a
 binary's source identity or the operator's environment declaration. The
 manifest digest and pair-level input hashes bind the report to its supplied
-exports without copying prompts into the report. Preserve the manifest
-privately: its raw exports can contain Keeper instructions and conversation.
+exports without copying prompts into the report. Preserve both manifest and
+report privately: raw exports can contain Keeper instructions and conversation,
+and preflight failure evidence can include provider response bodies.
 
 Each pair retains `preflight_observation`, including its own `status`, decision
 or failure, independently of `preflight_status` (the whole Librarian run).

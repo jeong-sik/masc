@@ -85,11 +85,15 @@ def attempts(value: Json, name: str) -> list[Json]:
 
 def validate_observation(observation: dict[str, Json]) -> None:
     status = observation.get("status")
+    received_fields = ("destination", "model", "request_body_sha256", "decision",
+                       "probabilities", "confidence", "passed_over")
+    if status in ("awaiting_answer", "failed") and any(key in observation for key in received_fields):
+        raise ValueError("answerless preflight cannot contain received-answer evidence")
     if status == "awaiting_answer":
         if "elapsed_s" not in observation or observation["elapsed_s"] is not None:
             raise ValueError("awaiting preflight must record null elapsed time")
-        if any(key in observation for key in ("destination", "model", "request_body_sha256", "decision", "failure")):
-            raise ValueError("awaiting preflight cannot contain completed evidence")
+        if "failure" in observation:
+            raise ValueError("awaiting preflight cannot contain completed failure evidence")
         return
     if number(observation.get("elapsed_s"), "preflight elapsed_s") < 0:
         raise ValueError("preflight elapsed_s must be nonnegative")

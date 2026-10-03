@@ -263,7 +263,9 @@ async function refreshSeat() {
     r = await api('GET', SEAT_PATH);
   } catch (_) {
     if (ended || latestSeatRequest !== request) return false;
-    setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
+    controllerError = '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.';
+    renderTurn();
+    setStatus('seat', controllerError);
     return false;
   }
   if (ended || latestSeatRequest !== request) return false;
@@ -274,7 +276,9 @@ async function refreshSeat() {
       || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
       || !Array.isArray(r.json.participants)
       || !r.json.participants.every(name => typeof name === 'string')) {
-    setStatus('seat', '자리 정보를 읽지 못했어요 (' + r.status + ')');
+    controllerError = '자리 정보를 읽지 못했어요 (' + r.status + ')';
+    renderTurn();
+    setStatus('seat', controllerError);
     return false;
   }
   me = r.json.name;

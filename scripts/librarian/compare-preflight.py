@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -209,6 +210,24 @@ def task_context(value: Json) -> None:
         raise ValueError("unknown historical goals observation")
 
 
+def rendered_prompt_bytes(template: str, variables: dict[str, Json]) -> bytes:
+    # Prompt_registry.render_template: String.trim keys, first binding wins,
+    # one non-recursive replacement; empty variable names are not required.
+    if not template.strip(" \t\n\r\f"):
+        raise ValueError("effective_template must be a nonblank string")
+    bindings: dict[str, str] = {}
+    for name, value in variables.items():
+        bindings.setdefault(name.strip(" \t\n\r\f"), string(value, "rendered variable " + name))
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1).strip(" \t\n\r\f")
+        if name and name not in bindings:
+            raise ValueError("unresolved prompt variable: " + name)
+        return bindings.get(name, match.group(0))
+
+    return re.sub(r"\{\{([^}]+)\}\}", replace, template).encode("utf-8")
+
+
 def input_payload(value: Json, actor: str) -> None:
     # SSOT: Keeper_librarian_runtime.exact_input_payload, prompt_material_payload
     # and Keeper_librarian.prompt_variables (eligible Memory-only preflight).
@@ -247,7 +266,7 @@ def input_payload(value: Json, actor: str) -> None:
     path = required(prompt, "file_path")
     if path is not None:
         string(path, "prompt file_path")
-    text(prompt.get("effective_template"), "effective_template")
+    template = string(prompt.get("effective_template"), "effective_template")
     count(prompt.get("rendered_bytes"), "rendered_bytes")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
     variables = obj(actual.get("rendered_prompt_variables"), "rendered_prompt_variables")
@@ -257,6 +276,9 @@ def input_payload(value: Json, actor: str) -> None:
         string(required(variables, key), "rendered variable " + key)
     for key, variable in variables.items():
         string(variable, "rendered variable " + key)
+    rendered = rendered_prompt_bytes(template, variables)
+    if len(rendered) != prompt["rendered_bytes"] or hashlib.sha256(rendered).hexdigest() != prompt["rendered_sha256"]:
+        raise ValueError("rendered prompt bytes or SHA-256 disagree with recorded material")
     if variables["keeper_id"] != actor:
         raise ValueError("run actor must match the frozen keeper_id")
     # Keeper_librarian.format_keeper_instructions_for_prompt uses OCaml String.trim.

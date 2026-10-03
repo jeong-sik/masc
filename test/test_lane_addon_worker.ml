@@ -1111,11 +1111,13 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
     check bool "primary terminal index succeeds when journal is unavailable" true
       (Result.is_ok (invoke "journal-failure" (Ok (answer `Null))));
-    let recovered = match sampling_requests (Store.create ~root:(Store.root store))
-        ~instance_id:"journal-failure" with
-      | Ok rows -> rows | Error detail -> fail detail in
+    let recovered = ref [] in
+    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
+      ~instance_id:"journal-failure" ~max_bytes:65536
+      ~f:(fun row -> recovered := row :: !recovered; Ok ()) in
     check int "reopened recovery reads primary while journal stays unavailable" 1
-      (List.length recovered);
+      (List.length !recovered);
+    check bool "unreadable journal prevents complete recovery claim" true (Result.is_error result);
     check bool "unavailable journal with absent primary remains an error" true
       (Result.is_error (sampling_requests (Store.create ~root:(Store.root store))
         ~instance_id:"no-primary-fallback")));
@@ -1179,7 +1181,33 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
     check bool "FIFO recovery blob is rejected without waiting for a writer" true
       (Result.is_error (sampling_requests store ~instance_id:"journal-failure"))))
 
+let test_sampling_recovery_reports_unreadable_terminal_journal () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "stale-primary-recovery") in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let instance_id = "journal-only" and request_id = "completed" in
+  require (Store.save_sampling_request store ~instance_id ~request_id (`Assoc ["state", `String "pending"]));
+  require (Store.save_sampling_outcome store ~instance_id ~request_id (`Assoc ["state", `String "finished"]));
+  let journal = Filename.concat (Store.root store) "sampling-outcomes" in
+  let backup = journal ^ ".saved" in
+  Unix.rename journal backup;
+  write journal "unreadable terminal journal";
+  Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
+    let visited = ref 0 in
+    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
+      ~instance_id ~max_bytes:65536 ~f:(fun row ->
+        check string "readable primary still exposes its stale state" "pending"
+          Yojson.Safe.Util.(row |> member "state" |> to_string);
+        incr visited; Ok ()) in
+    check int "readable primary is visited" 1 !visited;
+    check bool "stale primary is not complete recovery" true (Result.is_error result));
+  let rows = require (sampling_requests store ~instance_id) in
+  check int "restored journal owns the completed request" 1 (List.length rows);
+  check string "terminal journal supersedes stale pending primary" "finished"
+    Yojson.Safe.Util.(List.hd rows |> member "state" |> to_string))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling recovery reports unreadable terminal journal" `Quick test_sampling_recovery_reports_unreadable_terminal_journal;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;

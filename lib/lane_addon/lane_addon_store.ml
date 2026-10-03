@@ -343,7 +343,9 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
     | Error journal_error, Error primary_error ->
         Error (journal_error ^ "; " ^ primary_error)
     | Error detail, Ok None | Ok None, Error detail -> Error detail
-    | Error _, Ok (Some _) -> scan primary ~skip:(fun _ -> false)
+    | Error journal_error, Ok (Some _) ->
+        let* () = scan primary ~skip:(fun _ -> false) in
+        Error journal_error
     | Ok (Some _), Error primary_error ->
         let* () = scan journal ~skip:(fun _ -> false) in
         Error primary_error

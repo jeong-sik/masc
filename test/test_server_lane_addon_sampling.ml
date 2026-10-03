@@ -16,6 +16,30 @@ let params : S.create_message_params = {
   temperature=Some 0.25;max_tokens=37;stop_sequences=None;metadata=None;
   tools=None;tool_choice=None;_meta=None}
 
+let test_image_only_completion_is_sampling_content () =
+  let module L = Llm_provider.Types in
+  let response content : L.api_response =
+    {id="image-response";model="image-model";stop_reason=L.EndTurn;
+     content;usage=None;telemetry=None} in
+  let block = L.Image {media_type="image/png";data=image;source_type=L.Base64} in
+  let project = Server_lane_addon_sampling.For_testing.response_content in
+  let actual = require (project (response [block])) in
+  check bool "single image is preserved as MCP image content" true
+    (match actual with S.Image value -> value.data = image && value.mime_type = "image/png"
+     | S.Text _ -> false);
+  check bool "projected image survives protocol encoding and decoding" true
+    (S.sampling_content_of_yojson (S.sampling_content_to_yojson actual) = Ok actual);
+  check bool "multiple image outputs are not silently reduced" true
+    (Result.is_error (project (response [block;block])));
+  let url_image = L.Image {media_type="image/png";data="https://example.invalid/image.png";
+    source_type=L.Url} in
+  check bool "mixed image sources are not silently reduced" true
+    (Result.is_error (project (response [block;url_image])));
+  check bool "URL-only image cannot become MCP base64 content" true
+    (Result.is_error (project (response [url_image])));
+  check bool "empty completion remains an error" true
+    (Result.is_error (project (response [])))
+
 let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
@@ -364,6 +388,8 @@ max_reply_bytes=4194304
 let () = run "Server Lane sampling HTTP composition" ["host boundary",[
   test_case "sampling route preflight stays stable and recovers after runtime update" `Quick
     test_invalid_sampling_route_is_stable_until_runtime_update;
+  test_case "image-only completion preserves MCP content" `Quick
+    test_image_only_completion_is_sampling_content;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
   test_case "missing model identity walks the secondary" `Quick

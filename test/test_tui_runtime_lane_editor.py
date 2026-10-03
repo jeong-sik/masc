@@ -208,9 +208,21 @@ class LaneStore:
         lane_id = request["lane"]
         action = request.get("action", "set")
         with self.lock:
-            if action == "set" and not lane_id.startswith("exact/"):
+            if action == "set" and lane_id != "default" and not lane_id.startswith("exact/"):
                 if request.get("expected_source_revision") != f"{self.revision:064x}":
                     return 409, {"error": "runtime config source revision changed"}
+            if lane_id == "default":
+                route_id = request["runtime_id"]
+                route = next((lane for lane in self.lanes if lane["id"] == route_id), None)
+                entry_id = route["runtime_ids"][0] if route else route_id
+                entry = next((runtime for runtime in self.body["runtimes"]
+                              if runtime["id"] == entry_id), None)
+                if entry is None:
+                    return 400, {"error": "default route is unavailable"}
+                self.body["default_route"] = route_id
+                self.body["default_runtime"] = entry
+                self.revision += 1
+                return 200, commit_receipt()
             if lane_id.startswith("exact/"):
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
@@ -291,7 +303,7 @@ def without_checked_revision(posted: list[dict]) -> list[dict]:
     result = []
     for request in posted:
         request = dict(request)
-        if request.get("action", "set") == "set" and not request["lane"].startswith("exact/"):
+        if request.get("action", "set") == "set" and request["lane"] != "default" and not request["lane"].startswith("exact/"):
             revision = request.pop("expected_source_revision", None)
             if not isinstance(revision, str) or len(revision) != 64:
                 raise AssertionError(f"named lane write lacked a source revision: {request!r}")
@@ -1087,6 +1099,37 @@ def run_filter(executable: str) -> None:
     )
 
 
+def run_default_route(executable: str) -> None:
+    """The default route picker can keep a declared failover lane intact."""
+    store = LaneStore()
+    store.body["default_route"] = "primary"
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC System")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC System", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"f", b"Enter replace")
+        frame = h.screen_text(bytes(output))
+        assert b"primary   lane" in frame, frame
+        os.write(fd, b"\r")
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: any(path == ROUTING_PATH for path, _ in requests), timeout=3)
+        posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+        assert posted == [{"lane": "default", "runtime_id": "primary"}], posted
+        assert store.body["default_route"] == "primary"
+        assert store.body["default_runtime"]["id"] == "runtime-a"
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+        description="Runtime default route picker preserves a declared lane",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+
+
 def run_replace_and_promote(executable: str) -> None:
     """Model/effort search replaces in place even with an older read in flight."""
     store = LaneStore()
@@ -1170,6 +1213,7 @@ def run_replace_and_promote(executable: str) -> None:
     )
 
 
+
 if __name__ == "__main__":
     run_replace_and_promote(os.path.abspath(sys.argv[1]))
     run(os.path.abspath(sys.argv[1]))
@@ -1182,4 +1226,5 @@ if __name__ == "__main__":
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))
+    run_default_route(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

@@ -433,10 +433,9 @@ end
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 
-val get_default_and_runtimes : unit -> t option * t list
-(** The default runtime and the runtime list from one read of the loaded
-    state, so a reload between two separate reads cannot pair a default with
-    a list it is not in. *)
+val get_default_route_and_runtimes : unit -> string option * t option * t list
+(** The configured default route, its entry runtime and the runtime list from
+    one read of the loaded state. [None] means no default is initialized. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
@@ -475,6 +474,22 @@ val keeper_assignments : unit -> (string * string) list
     a catalog-unavailable assignment retains its exact configured runtime ID.
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
+
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+val dashboard_runtime_resolved_snapshot : unit -> dashboard_runtime_resolved_snapshot
+(** All routing fields and assignment resolution from one loaded-state read. *)
 
 type keeper_dispatch_snapshot
 (** Effective route, ordered candidates and their frozen dispatch identities

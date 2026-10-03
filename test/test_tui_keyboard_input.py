@@ -1451,6 +1451,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
         "generated_at_iso": "2026-09-23T00:00:00Z",
         "source": RUNTIME_RESOLVED_PATH,
         "config_path": None,
+        "default_route": None,
         "default_runtime": None,
         "media_failover": [],
         "media_failover_declared": [],
@@ -13725,6 +13726,7 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             "generated_at_iso": "2026-08-24T10:20:02Z",
             "source": RUNTIME_RESOLVED_PATH,
             "config_path": "/workspace/config/runtime.toml",
+            "default_route": "runtime-a",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
             # the decoder; empty is a configuration (no vision runtimes), and

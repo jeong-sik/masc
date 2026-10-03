@@ -1741,8 +1741,8 @@ type runtime_lane_pick =
          list on the wire, so the pick sends the current order with the choice
          on the end, and is refused while boot dropped an entry from it. *)
   | Pick_route_default
-      (* Replaces [\[runtime\].default] rather than appending: the entry holds
-         one runtime, the one a keeper with no assignment walks. *)
+      (* Replaces [\[runtime\].default] rather than appending: the route names
+         a declared lane or a runtime for keepers without assignments. *)
 
 let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_new_lane lane -> lane
@@ -9935,12 +9935,20 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
+type runtime_picker_choice =
+  | Runtime_choice of Tui_decode.runtime_option
+  | Lane_choice of Tui_decode.runtime_resolved_lane
+
+let runtime_picker_choice_id = function
+  | Runtime_choice runtime -> runtime.Tui_decode.ro_id
+  | Lane_choice lane -> lane.Tui_decode.rrl_id
+
 type runtime_picker_projection = {
   rlp_lane : string;
   rlp_pick : runtime_lane_pick;
   rlp_already : string list;
   rlp_providers : string list;
-  rlp_choices : Tui_decode.runtime_option list;
+  rlp_choices : runtime_picker_choice list;
       (* The window the picker draws, of the list its filter keeps. *)
   rlp_selected_row : int option;
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
@@ -9968,14 +9976,22 @@ let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
        runtime.Tui_decode.ro_model effort runtime.Tui_decode.ro_provider_id
        runtime.Tui_decode.ro_effective_max_context runtime.Tui_decode.ro_id)
 
-let runtime_picker_label (runtime : Tui_decode.runtime_option) =
-  Masc.Tui_terminal_text.sanitize_terminal_text
-    (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
-       runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
+let runtime_picker_label = function
+  | Runtime_choice runtime ->
+      Masc.Tui_terminal_text.sanitize_terminal_text
+        (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
+           runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
+  | Lane_choice lane ->
+      Masc.Tui_terminal_text.sanitize_terminal_text
+        (Printf.sprintf "%s   lane · %d runtimes" lane.Tui_decode.rrl_id
+           (List.length lane.Tui_decode.rrl_runtime_ids))
 
-let runtime_picker_label_for = function
-  | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> runtime_model_picker_label
-  | _ -> runtime_picker_label
+
+let runtime_picker_label_for pick choice =
+  match pick, choice with
+  | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Runtime_choice runtime ->
+      runtime_model_picker_label runtime
+  | _ -> runtime_picker_label choice
 
 (* The picker opens on the first row. Exact lanes start typing a filter
    immediately; the other pickers wait for [/]. Closing drops both. *)
@@ -10041,7 +10057,7 @@ let lane_picker_existing_slots (state : state) = function
     (match state.runtime_surface with
      | None -> []
      | Some snapshot ->
-       (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_default_runtime_id with
+       (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_default_route with
         | Some id -> [ id ]
         | None -> []))
 
@@ -10110,19 +10126,40 @@ let runtime_picker_rows (state : state) pick =
     List.partition lands
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
+  let lanes =
+    match pick with
+    | Pick_route_default ->
+        state.runtime_lanes
+        |> List.filter (fun lane ->
+             lane.Tui_decode.rrl_declared && lane.Tui_decode.rrl_runtime_ids <> [])
+        |> List.map (fun lane -> Lane_choice lane)
+    | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_exact_lane_replacement _
+    | Pick_new_lane _ | Pick_media_failover -> []
+  in
   let rows = match pick with
     | Pick_exact_lane_replacement _ -> landing |> List.filter (fun runtime ->
         not (List.mem runtime.Tui_decode.ro_id already))
     | _ -> landing @ refused in
-  ( already, providers, rows )
+  let runtime_choices =
+    rows
+    |> List.filter (fun runtime ->
+         not (List.exists (fun choice ->
+           String.equal (runtime_picker_choice_id choice) runtime.Tui_decode.ro_id) lanes))
+    |> List.map (fun runtime -> Runtime_choice runtime)
+  in
+  (already, providers, lanes @ runtime_choices)
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 then "  (runtime catalogue unread)"
+  let noun = match picker.rlp_pick with
+    | Pick_route_default -> "route"
+    | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_exact_lane_replacement _
+    | Pick_new_lane _ | Pick_media_failover -> "runtime" in
+  if picker.rlp_total = 0 then Printf.sprintf "  (%s catalogue unread)" noun
   else
-    Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
+    Printf.sprintf "  (no %s among %d matches the filter)" noun picker.rlp_total
 
 (* The keys the picker's header names, around the verb its Enter carries.
    While the filter is typed, letters are the filter's, so the header names
@@ -11033,6 +11070,22 @@ let runtime_authority_rows ~cols (state : state) : string list =
   Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
   |> List.map (fun line -> indent ^ line)
 
+let runtime_default_route_lines ~cols state =
+  let text =
+    match state.runtime_surface with
+    | None -> "[runtime].default  not observed"
+    | Some snapshot ->
+        let resolved = snapshot.Tui_decode.rss_resolved in
+        (match resolved.rrs_default_route, resolved.rrs_default_runtime_id with
+         | Some route, Some runtime_id ->
+             Printf.sprintf "[runtime].default  %s (enters %s) · f replaces" route runtime_id
+         | None, None -> "[runtime].default  none — every keeper needs an assignment · f chooses"
+         | Some _, None | None, Some _ -> "[runtime].default  inconsistent reading")
+  in
+  Masc_tui_message_layout.wrap_words
+    ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+    (Masc.Tui_terminal_text.sanitize_terminal_text text)
+
 let runtime_surface_listing_chrome ~cols state =
   runtime_listing_chrome
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
@@ -11040,10 +11093,12 @@ let runtime_surface_listing_chrome ~cols state =
     ~action_error:state.runtime_lane_notice
     ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
-    (* The two route rows -- [runtime].default and media_failover -- and their
-       divider, drawn above the lane table on the keeper-lane reading. *)
+    (* The wrapped default route, media_failover and divider sit above the
+       lane table. The key geometry counts the same default lines as render. *)
     ~route_rows:
-      (match state.runtime_mode with Runtime_lanes -> 3 | Runtime_all -> 0)
+      (match state.runtime_mode with
+       | Runtime_lanes -> List.length (runtime_default_route_lines ~cols state) + 2
+       | Runtime_all -> 0)
     ~editor_rows:
       (match state.slot_editor with
        | Some { se_target = Media_failover_slots; _ } ->

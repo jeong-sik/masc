@@ -6530,6 +6530,15 @@ let launch_runtime_lane_write ?replacement_selection state ~mailbox ~written wri
    key closes it. Inside a typed filter it is a letter. *)
 let runtime_picker_close_keys = [ "e"; "E" ]
 
+let launch_runtime_default_route state ~mailbox route_id =
+  if Masc_tui_types.runtime_lane_write_busy state then
+    state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+  else
+    launch_runtime_lane_write state ~mailbox
+      ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+        Masc_tui_http.set_runtime_default ~host ~port ~route_id:(Some route_id))
+;;
+
 let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
     ~(runtime : Masc.Tui_decode.runtime_option) ~existing =
   let runtime_id = runtime.Masc.Tui_decode.ro_id in
@@ -6578,8 +6587,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_route_default ->
         (* One entry, replaced rather than joined, so [existing] is not a list
            this write extends and a stale reading of it cannot be undone. *)
-        launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
-          Masc_tui_http.set_runtime_default ~host ~port ~runtime_id:(Some runtime_id))
+        launch_runtime_default_route state ~mailbox runtime_id
     | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
     | Masc_tui_types.Pick_new_lane _ | Masc_tui_types.Pick_media_failover ->
         (* Which of these a stale list can undo is
@@ -6615,7 +6623,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
             | Masc_tui_types.Pick_route_default ->
                 (* Answered by its own arm above, which does not reach here. *)
                 Masc_tui_http.set_runtime_default ~host ~port
-                  ~runtime_id:(Some runtime_id))
+                  ~route_id:(Some runtime_id))
 ;;
 
 (* Apply a slot-editor key. The plan decides; this only sends it. An exact
@@ -20972,9 +20980,19 @@ and is loaded on demand through keeper_skill.
                  with
                  | Masc_tui_pick_list.Stay list ->
                      state.runtime_lane_pick <- Some (pick, list)
-                 | Masc_tui_pick_list.Chosen runtime ->
+                 | Masc_tui_pick_list.Chosen (Masc_tui_types.Runtime_choice runtime) ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
                        ~pick ~runtime ~existing:already
+                 | Masc_tui_pick_list.Chosen (Masc_tui_types.Lane_choice lane) ->
+                     (match pick with
+                      | Masc_tui_types.Pick_route_default ->
+                          launch_runtime_default_route state ~mailbox:async_messages
+                            lane.Masc.Tui_decode.rrl_id
+                      | Masc_tui_types.Pick_conversation_lane _
+                      | Masc_tui_types.Pick_exact_lane _
+                      | Masc_tui_types.Pick_exact_lane_replacement _
+                      | Masc_tui_types.Pick_new_lane _
+                      | Masc_tui_types.Pick_media_failover -> ())
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k
@@ -21033,8 +21051,8 @@ and is loaded on demand through keeper_skill.
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
               && Option.is_none state.runtime_detail_target
               && Option.is_none state.runtime_lane_pick ->
-           (* [\[runtime\].default]: the runtime a keeper with no assignment
-              walks. One entry, so the picker replaces it. *)
+           (* [\[runtime\].default]: the lane or runtime a keeper with no
+              assignment walks. One route, so the picker replaces it. *)
            Masc_tui_types.open_runtime_lane_pick state Masc_tui_types.Pick_route_default;
            Masc_tui_types.dismiss_runtime_lane_notice state;
            launch_runtime_catalog_load state ~mailbox:async_messages

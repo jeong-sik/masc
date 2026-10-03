@@ -473,6 +473,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     fixtures.update(admission.fixtures)
     beta_submitted = []
     beta_interrupts = []
+    non_beta_interrupts = []
     def beta_request(body):
         beta_submitted.append(json.loads(body))
         return 503, {"error": "synthetic beta admission refused"}
@@ -485,6 +486,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             # Beta's refused request has no admitted turn to interrupt.
             return 409, {"error": "beta request was not admitted",
                          "signalled": False, "paused": False}
+        non_beta_interrupts.append(request)
         return admission.interrupt(body)
     fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(chat_request)
     fixtures["/api/v1/keepers/turn/interrupt"] = h.RequestHttpResponse(interrupt_request)
@@ -556,6 +558,13 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
                                "name": h.IMAGE_NAME, "mime_type": "image/png",
                                "size": len(base64.b64decode(image_data[0]))},
                               {"type": "image", "url": reference}], actual
+            # Finish alpha's fixture normally before cleanup. Esc:list is
+            # rendered from the same action that handles Escape, so leaving
+            # this pane cannot legitimately interrupt alpha's held turn.
+            admission.release.set()
+            await_screen(lambda text: b"reply-" + staged_text in text
+                         and b"Esc:list" in text,
+                         "alpha reply did not settle before leaving its chat")
             h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
                                       destination=b"MASC Keepers")
             os.write(fd, b"q")
@@ -568,6 +577,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
     # All HTTP handlers have joined, including a delayed Esc probe.
+    assert non_beta_interrupts == [], "unexpected non-beta interrupt: " + repr(non_beta_interrupts)
     assert all(request.get("request_id") == beta_submitted[0]["request_id"]
                and request.get("interrupt_token") is None
                for request in beta_interrupts), beta_interrupts

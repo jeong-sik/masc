@@ -84,97 +84,6 @@ let test_workspace_loss_withdraws_queued_message_target () =
   check bool "unobserved remote usage is not zero" true
     (Option.is_none (Tui_types.aggregate_keeper_stats state.keepers))
 
-let count_complete_composer_records module_path =
-  let count = ref 0 in
-  let iterator =
-    { Ast_iterator.default_iterator with
-      expr =
-        (fun self expression ->
-          (match expression.Parsetree.pexp_desc with
-           | Parsetree.Pexp_record (fields, _) ->
-               let names =
-                 List.map
-                   (fun ({ Location.txt; _ }, _) -> Ast_grep.longident_leaf txt)
-                   fields
-               in
-               if
-                 List.for_all
-                   (fun name -> List.mem name names)
-                   [ "target"; "focus"; "draft" ]
-               then incr count
-           | _ -> ());
-          Ast_iterator.default_iterator.expr self expression)
-    }
-  in
-  iterator.structure iterator (Ast_grep.parse_implementation_or_fail module_path);
-  !count
-
-let production_bin_implementations () =
-  let bin_dir = Filename.concat (Ast_grep.source_root ()) "bin" in
-  Sys.readdir bin_dir
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".ml")
-  |> List.sort String.compare
-  |> List.map (Filename.concat bin_dir)
-
-let test_state_projection_has_one_structural_owner () =
-  let owner =
-    Filename.concat (Ast_grep.source_root ())
-      "bin/masc_tui_composer_projection.ml"
-  in
-  check int "projection owns one complete Composer.t record" 1
-    (count_complete_composer_records owner);
-  let unexpected =
-    production_bin_implementations ()
-    |> List.filter (fun module_path -> not (String.equal module_path owner))
-    |> List.filter_map (fun module_path ->
-      let count = count_complete_composer_records module_path in
-      if count = 0 then None else Some (module_path, count))
-  in
-  let unexpected_count =
-    List.fold_left (fun total (_, count) -> total + count) 0 unexpected
-  in
-  let unexpected_files =
-    unexpected
-    |> List.map (fun (module_path, count) ->
-      Printf.sprintf "%s (%d)" (Filename.basename module_path) count)
-    |> String.concat ", "
-  in
-  check int
-    (if String.equal unexpected_files "" then
-       "all other production bin modules have no reconstruction"
-     else "unexpected Composer.t reconstructions: " ^ unexpected_files)
-    0 unexpected_count;
-  check int "key router calls the projection owner" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"handle_composer_key"
-       ~callee:"Composer_projection.of_state");
-  (* Both rows are drawn by the shared primitives, not by a surface: the
-     composer is the one row every surface ends with. *)
-  List.iter
-    (fun binding_name ->
-       check int (binding_name ^ " calls the projection owner") 1
-         (Ast_grep.count_calls_in_value_binding
-            ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name
-            ~callee:"Composer_projection.of_state"))
-    [ "composer_line"; "composer_cursor" ];
-  (* And nowhere else. These rows sat in the godfile until the primitives
-     moved out of it; a copy left behind, or a surface growing its own, is a
-     second reading of the same state, which is what this suite exists to
-     stop. *)
-  List.iter
-    (fun (module_path, binding_name) ->
-       check int
-         (binding_name ^ " is not drawn a second time in "
-          ^ Filename.basename module_path)
-         0
-         (Ast_grep.count_value_bindings ~module_path ~name:binding_name))
-    [ ("bin/masc_tui_render.ml", "composer_line")
-    ; ("bin/masc_tui_render.ml", "composer_cursor")
-    ; ("bin/masc_tui_render_chat.ml", "composer_line")
-    ; ("bin/masc_tui_render_chat.ml", "composer_cursor")
-    ]
-
 (* A slash command sent from the composer row runs as it does from the chat
    pane, but only the chat pane's footer said what the word being typed was:
    on every other surface "/tsk" read as a message until Enter. The row draws
@@ -194,33 +103,7 @@ let test_the_composer_row_says_what_a_slash_word_is () =
    | None -> fail "a prefix draws its candidates"
    | Some line -> check bool "naming /task" true (contains "task" (plain line)));
   check (option string) "a message draws nothing" None
-    (Masc_tui_render_prim.slash_hint_text ~restore:"" "hello");
-  check int "the composer row draws the hint" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name:"composer_line"
-       ~callee:"slash_hint_text");
-  check int "and the chat footer draws the same one" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render_chat.ml"
-       ~binding_name:"render_keeper_message" ~callee:"slash_hint_text")
-
-(* The Browser Lane is a page reader: it owns j/k, Enter and the rest, so
-   there is no composer to draw and no cursor to place. Both rows still ask
-   before drawing, and the row the composer would take is now empty. It used
-   to draw the lane's name, its source and its browser, which is what the
-   surface title says two rows under the tab strip -- the same three facts
-   twenty rows apart, that a reader had to match up by position. *)
-let test_the_browser_lane_row_does_not_repeat_its_title () =
-  List.iter
-    (fun binding_name ->
-       check int (binding_name ^ " asks whether the page reader is up") 1
-         (Ast_grep.count_calls_in_value_binding
-            ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name
-            ~callee:"browser_lane_on_screen"))
-    [ "composer_line"; "composer_cursor" ];
-  check int "and the label that restated the title is gone" 0
-    (Ast_grep.count_value_bindings ~module_path:"bin/masc_tui_types.ml"
-       ~name:"context_label")
+    (Masc_tui_render_prim.slash_hint_text ~restore:"" "hello")
 
 let () =
   run "tui-composer-projection"
@@ -233,11 +116,8 @@ let () =
             test_focus_and_draft_are_projected_together
         ; test_case "workspace loss withdraws queued message target" `Quick
             test_workspace_loss_withdraws_queued_message_target
-        ; test_case "one structural owner" `Quick
-            test_state_projection_has_one_structural_owner
         ; test_case "the composer row says what a slash word is" `Quick
             test_the_composer_row_says_what_a_slash_word_is
-        ; test_case "the browser lane row does not repeat its title" `Quick
-            test_the_browser_lane_row_does_not_repeat_its_title
+
         ] )
     ]

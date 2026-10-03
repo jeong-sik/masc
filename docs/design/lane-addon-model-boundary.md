@@ -13,6 +13,8 @@ registers the callback with the pinned MCP client's implementation before
 initialization. Only connections with this callback advertise sampling.
 Unconfigured requests receive the SDK's protocol error. Host refusals return
 an error to the requesting process rather than an invented model answer.
+Callback exceptions also return protocol errors, preserving subsequent tool
+framing; Eio cancellation still propagates to the caller.
 
 The integration suite exercises an actual Python MCP subprocess with an empty
 environment: initialization capability, exact request text and output limit,
@@ -22,10 +24,9 @@ execution or Docker isolation evidence.
 
 ## Remaining Lane/Fusion wiring
 
-- Declare model access explicitly in the package interface and resolve its
-  host-owned model route from installation TOML. The generic MCP callback does
-  not automatically grant Add-ons model access.
-- Register the callback only for the exact installed package with model access.
+- Resolve the host-owned model route from installation TOML and supply the
+  production callback. Package model-access declaration and worker-level
+  callback admission are implemented below; they do not resolve a provider.
   Keep provider keys on the host and the worker's existing network isolation.
 - Retain the model request before calling the provider, then retain actual
   model/runtime response identity, errors and source references separately.
@@ -41,3 +42,24 @@ The pinned SDK invokes sampling callbacks while reading the tool response.
 A callback must not recursively call the same MCP connection. Parallel panel
 execution needs separate worker connections or an upstream asynchronous
 sampling dispatcher; this primitive alone does not prove parallel fan-out.
+
+## Package and worker access contract
+
+The package manifest can declare `[interface] model_access = "host_sampling"`.
+The typed alternative is `"disabled"`; omission also disables model access.
+Unknown strings and booleans are rejected. Inspection serializes this mode,
+and it participates in the package's semantic configuration revision.
+
+`Lane_addon_worker.start` accepts the host callback only when the package
+declares host sampling. A declared requirement with no callback, or a callback
+supplied to a disabled package, is rejected before container creation. The
+matching pair registers the callback before MCP initialization. Docker's
+network isolation and environment arguments are unchanged.
+
+The worker scenario uses real subprocess/stdio with a hermetic Docker control
+fixture. It checks both rejected mismatches, capability advertisement, a
+model request reaching the callback, and the returned host model identity.
+It verifies requested isolation flags, not kernel enforcement or provider
+execution. Native CI remains pending. The production runtime still needs its
+installation-owned route/callback and durable request evidence bridge; merely
+setting the manifest mode does not wire a provider.

@@ -1252,6 +1252,11 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
       |> List.find (fun value -> text "instance_id" value = id)
       |> Yojson.Safe.Util.to_assoc in
     let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
+    (* The published package envelope predates host model declarations. *)
+    let released = List.map (fun (key, value) ->
+      match key, value with
+      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "model_access" fields)
+      | _ -> key, value) released in
     let before = `Assoc released in
     unwrap (Store.save_binding store ~instance_id:id before);
     Runtime.For_testing.reset ();
@@ -1279,6 +1284,39 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     check bool "released composed graph is shared only with its unique producer" true
       (Result.is_ok (authorize [producer;consumer] consumer));
     let refused label bindings value = check bool label true (Result.is_error (authorize bindings value)) in
+    let current_producer model_access = match producer with
+      | `Assoc f ->
+          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
+          `Assoc (("visibility", `Assoc ["kind",`String "shared"]) ::
+            ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated) ::
+            set f "package" (`Assoc (("model_access",model_access)::package)))
+      | _ -> assert false in
+    List.iter (fun model_access ->
+      check bool "released consumer reads current shared producer without rewriting it" true
+        (Result.is_ok (authorize [current_producer (`String model_access);consumer] consumer)))
+      ["disabled";"host_sampling"];
+    let with_producer_package transform = match current_producer (`String "disabled") with
+      | `Assoc f ->
+          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
+          `Assoc (set f "package" (`Assoc (transform package)))
+      | _ -> assert false in
+    let pre_model_producer = with_producer_package (List.remove_assoc "model_access") in
+    check bool "released consumer reads authority-bearing pre-model producer" true
+      (Result.is_ok (authorize [pre_model_producer;consumer] consumer));
+    List.iter (fun model_access ->
+      refused "invalid explicit model access fails closed"
+        [current_producer model_access;consumer] consumer)
+      [`String "unknown"; `Null; `Bool false];
+    let duplicate_model = with_producer_package (fun fields ->
+      ("model_access",`String "disabled")::fields) in
+    refused "duplicate producer model field fails closed" [duplicate_model;consumer] consumer;
+    let unknown_pre_model = with_producer_package (fun fields ->
+      ("unknown",`Bool true)::List.remove_assoc "model_access" fields) in
+    refused "unknown pre-model producer field fails closed" [unknown_pre_model;consumer] consumer;
+    let forged_released = match current_producer (`String "disabled") with
+      | `Assoc f -> `Assoc (List.remove_assoc "visibility" (List.remove_assoc "source_access" f))
+      | _ -> assert false in
+    refused "released envelope cannot smuggle current package fields" [forged_released] forged_released;
     refused "missing producer fails closed" [consumer] consumer;
     refused "ambiguous producer incarnation fails closed" [producer;producer;consumer] consumer;
     let cycle = record "released-producer" "producer" [upstream "consumer"] in

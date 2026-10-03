@@ -289,8 +289,19 @@ let install_script () = read_file (Filename.concat (source_root ()) "scripts/ins
 
 let quickstart_script () = read_file (Filename.concat (source_root ()) "quickstart.sh")
 
+(* Publication consumes the exact successful RC distribution; binary builds
+   and checksum production belong to its reusable installation workflow. *)
 let release_workflow () =
-  read_file (Filename.concat (source_root ()) ".github/workflows/release.yml")
+  let require label text needle = check bool label true (string_contains text needle) in
+  let root = source_root () in
+  let publication = read_file (Filename.concat root ".github/workflows/release.yml") in
+  let candidate = read_file (Filename.concat root ".github/workflows/release-candidate.yml") in
+  require "publication stages the verified RC distribution" publication
+    "scripts/ci/prepare-release-publication.py";
+  require "publication rechecks assets before publishing" publication "--recheck";
+  require "RC installation uses the release build workflow" candidate
+    "uses: ./.github/workflows/release-build.yml";
+  read_file (Filename.concat root ".github/workflows/release-build.yml")
 ;;
 
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")

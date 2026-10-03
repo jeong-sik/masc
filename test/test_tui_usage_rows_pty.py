@@ -41,9 +41,9 @@ def run(executable):
         # Make the wrapped content exceed the body, then reach its final row.
         frame = h.resize_and_wait(process, master_fd, output, rows=18, columns=30,
                                   needle=b"MASC Usage", final_cursor=b"\x1b[?25l")
-        if b"Transport" in h.screen_text(frame):
+        if b"4 missing" in h.unwrapped(h.screen_text(frame)):
             raise AssertionError("Usage fixture does not overflow the viewport")
-        h.send_and_wait(process, master_fd, output, b"j" * 30, b"Transport")
+        h.send_and_wait(process, master_fd, output, b"j" * 30, b"4 missing")
         h.drain_until_quiet(process, master_fd, output)
         screen = h.unwrapped(h.screen_text(bytes(output)))
         if b"7 malformed rows" not in screen:

@@ -448,7 +448,19 @@ let test_execution_preparation_reuse_and_scope () =
     List.iter (fun query ->
       Alcotest.(check bool) "scoped request bypasses default bytes" true
         (Option.is_none (read ~target:("/api/v1/dashboard/execution?" ^ query) "gzip")))
-      [ "full=true"; "force=true"; "fixture=sample"; "agent=alice" ];
+      [ "full=true"; "force=true"; "agent=alice" ];
+    let previous = Sys.getenv_opt "MASC_DASHBOARD_FIXTURES_ENABLED" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED"
+          (Option.value previous ~default:""))
+      (fun () ->
+        Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";
+        Alcotest.(check bool) "enabled execution fixture bypasses default bytes" true
+          (Option.is_none (read
+              ~target:"/api/v1/dashboard/execution?fixture=execution_smoke" "gzip"));
+        Alcotest.(check bool) "unknown fixture keeps the default representation" true
+          (Option.is_some (read
+              ~target:"/api/v1/dashboard/execution?fixture=sample" "gzip")));
     Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
     Alcotest.(check bool) "mutation discards all representations" true
       (Option.is_none (read "gzip")))

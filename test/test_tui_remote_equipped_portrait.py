@@ -144,8 +144,8 @@ class RemoteIdentity:
 def remote_portrait(binary: str, evidence: Path) -> None:
     manifest = json.loads((evidence / "manifest.json").read_text())
     keeper = manifest["keeper"]
-    before = (evidence / "before.png").read_bytes()
-    equipped = (evidence / "equipped.png").read_bytes()
+    before = (evidence / "before-icon.png").read_bytes()
+    equipped = (evidence / "equipped-icon.png").read_bytes()
     assert manifest["pixel_size"] == 160
     assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (160, 160)
     assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
@@ -153,6 +153,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[ROSTER_PATH] = roster
+    fixtures["/api/v1/gate/keepers"] = h.HeadersHttpResponse(lambda _headers: roster())
     requests: h.HttpRequests = []
     boot_path = f"/api/v1/keepers/{keeper}/boot"
     held_boot = h.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)

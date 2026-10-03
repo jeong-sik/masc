@@ -66,6 +66,9 @@ def validate_result(row, runtime_id, case):
                 and receipt['detail'] == (f'execution_failed: slot={runtime_id} {detail}; '
                                           f'flow=[slot={runtime_id} {call}]'),
                 'HTTP failure detail disagrees with terminal failure structure')
+        require('raw_response' in observation and observation['raw_response'] is None
+                and detail.endswith(' raw_response=none'),
+                'frozen HTTP failure must record an absent raw response consistently')
 
         require([attempt['kind'] for attempt in attempts]
                 == ['dispatch', 'http_failure', 'failure'],

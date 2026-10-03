@@ -391,13 +391,28 @@ class CandleEvidenceAudits(unittest.TestCase):
             ('blank_http_detail', 'HTTP failure detail'),
             ('http_slot', 'HTTP failure observations'),
             ('http_classification', 'HTTP failure observations'),
+            ('raw_response', 'absent raw response consistently'),
+            ('missing_raw_response', 'absent raw response consistently'),
+            ('raw_detail', 'absent raw response consistently'),
         ]:
             with self.subTest(mutation=mutation):
                 rows = copy.deepcopy(original)
                 row = next(row for row in rows if row['status'] == 'transport_unavailable')
                 output = row['receipt']['output']
                 attempts = output['attempts']
-                if mutation == 'response':
+                if mutation in ('raw_response', 'missing_raw_response', 'raw_detail'):
+                    observation = next(a for a in attempts if a['kind'] == 'http_failure')
+                    if mutation == 'raw_response':
+                        observation['raw_response'] = 'contradictory received bytes'
+                    elif mutation == 'missing_raw_response':
+                        del observation['raw_response']
+                    else:
+                        observation['detail'] = observation['detail'].replace('raw_response=none', 'raw_response=body')
+                        detail = row['receipt']['detail'].replace('raw_response=none', 'raw_response=body')
+                        row['answer'] = row['receipt']['detail'] = detail
+                        output['result'] = {'error':detail}
+                        next(a for a in attempts if a['kind'] == 'failure')['detail'] = detail
+                elif mutation == 'response':
                     attempts.append({'kind':'response', 'slot':row['receipt']['selected_slot'],
                                      'output':{'grade':'small'}})
                 elif mutation.startswith('missing_'):

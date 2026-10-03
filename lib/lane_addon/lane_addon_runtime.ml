@@ -1890,5 +1890,6 @@ module For_testing = struct
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;
     Hashtbl.iter (fun _ stop -> stop ()) fleet_services; Hashtbl.clear fleet_services;
-    fleet_backend := None; delivery_handler := None; skill_export_handler := None
+    fleet_backend := None; delivery_handler := None; skill_export_handler := None;
+    sampling_factory := None
 end

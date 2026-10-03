@@ -1244,7 +1244,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
         (Result.is_ok (Store.read_blob store request));
       check bool "bounded canonical read ignores broken recovery directory" true
         (Result.is_ok (Store.read_blob_bounded
-          ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request)))) [false;true]
+          ~budget:(Store.read_budget ~max_bytes:p.resources.max_reply_bytes) store request))))) [false;true]
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;

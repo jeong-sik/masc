@@ -326,7 +326,7 @@ def encode_output(value: Any) -> str:
         encoded.encode("utf-8")
         return encoded
     except (ValueError, TypeError, RecursionError, UnicodeEncodeError) as error:
-        raise InvalidInput("Observation must be serializable finite UTF-8 JSON") from error
+        raise InvalidInput("Observation must be serializable finite JSON with valid UTF-8") from error
 
 
 def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],

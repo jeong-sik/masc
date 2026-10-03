@@ -10,11 +10,7 @@ from typing import Any, cast
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "lib/server/server_standalone_lane_projection.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_render.ml",
-)
+
 
 
 def run(executable: str, captures: Path | None) -> None:

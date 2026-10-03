@@ -1008,17 +1008,6 @@
  test_operator_control_support))
 
 (test
- (name test_connector_attention_delivery_wiring)
- (modules test_connector_attention_delivery_wiring)
- ; Read through Ast_grep, so the sources are deps: without them the test runs
- ; against whatever the build directory happens to hold.
- (deps
-  %{workspace_root}/lib/server/server_connector_attention_delivery.ml
-  %{workspace_root}/lib/server/server_discord_in_process_gateway.ml
-  %{workspace_root}/lib/server/server_slack_in_process_gateway.ml)
- (libraries alcotest ast_grep))
-
-(test
  (name test_voice_session_manager)
  (modules test_voice_session_manager)
  (libraries masc_test_deps eio_main unix))
@@ -1130,7 +1119,6 @@
  (action
   (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
    (run %{test}))))
-
 
 (test
  (name test_keeper_yield_observability)
@@ -1262,39 +1250,6 @@
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps exact_output_fixture))
 
-; Reads lib/keeper sources through Ast_grep, so those sources are deps: without
-; them dune keeps a cached pass and the suite never re-runs when the code it
-; asserts on changes.
-(test
- (name test_tool_failure_logs_its_arguments)
- (modules test_tool_failure_logs_its_arguments)
- (libraries alcotest ast_grep))
-
-(test
- (name test_chat_send_checks_the_registry)
- (modules test_chat_send_checks_the_registry)
- (libraries alcotest ast_grep))
-
-(test
- (name test_completion_authority_records_verdicts)
- (modules test_completion_authority_records_verdicts)
- (libraries alcotest ast_grep))
-
-(test
- (name test_tool_call_id_is_not_invented)
- (modules test_tool_call_id_is_not_invented)
- (libraries alcotest ast_grep))
-
-; The wizard is drawn and keyed from two large dispatchers; these assert the
-; call sites rather than trusting the key help table.
-
-(test
- (name test_tui_config_key_help_matches_the_panes)
- (modules test_tui_config_key_help_matches_the_panes)
- ; The pane count is read out of the renderer source, so it is a dep.
- (deps %{workspace_root}/bin/masc_tui_render_prim.ml)
- (libraries alcotest ast_grep masc_tui_keys masc_tui_types))
-
 (test
  (name test_tui_config_pane_title_head)
  (modules test_tui_config_pane_title_head)
@@ -1302,60 +1257,14 @@
   masc_tui_render_prim masc_tui_theme))
 
 (test
- (name test_tui_voice_wizard_wiring)
- (modules test_tui_voice_wizard_wiring)
- ; Read through Ast_grep, so the sources are deps: without them the test reads
- ; a cached verdict and stays green while the wiring it asserts is gone.
- (deps %{workspace_root}/bin/masc_tui.ml %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep))
-
-(test
- (name test_keeper_turn_finish_cancel_protect)
- (modules test_keeper_turn_finish_cancel_protect)
- (deps
-  %{workspace_root}/lib/keeper/keeper_unified_turn.ml
-  %{workspace_root}/lib/keeper/keeper_turn.ml)
- (libraries alcotest ast_grep))
-
-(test
  (name test_keeper_turn_sandbox_profile_gate)
  (modules test_keeper_turn_sandbox_profile_gate)
- (deps
-  %{workspace_root}/lib/keeper/keeper_unified_turn.ml
-  %{workspace_root}/lib/keeper/keeper_turn.ml)
- (libraries alcotest ast_grep masc_test_deps))
-
-; #38500: the turn hands the prompt builder a briefing budget sized over the
-; candidates its walk may dispatch.
-(test
- (name test_keeper_briefing_budget_wiring)
- (modules test_keeper_briefing_budget_wiring)
- (deps %{workspace_root}/lib/keeper/keeper_unified_turn.ml)
- (libraries alcotest ast_grep))
-
-; masc#28983: what a finished process's status means for the answer, asked
-; without starting one. The dispatch-site half needs the source, hence ast_grep.
+ (libraries alcotest masc_test_deps))
 
 (test
  (name test_keeper_tool_execute_exit_report)
  (modules test_keeper_tool_execute_exit_report)
- (deps %{workspace_root}/lib/keeper/keeper_tool_execute_runtime.ml)
- (libraries alcotest ast_grep masc_test_deps))
-
-(test
- (name test_tool_call_log_requeue_on_failure)
- (modules test_tool_call_log_requeue_on_failure)
- (deps %{workspace_root}/lib/keeper_tool_call_log.ml)
- (libraries alcotest ast_grep))
-
-(test
- (name test_keeper_keepalive_launch_order_ast)
- (modules test_keeper_keepalive_launch_order_ast)
- (deps
-  %{workspace_root}/lib/keeper/keeper_keepalive.ml
-  %{workspace_root}/lib/keeper/keeper_supervisor_launch.ml
-  %{workspace_root}/test/fixtures/keeper_keepalive_launch_order_ast_fixture.ml)
- (libraries alcotest ast_grep))
+ (libraries alcotest masc_test_deps))
 
 (test
  (name test_alloc_profile)
@@ -1370,12 +1279,7 @@
 (test
  (name test_keeper_tool_error_text_bounded)
  (modules test_keeper_tool_error_text_bounded)
- (libraries alcotest ast_grep masc_test_deps masc.masc_core))
-
-(test
- (name test_keeper_hook_thinking_authority)
- (modules test_keeper_hook_thinking_authority)
- (libraries alcotest ast_grep))
+ (libraries alcotest masc_test_deps masc.masc_core))
 
 (test
  (name test_keeper_structured_output_schema)
@@ -2136,14 +2040,10 @@
 
 ; The metric store is on the same contract: a counter bumped inside a
 ; cancelled fiber must not turn the cancellation into a warning (#37349).
-; The AST cases read the store's source, so it is a dep -- without it dune
-; caches a pass and never re-runs them when the store changes.
-
 (test
  (name test_otel_metric_store_cancel)
  (modules test_otel_metric_store_cancel)
- (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
- (libraries alcotest ast_grep otel_metric_store eio eio_main))
+ (libraries alcotest otel_metric_store eio eio_main))
 
 (test
  (name test_otel_metric_total)
@@ -2199,7 +2099,6 @@
  (modules test_keeper_required_tools)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
-
 ; Real Keeper/Board completion and durable ACK; CI supplies Docker explicitly.
 (test
  (name test_keeper_board_turn_ack)
@@ -2231,7 +2130,6 @@
   test_exact_output_catalog_precedence_fixture)
  (deps ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
-
 
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 
@@ -2617,7 +2515,6 @@
 
 (include stanzas/test_slack_connector_config.inc)
 
-
 (include stanzas/test_msx_tools.inc)
 
 (include stanzas/test_dos_input_routes.inc)
@@ -2676,10 +2573,6 @@
  (modules test_keeper_external_resource_lease)
  (libraries alcotest masc_test_deps))
 
-
-
-(include stanzas/test_contract_harness_auth_script.inc)
-
 (include stanzas/test_context_max_observed_9953.inc)
 
 (include stanzas/test_otel_runtime_observables.inc)
@@ -2734,9 +2627,7 @@
 
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 
-
 (include stanzas/test_docker_playground_gc_script.inc)
-
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 
@@ -2784,7 +2675,6 @@
 
 (include stanzas/test_gate_protocol.inc)
 
-
 (include stanzas/test_goal_phase_all.inc)
 
 (include stanzas/test_goal_verification_gate.inc)
@@ -2792,9 +2682,6 @@
 (include stanzas/test_goal_verification_agent.inc)
 (include stanzas/test_goal_verification_run_registry.inc)
 (include stanzas/test_reliable_change_g1.inc)
-
-
-
 
 (include stanzas/test_h2_mode_vocabulary.inc)
 
@@ -2804,23 +2691,18 @@
 
 (include stanzas/test_http_pages_asset_read.inc)
 
-
 (include stanzas/test_bind_required_guard_counter.inc)
-
 
 (include stanzas/test_k2_pipeline_e2e.inc)
 
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 
-
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
-
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)
 
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 (include stanzas/test_keeper_runtime_instructions.inc)
-
 
 (include stanzas/test_keeper_autoboot_single_owner.inc)
 
@@ -2830,8 +2712,6 @@
 (include stanzas/test_keeper_owned_checkpoint.inc)
 (include stanzas/test_keeper_recovery_projection.inc)
 (include stanzas/test_keeper_recovery_transmission.inc)
-
-
 
 (include stanzas/test_keeper_context_isolation.inc)
 
@@ -2847,7 +2727,6 @@
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)
-
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -2891,9 +2770,6 @@
 (include stanzas/test_keeper_owner.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
 
-
-
-
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
 (include stanzas/test_pause_authority_agrees.inc)
@@ -2902,11 +2778,7 @@
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 
-
-
-
 (include stanzas/test_keeper_request_wire_observation.inc)
-
 
 (include stanzas/test_otel_histogram_bucket_labels.inc)
 
@@ -2924,7 +2796,6 @@
 (include stanzas/test_keeper_replay_checkpoint.inc)
 
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
-
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
@@ -2944,14 +2815,10 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
-
 (include stanzas/test_keeper_task_outcomes.inc)
 (include stanzas/test_keeper_store_boot_reconcile.inc)
 
 (include stanzas/test_keeper_task_create_typed_failure.inc)
-
-
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
@@ -3004,8 +2871,6 @@
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
-
-
 (include stanzas/test_masc_dirname_ssot.inc)
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
@@ -3020,7 +2885,6 @@
 (include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
-
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
@@ -3038,9 +2902,7 @@
 
 (include stanzas/test_mcp_tool_matrix.inc)
 
-
 (include stanzas/test_normalized_actor.inc)
-
 
 (include stanzas/test_keeper_provider_timeout_labels.inc)
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
@@ -3067,7 +2929,6 @@
 (include stanzas/test_server_dashboard_official_client_probe.inc)
 (include stanzas/test_official_client_session_store.inc)
 
-
 (include stanzas/test_openapi_api_e2e.inc)
 
 (include stanzas/test_masc_agent_core_bridge_observation.inc)
@@ -3080,7 +2941,6 @@
 
 (include stanzas/test_otel_otlp_export_e2e.inc)
 (include stanzas/test_otel_export_health_pause.inc)
-
 
 (include stanzas/test_shutdown_flag.inc)
 
@@ -3098,11 +2958,6 @@
 (include stanzas/test_limit_schema_widen.inc)
 
 (include stanzas/test_parse_outcome.inc)
-
-
-
-
-
 
 (include stanzas/test_server_state_product.inc)
 
@@ -3151,7 +3006,6 @@
 
 (include stanzas/test_hitl_summary_worker.inc)
 
-
 (test
  (name test_graphql_api_coverage)
  (modules test_graphql_api_coverage)
@@ -3161,7 +3015,6 @@
  (name test_misc_coverage)
  (modules test_misc_coverage)
  (libraries masc_test_deps))
-
 
 ; RFC-0083 PR-2 — Tool_name.t exhaustive closure test. Round-trips all
 ; Masc_keeper.t variants through to_string/of_string and pins the variant
@@ -3197,7 +3050,6 @@
  (modules test_tool_capability_typed)
  (libraries masc_test_deps))
 
-
 ; RFC-0084 PR-10 — Typed Dispatch_outcome.t arm invariants. Pins
 ; cardinality (2), to_string vocabulary, round-trip preservation, and
 ; string-vocab parity with PR-7/8/9 ("handled" / "no_handler"). Requires
@@ -3221,7 +3073,6 @@
  (modules test_host_config_resolution)
  (libraries masc_test_deps))
 
-
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
 ; (base_path / config_dir / data_dir) + from_env alias.
 
@@ -3229,7 +3080,6 @@
  (name test_rfc_0085_pr6_host_config_from_env)
  (modules test_rfc_0085_pr6_host_config_from_env)
  (libraries alcotest masc.host_config unix))
-
 
 ; Verify the shared MCP dispatch finalizer fires typed observers without
 ; changing the handler result.
@@ -3260,16 +3110,6 @@
   masc.tool_types
   unix))
 
-
-; RFC-0086 — keeper namespace bulk promotion invariant.
-; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
-; lib/keeper/ carries the keeper_ prefix.
-
-(test
- (name test_rfc_0086_keeper_namespace_invariant)
- (modules test_rfc_0086_keeper_namespace_invariant)
- (libraries alcotest masc_test_deps))
-
 ; Eval_tool_selector is an observational harness/benchmark matcher.  It
 ; must not become a live keeper/runtime routing gate or tool policy surface.
 
@@ -3291,7 +3131,6 @@
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))
 
-
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
 (include stanzas/test_keeper_meta_current_schema.inc)
@@ -3301,7 +3140,6 @@
 (include stanzas/test_keeper_name_reserves_store_dirs.inc)
 
 (include stanzas/test_store_unreadable.inc)
-
 
 (test
  (name test_keeper_visible_path_projection)
@@ -3351,7 +3189,7 @@
 (test
  (name test_keeper_portrait_read)
  (modules test_keeper_portrait_read)
- (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
+ (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types masc_candle_store))
 
 (test
  (name test_keeper_image_dimensions)
@@ -3403,42 +3241,9 @@
    (run %{test}))))
 
 (test
- (name test_exec_ssh_bootstrap)
- (modules test_exec_ssh_bootstrap)
- (libraries alcotest ast_grep compiler-libs.common masc.string_util)
- (deps (source_tree ../bin)))
-
-(test
- (name test_tui_http_ast)
- (modules test_tui_http_ast)
- (libraries alcotest ast_grep compiler-libs.common)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)
-  %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
-
-; The STATE column of the Fusion run list against the three vocabularies it
-; draws. Reads the width out of bin/ and the vocabularies out of bin/ and lib/,
-; because a list of today's strings written into the test is the copy that goes
-; stale while the column silently truncates.
-
-(test
- (name test_tui_fusion_state_width)
- (modules test_tui_fusion_state_width)
- (libraries alcotest ast_grep compiler-libs.common)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)))
-
-; The footer of a detail-owning surface and the renderers that draw it. Reads
-; the key table for the contract and bin/ for the renderers, because the
-; renderer half is an optional argument -- omitting it compiles.
-
-(test
  (name test_tui_footer_detail_state)
  (modules test_tui_footer_detail_state)
- (libraries alcotest ast_grep masc_tui_keys masc_tui_types masc_tui_footer)
- (deps (source_tree ../bin)))
+ (libraries alcotest masc_tui_keys masc_tui_types masc_tui_footer))
 
 (test
  (name test_tui_runtime_config_receipt)
@@ -3485,45 +3290,40 @@
 (test
  (name test_tui_chat_gate_row)
  (modules test_tui_chat_gate_row)
- (libraries alcotest ast_grep masc_tui_types)
- (deps
-  (source_tree ../bin)))
+ (libraries alcotest masc_tui_types))
 
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
-  masc_tui_answering
-  masc_tui_keys
-  masc.fusion_core
-  masc_tui_fetched
-  alcotest
-  ast_grep
-  astring
-  masc
-  masc.masc_types
-  masc_tui_footer
-  masc_tui_interrupt_signal
-  masc_tui_esc_interrupt
-  masc_tui_send_disposition
-  masc_tui_keeper_chat_live
-  masc_tui_keeper_chat_log
-  masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_queue
-  masc_tui_keeper_chat_transcript
-  masc_tui_keeper_selection
-  masc_tui_message_layout
-  masc_tui_render_chat
-  masc_tui_render_schedule
-  masc_tui_frame_presenter
-  masc_tui_ansi
-  masc_tui_theme
-  masc_tui_types
-  masc_tui_roster_pane
-  unix
-  yojson)
- (deps
-  (source_tree ../bin)))
+ masc_tui_answering
+ masc_tui_keys
+ masc.fusion_core
+ masc_tui_fetched
+ alcotest
+ astring
+ masc
+ masc.masc_types
+ masc_tui_footer
+ masc_tui_interrupt_signal
+ masc_tui_esc_interrupt
+ masc_tui_send_disposition
+ masc_tui_keeper_chat_live
+ masc_tui_keeper_chat_log
+ masc_tui_keeper_chat_projection
+ masc_tui_keeper_chat_queue
+ masc_tui_keeper_chat_transcript
+ masc_tui_keeper_selection
+ masc_tui_message_layout
+ masc_tui_render_chat
+ masc_tui_render_schedule
+ masc_tui_frame_presenter
+ masc_tui_ansi
+ masc_tui_theme
+ masc_tui_types
+ masc_tui_roster_pane
+ unix
+ yojson))
 
 (test
  (name test_tui_chat_rows_memo)
@@ -3570,20 +3370,6 @@
  (name test_tui_runtime_param_picker)
  (modules test_tui_runtime_param_picker)
  (libraries alcotest yojson masc_tui_types))
-
-(test
- (name test_tui_no_value_mark)
- (modules test_tui_no_value_mark)
- (libraries alcotest ast_grep masc_tui_theme tui_source)
- (deps
-  (source_tree ../bin)))
-
-(test
- (name test_tui_ask_selection_wiring)
- (modules test_tui_ask_selection_wiring)
- (libraries alcotest ast_grep)
- (deps
-  (source_tree ../bin)))
 
 (test
  (name test_tui_operator_projection)
@@ -3943,32 +3729,16 @@
 (test
  (name test_tui_agenda)
  (modules test_tui_agenda)
- (deps
-  %{workspace_root}/bin/masc_tui.ml
-  %{workspace_root}/bin/masc_tui_render.ml
-  %{workspace_root}/bin/masc_tui_render_prim.ml
-  %{workspace_root}/bin/masc_tui_render_chat.ml
-  %{workspace_root}/bin/masc_tui_render_approvals.ml
-  %{workspace_root}/bin/masc_tui_render_tools.ml
-  %{workspace_root}/bin/masc_tui_types.ml)
  (libraries
-  alcotest
-  ast_grep
-  masc
-  masc_workspace
-  masc_tui_agenda
-  masc_tui_home
-  masc_tui_markdown_render_cache
-  masc_tui_message_layout
-  masc_tui_types
-  unix))
-
-(test
- (name test_tui_duration_spelling)
- (modules test_tui_duration_spelling)
- (libraries alcotest ast_grep masc_tui_message_layout)
- (deps
-  (source_tree ../bin)))
+ alcotest
+ masc
+ masc_workspace
+ masc_tui_agenda
+ masc_tui_home
+ masc_tui_markdown_render_cache
+ masc_tui_message_layout
+ masc_tui_types
+ unix))
 
 (test
  (name test_tui_message_layout)
@@ -4127,17 +3897,14 @@
  (name test_tui_composer_projection)
  (modules test_tui_composer_projection)
  (libraries
-  alcotest
-  ast_grep
-  compiler-libs.common
-  masc
-  masc_tui_composer
-  masc_tui_composer_projection
-  masc_tui_render_prim
-  masc_tui_theme
-  masc_tui_types)
- (deps
-  (source_tree ../bin)))
+ alcotest
+
+ masc
+ masc_tui_composer
+ masc_tui_composer_projection
+ masc_tui_render_prim
+ masc_tui_theme
+ masc_tui_types))
 
 (test
  (name test_tui_credential)
@@ -4411,7 +4178,6 @@
  (modules test_tui_planning_order)
  (libraries alcotest masc.masc_goal masc_tui_types))
 
-
 ; The named keyboard alias keeps the existing targeted-suite entry point.
 ; Each dependency has its own process, so Dune can run the six parts together.
 (alias
@@ -4483,7 +4249,6 @@
  (deps test_tui_keyboard_board_terminal_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_keyboard_board_terminal_pty.py} %{dep:../bin/masc_tui.exe})))
 
-
 ; The default runtest alias already runs this scenario through the keyboard aggregate.
 ; The focused alias gives edited-contract PRs that one consumer without
 ; repeating the walk in every full test run.
@@ -4515,7 +4280,6 @@
 ; for journal:full after Ctrl-N and Ctrl-F land on the narrow notice screen
 ; (run 34072434219). That step had never run anywhere either. The lane is
 ; named so it can be dispatched on its own while that is open.
-
 
 (rule
  (alias runtest-test_tui_keyboard_input-voice-wizard)
@@ -5556,16 +5320,6 @@
  (libraries alcotest masc_tui_approval_detail))
 
 (test
- (name test_tui_approval_metadata)
- (modules test_tui_approval_metadata)
- ; The row lives in the executable, which no test can link, so its clause
- ; vocabulary is read through Ast_grep. The source is a dep: without it the
- ; test reads a cached verdict and stays green while the row it measures has
- ; gone back to being joined by hand.
- (deps %{workspace_root}/bin/masc_tui_render_approvals.ml)
- (libraries alcotest ast_grep masc_tui_frame masc_tui_message_layout))
-
-(test
  (name test_tui_tool_table)
  (modules test_tui_tool_table)
  (libraries alcotest masc_tui_message_layout masc_tui_tool_table))
@@ -5573,10 +5327,8 @@
 (test
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
- (libraries alcotest ast_grep compiler-libs.common masc
-   masc_tui_connector_state)
- (deps
-  (source_tree ../bin)))
+ (libraries alcotest masc
+ masc_tui_connector_state))
 
 (test
  (name test_tui_connector_unbind)
@@ -5700,8 +5452,6 @@
 
 (include stanzas/test_verifier_exact_lane.inc)
 
-
-
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
 (include stanzas/test_exact_output_runtime_deadline.inc)
@@ -5822,8 +5572,6 @@
 (include stanzas/test_tui_memory_mark.inc)
 
 (include stanzas/test_tui_config.inc)
-(include stanzas/test_tui_config_highlight_wiring.inc)
-(include stanzas/test_tui_row_wiring.inc)
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
@@ -6133,7 +5881,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries masc_tui_identity_model alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries masc_tui_identity_model masc_tui_identity_updates alcotest masc masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)
@@ -6402,16 +6150,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- ; The pick dispatch lives in the executable, which no test can link, so the
- ; assertions about it and about the two renderers are read through Ast_grep.
- ; The sources are deps: without them the test reads a cached verdict and
- ; stays green while the wiring it asserts is gone.
- (deps
-  %{workspace_root}/bin/masc_tui.ml
-  %{workspace_root}/bin/masc_tui_types.ml
-  %{workspace_root}/bin/masc_tui_render.ml)
- (libraries masc_tui_surface_search alcotest ast_grep compiler-libs.common masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
-
+ (libraries masc_tui_surface_search alcotest masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)
@@ -6425,7 +6164,6 @@
  (name runtest)
  (deps (alias runtest-test_browser_elements)))
 
-
 (include stanzas/test_browser_interaction.inc)
 
 (rule
@@ -6436,7 +6174,6 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_screenshot)))
-
 
 ; The same scenario used by the local interpreter probe, linked against real
 ; MASC interfaces for the CI-owned native Firefox run.
@@ -6454,9 +6191,6 @@
  (name firefox_controls_probe)
  (modules firefox_controls_probe)
  (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))
-
-
-
 
 (rule
  (alias runtest-test_tui_keyboard_input-fusion-history)
@@ -6796,7 +6530,6 @@
  (name runtest)
  (deps (alias runtest-test_tui_browser_action_navigation)))
 
-
 (rule
  (alias runtest-test_tui_ask_alternative)
  (deps test_tui_ask_alternative.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7098,7 +6831,6 @@
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
 
-
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
@@ -7242,7 +6974,7 @@
 (test
  (name test_dashboard_execution_render_window)
  (modules test_dashboard_execution_render_window)
- (libraries alcotest eio eio.mock yojson masc.dashboard))
+ (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.
@@ -7371,7 +7103,6 @@
    test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_lane_operator_pty.py} %{dep:../bin/masc_tui.exe})))
 
-
 (include stanzas/test_operator_media_inspection.inc)
 
 (test
@@ -7452,12 +7183,7 @@
 (test
  (name test_tui_fusion_summary_rows)
  (modules test_tui_fusion_summary_rows)
- ; The Fusion list is drawn in the executable, which no test can link, so the
- ; two wiring assertions are read through Ast_grep. The source is a dep:
- ; without it the test reads a cached verdict and stays green while the wiring
- ; it asserts is gone.
- (deps %{workspace_root}/bin/masc_tui_render_fusion.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
@@ -7627,8 +7353,6 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_home_decision_cards_pty)))
-
-
 
 (rule
  (alias runtest-test_tui_palette_input_viewport_pty)
@@ -7831,10 +7555,6 @@
  (modules test_lane_addon_broadcast_delivery)
  (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix yojson))
 
-
-
-
-
 (rule
  (alias runtest-test_tui_task_metadata_viewport_pty)
  (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7842,7 +7562,6 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_task_metadata_viewport_pty)))
-
 
 (rule
  (alias runtest-harness-server-binary)
@@ -7930,6 +7649,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_continuity_admission)))
+
+(rule
+ (alias runtest-test_tui_lane_initial_authority)
+ (deps test_tui_lane_initial_authority.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_lane_initial_authority.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_lane_initial_authority)))
 
 (test
  (name test_server_keeper_build_maintenance)

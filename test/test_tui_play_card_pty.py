@@ -21,17 +21,7 @@ from pathlib import Path
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_play_card.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_scroll.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-)
+
 
 TOKEN = "3f9a1c07d25b48e6a0c1d7e2f4b86a59c3d10e7f2a4b6c8d9e0f1a2b3c4d5e6f"
 LINK = "https://masc.example.com/play#" + TOKEN

@@ -7,7 +7,7 @@ import unicodedata
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml")
+
 FILE_PATH = "lib/" + "long-한글-" * 35 + "Z.ml"
 TITLE = "TITLEHEAD " + "한글 task evidence " * 45 + "TITLEEND"
 EXECUTION = "exec-" + "e" * 110 + "EXECTAIL"

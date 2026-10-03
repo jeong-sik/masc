@@ -1,5 +1,8 @@
 # Keeper usage comparison evidence
 
+Historical evidence only: these frames precede the unread-turn decoder and partial-window comparison repair. Their bars and recorded hashes describe the old candidate. No new binary, PTY or browser replay verifies the corrected source.
+
+
 ## 공통 헤더
 
 - 날짜(ISO8601): 2026-10-03T06:16:08.661479+00:00

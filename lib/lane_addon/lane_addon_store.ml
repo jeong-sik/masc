@@ -556,29 +556,41 @@ let recover_sampling_requests t ~instance_id ~max_reply_bytes =
                  else Error "sampling outcome blob digest mismatch" in
                let* () = match verify (blob_path hash) with
                  | Ok () -> Ok ()
-                 | Error _ -> (match verify (recovery_blob_path hash) with
-                     | Ok () -> Ok ()
-                     | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
+                 | Error _ ->
+                     (* A present corrupt primary consumes the query allowance
+                        before fallback. Repair it before discarding the journal
+                        body, even when the fallback is already intact. *)
+                     if Fs_compat.exact_path_kind (Filename.concat t.root (blob_path hash))
+                         <> Fs_compat.Exact_missing then
+                       write_blob t bytes |> Result.map (fun _ -> ())
+                     else (match verify (recovery_blob_path hash) with
+                       | Ok () -> Ok ()
+                       | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
                write t (Filename.concat relative name)
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
       | _ -> Error "invalid sampling recovery state" in
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
-    let scan relative ~skip =
+    let keep_first_error first next = match first with
+      | Ok () -> next | Error _ -> first in
+    let scan relative ~skip = protect (fun () ->
       let path = Filename.concat t.root relative in
       match Fs_compat.exact_path_kind path with
       | Fs_compat.Exact_missing -> Ok ()
       | _ ->
           let handle = Unix.opendir path in
           Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
-            let rec next () = match Unix.readdir handle with
+            let rec next result = match Unix.readdir handle with
               | name when Filename.check_suffix name ".json" && not (skip name) ->
-                  let* () = recover relative name in next ()
-              | _ -> next ()
-              | exception End_of_file -> Ok () in
-            next ()) in
-    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
-    scan (sampling_directory instance_id) ~skip:(fun name ->
-      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
+                  let recovered = protect (fun () -> recover relative name)
+                    |> Result.map_error (fun detail -> Filename.concat relative name ^ ": " ^ detail) in
+                  next (keep_first_error result recovered)
+              | _ -> next result
+              | exception End_of_file -> result in
+            next (Ok ()))) in
+    let terminal_result = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
+    let primary_result = scan (sampling_directory instance_id) ~skip:(fun name ->
+      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing) in
+    keep_first_error terminal_result primary_result)
 
 let record_path t instance_id seq =
   Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))

@@ -77,8 +77,11 @@ val recover_sampling_requests : t -> instance_id:string -> max_reply_bytes:int -
     Stream records with a per-record bound derived from the producer's reply
     limit and JSON string escaping. Verify journal identity and durability,
     recover exact outcomes, and durably compact their indexes. Existing intact
-    blobs are not replaced. Pending requests never invoke a model. An error may
-    follow partial recovery; the remaining records are retried by maintenance.
+    blobs are not replaced. A corrupt primary blob is repaired before compaction
+    so bounded readers do not spend their allowance on it before the fallback.
+    Pending requests never invoke a model. Record errors do not stop recovery of
+    other requests in either directory. Return the first error with its path;
+    maintenance retries incomplete records.
     Call from a system thread. *)
 val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result

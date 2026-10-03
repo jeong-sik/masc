@@ -264,11 +264,12 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
 let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
   let cases = List.concat_map (fun (request_id, outcome_first) ->
     List.concat_map (fun terminal_journal ->
-      List.map (fun placement -> request_id, outcome_first, terminal_journal, placement, false)
-        [`Missing; `Canonical; `Fallback]) [true; false])
+      List.map (fun placement -> request_id, outcome_first, terminal_journal, placement, false, false)
+        [`Missing; `Canonical; `Fallback; `Corrupt_canonical]) [true; false])
     ["request-1", false; "request-8", true]
-    @ ["request-1", true, true, `Canonical, true] in
-  List.iter (fun (request_id, outcome_first, terminal_journal, placement, escaped) ->
+    @ ["request-1", true, true, `Canonical, true, false;
+       "request-1", false, false, `Missing, false, true] in
+  List.iter (fun (request_id, outcome_first, terminal_journal, placement, escaped, broken_siblings) ->
     with_fixture (fun env _sw config dir state ->
       let clock = Eio.Stdenv.clock env in
       let max_reply_bytes = 4 * 1024 * 1024 in
@@ -315,12 +316,22 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
       let existing = match placement with
         | `Missing -> None
         | `Canonical -> ignore (unwrap (Store.write_blob store bytes)); Some canonical
-        | `Fallback ->
+        | `Fallback | `Corrupt_canonical ->
             Unix.mkdir canonical 0o700;
             ignore (unwrap (Store.write_sampling_blob store bytes));
             Unix.rmdir canonical;
+            if placement = `Corrupt_canonical then write canonical (String.make (String.length bytes) '!');
             Some (Filename.concat (Store.root store) ("sampling-evidence/" ^ hash ^ ".json")) in
       let before = Option.map Unix.stat existing in
+      let damaged_records = if broken_siblings then
+          List.map (fun (request_id, bytes) ->
+            unwrap (Store.save_sampling_outcome store ~instance_id ~request_id `Null);
+            let path = Filename.concat (Store.root store)
+              ("sampling-outcomes/" ^ Store.digest instance_id ^ "/" ^ Store.digest request_id ^ ".json") in
+            write path bytes;
+            path, bytes)
+            ["broken-json", "{"; "broken-state", "null"]
+        else [] in
       let selected = instance_id ^ "/1/answer" in
       let output : Types.output = {rows=[{id=selected;lane_id=instance_id ^ "/result";
         kind=Types.Value;title="Retained answer";observed_at=1.;subject_id="answer";
@@ -331,8 +342,17 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
       Runtime.For_testing.reset ();
       (* This is the public function wired before configuration startup and
          into the maintenance pulse, not the iterator test recovery helper. *)
-      unwrap (Runtime.recover_sampling ~config);
+      let recover () =
+        let result = Runtime.recover_sampling ~config in
+        if broken_siblings then check bool "damaged siblings remain an explicit recovery error" true
+          (Result.is_error result)
+        else unwrap result;
+        List.iter (fun (path, bytes) ->
+          check string "recovery preserves damaged sibling evidence" bytes (Fs_compat.load_file path)) damaged_records in
+      recover ();
       check string "runtime recovery preserves exact outcome bytes" bytes (unwrap (Store.read_blob store outcome));
+      if placement = `Corrupt_canonical then
+        check string "corrupt primary is repaired before journal compaction" bytes (Fs_compat.load_file canonical);
       (match existing, before with
        | Some path, Some before ->
            let after = Unix.stat path in
@@ -346,7 +366,7 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
       check string "bounded query keeps the complete answer" answer
         (List.hd receipts |> member "terminal" |> member "response" |> member "content" |> text "text");
       Runtime.For_testing.reset ();
-      unwrap (Runtime.recover_sampling ~config);
+      recover ();
       check bool "another restart and bounded query keep the same receipt" true (query () = receipts);
       let history = unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list in
       check bool "real runtime history exposes the prior producer row" true

@@ -1628,11 +1628,13 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
             h.drain_until_quiet(process, fd, output)
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
-            os.write(fd, b"q")
+            # The refused chat retains composer focus. A letter is a draft
+            # character there, so end this read-only scenario with Ctrl-C.
+            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
         h.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-            refresh=3600, terminal_cols=TERMINAL_COLUMNS)
+            refresh=3600, terminal_cols=TERMINAL_COLUMNS, confirm_exit=b"\x03")
 
 
 if __name__ == "__main__":

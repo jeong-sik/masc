@@ -139,6 +139,35 @@ class ReportCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertAlmostEqual(json.loads(result.stdout)["paired_median_delta_s"], 1.05)
 
+    def test_successful_full_lane_requires_a_nonblank_selected_slot(self) -> None:
+        for arm in ("baseline", "preflight"):
+            for slot in (None, "", "   ", 123, False, {}, []):
+                with self.subTest(arm=arm, slot=slot):
+                    manifest = fixture()
+                    run = manifest["pairs"][0][arm]["run"]
+                    if arm == "preflight":
+                        run["output"].update(
+                            jev_preflight=observation("judged", "needs_generation"),
+                            generation_path="full_lane",
+                            full_llm_skipped=False,
+                        )
+                    run["selected_slot"] = slot
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
+
+    def test_preselection_failure_and_cancellation_keep_null_slot(self) -> None:
+        for status in ("failed", "cancelled"):
+            with self.subTest(status=status):
+                manifest = fixture()
+                run = manifest["pairs"][0]["baseline"]["run"]
+                run.update(status=status, selected_slot=None)
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    json.loads(result.stdout)["pairs"][0]["baseline_status"], status
+                )
+
     def test_answerless_observations_reject_received_answer_fields(self) -> None:
         for status in ("failed", "awaiting_answer"):
             for field in ("destination", "model", "request_body_sha256", "decision",

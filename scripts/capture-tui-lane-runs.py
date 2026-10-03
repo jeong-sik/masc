@@ -270,6 +270,12 @@ def ttyd_session(
                     while offset >= 0:
                         masked[offset:offset + len(value)] = b"*" * len(value)
                         offset = detail_bytes.find(value, offset + 1)
+                    # A live writer or an interrupted process may leave a
+                    # private value incomplete at the observed EOF.
+                    for length in range(min(len(value) - 1, len(detail_bytes)), 0, -1):
+                        if detail_bytes.endswith(value[:length]):
+                            masked[-length:] = b"*" * length
+                            break
                 detail = bytes(masked[-4096:]).decode("utf-8", errors="replace")
                 raise type(error)(
                     f"{error}\nttyd startup log (bounded tail):\n{detail}"

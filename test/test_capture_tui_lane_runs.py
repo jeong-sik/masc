@@ -159,6 +159,28 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
         self.assertNotIn("secret-token", str(raised.exception))
         self.assertIn("startup-failure", str(raised.exception))
 
+    def test_startup_diagnostic_masks_bearer_incomplete_at_log_end(self):
+        process = Mock()
+        bearer = "operator-private-bearer-token"
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(b"starting with bearer: " + bearer[:-3].encode())
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture, "free_port", return_value=0),
+            patch.dict(capture.os.environ, {"MASC_TOKEN": bearer}),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(capture, "wait_port", side_effect=TimeoutError("ttyd did not listen")),
+        ):
+            with self.assertRaises(TimeoutError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        self.assertNotIn(bearer[:-3], str(raised.exception))
+        self.assertIn("starting with bearer:", str(raised.exception))
+
     def test_cleanup_reaps_killed_process_even_when_browser_close_fails(self):
         process = Mock()
         process.wait.side_effect = [subprocess.TimeoutExpired("ttyd", 5), 0]

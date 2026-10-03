@@ -64,7 +64,11 @@
 
 The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0.49.0/docs/releases/v0.49.0-details.md) preserve every original release note, all 49 final-candidate fragments, and the 21 fragments from the final main integration. Read the upgrade and fresh-state instructions above before updating.
 - The final main integration (a4e3b9478a, the Lane Add-ons stack and the latest fixes) folded #40210, #40222, #40227, #40233, #40237, #40239, #40243, #40253, #40254, #40257, #40269, #40273, #40330, #40343, #40405, #40408, #40409, #40410, #40614, #40844, #40863, #40871, #40939, #40955. Each PR's fragment is preserved verbatim in the unabridged notes below.
-- The release review folded the fragments that accumulated while main kept moving: #40163, #40168, #40173, #40175, #40176, #40177, #40178, #40179, #40180, #40185, #40188, #40193, #40198, #40212, #40225, #40231, #40266, #40302, #40303, #40310, #40522, #40525, #40547, #40568, #40571, #40572, #40579, #40582, #40584, #40585, #40654, #40655, #40686, #40691, #40699, #40702, #40703, #40705, #40706, #40711, #40715, #40721, #40732, #40736, #40739, #40741, #40742, #40750, #40761, #40777, #README. Each PR's fragment is preserved verbatim in the unabridged notes below.
+- The release review folded the fragments that accumulated while main kept moving: #40163, #40168, #40173, #40175, #40176, #40177, #40178, #40179, #40180, #40185, #40188, #40193, #40198, #40212, #40225, #40231, #40266, #40302, #40303, #40310, #40522, #40525, #40547, #40568, #40571, #40572, #40579, #40582, #40584, #40585, #40654, #40655, #40686, #40691, #40699, #40702, #40703, #40705, #40706, #40711, #40715, #40721, #40732, #40736, #40739, #40741, #40742, #40750, #40761, #40777. Each PR's fragment is preserved verbatim in the unabridged notes below.
+
+- The conflict repair folded the remaining inherited fragments into this release: #40299, #40607, #40616, #40662, #40675, #40678, #40690, #40693, #40808, #40809, #40818, #40857, #40926, #40971, #40975, #40995. Their full text is preserved in the detailed notes.
+
+- The subsequent main integration includes the source-check cleanup in #40987 and #40990; their notes are preserved in the detailed record.
 
 ## [0.48.0] - 2026-09-29
 

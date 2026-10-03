@@ -6,8 +6,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_table.ml", "bin/masc_tui.ml",
-                  "bin/masc_tui_types.ml", "bin/masc_tui_keys.ml")
+
 FUTURE = "2099-01-01T00:00:00Z"
 MALFORMED = "unparseable-clock-reading"
 LONG_STAMP = "unreadable-" + "longclock" * 30 + "-STAMPEND"

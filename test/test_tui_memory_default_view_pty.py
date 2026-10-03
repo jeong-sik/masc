@@ -12,7 +12,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render_memory.ml", "bin/masc_tui_keys.ml", "bin/masc_tui.ml", "lib/tui_decode_memory_health.ml", "lib/tui_decode_memory_health.mli", "lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts.mli")
+
 
 # The ledger coordinates the default view folds: the snapshot revision, the
 # trace the saved context points at, and the prepared-request row that reads

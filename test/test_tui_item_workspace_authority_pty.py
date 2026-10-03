@@ -14,12 +14,7 @@ import sys
 import test_tui_keyboard_input as h
 import test_tui_remote_workspace_history_pty as authority
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_render.ml",
-)
+
 ITEM_PATH = "/api/v1/keepers/alpha/items"
 CATALOG = (
     ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),

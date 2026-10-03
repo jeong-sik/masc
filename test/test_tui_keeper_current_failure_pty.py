@@ -11,10 +11,7 @@ from typing import cast
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "lib/tui_decode.ml",
-)
+
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 # Longer than the whole terminal width, with short words so wrapping cannot

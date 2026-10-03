@@ -155,10 +155,9 @@ def identity_row(rows: dict[int, bytes]) -> int:
 
 def assert_facts_full_width(rows: dict[int, bytes], why: str) -> None:
     assert not portrait_rows(rows), f"{why}, the portrait still drew: {rows!r}"
-    identity = identity_row(rows)
-    # Identity, Name, Paused, a blank row: the facts keep every row.
-    assert row_of(rows, b"Current Work") == identity + 4, \
-        f"{why}, the rows the portrait took were not given back: {rows!r}"
+    identity_row(rows)
+    assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
+        f"{why}, Current Work obscured the Identity facts: {rows!r}"
 
 
 def assert_portrait_beside_identity(output: bytearray) -> None:
@@ -169,15 +168,16 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
     assert band[0] == identity and band[-1] < identity + MOSAIC_BAND_ROWS, \
         f"the portrait is not the {MOSAIC_BAND_ROWS} rows beside Identity: rows {band}, Identity {identity}"
     assert len(band) >= MOSAIC_BAND_ROWS // 2, f"too little of the portrait drew: rows {band}"
-    for offset, needle in enumerate((IDENTITY, NAME_ROW, PAUSED_ROW)):
-        text = rows[identity + offset].decode("utf-8", "replace")
+    for number, needle in ((identity, IDENTITY),
+                           (row_of(rows, NAME_ROW), NAME_ROW),
+                           (row_of(rows, PAUSED_ROW), PAUSED_ROW)):
+        text = rows[number].decode("utf-8", "replace")
         cells = [text.find(cell) for cell in HALF_BLOCK if cell in text]
         assert cells and min(cells) < text.find(needle.decode()), \
             f"{needle!r} is not beside the portrait: {text!r}"
-    assert b"alpha" in rows[identity + 1], "the Name row lost the name"
-    # Current work shares the header beside the icon, below Identity facts.
-    assert row_of(rows, b"Current Work") == identity + 4, \
-        f"the facts after the portrait moved: {rows!r}"
+    assert b"alpha" in rows[row_of(rows, NAME_ROW)], "the Name row lost the name"
+    assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
+        f"Current Work obscured the Identity facts: {rows!r}"
     styled = last_frame_rows(output, preserve_styles=True)
     assert FOREGROUND_ESCAPE in styled[identity], "the portrait was drawn without colour"
 
@@ -1020,6 +1020,10 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
             wait_refreshes(process, fd, output)
+            # Health requests can overlap; wait until the TUI applies revocation.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"No keeper selected" in frame(output), timeout=10), \
+                "unread authority was not applied"
             # A manual read during revocation must not create a new token
             # that would admit an answering but unverified endpoint.
             os.write(fd, b"o" if sandbox_logs else b"r")

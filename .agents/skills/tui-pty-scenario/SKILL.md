@@ -86,23 +86,36 @@ AssertionError: timed out waiting for b'MASC Overview': b'...'
 
 ## 4. CI 에서 돌리기
 
-### PR 검증
+### 실행 경로
 
-PR·일반 branch push로 자동 CI를 실행하지 않는다. 변경한 입력·렌더링 경계와 직접
-소비자를 확인하고, 필요한 경우 해당 가족의 검증을 명시적으로 요청한다.
-`SOURCE_MODULES` 기반 선택기는 제거됐으므로 경로 문자열 선언으로 실행을 보장하지 않는다.
-Full CI는 최종 Release/Tag 후보에서 실행하며, 세부 절차는 `docs/constitution.xml`의
-`execution_protocol`과 `docs/CI-REVIEW-WORKFLOW.md`를 따른다.
+PR 생성·push 는 CI 를 시작하지 않는다. 일반 개발 검사는 리더가 승인된 PR head 와 검사 범위를
+명시적으로 고른 뒤 실행한다. [CI 선택 절차](../../../scripts/review/APPROVED-CI-SELECTION.md)에
+따라 조합 후보와 `SELECTION.json` 영수증을 준비하고 후보 브랜치를 게시한다.
+현재 준비 도구가 받는 PR 범위와 승인 조건도 이 절차를 따른다.
+
+`test.yml` 은 `workflow_call` 전용이다. 최소 PTY 검사는 `leader-ci.yml` 을 `main` 에서
+dispatch 해 요청한다. Release/Tag 전체 검증은
+[Release Candidate Verification](../../../.github/workflows/release-candidate.yml)에서 실행한다.
 
 ### 가족 하나를 Linux 에서
 
 ```sh
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input-<family>
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기본 산책
+gh workflow run leader-ci.yml --ref main \
+  -f candidate="$(jq -r .candidate SELECTION.json)" \
+  -F selection=@SELECTION.json \
+  -F tests=true \
+  -f suites='test_tui_keyboard_input-<family>'
 ```
 
-`suite` 는 `test/<이름>.py` 파일 이름이나 `test/dune` 에 선언된 `runtest-<이름>` alias 이름을 받는다.
-시나리오 하나만 고르는 입력은 없다.
+`<family>` 를 실제 가족 이름으로 바꾼다. 기본 산책은 `suites=test_tui_keyboard_input` 이다.
+여러 스위트는 쉼표로 구분한다. `suites` 는 `test.yml` 의 `suite` 입력으로 전달되며,
+`test/<이름>.py` 파일 이름이나 `test/dune` 에 선언된 `runtest-<이름>` alias 이름을 받는다.
+시나리오 하나만 고르는 CI 입력은 없다.
+
+결과는 조합 후보 SHA 와 실제 실행한 스위트의 증거다. 개별 PR 검사나 전체 TUI 검증으로
+확대하지 않는다. 변경한 화면의 동작을 검증하는 스위트를 직접 고른다. 다른 검사만 통과했다면
+그 화면은 미검증이다. 시간 초과는 targeted runner 의 `TIMEOUT` 결과와 해당 스위트 로그로
+확인한다. CI 를 watch 하거나 반복 조회하지 않고 작업 경계에서 결과를 읽는다.
 
 ## 5. 새 시나리오 만들기
 

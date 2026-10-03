@@ -1,0 +1,10 @@
+sweep_zero=accepted
+sweep_above_max=accepted
+zero_backups=accepted
+valid_bounds=accepted
+sweep_env_0=0
+sweep_env_121=121
+sweep_env_nan=nan
+sweep_env_infinity=inf
+backup_env_zero=0
+strict_boot_rejections=0/16

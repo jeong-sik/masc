@@ -524,8 +524,7 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
       }
 
 (* What a row wears in its first cell. The category is the librarian
-   taxonomy, a closed sum the producer writes and the model's schema enum is
-   built from ([Keeper_memory_os_types.category]); the other two are this
+   label the producer writes ([Keeper_memory_os_types.category]); the other two are this
    pane's own words for rows that are not ordinary facts, and the call sites
    know which they are drawing, so they say so rather than handing over a
    string to be recognised. *)
@@ -558,7 +557,7 @@ let format_row_badge badge =
           | Memory_category.Code_change | Memory_category.Fact
           | Memory_category.Preference | Memory_category.Goal
           | Memory_category.Constraint | Memory_category.Validated_approach
-          | Memory_category.Lesson ->
+          | Memory_category.Lesson | Memory_category.Custom _ ->
               Theme.recede ()
         in
         ( style
@@ -567,7 +566,12 @@ let format_row_badge badge =
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
-      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+      match badge with
+      | Badge_category (Memory_category.Custom _) ->
+          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
+          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
+      | Badge_category _ | Badge_source | Badge_dropped ->
+          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in

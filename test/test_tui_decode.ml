@@ -3644,7 +3644,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_tool_surface_bytes", `Int 2360
       ; "skill_discovery_bytes", `Int 369
       ; "skill_eager_body_bytes", `Int 0
-      ; "skill_body_bytes", `Int 4981
+      ; "skill_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "unavailable_skill_names", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
@@ -3744,11 +3744,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
          Alcotest.(check string) "flow node tool" "keeper_lane_status" node.sfn_tool_name;
          Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
        | _ -> Alcotest.fail "expected one decoded flow node and batch");
-      Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
-      Alcotest.(check int) "Skill surface bytes" 2360 ets_skill_tool_surface_bytes;
+      Alcotest.(check (option int)) "whole surface bytes" (Some 79984) ets_tool_surface_bytes;
+      Alcotest.(check (option int)) "Skill surface bytes" (Some 2360) ets_skill_tool_surface_bytes;
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
-      Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
+      Alcotest.(check (option int)) "reported zero body bytes" (Some 0) ets_skill_body_bytes;
       (* The skill source is asserted above, against the shape the producer
          emits. This used to pin a SKILL.md path that no producer has sent
          since the surface moved to skill_provenance -- the fixture was the
@@ -3965,9 +3965,9 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
                { ets_tool_delivery =
                    Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported;
                  ets_skill_profiles = [];
-                 ets_tool_surface_bytes = 0;
-                 ets_skill_tool_surface_bytes = 0;
-                 ets_skill_body_bytes = 0;
+                 ets_tool_surface_bytes = None;
+                 ets_skill_tool_surface_bytes = None;
+                 ets_skill_body_bytes = None;
                  ets_tools = [];
                  _
                });
@@ -5670,10 +5670,8 @@ let test_decode_memory_fact_reads_the_use_record () =
   (* A row without the record is a server this decoder does not know. *)
   rejected ~what:"a row without events is rejected" ~needle:"events" (snapshot_with ())
 
-(* The server writes a fact's category through [category_to_string], so a
-   word outside the eight is a wire error -- not a ninth category for the
-   renderer to guess a colour for. *)
-let test_decode_memory_fact_refuses_an_unknown_category () =
+(* New category names keep their identity across the server and TUI. *)
+let test_decode_memory_fact_accepts_dynamic_categories () =
   let snapshot category =
     Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot
       (memory_fact_snapshot_json
@@ -5711,8 +5709,8 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
         | Masc.Tui_decode_memory_facts.Memory_store_present _ | Masc.Tui_decode_memory_facts.Memory_store_absent ->
             false)
   in
-  Alcotest.(check bool) "a word the producer never writes is refused" true
-    (refused_naming "rule" (snapshot "rule"));
+  Alcotest.(check bool) "malformed category is refused" true
+    (refused_naming "bad-category" (snapshot "bad-category"));
   List.iter
     (fun category ->
       let word = Masc.Keeper_memory_os_types.category_to_string category in
@@ -5722,7 +5720,8 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
           Alcotest.(check bool) (word ^ " round-trips") true
             (fact.Masc.Tui_decode_memory_facts.mf_category = category)
       | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
-    Masc.Keeper_memory_os_types.all_categories
+    (Masc.Keeper_memory_os_types.all_categories
+     @ [ Option.get (Masc.Keeper_memory_os_types.category_of_string "architecture_decision") ])
 
 (* The "all keepers" Memory view merges per-keeper listings. A keeper that
    could not be read is named beside the facts that were read; a keeper with
@@ -12398,8 +12397,8 @@ let () =
           test_merge_keeper_memory_facts_all_read;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
-        Alcotest.test_case "memory fact refuses an unknown category" `Quick
-          test_decode_memory_fact_refuses_an_unknown_category;
+        Alcotest.test_case "memory fact accepts dynamic categories" `Quick
+          test_decode_memory_fact_accepts_dynamic_categories;
         Alcotest.test_case "memory fact row carries the use record" `Quick
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick

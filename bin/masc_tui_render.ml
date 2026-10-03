@@ -9599,10 +9599,16 @@ let render_runtime (state : state) =
     | Masc_tui_types.Runtime_lanes -> List.length candidates
     | Masc_tui_types.Runtime_all -> List.length all_runtimes
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
+    match state.runtime_surface with
+    | None -> "reading unavailable"
+    | Some snapshot ->
+        (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
+         | None -> "reading time unavailable"
+         | Some generated_at ->
+             let recorded = Unix.localtime generated_at in
+             Printf.sprintf "reading %02d:%02d:%02d"
+               recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
   in
   let header =
     match state.runtime_surface with
@@ -11976,18 +11982,39 @@ let render_config_models (state : state) =
        (* [box_line] spends cells on the two border glyphs and the padding
           either side, and this pane adds two more for its own indent. A
           width that ignores them wraps the last column onto its own row,
-          which reads as a blank value. *)
+          which reads as a blank value. The pane is the truth the table is
+          fitted against: handing the table a floor of 40 on a terminal
+          narrower than that drew mandatory readings into cells the frame
+          then cut (#28905 review). [render] uses the pane to choose the
+          stacked layout before that cut can eat a value. *)
        let table =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
+           ~pane:(max 1 (cols - 6 - 2))
            state.config_models_rows
        in
        let total = List.length table in
+       (* The cursor walks bindings, not lines. In table mode line 0 is the
+          header, so binding [i] is line [i+1] and that is what the window
+          follows. In stacked mode the item's first line is the binding's
+          line: the cursor still selects the same record it did before the
+          resize, which is the whole point of the transition. *)
+       let pane_width = max 1 (cols - 6 - 2) in
+       let table_mode =
+         Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
+       in
+       let cursor_line =
+         if table_mode then state.config_models_cursor + 1
+         else
+           List.nth_opt
+             (Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width state.config_models_rows)
+             state.config_models_cursor
+           |> Option.value ~default:0
+       in
        let max_scroll = max 0 (total - table_height) in
        (* The window follows the cursor rather than the other way round: a
           cursor the frame does not draw is a selection the reader cannot
           see, and [e] would act on a row that is off screen. *)
-       let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
        let scroll =
          if cursor_line < scroll then cursor_line
@@ -12000,14 +12027,15 @@ let render_config_models (state : state) =
           key, a list that shrank -- drew its rows outside the window, and
           they came out blank. *)
        let table_window = Rows.of_list ~first:scroll ~height:table_height table in
-       (* Row 0 of [table] is the header, so a cursor over the data rows is
-          one lower than the line it marks. *)
+       (* Row 0 of [table] is the header in table mode, so a cursor over the
+          data rows is one lower than the line it marks. Stacked mode has no
+          header: line 0 is the first binding's item. *)
        for i = 0 to table_height - 1 do
          let index = scroll + i in
          match Rows.at table_window index with
          | Some line ->
              let marked =
-               if index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
+               if table_mode && index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
                else if index = cursor_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
                else "  " ^ line
              in

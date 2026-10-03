@@ -260,25 +260,20 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
         ~content_rows:100 ~content_cols:100)))
 
 let test_mosaic_previews_every_catalog_accessory () =
-  let cache = Portrait.cache () in
-  let bare = Option.get (band ~cache ()) in
-  let body = Look.body_of_name alpha in
-  let full_bare = Draw.render body Look.bare bare.Portrait.box.View.size in
-  List.iter (fun item ->
-    let equipment = Keeper_portrait_item.preview item Look.bare in
-    let id = Keeper_portrait_item.id item in
-    (* The mosaic icon frames the wax and the face; the dish rides below that
-       frame, so a base item proves itself on the full drawing instead of on
-       the icon. Other slots must move the icon's own pixels. *)
-    if Keeper_portrait_item.slot item = Keeper_portrait_item.Base then
-      check bool (id ^ " shows on the full portrait") false
-        (String.equal full_bare.Draw.rgba
-           (Draw.render body equipment bare.Portrait.box.View.size).Draw.rgba)
-    else
-      let shown = Option.get (band ~cache ~equipment ()) in
-      check bool (id ^ " changes the Mosaic portrait") false
+  let previous = View.current_display () in
+  Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
+    View.set_display View.Mosaic;
+    let preview equipment =
+      Option.get (Portrait.preview ~name:alpha ~equipment
+        ~content_rows:14 ~content_cols:28) in
+    let bare = preview Look.bare in
+    List.iter (fun item ->
+      let equipment = Keeper_portrait_item.preview item Look.bare in
+      let shown = preview equipment in
+      let id = Keeper_portrait_item.id item in
+      check bool (id ^ " changes the Item Mosaic preview") false
         (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba))
-    Keeper_portrait_item.all
+      Keeper_portrait_item.all)
 
 let () =
   run "tui_keeper_portrait"

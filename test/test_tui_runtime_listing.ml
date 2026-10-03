@@ -1148,9 +1148,9 @@ let test_default_route_picker_uses_refreshed_lanes () =
     Alcotest.(check (list string)) label ["a"; "b"; "c"]
       (List.map runtime_picker_choice_id choices);
     Alcotest.(check bool) "the fresh lane shadows runtime a" true
-      (match List.hd_opt choices with
-       | Some (Lane_choice lane) -> lane.rrl_runtime_ids = ["b"; "a"]
-       | Some (Runtime_choice _) | None -> false)
+      (match choices with
+       | Lane_choice lane :: _ -> lane.rrl_runtime_ids = ["b"; "a"]
+       | Runtime_choice _ :: _ | [] -> false)
   in
   check "stale surface does not replace fresh lanes";
   state.runtime_surface <- None;

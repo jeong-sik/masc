@@ -9987,6 +9987,28 @@ let test_librarian_preflight_detail_reports_actual_route () =
       (Result.is_error (Tui_decode.decode_lane_run_detail
         (with_side_write key (`Assoc ["status", `String "invented"]))))
   ) ["context_write", Tui_decode.Context_write; "continuity_write", Tui_decode.Continuity_write];
+  List.iter (fun (key, receipt) ->
+    let json = `Assoc (("status", `String "committed") :: receipt) in
+    Alcotest.(check bool) "complete side-write receipt accepted" true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (with_side_write key json)));
+    List.iter (fun (field, _) ->
+      Alcotest.(check bool) "committed side-write requires receipt field" true
+        (Result.is_error (Tui_decode.decode_lane_run_detail
+          (with_side_write key (`Assoc (("status", `String "committed") :: List.remove_assoc field receipt)))))) receipt
+  ) ["context_write", ["generation", `String "generation-1"; "revision", `Int 1];
+     "continuity_write", ["end_atom", `Int 42; "prefix_sha256", `String (String.make 64 'a')]];
+  List.iter (fun (key, receipt) ->
+    Alcotest.(check bool) "malformed committed side-write receipt rejected" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc (("status", `String "committed") :: receipt)))))
+  ) ["context_write", ["generation", `String " "; "revision", `Int 1];
+     "context_write", ["generation", `String "generation-1"; "revision", `Int 0];
+     "continuity_write", ["end_atom", `Int 0; "prefix_sha256", `String (String.make 64 'a')];
+     "continuity_write", ["end_atom", `Int (-1); "prefix_sha256", `String (String.make 64 'a')];
+     "continuity_write", ["end_atom", `Int 42; "prefix_sha256", `String "not-a-hash"]];
+  Alcotest.(check bool) "context-only scope cannot also report a snapshot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (with_side_write "memory_write" (`String "skipped_context_only"))));
   let context_only = match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with

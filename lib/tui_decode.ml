@@ -5661,6 +5661,9 @@ let decode_librarian_preflight output =
          | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
          | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
          | _ -> Error "unknown or inconsistent Librarian snapshot result") in
+    let* () = if lp_context_only && Option.is_some lp_memory_result
+      then Error "context-only Librarian output cannot contain a Memory snapshot"
+      else Ok () in
     let decode_side_write kind key =
       match Json_util.assoc_member_opt key output with
       | None -> Ok None
@@ -5669,7 +5672,18 @@ let decode_librarian_preflight output =
         let* status = match kind, status with
           | _, "not_attempted" -> Ok Side_not_attempted
           | _, "outcome_unconfirmed" -> Ok Side_outcome_unconfirmed
-          | _, "committed" -> Ok Side_committed
+          | Context_write, "committed" ->
+            let* generation = required_string_field record "generation" in
+            let* revision = required_int_field record "revision" in
+            if String.trim generation = "" || revision <= 0
+            then Error "invalid committed Context receipt" else Ok Side_committed
+          | Continuity_write, "committed" ->
+            let* end_atom = required_int_field record "end_atom" in
+            let* () = if end_atom > 0 then Ok () else Error "invalid committed Continuity end atom" in
+            let* hash = required_string_field record "prefix_sha256" in
+            if String.length hash = 64
+               && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hash
+            then Ok Side_committed else Error "invalid committed Continuity receipt"
           | _, "failed" ->
             let+ detail = required_string_field record "detail" in Side_failed detail
           | Context_write, "answer_missing" -> Ok Side_answer_missing

@@ -5,17 +5,6 @@ concurrency:
   group: release-full-checks-${{ github.run_id }}
   cancel-in-progress: false
 jobs:
-  tla:
-    name: TLA model check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
-    - name: Run all TLC models
-      run: bash scripts/tla-check.sh
   distribution:
     name: distribution and installation
     runs-on: ubuntu-24.04
@@ -66,7 +55,7 @@ jobs:
     - name: Check committed credentials
       run: python3 scripts/ci/check-committed-secrets.py
   check:
-    name: dune build @check
+    name: OCaml type checks (development and release)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -111,48 +100,11 @@ jobs:
 
         dune build @check @test/stanzas/runtest ${node_targets}
 
-        '
-    - name: masc.opam matches dune-project regeneration
-      run: bash scripts/check-opam-file-regenerated.sh
-    - name: Build the Keeper sandbox image the sandboxed suites read through
-      run: 'set -euo pipefail
-
-        docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
-
-        docker image inspect masc-sandbox-test:ci --format ''{{.Id}}''
-
-        '
-  release-check:
-    name: dune build --profile release @check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-    - name: Free disk space
-      run: "set -euo pipefail\ncleanup_pids=()\nsudo rm -rf /usr/local/lib/android & cleanup_pids+=(\"$!\")\nsudo\
-        \ rm -rf /usr/share/dotnet & cleanup_pids+=(\"$!\")\nsudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=(\"\
-        $!\")\nsudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=(\"$!\")\nsudo docker image prune --all --force\
-        \ & cleanup_pids+=(\"$!\")\nfor cleanup_pid in \"${cleanup_pids[@]}\"; do\n  wait \"${cleanup_pid}\" ||\
-        \ true\ndone\n"
-    - name: Checkout
-      uses: actions/checkout@v7
-    - name: Setup OCaml toolchain
-      uses: ./.github/actions/setup-ocaml-toolchain
-    - name: Pin external OCaml dependencies
-      uses: ./.github/actions/pin-ocaml-deps
-    - name: Install system and OCaml dependencies
-      uses: ./.github/actions/install-ocaml-deps
-      with:
-        install-flags: --with-test
-    - name: Build
-      env:
-        DUNE_JOBS: '4'
-      run: 'set -euo pipefail
-
         dune build --profile release @check
 
         '
+    - name: masc.opam matches dune-project regeneration
+      run: bash scripts/check-opam-file-regenerated.sh
   dashboard-types:
     name: dashboard typecheck
     runs-on: ubuntu-24.04
@@ -212,10 +164,8 @@ jobs:
     if: ${{ always() }}
     name: Release checks passed
     needs:
-    - tla
     - distribution
     - check
-    - release-check
     - dashboard-types
     runs-on: ubuntu-24.04
     timeout-minutes: 5

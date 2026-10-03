@@ -31,10 +31,16 @@ when that coverage is needed; it is separate from leader-selected candidate
 verification and does not grant merge permission.
 
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
-profile, dashboard, model checks, behavioral suites and distribution/installation
+profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 requires an explicit `publish=true` dispatch on an existing version tag and full
-successful verification. Specialized host and packaging proofs remain manual.
+successful verification. Development and release-profile OCaml type checks share
+one toolchain job. Installer script tests run once in the distribution job;
+each of the four native targets still builds and verifies its shipped binaries
+and installation. The behavior lane builds its own sandbox image where it is used.
+TLA model checks run explicitly through `model-check.yml` when state-machine
+specifications change; they are not a prerequisite for shipping a binary.
+Specialized host and packaging proofs remain manual.
 
 Prefer short, focused checks: the constitution's "about two minutes"
 describes their intended scale, not a timeout or a pass/fail threshold.

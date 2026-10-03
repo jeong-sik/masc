@@ -11,10 +11,7 @@ import os
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_types.ml", "bin/masc_tui_render_memory.ml",
-    "bin/masc_tui_context_inspector.ml",
-)
+
 
 
 def run(executable, baseline=False):

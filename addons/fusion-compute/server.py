@@ -70,7 +70,11 @@ def model_references(value, *, pending=False):
     keys = ("request",) if pending and "outcome" not in value else ("request", "outcome")
     if set(value) != set(keys):
         raise InvalidInput("model evidence must contain exactly the retained request and permitted outcome")
-    return {key: retained([value.get(key)], f"model {key}")[0]
+    for key in keys:
+        reference = object_value(value[key], f"model {key}")
+        if set(reference) != {"uri", "sha256"}:
+            raise InvalidInput(f"model {key} reference must contain exactly uri and sha256")
+    return {key: retained([value[key]], f"model {key}")[0]
             for key in keys}
 
 

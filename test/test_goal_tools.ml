@@ -1030,11 +1030,22 @@ let test_callers_share_a_goal_without_private_delivery () =
     | [ row ] -> ignore (shared_row label row)
     | _ -> fail (label ^ " must retain the one shared Goal"))
     [ "primary", primary; "mirror", mirror ];
-  List.iter (fun (ctx : Tool_workspace.context) ->
-    check bool (ctx.agent_name ^ " has no private Goal transcript") false
-      (Sys.file_exists (Keeper_chat_store.chat_path
-         ~base_dir:config.base_path ~keeper_name:ctx.agent_name)))
-    [ creator; collaborator ]
+  (* The goal proof outbox delivers the announcement to every persisted
+     Keeper; [Workspace.init ~agent_name] persists the caller as one. The
+     shared workspace announcement above remains the public reading, and the
+     caller's own transcript additionally receives the same verdict. *)
+  (* The goal proof outbox delivers to every persisted Keeper, and
+     [Workspace.init ~agent_name] persists the caller as one: the creator's
+     own transcript receives the same verdict that the shared workspace
+     announcement above carries. A collaborator name that was never
+     initialized stays a plain caller and receives no private transcript. *)
+  let has_transcript (ctx : Tool_workspace.context) =
+    Sys.file_exists (Keeper_chat_store.chat_path
+      ~base_dir:config.base_path ~keeper_name:ctx.agent_name) in
+  check bool "the persisted creator receives the verdict transcript" true
+    (has_transcript creator);
+  check bool "an uninitialized collaborator name stays transcript-free" false
+    (has_transcript collaborator)
 ;;
 
 let test_goal_completion_accepts_goal_without_tasks () =

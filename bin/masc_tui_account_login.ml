@@ -658,7 +658,10 @@ let visible_lines ~height ~width t =
     | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
-    | Finished _ -> min t.cursor (max 0 (List.length rows - height))
+    | Finished _ ->
+      let skip = min t.cursor (max 0 (List.length rows - height)) in
+      t.cursor <- skip;
+      skip
     | Loading | Logging | Documented_context _ | Saving | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =

@@ -302,6 +302,11 @@ let partly_checked_save () =
     (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
   List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
       (List.mem row !seen)) expected;
+  let bottom = visible () in
+  List.iter (fun _ -> ignore (Login.key t2 "j"); ignore (visible ())) expected;
+  ignore (Login.key t2 "k");
+  check bool "one up key moves after repeated down keys at the bottom" true
+    (visible () <> bottom);
   List.iter (fun _ -> ignore (Login.key t2 "k"))
     (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
   check (list string) "scroll can return to the initial result" initial (visible ());

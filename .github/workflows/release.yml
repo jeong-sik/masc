@@ -58,9 +58,32 @@ jobs:
       suite: ""
       eio_backend: ""
 
-  build:
+  dashboard:
+    name: Build shared dashboard assets
     needs: validate-release-entrypoint
     if: ${{ !cancelled() && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Build production dashboard once
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          (cd dashboard && pnpm install --frozen-lockfile)
+          scripts/build-dashboard-if-needed.sh --force
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
+          path: assets/dashboard/
+          overwrite: true
+          include-hidden-files: true
+          if-no-files-found: error
+
+  build:
+    needs: [validate-release-entrypoint, dashboard]
+    if: ${{ !cancelled() && needs.dashboard.result == 'success' && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -297,22 +320,11 @@ jobs:
           done
           echo "server and TUI binaries carry no dynamic sqlite dependency"
 
-      # The Build step above compiles only the OCaml binaries. The server reads
-      # the dashboard SPA from assets/dashboard/ at runtime, so without this the
-      # freshly built server answers /dashboard with 503 and quickstart-smoke
-      # fails on the required Linux platforms -- which is why the v0.26.0 and
-      # v0.27.0 release builds failed at this step. Mirror ci.yml's dashboard
-      # toolchain (node 22 + pnpm 10.31.0).
-      - name: Set up Node for dashboard assets
-        uses: actions/setup-node@v7
+      - name: Download verified-source dashboard assets
+        uses: actions/download-artifact@v8
         with:
-          node-version: '22'
-
-      - name: Build dashboard assets
-        run: |
-          corepack enable && corepack prepare pnpm@10.31.0 --activate
-          (cd dashboard && pnpm install --frozen-lockfile)
-          scripts/build-dashboard-if-needed.sh --force
+          name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
+          path: assets/dashboard/
 
       - name: Source quickstart onboarding smoke
         run: scripts/quickstart-smoke.sh
@@ -421,42 +433,6 @@ jobs:
           echo "probe: $probe"
           echo "$probe" | jq -e '.name == "masc-exec-shim" and (.version | test("^[0-9]+\\.")) and (.capabilities | type == "array")' >/dev/null
           sha256sum "$shim"
-
-      # Preserve native files for isolated operator acceptance while the
-      # remaining evidence and installation gates run. These artifacts are
-      # deliberately outside the masc-* distribution download pattern.
-      - name: Record unverified native preflight provenance
-        env:
-          PREFLIGHT_ARCH: ${{ matrix.arch }}
-        run: |
-          python3 - <<'PYCODE'
-          import hashlib, json, os
-          from pathlib import Path
-          files = sorted(Path('dist').glob('masc-*')) + [
-              Path('scripts/install.sh'), Path('scripts/install-runtime-setup.py'),
-              Path('config/runtime.toml')]
-          receipt = dict(source_commit=os.environ['GITHUB_SHA'],
-                         platform=os.environ['PREFLIGHT_ARCH'],
-                         run_id=os.environ['GITHUB_RUN_ID'],
-                         run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
-                         release_verified=False, published=False,
-                         sha256={str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-                                 for p in files if p.is_file()})
-          Path('native-preflight.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          PYCODE
-
-      - name: Upload unverified native preflight files
-        uses: actions/upload-artifact@v7
-        with:
-          name: preflight-native-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
-          retention-days: 7
-          if-no-files-found: error
-          path: |
-            dist/masc-*
-            scripts/install.sh
-            scripts/install-runtime-setup.py
-            config/runtime.toml
-            native-preflight.json
 
       - name: Generate release evidence bundle
         run: |

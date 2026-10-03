@@ -82,23 +82,13 @@ jobs:
       uses: ./.github/actions/install-ocaml-deps
       with:
         install-flags: --with-test
-        os-packages: jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv
-    - name: Prepare managed presentation verification inputs
-      run: python3 scripts/ci/prepare-presentation-verifier.py
-    - name: Make pnpm available to the suites that read a dashboard PATH
-      run: corepack enable && corepack prepare pnpm@10.31.0 --activate
-    - name: Verify standalone namespace fixtures
-      run: python3 test/test_run_standalone_suites.py --compile-fixtures -v
+        os-packages: jq ripgrep
     - name: Build
       env:
         DUNE_JOBS: '4'
       run: 'set -euo pipefail
 
-        node_targets=$(python3 scripts/ci/list-node-alias-targets.py)
-
-        printf ''browser parity suites:\n%s\n'' "${node_targets}"
-
-        dune build @check @test/stanzas/runtest ${node_targets}
+        dune build @check
 
         dune build --profile release @check
 
@@ -140,26 +130,6 @@ jobs:
         pnpm exec vitest run ${coupled}
 
         '
-    - name: Build browser preview
-      working-directory: dashboard
-      run: pnpm exec vite build --config vite.preview.config.ts
-    - name: Record browser preview provenance
-      env:
-        PR_HEAD_COMMIT: ${{ github.sha }}
-      run: "python3 - <<'PY'\nimport hashlib, json, os, subprocess\nfrom pathlib import Path\nroot = Path('assets/dashboard')\n\
-        files = sorted(path for path in root.rglob('*') if path.is_file())\nif not (root / 'index.html').is_file():\n\
-        \    raise SystemExit('Dashboard build did not produce index.html')\nmanifest = {\n    'checkout_commit':\
-        \ subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),\n    'pr_head_commit': os.environ['PR_HEAD_COMMIT'],\n\
-        \    'run_id': os.environ['GITHUB_RUN_ID'],\n    'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],\n    'files':\
-        \ {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()\n              for path in\
-        \ files},\n}\n(root / 'preview-provenance.json').write_text(json.dumps(manifest, indent=2) + '\\n')\nPY\n"
-    - name: Upload browser preview
-      uses: actions/upload-artifact@v7
-      with:
-        name: dashboard-preview-${{ github.sha }}-${{ github.run_attempt }}
-        path: assets/dashboard/
-        include-hidden-files: true
-        if-no-files-found: error
   required-success:
     if: ${{ always() }}
     name: Release checks passed

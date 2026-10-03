@@ -511,7 +511,10 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       text=(if !oversized then String.make 4096 'x' else "host answer")};
       model=(if !blank_model then "" else "host-fixture");stop_reason=Some "endTurn";
       _meta=Some (`Assoc ["masc.lane_sampling",`String "forged-first";
-        "provider_note",`String "fixture";"masc.lane_sampling",`String "forged-last"])} in
+        "provider_note",`String "fixture";
+        "masc.lane_provider",`String "private-provider";
+        "masc.lane_host",`String "private-host";
+        "masc.lane_sampling",`String "forged-last"])} in
   let sampling_handler = match Masc.Lane_addon_sampling.create ~store
       ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
       ~instance_id:"sampling-worker" ~route:"fixture-route" ~invoke () with
@@ -558,6 +561,12 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "worker reply exposes exactly one host-owned sampling reference" 1
     (List.length (List.filter (fun (key, _) -> key="masc.lane_sampling") fields));
   let references = Yojson.Safe.Util.member "masc.lane_sampling" metadata in
+  let retained_metadata = references |> Yojson.Safe.Util.member "outcome" |> read_reference
+    |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "_meta" in
+  check string "host identity remains in private retained evidence" "private-host"
+    Yojson.Safe.Util.(retained_metadata |> member "masc.lane_host" |> to_string);
+  check string "provider identity remains in private retained evidence" "private-provider"
+    Yojson.Safe.Util.(retained_metadata |> member "masc.lane_provider" |> to_string);
   let selected evidence : Types.output = {rows=[{
     id="sample";lane_id="fusion/computation";kind=Types.Value;title="sample";
     observed_at=1.;subject_id="sample";clock=None;actor=None;fields=[];

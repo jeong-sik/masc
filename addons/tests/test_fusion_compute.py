@@ -303,6 +303,24 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                     self.assertNotIn("structuredContent", replies[2]["result"])
                 self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 3, "result": {}})
 
+    def test_decoder_limits_in_host_terminal_keep_next_ping_available(self):
+        class DecoderLimitHost(Host):
+            def answer(self, request):
+                reply = super().answer(request)
+                reply["error"]["message"] = self.text
+                return reply
+
+        terminals = (
+            "[" * 10000 + "0" + "]" * 10000,
+            "9" * (sys.int_info.default_max_str_digits + 1),
+        )
+        for terminal in terminals:
+            with self.subTest(terminal_length=len(terminal)), tempfile.TemporaryDirectory() as root:
+                host = DecoderLimitHost(root, status="host_error", text=terminal)
+                result = call(host, [source()], ping=True)
+                self.assertTrue(result["isError"])
+                self.assertEqual(len(host.calls), 1)
+
     def test_oversized_terminal_sampling_reply_is_rejected_before_outcome_copy(self):
         class OversizedHost(Host):
             def answer(self, request):

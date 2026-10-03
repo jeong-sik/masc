@@ -230,6 +230,91 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
       (member "output" observed |> member "rows" |> list |> List.length))
     [[];["output_id",`String "all"]])
 
+let test_cold_sampling_journal_reaches_downstream_source () =
+  List.iter (fun (request_id, outcome_first) ->
+    List.iter (fun use_terminal_journal -> with_store (fun dir store ->
+      let instance_id = "cold-worker" in
+      let request = require (Store.write_blob store (Yojson.Safe.to_string (`Assoc [
+        "kind",`String "model_request";"instance_id",`String instance_id;
+        "request_id",`String request_id]))) in
+      let bytes = Yojson.Safe.to_string (`Assoc [
+        "kind",`String "model_outcome";"instance_id",`String instance_id;
+        "request",Types.evidence_to_json request;"status",`String "answered";
+        "response",`Assoc ["model",`String "actual-model";
+          "content",`Assoc ["type",`String "text";"text",`String "durable answer"]]]) in
+      let outcome = Store.blob_reference bytes in
+      check bool "fixture covers the sorted evidence order" outcome_first
+        (Stdlib.compare outcome request < 0);
+      let record state outcome = ["instance_id",`String instance_id;
+        "request_id",`String request_id;"request",Types.evidence_to_json request;
+        "state",`String state;"outcome",outcome] in
+      require (Store.save_sampling_request store ~instance_id ~request_id
+        (`Assoc (record "pending" `Null)));
+      let terminal body = `Assoc (("outcome_bytes",`String body) ::
+        record "finished" (Types.evidence_to_json outcome)) in
+      let save = if use_terminal_journal then Store.save_sampling_outcome
+        else Store.save_sampling_request in
+      let status : Types.coverage = {source_id=instance_id;incarnation=instance_id;
+        cursor=Some "1";complete=true;detail=None} in
+      let output : Types.output = {rows=[{id="cold-worker/1/answer";
+        lane_id="cold-worker/result";kind=Types.Value;title="Answer";
+        observed_at=1.;subject_id="answer";clock=None;actor=None;fields=[];
+        evidence=[request;outcome];related_ids=[]}];coverage=[status]} in
+      (match Store.append_observation store ~instance_id ~seq:1 ~sources:(`Assoc []) output with
+       | Ok () -> () | Error error -> fail (Store.observation_write_error_to_string error));
+      let cold = Store.create ~root:(Store.root store) in
+      let captured : Sources.lane_output = {installation_id="producer";instance_id;
+        run_id="run";configuration_revision="configuration";package_revision="package";
+        outputs=[];observation_seq=1;status;
+        output=require (Store.read_observation ~instance_id ~seq:1 ~max_bytes:16384 cold)} in
+      let acquire () = require (Sources.acquire ~access:Sources.Operator_configuration
+        ~store:cold ~package:(package dir 16384)
+        ~resolve_lane_output:(fun ~installation_id:_ -> Ok captured)
+        ~binding:(binding [`Assoc ["source_id",`String "upstream";
+          "kind",`String "lane_output";"installation_id",`String "producer";
+          "selection",`String "latest_completed"]])) |> list |> List.hd in
+      require (save store ~instance_id ~request_id (terminal (bytes ^ " ")));
+      let rejected = acquire () in
+      check bool "corrupt journal stays unavailable without pending fallback" true
+        (member "complete" rejected = `Bool false && member "observations" rejected = `List []);
+      check string "digest mismatch reaches source coverage" "sampling outcome digest mismatch"
+        (member "detail" rejected |> text);
+      check bool "digest mismatch cannot publish an outcome" true
+        (Result.is_error (Store.read_blob cold outcome));
+      require (save store ~instance_id ~request_id (terminal bytes));
+      check bool "read envelope rejects the journal before restoration" true
+        (match Store.load_sampling_request_bounded cold ~instance_id ~request_id
+          ~budget:(Store.read_budget ~max_bytes:(String.length (Yojson.Safe.to_string (terminal bytes)) - 1)) with
+         | Error Store.Read_limit_exceeded -> true | _ -> false);
+      check bool "rejected oversized read leaves outcome unpublished" true
+        (Result.is_error (Store.read_blob cold outcome));
+      let fail_sync _ = raise (Unix.Unix_error (Unix.EIO,"fsync","fixture")) in
+      check bool "journal durability failure precedes restoration" true
+        (match Store.For_testing.load_sampling_request_bounded cold ~instance_id ~request_id
+          ~budget:(Store.read_budget ~max_bytes:16384)
+          ~sync_file:fail_sync ~sync_parent:Unix.fsync with
+         | Error (Store.Read_failed _) -> true | _ -> false);
+      check bool "unconfirmed journal leaves outcome unpublished" true
+        (Result.is_error (Store.read_blob cold outcome));
+      let source = acquire () in
+      check bool "cold source acquisition recovers the journal" true
+        (member "complete" source = `Bool true);
+      let observation = member "observations" source |> list |> List.hd in
+      let receipt = member "sampling_receipts" observation |> list in
+      check int "one actual downstream receipt" 1 (List.length receipt);
+      let receipt = List.hd receipt in
+      check bool "receipt retains exact request and outcome" true
+        (member "request" receipt = Types.evidence_to_json request
+         && member "outcome" receipt = Types.evidence_to_json outcome);
+      check string "downstream receives retained answer" "durable answer"
+        (member "terminal" receipt |> member "response" |> member "content" |> member "text" |> text);
+      check string "cold read publishes exact journal bytes" bytes (require (Store.read_blob cold outcome));
+      let reference = member "evidence" observation |> list |> List.hd |> own_reference in
+      let retained = require (Store.read_blob cold reference) |> Yojson.Safe.from_string in
+      check bool "frozen downstream source includes recovered receipt" true
+        (member "sampling_receipts" retained = `List [receipt]))) [true;false])
+    ["request-1",true;"request-3",false]
+
 let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->
   let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
   let ledger_dir = Filename.concat dir "machine" in
@@ -622,6 +707,8 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
             (require (Store.read_blob store reference))) ['a';'b';'c']))
 
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "cold sampling journal reaches downstream source" `Quick
+    test_cold_sampling_journal_reaches_downstream_source;
   test_case "completed input identity preserves output, mapping and failure" `Quick
     test_completed_port_refresh_identity_preserves_status_and_output;
   test_case "Fusion envelope overflow creates no orphan and preserves existing evidence" `Quick

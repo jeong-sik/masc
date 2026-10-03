@@ -263,6 +263,18 @@ let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes"
 let save_sampling_outcome t ~instance_id ~request_id json =
   write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
     (Yojson.Safe.to_string json)
+let restore_sampling_outcome t = function
+  | `Assoc fields ->
+      (match List.assoc_opt "outcome_bytes" fields with
+       | None -> Ok ()
+       | Some (`String bytes) ->
+           let* expected = match List.assoc_opt "outcome" fields with
+             | Some json -> evidence_of_json json
+             | None -> Error "sampling outcome reference is missing" in
+           if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
+           else write_sampling_blob t bytes |> Result.map (fun _ -> ())
+       | Some _ -> Error "sampling outcome bytes must be a string")
+  | _ -> Ok ()
 let iter_sampling_requests t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
@@ -280,16 +292,7 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                   let json = Yojson.Safe.from_string bytes in
                   (* The first terminal write includes exact outcome bytes, so a
                      crash before blob publication is recoverable. *)
-                  let* () = match json with
-                    | `Assoc fields -> (match List.assoc_opt "outcome_bytes" fields with
-                        | Some (`String bytes) ->
-                            let* expected = match List.assoc_opt "outcome" fields with
-                              | Some json -> evidence_of_json json
-                              | None -> Error "sampling outcome reference is missing" in
-                            if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
-                            else write_sampling_blob t bytes |> Result.map (fun _ -> ())
-                        | _ -> Ok ())
-                    | _ -> Ok () in
+                  let* () = restore_sampling_outcome t json in
                   let* () = f json in
                   next ()
               | _ -> next ()
@@ -443,8 +446,19 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
           read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
           |> Result.map_error (fun detail -> Read_failed detail)
         end) in
-      try Ok (Some (Yojson.Safe.from_string bytes))
-      with Yojson.Json_error detail -> Error (Read_failed detail))
+      let* json = try Ok (Yojson.Safe.from_string bytes)
+        with Yojson.Json_error detail -> Error (Read_failed detail) in
+      let* () = match json with
+        | `Assoc fields
+          when List.assoc_opt "instance_id" fields = Some (`String instance_id)
+            && List.assoc_opt "request_id" fields = Some (`String request_id) -> Ok ()
+        | _ -> Error (Read_failed "sampling record identity mismatch") in
+      (* The journal read and durability check above precede reconstruction.
+         A cold downstream read can finish interrupted blob publication without
+         a directory scan, test helper or repeated provider call. *)
+      let* () = restore_sampling_outcome t json
+        |> Result.map_error (fun detail -> Read_failed detail) in
+      Ok (Some json))
 let load_sampling_request_bounded =
   load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 

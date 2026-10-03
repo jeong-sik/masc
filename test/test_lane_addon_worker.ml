@@ -1188,8 +1188,14 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   (match Store.save_sampling_request store ~instance_id:"journal-failure" ~request_id first_terminal with
    | Ok () -> () | Error detail -> fail detail);
   Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json"));
-  ignore (match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail);
-  check bool "recovery reconstructs outcome from first durable terminal record" true
+  let recovered = Store.create ~root:(Store.root store) in
+  (match Store.load_sampling_request_bounded ~budget:(Store.read_budget ~max_bytes:65536)
+    recovered ~instance_id:"journal-failure" ~request_id with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "missing primary terminal record"
+   | Error (Store.Read_failed detail) -> fail detail
+   | Error Store.Read_limit_exceeded -> fail "terminal exceeded fixture allowance");
+  check bool "cold read reconstructs outcome from first durable terminal record" true
     (Result.is_ok (Store.read_blob store reference)))
 
 let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_recovery ->
@@ -1248,26 +1254,25 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
   let request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" refs) with
     | Ok value -> value | Error detail -> fail detail in
   check bool "request evidence remains readable" true (Result.is_ok (Store.read_blob store request));
-  let rows = match sampling_requests store ~instance_id:"blob-failure" with
-    | Ok rows -> rows | Error detail -> fail detail in
-  let row = match rows with [row] -> row | _ -> fail "missing terminal record" in
-  check string "known result remains finished" "finished"
-    Yojson.Safe.Util.(row |> member "state" |> to_string);
-  let outcome = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
+  let outcome = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" refs) with
     | Ok value -> value | Error detail -> fail detail in
-  let terminal = match Store.read_blob store outcome with
-    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
-  check string "recovery preserves known model result" "answered"
-    Yojson.Safe.Util.(terminal |> member "status" |> to_string);
+  check bool "dual publication failure leaves no readable outcome before recovery"
+    (not block_recovery) (Result.is_ok (Store.read_blob store outcome));
   let output : Types.output = {rows=[{id="answer";lane_id="fusion/computation";
     kind=Types.Value;title="answer";observed_at=1.;subject_id="analysis";clock=None;
     actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
-  let receipts = match Sampling.retained_receipts ~store ~instance_id:"blob-failure"
+  let recovered = Store.create ~root:(Store.root store) in
+  let receipts = match Sampling.retained_receipts ~store:recovered ~instance_id:"blob-failure"
     ~max_bytes:p.resources.max_reply_bytes output with
     | Ok value -> value | Error detail -> fail detail in
   check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
   check string "receipt keeps actual model identity" "actual-model"
     Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string);
+  check int "cold receipt recovery does not reinvoke the model" 1 !invocations;
+  let terminal = match Store.read_blob recovered outcome with
+    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+  check string "recovery preserves known model result" "answered"
+    Yojson.Safe.Util.(terminal |> member "status" |> to_string);
   let saved_recovery = recovery_directory ^ ".saved" in
   Unix.rename recovery_directory saved_recovery;
   write recovery_directory "unavailable recovery directory";

@@ -272,7 +272,12 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
     | Some result -> result
     | None ->
         let result = Store.read_blob_bounded ~budget store reference in
-        Hashtbl.add blobs reference result;
+        (* An outcome may be visited before its request restores the journaled
+           bytes. Cache successful reads and exhausted budgets, never absence
+           or a failed publication that the request read can repair. *)
+        (match result with
+         | Ok _ | Error Store.Read_limit_exceeded -> Hashtbl.add blobs reference result
+         | Error (Store.Read_failed _) -> ());
         result in
   let json_bytes reference =
     match read_blob reference with

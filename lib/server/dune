@@ -14,6 +14,7 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  mcp_protocol
   masc.workspace_connection
   ;; The server start logs whether Candle is on (RFC-goal-candle-ledger 3.9), and
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row

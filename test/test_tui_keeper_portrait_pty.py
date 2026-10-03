@@ -48,15 +48,14 @@ PAUSED_ROW = b"Paused:"
 CURRENT_FAILURE = b"Current failure"
 # Masc_tui_keeper_portrait.band_size: the rows and cells a mosaic portrait
 # takes, and the rows a placed one does on a 20 px cell.
-MOSAIC_BAND_ROWS = 12
-MOSAIC_BAND_COLS = 24
-PIXEL_BAND_ROWS = 8
+MOSAIC_BAND_ROWS = 8
+MOSAIC_BAND_COLS = 16
+PIXEL_BAND_ROWS = 4
 # Where a portrait cell may sit: the frame's two cells, the fact indent, and
 # the band. A half block further right is not the portrait.
 PORTRAIT_CELLS = 2 + 2 + MOSAIC_BAND_COLS
-# The harness terminal's 30 rows leave the detail 23 content rows, over a
-# mosaic's Masc_tui_keeper_portrait.min_content_rows (20); 24 rows leave it
-# 17, under.
+# A 30-row terminal fits the mosaic and facts; 24 rows give all space to facts.
+# Pixel icons use four rows; Items keeps its larger outfit preview.
 TALL_ROWS = 30
 SHORT_ROWS = 24
 COLUMNS = 100
@@ -171,7 +170,7 @@ def assert_facts_full_width(rows: dict[int, bytes], why: str) -> None:
     assert not portrait_rows(rows), f"{why}, the portrait still drew: {rows!r}"
     identity = identity_row(rows)
     # Identity, Name, Paused, a blank row: the facts keep every row.
-    assert row_of(rows, CURRENT_FAILURE) == identity + 4, \
+    assert row_of(rows, b"Current Work") == identity + 4, \
         f"{why}, the rows the portrait took were not given back: {rows!r}"
 
 
@@ -189,9 +188,8 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
         assert cells and min(cells) < text.find(needle.decode()), \
             f"{needle!r} is not beside the portrait: {text!r}"
     assert b"alpha" in rows[identity + 1], "the Name row lost the name"
-    # The band holds the facts' rows: the blank row after the portrait, then
-    # the next section.
-    assert row_of(rows, CURRENT_FAILURE) == identity + MOSAIC_BAND_ROWS + 1, \
+    # Current work shares the header beside the icon, below Identity facts.
+    assert row_of(rows, b"Current Work") == identity + 4, \
         f"the facts after the portrait moved: {rows!r}"
     styled = last_frame_rows(output, preserve_styles=True)
     assert FOREGROUND_ESCAPE in styled[identity], "the portrait was drawn without colour"
@@ -218,7 +216,7 @@ def portrait_follows_the_terminal_height(binary: str) -> None:
         open_alpha_detail(process, fd, output)
         assert_portrait_beside_identity(output)
         # A short terminal keeps every row for facts.
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
+        h.resize_and_wait(process, fd, output, rows=20, columns=COLUMNS, needle=IDENTITY)
         h.drain_until_quiet(process, fd, output)
         assert_facts_full_width(last_frame_rows(output), "on a short terminal")
         # And the portrait comes back when the rows do.
@@ -257,6 +255,16 @@ def no_portrait_under_no_color(binary: str) -> None:
 
 def portrait_as_pixels(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    reason = "fixture appraiser unavailable " + "long account headline " * 8
+    revision = hashlib.sha256(("disabled\0" + reason).encode()).hexdigest()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "disabled", "reason": reason}
+    for keeper in roster["keepers"]:
+        keeper["candle_account_revision"] = revision
+    fixtures["/api/v1/keepers/alpha/items"] = (200, {
+        "status": "disabled", "keeper": "alpha",
+        "reason": reason, "account_revision": revision,
+    })
 
     def interact(process, fd, _slave, output, _base):
         start = len(output)
@@ -281,8 +289,29 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        assert row_of(rows, CURRENT_FAILURE) == identity + PIXEL_BAND_ROWS + 1, \
+        assert row_of(rows, b"Current Work") == identity + 4, \
             "the facts did not leave the picture its rows"
+        # Item text that needs the full width must remove the actual Kitty
+        # placement as well as its reserved columns. Mosaic-only proof cannot
+        # detect a pixel overlay left above the text.
+        start = len(output)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"Candle disabled:" in b"\n".join(last_frame_rows(output).values()), timeout=10)
+        h.wait_for_output(process, fd, output, PORTRAIT_DELETE, start=start, timeout=3.0)
+        h.drain_until_quiet(process, fd, output)
+        after = bytes(output[output.rfind(PORTRAIT_DELETE, start):])
+        assert not any(kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+                       for match in PLACEMENT.finditer(after)), \
+            "long Item account headline retained a Kitty portrait over its text"
+        assert row_of(last_frame_rows(output), b"glasses") > 0
+        capture_item_screen(output, "kitty-account-full-width")
+        start = len(output)
+        h.send_and_wait(process, fd, output, b"[", INFO_TAB)
+        h.drain_until_quiet(process, fd, output)
+        assert any(kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+                   for match in PLACEMENT.finditer(bytes(output[start:]))), \
+            "Info did not restore its Kitty portrait after the full-width Item view"
         # Leaving the detail takes the picture down with it.
         start = len(output)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
@@ -347,6 +376,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         second = last_frame_rows(output)
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
+        assert row_of(second, b"Selected: 1.000") > 0
         assert row_of(second, b"Preview changes this picture only") > 0
         capture_item_screen(output, "shades-preview")
         # Read the current completed viewport after each navigation or resize.
@@ -357,6 +387,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
         assert row_of(last_frame_rows(output), b"Selected: unpriced") > 0
+        assert row_of(last_frame_rows(output), b"Preview changes this picture only") > 0
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
@@ -377,6 +408,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         narrow = last_frame_rows(output)
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
         assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
+        assert row_of(narrow, b"Preview changes this picture only") > 0, "narrow Items hid the preview notice"
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 

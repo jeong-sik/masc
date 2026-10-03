@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Code  17:07:48  HTTP [connected]
+   ▸ lib/a.ml
+ ──────────────────────────────────────────────────────────────────────────────
+      1 let x = 1
+      2 (* hi *)
+      3 let y = x
+      4
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  h/l:pane  Right / Enter:open  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

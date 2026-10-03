@@ -25,3 +25,11 @@ Regression coverage must prove: first-round recall creates no complete artifact 
 This supersedes the all-facts fallback and the default per-turn complete-artifact preparation in the source interface. The older Draft RFCs on Recall selection remain proposals, including their separate typed task/goal linking and event-validity work. This implementation adopts demand retrieval without creating that metadata schema or an automatic selector.
 
 Design reference: [Anthropic context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) describes lightweight identifiers with just-in-time retrieval; this change uses the existing Keeper tools to apply that pattern.
+
+## Operator readings in the TUI
+
+Memory storage is shown in observed B/KiB/MiB, never estimated model tokens. Storage includes the persisted snapshot serialization, so it is not a measure of this turn's recall or provider request. The chat Context inspector labels the measured Recall block at its own recorded turn; prior records may have full-memory content and must not be relabelled as notices.
+
+A currently failed Librarian pass and historical failed-pass counts are separate readings. Recovered memory can be current even while its failure history is nonzero. The memory state label describes memory processing, not Keeper execution. Both the historical count and current error cause stay available.
+
+Demand search exposes `source_verification.status=incomplete` when query-selected source claims were withheld because validation could not finish. This is uncertainty, not a definitive miss; no deferred claim body is delivered. Unrelated, deliberately unselected sources do not make a query incomplete.

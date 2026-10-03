@@ -164,11 +164,11 @@ let test_the_recovery_read_retires_only_the_landed_login () =
     ~masc_root:"/r";
   hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
     ~masc_root:"/r";
-  Masc_tui_types.forget_identity_login_expectations state ~keeper_name:"A"
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
   check (Alcotest.list Alcotest.string) "the landed login stops being owed"
     [ "atlassian" ] (held_expectations state "A");
-  Masc_tui_types.forget_identity_login_expectations state ~keeper_name:"A"
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[unreadable "atlassian" "read failed"];
   check (Alcotest.list Alcotest.string) "an unreadable read is not completion"
     [ "atlassian" ] (held_expectations state "A")
@@ -234,6 +234,54 @@ let test_workspace_withdrawal_retires_identity_consent () =
     (Masc_tui_types.finish_identity_login_request state old);
   check Alcotest.bool "new workspace request remains current" true
     (Masc_tui_types.finish_identity_login_request state successor)
+
+let test_oauth_polling_survives_unread_authority () =
+  let state = identity_state () in
+  let origin : Masc.Tui_decode.server_identity =
+    { sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_base_path = "/workspace/a";
+      sid_masc_root = "/workspace/a/.masc"; sid_executable_in_worktree = None;
+      sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
+      sid_gc = None; sid_scheduler = None } in
+  let remember () = Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://consent") in
+  let pending () = Masc_tui_types.identity_login_pending_for_keeper state "A" in
+  state.server_identity <- Some origin;
+  remember ();
+  check Alcotest.bool "accepted login participates in cadence" true (pending ());
+  Masc_tui_types.withdraw_identity_readings state;
+  state.server_identity <- None;
+  check Alcotest.bool "unread authority cannot poll" false (pending ());
+  check (Alcotest.list Alcotest.string) "withdrawal removes consent URL" [] (pending_urls state "A");
+  Masc_tui_types.reconcile_detail_intent_origins state (Error "unread");
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok { origin with sid_masc_root = "" });
+  state.server_identity <- Some origin;
+  Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
+  (* The first successful recovery GET still says consent has not landed.
+     There is no URL left to drive the old cadence, but waiting must continue. *)
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared "slack" "Slack"];
+  check Alcotest.bool "pending recovery reading keeps polling" true (pending ());
+  check (Alcotest.list Alcotest.string) "recovery cannot resurrect URL" [] (pending_urls state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "slack" "temporarily unavailable"];
+  check Alcotest.bool "unreadable provider retains intent" true (pending ());
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
+    ~providers:[declared ~tools:[] "slack" "Slack"];
+  check Alcotest.bool "other Keeper cannot retire intent" true (pending ());
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared ~tools:[] "slack" "Slack"];
+  check Alcotest.bool "attached provider ends cadence" false (pending ());
+  remember ();
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A" ~provider_id:"slack";
+  check Alcotest.bool "explicit abandonment ends cadence" false (pending ());
+  remember ();
+  Masc_tui_types.withdraw_identity_readings state;
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok { origin with sid_masc_root = "/workspace/b/.masc" });
+  Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
+  check Alcotest.bool "foreign root then A cannot resurrect intent" false (pending ())
 
 let test_switching_keepers_retains_each_consent_url () =
   let state = identity_state () in
@@ -736,6 +784,8 @@ let () =
       ( "pending consent lifecycle",
         [ Alcotest.test_case "workspace withdrawal retires identity consent"
             `Quick test_workspace_withdrawal_retires_identity_consent;
+          Alcotest.test_case "OAuth polling survives unread authority"
+            `Quick test_oauth_polling_survives_unread_authority;
           Alcotest.test_case "switching Keepers retains each consent URL"
             `Quick test_switching_keepers_retains_each_consent_url;
           Alcotest.test_case "multiple providers complete independently"

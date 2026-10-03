@@ -3686,14 +3686,10 @@ let render_keeper_message (state : state) =
       let roster_rows = match portrait with
         | None -> pane_rows
         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
-      keeper_roster_pane
-        ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
       Option.iter (fun portrait ->
         box_line left_buf keeper_roster_pane_cols
-          (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
-        (* Anchor pixels to the actual caption, since the roster renderer can
-           emit fewer lines than its requested budget. *)
+          (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
+        (* Anchor pixels to the caption actually drawn above the selectable roster. *)
         let picture_row = count_frame_lines left_buf in
         List.iter (box_line left_buf keeper_roster_pane_cols)
           portrait.Masc_tui_chat_portrait.picture_lines;
@@ -3705,6 +3701,9 @@ let render_keeper_message (state : state) =
           Masc_tui_portrait_view.request
             {placement with row = picture_row + strip_rows}) portrait.placement)
         portrait;
+      keeper_roster_pane
+        ~focused:(state.keeper_message_focus = Left_pane)
+        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;

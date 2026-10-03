@@ -1,3 +1,4 @@
+# Isolated Item HTTP fixture: dead loopback transport, no model-call evidence.
 [runtime]
 default = "deepseek.smoke"
 
@@ -15,6 +16,11 @@ endpoint = "http://127.0.0.1:9/v1"
 # declares no exact-body-timeout-s is left out at boot (#38779). Nothing here is
 # ever answered, so the value only has to be a valid deadline.
 exact-body-timeout-s = 1200.0
+
+# Use only synthetic authorization; isolated boot must not depend on host tokens.
+[providers.deepseek.credentials]
+type = "inline"
+value = "release-evidence-loopback"
 
 [models.smoke]
 # Keep the harness-local slot alias, with a real provider-scoped catalog model

@@ -54,9 +54,7 @@ let providers_loaded (state : state) request result =
   if current
   then (
     match result with
-    | Ok providers ->
-      retire_identity_logins state ~keeper_name ~providers;
-      forget_identity_login_expectations state ~keeper_name ~providers
+    | Ok providers -> retire_identity_logins state ~keeper_name ~providers
     | Error _ -> ());
   if current && keeper_detail_target_matches state keeper_name
   then (
@@ -81,10 +79,6 @@ let login_started (state : state) request ~report ~notice result =
         ; ils_label = label
         ; ils_url = url
         };
-      (match state.server_identity with
-       | Some origin -> remember_identity_login_expectation state
-           { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id }
-       | None -> ());
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;
       report "system" (Printf.sprintf "%s: %s login started" keeper_name provider_id)

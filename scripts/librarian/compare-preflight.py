@@ -103,6 +103,8 @@ def compare(manifest: Json) -> dict[str, Json]:
         preflight, after, preflight_output, preflight_s = read_run(
             pair.get("preflight")
         )
+        if text(baseline.get("actor"), "baseline actor") != text(preflight.get("actor"), "preflight actor"):
+            raise ValueError("paired runs must use the same Keeper actor")
         for run in (baseline, preflight):
             run_id = text(run.get("run_id"), "run_id")
             if run_id in run_ids:
@@ -127,6 +129,8 @@ def compare(manifest: Json) -> dict[str, Json]:
         path = preflight_output.get("generation_path")
         skipped = preflight_output.get("full_llm_skipped")
         status = observation.get("status")
+        if status == "skipped" and observation.get("reason") == "librarian_preflight_disabled":
+            raise ValueError("preflight arm must not disable preflight")
         if status not in (
             "awaiting_answer",
             "skipped",
@@ -155,6 +159,17 @@ def compare(manifest: Json) -> dict[str, Json]:
             "jev_no_change",
         ):
             raise ValueError("preflight route must be explicitly recorded")
+        rejection = preflight_output.get("preflight_domain_rejection")
+        keep_fallback = status == "judged" and observation.get("decision") == "keep_current" and path == "full_lane"
+        if keep_fallback:
+            text(rejection, "keep-current fallback domain rejection")
+        elif rejection is not None:
+            raise ValueError("domain rejection requires keep-current full-lane fallback")
+        if path == "not_entered" and (
+            preflight.get("status") not in ("failed", "cancelled")
+            or preflight.get("selected_slot") is not None
+        ):
+            raise ValueError("generation not entered requires failed or cancelled run without slot")
         if skipped:
             if (
                 path != "jev_no_change"

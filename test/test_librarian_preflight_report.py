@@ -20,6 +20,7 @@ def fixture() -> dict[str, Any]:
             "run": {
                 "run_id": run_id,
                 "lane": "librarian_exact",
+                "actor": "fixture-keeper",
                 "status": "succeeded",
                 "selected_slot": None if enabled else "fixture-cli",
                 "elapsed_s": elapsed,
@@ -122,12 +123,24 @@ class ReportCliTest(unittest.TestCase):
             "boolean_count",
             "awaiting",
             "missing_rejection",
+            "disabled_candidate",
+            "keep_current_fallback",
+            "different_actor",
+            "successful_not_entered",
         ):
             with self.subTest(mode=mode):
                 manifest = fixture()
                 pair = manifest["pairs"][0]
                 run = pair["preflight"]["run"]
-                if mode == "input":
+                if mode == "different_actor":
+                    run["actor"] = "other-keeper"
+                elif mode in ("disabled_candidate", "keep_current_fallback", "successful_not_entered"):
+                    run["output"].update(generation_path="full_lane", full_llm_skipped=False)
+                    if mode == "disabled_candidate":
+                        run["output"]["jev_preflight"] = {"status": "skipped", "reason": "librarian_preflight_disabled"}
+                    elif mode == "successful_not_entered":
+                        run["output"].update(generation_path="not_entered", jev_preflight={"status": "failed"})
+                elif mode == "input":
                     run["input"]["payload"]["actual_input"][
                         "rendered_prompt_variables"
                     ]["source"] = "changed source"

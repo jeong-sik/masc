@@ -221,25 +221,32 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
     (restored.Portrait.image == bare.Portrait.image)
 
 let test_mosaic_preserves_every_catalog_accessory_rendering () =
-  let cache = Portrait.cache () in
-  let bare = Option.get (band ~cache ()) in
-  List.iter (fun item ->
-    let equipment = Keeper_portrait_item.preview item Look.bare in
-    let shown = Option.get (band ~cache ~equipment ()) in
-    let id = Keeper_portrait_item.id item in
-    check bool (id ^ " changes the Mosaic portrait") false
-      (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
+  let previous = View.current_display () in
+  Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
+    View.set_display View.Mosaic;
+    let preview equipment =
+      Option.get (Portrait.preview ~name:alpha ~equipment
+        ~content_rows:14 ~content_cols:28) in
+    let bare = preview Look.bare in
     let body = Look.body_of_name alpha in
-    let expected = match Keeper_portrait_item.slot item with
-      | Keeper_portrait_item.Base ->
-          Draw.render_compact_posed body equipment Draw.still shown.Portrait.box.View.size
-      | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
-      | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
-          Draw.render body equipment shown.Portrait.box.View.size in
-    check string (id ^ " preserves equipped rendering")
-      expected.Draw.rgba shown.Portrait.image.Draw.rgba)
-    Keeper_portrait_item.all
-
+    let full_bare = Draw.render body Look.bare bare.Portrait.box.View.size in
+    List.iter (fun item ->
+      let equipment = Keeper_portrait_item.preview item Look.bare in
+      let shown = preview equipment in
+      let id = Keeper_portrait_item.id item in
+      check bool (id ^ " changes the Item Mosaic preview") false
+        (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
+      check bool (id ^ " remains visible beyond a full empty portrait") false
+        (String.equal full_bare.Draw.rgba shown.Portrait.image.Draw.rgba);
+      let expected = match Keeper_portrait_item.slot item with
+        | Keeper_portrait_item.Base ->
+            Draw.render_compact_posed body equipment Draw.still shown.Portrait.box.View.size
+        | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
+        | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
+            Draw.render body equipment shown.Portrait.box.View.size in
+      check string (id ^ " preserves equipped rendering")
+        expected.Draw.rgba shown.Portrait.image.Draw.rgba)
+      Keeper_portrait_item.all)
 
 let test_item_mosaic_preview_changes_with_selected_accessory () =
   let previous = View.current_display () in
@@ -280,20 +287,6 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades
         ~content_rows:100 ~content_cols:100)))
 
-let test_mosaic_previews_every_catalog_accessory () =
-  let cache = Portrait.cache () in
-  let bare = Option.get (band ~cache ()) in
-  let full_bare = Draw.render (Look.body_of_name alpha) Look.bare bare.Portrait.box.View.size in
-  List.iter (fun item ->
-    let equipment = Keeper_portrait_item.preview item Look.bare in
-    let shown = Option.get (band ~cache ~equipment ()) in
-    let id = Keeper_portrait_item.id item in
-    check bool (id ^ " changes the Mosaic portrait") false
-      (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
-    check bool (id ^ " remains visible beyond a full empty portrait") false
-      (String.equal full_bare.Draw.rgba shown.Portrait.image.Draw.rgba))
-    Keeper_portrait_item.all
-
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
@@ -316,6 +309,5 @@ let () =
             test_the_picture_leaves_with_the_detail
         ] )
     ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded;
-        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels;
-        test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory ])
+        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels ])
     ]

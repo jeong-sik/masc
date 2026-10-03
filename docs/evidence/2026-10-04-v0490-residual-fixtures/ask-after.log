@@ -1,0 +1,11 @@
+{"scope": "fd7e6c37 candidate binary plus edited fixture diagnostic; not PR41031 exact-head binary verification", "candidate_commit": "fd7e6c37e006af09b1dba65fb2b3b55249104c7f", "source_sha256": "5e1e408dc7c414c8997f7da885c7d8e7adab4baf60785ebc8d6931f90e607c35", "binary_sha256": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d"}
+{"scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)", "method": "GET", "status": 405, "body": "{\"error\": \"POST required\"}", "gate_requested": false, "admitted_count": 0}
+{"scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)", "method": "DELETE", "status": 405, "body": "{\"error\": \"POST required\"}", "gate_requested": false, "admitted_count": 0}
+{"description": "Ask editor and held submit are withdrawn with workspace (admitted=False)", "admitted_count": 0, "admitted_method_phase": [], "response_recorded_count": 0, "response_recorded_bodies": [], "gate_requested": false, "gate_completed": false}
+PASS Ask editor and held submit are withdrawn with workspace (admitted=False)
+{"scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)", "method": "GET", "status": 405, "body": "{\"error\": \"POST required\"}", "gate_requested": false, "admitted_count": 0}
+{"scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)", "method": "DELETE", "status": 405, "body": "{\"error\": \"POST required\"}", "gate_requested": false, "admitted_count": 0}
+{"description": "Ask editor and held submit are withdrawn with workspace (admitted=True)", "admitted_count": 1, "admitted_method_phase": [["POST", "a"]], "response_recorded_count": 1, "response_recorded_bodies": [{"name": "alpha", "ask_id": "ask-1", "answers": [{"question_id": "q-1", "response": {"kind": "chose", "choice_ids": ["c-yes"]}}]}], "gate_requested": true, "gate_completed": true}
+PASS Ask editor and held submit are withdrawn with workspace (admitted=True)
+ask_workspace_withdrawal PASS both modes; GET/DELETE HTTP refusal PASS
+Python AST PASS

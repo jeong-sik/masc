@@ -1,0 +1,9 @@
+{
+  "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+  "admitted_count": 0,
+  "admitted_method_phase": [],
+  "response_recorded_count": 0,
+  "response_recorded_bodies": [],
+  "gate_requested": false,
+  "gate_completed": false
+}

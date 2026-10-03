@@ -327,7 +327,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
   let selected_keeper_name =
-    match state.pending_detail_focus with
+    match state.detail_focus_recovery with
     | Some (origin, name, _) when state.view = Keepers Keeper_detail
         && server_workspace_matches ~expected:(Some origin)
              (match state.server_identity with Some current -> Ok current | None -> Error "unread") ->
@@ -381,7 +381,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
 
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, _ when state.pending_detail_focus <> None ->
+    | Some _, _ when state.detail_focus_recovery <> None ->
         (* A partial remote roster must not make cursor zero name a different
            Keeper while the withdrawn detail is waiting for its own name. *)
         []
@@ -405,13 +405,13 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)
-  if state.pending_detail_focus <> None && keepers_error <> None then ()
+  if state.detail_focus_recovery <> None && keepers_error <> None then ()
   else (match
      Keeper_selection.reconcile ~current_ids:current_keeper_ids
        ~next_ids:next_keeper_ids ~current:current_navigation
    with
    | Keeper_selection.List_cursor cursor ->
-       state.pending_detail_focus <- None;
+       state.detail_focus_recovery <- None;
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with
         | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->

@@ -9903,11 +9903,6 @@ let same_server_workspace (left : Tui_decode.server_identity) (right : Tui_decod
   && String.equal (Masc_tui_types.canonical_path left.sid_masc_root)
        (Masc_tui_types.canonical_path right.sid_masc_root)
 
-let apply_http_scoped_surfaces_and_refresh state ~mailbox results =
-  let previous_items = visible_item_revision state in
-  apply_http_scoped_surfaces state results;
-  refresh_changed_keeper_items state ~mailbox previous_items
-
 let same_currency_workspace source current =
   match source, current with
   | Some source, Some current

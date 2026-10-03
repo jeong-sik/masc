@@ -72,7 +72,7 @@ let test_detail_intents_wait_for_comparable_identity () =
   let state = Masc_tui_types.create_state ~workspace:"a"
     ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
   let origin = identity "/workspace/a" in
-  state.pending_detail_focus <- Some (origin, "same-keeper", Masc_tui_types.Detail_instructions);
+  state.detail_focus_recovery <- Some (origin, "same-keeper", Masc_tui_types.Detail_instructions);
   state.connector_unbind_offer_pending <- ["same-keeper"];
   state.connector_unbind_offer_origin <- Some origin;
   state.keeper_sandbox_logs_requested <- Some "same-keeper";
@@ -80,7 +80,7 @@ let test_detail_intents_wait_for_comparable_identity () =
   let apply = Masc_tui_types.reconcile_detail_intent_origins state in
   let retained label =
     Alcotest.(check bool) (label ^ " source-bound detail focus") true
-      (state.pending_detail_focus = Some (origin, "same-keeper", Masc_tui_types.Detail_instructions));
+      (state.detail_focus_recovery = Some (origin, "same-keeper", Masc_tui_types.Detail_instructions));
     Alcotest.(check (list string)) (label ^ " connector intent")
       ["same-keeper"] state.connector_unbind_offer_pending;
     Alcotest.(check (option string)) (label ^ " Sandbox intent")
@@ -99,7 +99,7 @@ let test_detail_intents_wait_for_comparable_identity () =
      request or post-action offer may become an action in that new store. *)
   apply (Ok { origin with sid_masc_root = "/workspace/a/another-masc-root" });
   Alcotest.(check bool) "foreign root retires detail focus" true
-    (state.pending_detail_focus = None);
+    (state.detail_focus_recovery = None);
   Alcotest.(check (list string)) "foreign root clears connector intent"
     [] state.connector_unbind_offer_pending;
   Alcotest.(check (option string)) "foreign root clears Sandbox intent"
@@ -108,7 +108,7 @@ let test_detail_intents_wait_for_comparable_identity () =
     (state.connector_unbind_offer_origin = None && state.keeper_sandbox_logs_origin = None);
   apply (Ok origin);
   Alcotest.(check bool) "return to A does not recreate detail focus" true
-    (state.pending_detail_focus = None);
+    (state.detail_focus_recovery = None);
   Alcotest.(check (option string)) "return to A does not recreate Sandbox intent"
     None state.keeper_sandbox_logs_requested
 

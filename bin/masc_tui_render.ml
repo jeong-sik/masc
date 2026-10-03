@@ -4358,9 +4358,18 @@ let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
         | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
-      ["JEV PREFLIGHT · " ^ decision; path]
-      @ model @ elapsed @ probabilities @ rejection
-      @ ["기억 저장 결과는 아래 after/absorption 및 실행 상태에서 확인"; ""]
+      let document = String.concat "\n"
+        (["JEV PREFLIGHT · " ^ decision; path]
+         @ model @ elapsed @ probabilities @ rejection
+         @ ["기억 저장 결과는 아래 after/absorption 및 실행 상태에서 확인"; ""]) in
+      let document =
+        if String.length document <= lane_run_preview_source_max_bytes then document
+        else
+          let notice = Printf.sprintf "\n… truncated preflight, total %d bytes" (String.length document) in
+          let room = lane_run_preview_source_max_bytes - String.length notice in
+          let cut = String_util.utf8_char_boundary document room in
+          String.sub document 0 cut ^ notice in
+      String.split_on_char '\n' document
       |> List.concat_map (fun text ->
           Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
           |> List.map (fun line -> Theme.info (), line))

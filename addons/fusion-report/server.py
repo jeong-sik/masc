@@ -40,6 +40,7 @@ class ComputationRole(Enum):
 @dataclass(frozen=True)
 class ReportContent:
     run_id: str
+    status: RunState
     heading: str
     post_headline: str | None
     judge: JudgeSynthesis | JudgeFailure | None
@@ -53,6 +54,7 @@ class ComputationContent:
     status: ComputationState
     model: str | None
     text: str | None
+    has_retained_response: bool
     error: dict | None
     validation_error: str | None
 
@@ -63,22 +65,57 @@ class ReportDraft:
     content: ReportContent | ComputationContent | None
 
 
-def render_body(content: ReportContent | ComputationContent, *, complete: bool) -> str:
+def render_input_scope(context: ReportDraft, source_status: dict) -> str:
+    fields = context.item["fields"]
+    producer = fields["producer"]
+    def reading(label, status):
+        state = "입력 있음" if status["complete"] else "입력 불완전"
+        detail = f" · {status['detail']}" if status["detail"] is not None else ""
+        return f"- {label}: {status['source_id']} · {state}{detail}\n"
+    body = "\n## 입력과 조립 경로\n\n"
+    body += (f"{producer['installation_id']}의 보존된 결과 → 보고서 입력 {source_status['source_id']}\n"
+             f"실행: {producer['run_id']} · 생산자: {producer['instance_id']} · "
+             f"완료 관측: {producer['observation_seq']}\n\n")
+    body += reading("보고서 입력", source_status)
+    body += reading("생산자 상태", fields["producer_status"])
+    for status in fields["upstream_coverage"]:
+        body += reading("생산자 입력 범위", status)
+    return body
+
+
+def render_body(content: ReportContent | ComputationContent, *, complete: bool,
+                input_scope: str) -> str:
     if isinstance(content, ComputationContent):
         body = f"# Fusion 계산 보고서 · {content.role.value}\n\n분석: {content.analysis_id}\n"
-        body += f"\n모델 호출 상태: {content.status.value}\n"
+        labels = {ComputationState.ANSWERED: "응답 받음",
+                  ComputationState.HOST_ERROR: "호스트 호출 오류",
+                  ComputationState.OUTCOME_UNKNOWN: "호출 결과 확인 필요",
+                  ComputationState.INVALID_RESPONSE: "응답 검증 실패"}
+        body += f"\n모델 호출 상태: {labels[content.status]} ({content.status.value})\n"
         body += f"\n실제 응답 모델: {content.model if content.model is not None else '확인되지 않음'}\n"
         body += "\n입력 범위: " + ("보존된 입력과 모델 결과" if complete else "불완전한 결과") + "\n"
         if content.text is not None:
             body += f"\n## 보존된 모델 응답\n\n{content.text}\n"
-        elif content.validation_error is not None:
+        elif content.has_retained_response:
             body += "\nFusion에서 사용할 수 있는 텍스트 응답이 없습니다. 원본 응답은 입력 근거에 보존했습니다.\n"
-            body += "\n## Fusion 응답 검증 실패\n\n" + content.validation_error + "\n"
         else:
             body += "\n보존된 모델 응답이 없습니다.\n"
+        if content.validation_error is not None:
+            body += "\n## Fusion 응답 검증 실패\n\n" + content.validation_error + "\n"
         if content.error is not None:
             body += "\n## 실제 sampling 오류\n\n" + json.dumps(content.error, ensure_ascii=False) + "\n"
-        return body + "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n"
+        if content.status is ComputationState.ANSWERED:
+            next_step = ("보존된 응답과 입력 근거를 함께 확인해 현재 작업에 적용할지 판단하세요."
+                         if complete else
+                         "표시된 불완전한 입력의 원인을 확인하세요. 받은 응답만으로 누락된 근거가 채워진 것은 아닙니다.")
+        else:
+            next_step = {
+                ComputationState.HOST_ERROR: "보존된 오류와 요청·결과 근거에서 호출 실패 원인을 확인하세요.",
+                ComputationState.OUTCOME_UNKNOWN: "보존된 요청의 결과부터 확인하세요. 결과가 확인되지 않은 호출을 바로 반복하지 마세요.",
+                ComputationState.INVALID_RESPONSE: "보존된 응답과 검증 오류를 확인하세요. 검증 실패 응답을 분석 결과로 사용하지 마세요.",
+            }[content.status]
+        return (body + input_scope + "\n## 다음 확인\n\n" + next_step + "\n"
+                "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n")
     body = f"# Fusion 보고서 · {content.heading}\n\n실행: {content.run_id}\n"
     body += "\n입력 범위: " + ("기록된 실행 결과" if complete else "불완전한 결과") + "\n"
     if content.failure is not None:
@@ -92,7 +129,14 @@ def render_body(content: ReportContent | ComputationContent, *, complete: bool) 
         body += f"\n## 심판 실패\n\n{content.judge.failure_code}: {content.judge.error}\n"
     else:
         body += "\n보존된 분석 내용이 아직 없습니다.\n"
-    return body + "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n"
+    next_step = {
+        RunState.RUNNING: "같은 실행의 후속 결과를 확인하세요. 현재 보존된 내용은 진행 중인 실행의 기록입니다.",
+        RunState.FAILED: "이 실행의 실패 원인과 보존된 근거를 확인하세요. 입력이 모두 있어도 실행 실패는 별도 상태입니다.",
+        RunState.COMPLETED: ("보존된 분석과 입력 근거를 함께 확인해 현재 작업에 적용할지 판단하세요."
+                             if complete else "표시된 입력 범위에서 누락된 근거를 확인하세요."),
+    }[content.status]
+    return (body + input_scope + "\n## 다음 확인\n\n" + next_step + "\n"
+            "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n")
 
 
 def run_state(value):
@@ -159,8 +203,8 @@ def computation_report(source, observation, original, *, producer, producer_stat
     display_model = model
     if validation_error is not None and isinstance(response.get("model"), str) and response["model"].strip():
         display_model = response["model"]
-    return ReportDraft(item, ComputationContent(analysis_id, role, status, display_model, text, error,
-                                               validation_error)), complete
+    return ReportDraft(item, ComputationContent(analysis_id, role, status, display_model, text,
+                                              response is not None, error, validation_error)), complete
 
 
 def row_coordinates(original):
@@ -358,7 +402,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         judge = canonical_judge(post) if post else None
         if status is RunState.COMPLETED and isinstance(judge, JudgeFailure):
             raise InvalidInput("Completed Fusion run cannot carry a failed canonical judge")
-        content = ReportContent(run_id, heading, post["body"] if post else None, judge, failure)
+        content = ReportContent(run_id, status, heading, post["body"] if post else None, judge, failure)
         item = row(source, observation, lane="fusion/report", subject=run_id,
                    title=f"Fusion 보고서 · {heading}", kind="value", fields={
                        "format": "markdown", "fusion_run_id": run_id,
@@ -409,9 +453,12 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
             for draft in source_rows:
                 draft.item["fields"]["input_complete"] = False
         for draft in source_rows:
-            if draft.content is not None:
+            if draft.content is None:
+                draft.item["fields"].update(format="markdown", body=render_input_scope(draft, status))
+            else:
                 draft.item["fields"]["body"] = render_body(
-                    draft.content, complete=draft.item["fields"]["input_complete"])
+                    draft.content, complete=draft.item["fields"]["input_complete"],
+                    input_scope="\n입력과 조립 경로는 함께 보존된 보고서 입력 기록에서 확인하세요.\n")
             rows.append(draft.item)
         statuses.append(status)
     return {"rows": rows, "coverage": statuses}

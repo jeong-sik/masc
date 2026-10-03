@@ -70,6 +70,8 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 
 - The subsequent main integration includes the source-check cleanup in #40987 and #40990; their notes are preserved in the detailed record.
 
+- Integrate the current-library compile and actual Item preview test corrections from #40978, and preserve authoritative Item accounts across unchanged partial-roster refreshes (#40313). The detailed notes retain the original #40978 fragment.
+
 ## [0.48.0] - 2026-09-29
 
 ### Fresh state required

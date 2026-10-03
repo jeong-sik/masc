@@ -3557,7 +3557,13 @@ let keeper_item_revision state keeper_name =
   | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
   | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
-let launch_keeper_items state ~mailbox keeper_name =
+let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
+  let observed_account =
+    match state.item_account with
+    | Some (name, _) as account when keep_observed_account
+        && String.equal name keeper_name -> account
+    | _ -> None
+  in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
   | (Workspace_identity_unread | Workspace_identity_mismatch _), _
@@ -3578,6 +3584,10 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Invalid _ | Absent ->
     state.item_account_error <- Some "Keeper is not observed in the current roster"
   | Present _ | Unobserved ->
+  (* A cadence read under unchanged authority refreshes an observed account
+     without blanking it while the request is pending. Refusals above and a
+     failed endpoint response still withdraw it. *)
+  state.item_account <- observed_account;
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -3616,7 +3626,9 @@ let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   in
   if current <> previous || retry_settled_failure || (roster_refreshed && not read_pending) then
     match current with
-    | Some (keeper_name, _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (keeper_name, _, _, _) ->
+        launch_keeper_items ~keep_observed_account:(current = previous)
+          state ~mailbox keeper_name
     | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
@@ -9692,8 +9704,8 @@ let apply_keeper_roster_load state result =
        | None -> ()
        | Some (keeper_name, _) ->
          (match Keeper_control.liveness_of_roster roster keeper_name with
-          | Keeper_control.Present _ -> ()
-          | Unobserved | Invalid _ | Absent -> withdraw_keeper_items state))
+          | Keeper_control.Present _ | Unobserved -> ()
+          | Invalid _ | Absent -> withdraw_keeper_items state))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,

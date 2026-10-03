@@ -5,6 +5,7 @@ The same Keeper name deliberately appears in both workspaces.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -132,6 +133,109 @@ class ItemWire(authority.WorkspaceWire):
         if phase == "a-returned":
             return account("3250", "quill", "1750", "c")
         return account("7500", "crown", "2000", "b")
+
+
+class PartialRosterWire(ItemWire):
+    def __init__(self, roster):
+        super().__init__(roster)
+        self.complete = False
+        self.partial_reads = 0
+
+    def roster(self):
+        status, payload = authority.WorkspaceWire.roster(self)
+        template = next(row for row in payload["keepers"] if row["name"] == "beta")
+        rows = []
+        # The real endpoint caps its rows at 200; local alpha is outside that
+        # observed prefix, with its Item account still owned by /items.
+        for index in range(200):
+            row = copy.deepcopy(template)
+            row["name"] = f"observed-{index:03d}"
+            row["meta"] = h.keeper_roster_meta(row["name"])
+            rows.append(row)
+        with self.lock:
+            complete = self.complete
+            if not complete:
+                self.partial_reads += 1
+            self.events.append({"event": "partial-roster", "complete": complete})
+        payload.update(keepers=rows, count=len(rows), total=200 if complete else 201,
+                       truncated=not complete,
+                       candle={"status": "ready", "issued_milli": "12500",
+                               "burned_milli": "0", "circulating_milli": "12500"})
+        return status, payload
+
+    def items(self):
+        response = super().items()
+        if self.held_returned.is_set() and response[0] == 200:
+            return account("99999", "glasses", "99999", "a")
+        return response
+
+
+def run_partial_roster(binary, captures):
+    fixtures = h.keeper_runtime_http_fixtures()
+    roster_fixture = fixtures[authority.ROSTER_PATH]
+    assert isinstance(roster_fixture, tuple)
+    wire = PartialRosterWire(roster_fixture[1])
+    fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/api/v1/gate/keepers"] = wire.roster
+    fixtures["/health"] = h.HeadersHttpResponse(lambda _headers: wire.health())
+    fixtures["/health?full=1"] = h.HeadersHttpResponse(lambda _headers: wire.health())
+    fixtures[ITEM_PATH] = wire.items
+
+    def interact(process, fd, _slave, output, _base):
+        def wait(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(authority.screen(output)), timeout=authority.WAIT_SECONDS), \
+                f"{label}: {authority.screen(output)!r}"
+
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+            h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+            wait(lambda text: b"Balance 12.500 Candle" in text, "unobserved alpha Item read")
+            wire.arm_items()
+            assert h.wait_for_fixture_event(process, fd, output, wire.held_started,
+                timeout=authority.WAIT_SECONDS), "cadence did not refresh alpha's Item account"
+            with wire.lock:
+                prior_reads = wire.partial_reads
+
+            def later_roster_reads(_text):
+                with wire.lock:
+                    return wire.partial_reads >= prior_reads + 2
+
+            wait(later_roster_reads, "partial roster cadence did not continue during Item read")
+            h.resize_and_wait(process, fd, output, rows=35,
+                columns=authority.TERMINAL_COLUMNS, needle="▸Items".encode(),
+                controls=(h.FULL_REDRAW,))
+            assert b"Balance 12.500 Candle" in authority.screen(output), \
+                "partial roster refresh withdrew the authoritative pending Item account"
+            if captures is not None:
+                (captures / "partial-roster-held.txt").write_bytes(authority.screen(output))
+            wire.release_held.set()
+            wait(lambda text: b"Balance 99.999 Candle" in text, "current Item response was lost")
+            wire.change_account("failed")
+            wait(lambda text: b"current Item ledger unreadable" in text,
+                 "endpoint failure retained the old account")
+            assert b"Balance " not in authority.screen(output)
+            wire.change_account("ready")
+            wait(lambda text: b"Balance 99.999 Candle" in text, "Item account did not recover")
+            with wire.lock:
+                wire.complete = True
+            wait(lambda text: b"Keeper is not observed in the current roster" in text,
+                 "a complete roster's absence did not withdraw the Item account")
+            assert b"Balance " not in authority.screen(output)
+            os.write(fd, b"q")
+        finally:
+            wire.release_held.set()
+            if captures is not None:
+                (captures / "partial-roster.pty").write_bytes(output)
+                with wire.lock:
+                    events = list(wire.events)
+                (captures / "partial-roster-requests.json").write_text(json.dumps(events, indent=2) + "\n")
+
+    h.run_terminal_scenario(binary, description="Partial roster retains authoritative Item account",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_rows=34, terminal_cols=authority.TERMINAL_COLUMNS)
 
 
 def run(binary, captures):
@@ -320,4 +424,5 @@ if __name__ == "__main__":
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
     run(binary, captures)
+    run_partial_roster(binary, captures)
     print("Item workspace authority: PASS (withdrawal, late response, failure, Off, recovery)")

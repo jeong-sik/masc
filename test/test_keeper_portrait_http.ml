@@ -886,7 +886,9 @@ beanie = %d
          let size = Option.get (Keeper_portrait_draw.size_of_int 160) in
          let image = Keeper_portrait_draw.render_icon
            (Keeper_portrait_look.body_of_name keeper) equipment size in
-         Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
+         match Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba with
+         | Ok png -> png
+         | Error detail -> failf "portrait icon PNG encoding failed: %s" detail
        in
        Fs_compat.save_file (Filename.concat evidence "before-icon.png") (icon starting);
        Fs_compat.save_file (Filename.concat evidence "equipped-icon.png") (icon expected);

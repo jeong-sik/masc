@@ -5894,6 +5894,10 @@ let decode_lane_run_detail json =
     | Some {lp_generation_path = Generation_not_entered; _}, Lane_run_succeeded ->
       Error "successful Librarian run cannot await preflight without entering generation"
     | _, _ -> Ok () in
+  let* () = match lrd_librarian_preflight, summary.lrs_status, summary.lrs_selected_slot with
+    | Some {lp_generation_path = Generation_full_lane; _}, Lane_run_succeeded, None ->
+      Error "successful Librarian generation requires its selected slot"
+    | _, _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"

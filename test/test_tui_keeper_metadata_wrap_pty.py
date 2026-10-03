@@ -23,11 +23,14 @@ def prepare(base):
     path.write_text(json.dumps(meta), encoding="utf-8")
 
 
-def fixtures() -> h.HttpFixtures:
+def fixtures(gate_response_ready: threading.Event) -> h.HttpFixtures:
     served = h.keeper_runtime_http_fixtures()
-    served["/api/v1/dashboard/gate/keeper-settings"] = (503, {
-        "error": "설정 읽기 실패 " * 20 + " GATE-END 한글끝",
-    })
+    def gate_settings() -> h.HttpResponse:
+        response = (503, {"error": "설정 읽기 실패 " * 20 + " GATE-END 한글끝"})
+        gate_response_ready.set()
+        return response
+
+    served["/api/v1/dashboard/gate/keeper-settings"] = gate_settings
     served[h.CONNECTORS_PATH] = (200, {
         "connectors": [{
             "connector_id": "discord", "display_name": "Discord", "status": "connected",
@@ -71,26 +74,24 @@ def scan(process, fd, output, expected):
 
 
 def run(executable):
-    served = fixtures()
-    gate_read = threading.Event()
-    gate_response = served["/api/v1/dashboard/gate/keeper-settings"]
-    assert isinstance(gate_response, tuple)
-    def gate_settings() -> h.HttpResponse:
-        gate_read.set()
-        return gate_response
-    served["/api/v1/dashboard/gate/keeper-settings"] = gate_settings
+    gate_response_ready = threading.Event()
+
     def interact(process, fd, _slave, output, _base):
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
-        assert h.wait_for_fixture_event(process, fd, output, gate_read, timeout=15), \
-            "Keeper gate settings were not read"
-        # A scroll scan cannot collect an asynchronous reading that arrives
-        # after it has already passed the Gate section. Wait for its visible
-        # diagnostic on a tall frame before testing physical-row windows.
-        h.resize_and_wait(process, fd, output, rows=150, columns=80,
+        # Info opens before its asynchronous Gate settings response lands.
+        # Expose the error head as an application barrier before paging; a
+        # quiet last viewport alone does not prove the metadata was loaded.
+        assert h.wait_for_fixture_event(process, fd, output, gate_response_ready, timeout=5), (
+            "Gate settings fixture response was not requested"
+        )
+        h.resize_and_wait(process, fd, output, rows=70, columns=100,
                           needle=b"Keepers", controls=(h.FULL_REDRAW,))
-        h.wait_for_output(process, fd, output, b"GATE-END", start=0, timeout=15)
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: "설정 읽기 실패".encode() in h.screen_text(bytes(output)), timeout=5), (
+            "Gate settings response was not rendered in Info"
+        )
         for columns in (80, 40, 60):
             h.resize_and_wait(process, fd, output, rows=24, columns=columns,
                               needle=b"Keepers", controls=(h.FULL_REDRAW,))
@@ -108,7 +109,7 @@ def run(executable):
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Keeper metadata wraps into scrollable rows",
-                           interact=interact, http_fixtures=served, prepare_workspace=prepare)
+                           interact=interact, http_fixtures=fixtures(gate_response_ready), prepare_workspace=prepare)
 
 
 if __name__ == "__main__":

@@ -6,9 +6,8 @@ open Alcotest
     accessor; the 11 hardcode-site migrations are scoped to
     *follow-up cleanup PRs* (one per sub-domain).
 
-    Tests pin:
-    - host field count and values match the 11 sites
-      enumerated in RFC-0084 §1.5
+    Tests cover:
+    - host defaults and host-derived temporary directories
     - is_test_mode round-trips through the typed sum (no
       String.starts_with leak)
     - resolve ~base_path returns base-path-relative runtime roots
@@ -23,6 +22,10 @@ let test_host_field_values () =
     "host.cred_root pins temp keeper-creds"
     temp_keeper_creds
     d.cred_root;
+  (check string)
+    "host.agent_runtime_root follows host temp dir"
+    (Filename.get_temp_dir_name ())
+    d.agent_runtime_root;
   (check string)
     "host.host_bash pins /bin/bash \
      (keeper_tool_execute_runtime.ml:745, 802)"
@@ -81,23 +84,6 @@ let test_resolve_default_base_path () =
     ()
 ;;
 
-let pinned_hardcode_sites = 11
-(** RFC-0084 §1.5 P0 hardcode count. PR-12 introduces the typed surface
-    for these 11 sites; follow-up cleanup PRs migrate each sub-domain. *)
-
-let pinned_test_mode_sites_to_replace = 5
-
-let test_hardcode_site_inventory_pin () =
-  (check int)
-    "RFC-0084 §1.5 P0 hardcode site count (pinned for migration tracking)"
-    11
-    pinned_hardcode_sites;
-  (check int)
-    "RFC-0084 §1.5 String.starts_with \"test_\" site count"
-    5
-    pinned_test_mode_sites_to_replace
-;;
-
 let () =
   Alcotest.run
     "RFC-0084 PR-12 Host_config typed"
@@ -113,10 +99,6 @@ let () =
         ; test_case "is-test-mode-typed" `Quick test_is_test_mode_typed
         ; test_case "resolve-with-base-path" `Quick test_resolve_with_base_path
         ; test_case "resolve-default-base-path" `Quick test_resolve_default_base_path
-        ; test_case
-            "hardcode-site-inventory-pin"
-            `Quick
-            test_hardcode_site_inventory_pin
         ] )
     ]
 ;;

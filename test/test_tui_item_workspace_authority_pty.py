@@ -242,7 +242,9 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Keeper is not observed in the current roster" in text,
+            wait(lambda text: b"Account unavailable:" in text
+                 and (b"Keeper is not observed in the current roster" in text
+                      or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-unavailable")

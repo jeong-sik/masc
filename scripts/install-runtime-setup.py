@@ -385,6 +385,7 @@ def catalog_models(binary, choice):
         # The binary's client catalog owns the window: its rows are verified
         # client metadata, so the wizard trusts the stated context as-is.
         return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'],
+                     supports_image_input=row.get('supports_image_input'),
                      release=row.get('release'))
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
@@ -1593,6 +1594,13 @@ def resolve_model_spec(source, model, timeout, binary=None):
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
                 streaming=choice in ('claude_code', 'codex', 'antigravity', 'muse'))
+    if choice in ('claude_code', 'codex') and binary:
+        # Refresh may provide context without media metadata. Join only the
+        # selected native client's exact model, leaving unknowns undeclared.
+        catalog = next((row for row in catalog_models(binary, choice)
+                        if row['id'] == model['id']), None)
+        if catalog and type(catalog.get('supports_image_input')) is bool:
+            spec['supports_image_input'] = catalog['supports_image_input']
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind') if source.get(key)})

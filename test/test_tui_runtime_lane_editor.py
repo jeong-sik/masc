@@ -1128,7 +1128,27 @@ def run_replace_and_promote(executable: str) -> None:
     store.exact_declared["librarian_exact"] = []
     store.exact_declared_cli["librarian_exact"] = [backup, current]
     fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    hold_catalog = threading.Event()
+    catalog_arrived = threading.Event()
+    release_catalog = threading.Event()
+
+    def resolved():
+        if hold_catalog.is_set():
+            hold_catalog.clear()
+            catalog_arrived.set()
+            if not release_catalog.wait(timeout=10.0):
+                return 504, {"error": "catalogue hold was never released"}
+        return store.resolved()
+
+    refresh_called = threading.Event()
+
+    def forced_probe():
+        refresh_called.set()
+        return h.runtime_probe_response(fresh=True)
+
+    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = forced_probe
+    fixtures[h.RUNTIME_RESOLVED_PATH] = resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
@@ -1147,8 +1167,18 @@ def run_replace_and_promote(executable: str) -> None:
                 raise AssertionError("the old lane read did not start")
             h.send_and_wait(process, fd, output, b"s", b"Model order")
             h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
-            h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            hold_catalog.set()
+            h.send_and_wait(process, fd, output, b"r", b"runtime catalogue loading")
+            try:
+                if not h.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
+                    raise AssertionError("replacement catalogue did not start loading")
+                h.send_and_wait(process, fd, output, b"luna medium", b"runtime catalogue loading")
+                press(process, fd, output, b"\r")
+                if any(path == ROUTING_PATH for path, _ in requests):
+                    raise AssertionError("Enter submitted a cached replacement during refresh")
+            finally:
+                release_catalog.set()
+            h.wait_for_output(process, fd, output, b"gpt-6-luna medium", start=0, timeout=5.0)
             h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()
@@ -1177,6 +1207,17 @@ def run_replace_and_promote(executable: str) -> None:
         if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
             raise AssertionError("expanded model choices are not visible")
         h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        h.send_and_wait(process, fd, output, b"p", b"MASC Runtime")
+        mark = mark_output(fd, output)
+        refresh_called.clear()
+        press(process, fd, output, b"r")
+        if not h.wait_for_fixture_event(process, fd, output, refresh_called, timeout=5.0):
+            raise AssertionError("Runtime r was swallowed by the previous Lane editor")
+        frame = h.screen_text(bytes(output[mark:]))
+        if b"Replace selected candidate" in frame or b"Model order" in frame:
+            raise AssertionError("Runtime refresh reopened a hidden Lane editor")
+        if len([path for path, _ in requests if path == ROUTING_PATH]) != 2:
+            raise AssertionError("leaving the Lane editor changed its candidate order")
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 

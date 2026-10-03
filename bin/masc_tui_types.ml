@@ -9891,9 +9891,12 @@ let runtime_picker_rows (state : state) pick =
     List.partition lands
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
-  let rows = match pick with
-    | Pick_exact_lane_replacement _ -> landing |> List.filter (fun runtime ->
-        not (List.mem runtime.Tui_decode.ro_id already))
+  let rows = match pick, state.runtime_catalog_reading with
+    | Pick_exact_lane_replacement _, Runtime_catalog_read ->
+        landing |> List.filter (fun runtime ->
+          not (List.mem runtime.Tui_decode.ro_id already))
+    | Pick_exact_lane_replacement _,
+      (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
     | _ -> landing @ refused in
   ( already, providers, rows )
 

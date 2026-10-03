@@ -5577,7 +5577,11 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (* The lane editor's line belongs to the view that drew it. *)
-  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
+  if destination <> state.view then begin
+    Masc_tui_types.dismiss_runtime_lane_notice state;
+    state.slot_editor <- None;
+    state.runtime_lane_pick <- None
+  end;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox

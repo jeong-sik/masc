@@ -11,10 +11,10 @@ module Runtime = struct
     Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
   let save_declaration ?caller ?access ~config args =
     Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
-  let dispatch ?caller ~config ~operation args =
-    let access = match caller with
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration
-      | Some keeper -> Lane_addon_sources.Keeper keeper in
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
     Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
@@ -70,8 +70,7 @@ let keeper_call config name args =
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in
   let context : Tool_misc.context = {config;agent_name="editor-keeper";help_schemas=[]} in
-  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper")
-    context ~name:descriptor.internal_name ~args:translated with
+  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper") context ~name:descriptor.internal_name ~args:translated with
   | Some value -> value | None -> fail "Keeper descriptor has no executable declaration route"
 
 let with_fixture f =
@@ -170,7 +169,7 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       (request ~mode:"create" ~file_name:"own.toml" bytes) in
     check bool "Keeper can save its own source without granting shared read authority" true
       (Tool_result.is_success own);
-    match Runtime.save_declaration ~config
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config
       (request ~mode:"create" ~file_name:"operator.toml" (source "operator-fusion")) with
     | Ok _ -> ()
     | Error error -> failf "operator declaration writer remains available: %s" error.Editor.message)
@@ -310,7 +309,7 @@ let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun
     (member "current" details = `Null);
   let current = read config directory "observer.toml" in
   List.iter (fun args ->
-    match Runtime.save_declaration ~config args with
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args with
     | Error error -> check bool "invalid candidate is a typed rejection" true (error.code=Editor.Invalid_declaration)
     | Ok _ -> fail "invalid candidate was written")
     [request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"observer.toml" "id = [";
@@ -360,7 +359,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   Fun.protect ~finally:(fun () -> Unix.rmdir unreadable) (fun () ->
     check bool "an unreadable declaration makes inventory incomplete" false
       (Lane_addon_config.load ~directory).complete;
-    match Runtime.save_declaration ~config (request ~revision:(text "source_revision" repaired)
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~revision:(text "source_revision" repaired)
       ~mode:"save" ~file_name:"broken.toml" ("# cannot inventory peers\n" ^ repaired_source)) with
     | Error error -> check bool "unreadable inventory still blocks publication" true (error.code=Editor.Io_error)
     | Ok _ -> fail "saved without a readable declaration inventory");
@@ -370,20 +369,20 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
 let test_request_paths_and_create_are_exact () = with_fixture (fun _clock config directory root _started ->
   let bytes = declaration () in
   List.iter (fun args -> check bool "invalid mode/revision combination refused" true
-    (Result.is_error (Runtime.save_declaration ~config args)))
+    (Result.is_error (Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args)))
     [request ~mode:"save" ~file_name:"a.toml" bytes;
      request ~revision:(String.make 64 'a') ~mode:"create" ~file_name:"a.toml" bytes;
      request ~mode:"create" ~file_name:"../outside.toml" bytes;
      request ~mode:"create" ~file_name:"nested/a.toml" bytes];
   ignore (save config (request ~mode:"create" ~file_name:"a.toml" bytes));
-  (match Runtime.save_declaration ~config (request ~mode:"create" ~file_name:"a.toml" bytes) with
+  (match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~mode:"create" ~file_name:"a.toml" bytes) with
    | Error error -> check bool "create never overwrites" true (error.code=Editor.Revision_conflict)
    | Ok _ -> fail "create replaced an existing declaration");
   let outside = Filename.concat root "outside.toml" in write outside bytes;
   Unix.symlink outside (Filename.concat directory "link.toml");
   List.iter (fun source_path ->
     check bool "read has no arbitrary filesystem path escape" true
-      (Result.is_error (Runtime.read_declaration ~config (`Assoc ["source_path",`String source_path]))))
+      (Result.is_error (Runtime.read_declaration ~access:Lane_addon_sources.Operator_configuration ~config (`Assoc ["source_path",`String source_path]))))
     [outside;Filename.concat directory "link.toml"])
 
 let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock config directory _root _started ->
@@ -391,8 +390,8 @@ let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock confi
   let first = save config (request ~mode:"create" ~file_name:"a.toml" bytes) in
   let revision = member "document" first |> text "source_revision" in
   let args value = request ~revision ~mode:"save" ~file_name:"a.toml" (declaration ~value ()) in
-  let a,b = Eio.Fiber.pair (fun () -> Runtime.save_declaration ~config (args "a"))
-    (fun () -> Runtime.save_declaration ~config (args "b")) in
+  let a,b = Eio.Fiber.pair (fun () -> Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (args "a"))
+    (fun () -> Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (args "b")) in
   check int "one writer owns the observed source revision" 1 (List.length (List.filter Result.is_ok [a;b]));
   check int "the other writer observes the committed conflict" 1 (List.length (List.filter Result.is_error [a;b]));
   let current = read config directory "a.toml" in

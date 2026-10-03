@@ -32,6 +32,10 @@ val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t
     bytes and both path identities again. A visible rename alone is not durable
     confirmation. Sync/read/identity failures return [Error] without replay or
     changing the result. Reads keep the existing full-receipt allocation policy. *)
+val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Retain the exact published evidence before sending its idempotent Broadcast.
+    Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads

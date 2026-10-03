@@ -40,7 +40,7 @@ type diagnostic =
   | Input_failure of string
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
-  keepers : string list; choice : int;
+  keepers : string list; choice : int; broadcast_request_id : string;
 }
 (** Marked rows about to be frozen under [owner_title]. [choice] 0 preserves
     only; [choice] n sends the reference to the n-th Keeper of [keepers]. *)
@@ -48,6 +48,7 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
+  pending_broadcasts : (Yojson.Safe.t * string) list;
   presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
@@ -122,16 +123,20 @@ val overview_hints : t -> string
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t
 val evidence_request : t -> (request, string) result
-val open_evidence : keepers:string list -> t -> (t, string) result
+val open_evidence : request_id:string -> keepers:string list -> t -> (t, string) result
 (** Open the export choice for the marked rows. Fails like [evidence_request]
     when the rows span owners or left the view. *)
 val move_evidence : t -> int -> t
+val acknowledge_broadcast : t -> Yojson.Safe.t -> t
+(** A committed response ends this send. Unanswered requests retain their ID
+    across reopening the same selected evidence; a later acknowledged send gets
+    a new ID from [open_evidence]. *)
 val submit_evidence : t -> (t * request, string) result
 (** Close the choice and build the exact request: the frozen bundle alone, or
-    with [keeper_name] when a Keeper was chosen. *)
+    with [keeper_name] for one Keeper or [broadcast=true] for workspace sharing. *)
 val evidence_receipt_lines : Yojson.Safe.t -> string list
 (** What an evidence receipt says in one or two readable lines: rows frozen
-    and, separately, whether the optional Keeper delivery succeeded. Empty for
+    and, separately, whether optional Keeper delivery or Broadcast committed. Empty for
     receipts of other operations. *)
 
 val status_text : t -> string

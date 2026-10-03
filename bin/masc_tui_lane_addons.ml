@@ -45,12 +45,13 @@ type diagnostic =
    optional message the Keeper may use, defer or ignore. *)
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
-  keepers : string list; choice : int;
+  keepers : string list; choice : int; broadcast_request_id : string;
 }
 type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
+  pending_broadcasts : (Yojson.Safe.t * string) list;
   presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
@@ -61,7 +62,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -413,38 +414,53 @@ let evidence_target view =
   let* owners=owners view.selected in
   match List.sort_uniq (fun (a : instance) (b : instance) -> String.compare a.id b.id) owners with
   | [owner] -> Ok (owner, `Assoc ["instance_id",`String owner.id;
-      "row_ids",`List (List.map (fun id -> `String id) view.selected)])
+      "row_ids",`List (List.sort String.compare view.selected |> List.map (fun id -> `String id))])
   | _ -> Error "Selected evidence spans multiple instances; select one owner at a time"
 let evidence_request view =
   let* _, evidence = evidence_target view in Ok (Evidence evidence)
-let open_evidence ~keepers view =
+let open_evidence ~request_id ~keepers view =
   let* owner, evidence = evidence_target view in
+  let broadcast_request_id = match List.find_opt (fun (previous,_) -> Yojson.Safe.equal previous evidence) view.pending_broadcasts with
+    | Some (_, id) -> id | None -> request_id in
   Ok {view with evidence_prompt=Some {evidence;owner_title=owner.title;
-    row_count=List.length view.selected;keepers=List.sort_uniq String.compare keepers;choice=0};
+    row_count=List.length view.selected;keepers=List.sort_uniq String.compare keepers;choice=0;broadcast_request_id};
     error=None;scroll=0}
 let move_evidence view delta = match view.evidence_prompt with
   | None -> view
   | Some prompt ->
-      let choice = max 0 (min (List.length prompt.keepers) (prompt.choice + delta)) in
+      let choice = max 0 (min (List.length prompt.keepers + 1) (prompt.choice + delta)) in
       {view with evidence_prompt=Some {prompt with choice}}
 let evidence_keeper prompt = if prompt.choice=0 then None else List.nth_opt prompt.keepers (prompt.choice-1)
 let submit_evidence view = match view.evidence_prompt with
   | None -> Error "No evidence export is open"
   | Some prompt ->
       let fields = match prompt.evidence with `Assoc fields -> fields | _ -> [] in
-      let request = match evidence_keeper prompt with
-        | None -> prompt.evidence
-        | Some keeper -> `Assoc (fields @ ["keeper_name",`String keeper]) in
-      Ok ({view with evidence_prompt=None}, Evidence request)
+      let request = if prompt.choice=List.length prompt.keepers + 1
+        then `Assoc (fields @ ["broadcast",`Bool true;"request_id",`String prompt.broadcast_request_id])
+        else match evidence_keeper prompt with
+          | None -> prompt.evidence
+          | Some keeper -> `Assoc (fields @ ["keeper_name",`String keeper]) in
+      let pending_broadcasts = if prompt.choice=List.length prompt.keepers + 1 then
+        (prompt.evidence,prompt.broadcast_request_id) :: List.filter
+          (fun (_,id) -> not (String.equal id prompt.broadcast_request_id)) view.pending_broadcasts
+        else view.pending_broadcasts in
+      Ok ({view with evidence_prompt=None;pending_broadcasts}, Evidence request)
+let acknowledge_broadcast view receipt =
+  match get (field "request_id") "delivery" receipt, get (field "status") "delivery" receipt with
+  | Ok (`String request_id), Ok (`String "committed") ->
+      {view with pending_broadcasts=List.filter
+        (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
+  | _ -> view
 let evidence_lines prompt =
   let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
   [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
      (if prompt.row_count=1 then "" else "s") prompt.owner_title;
-   "The bundle is frozen under this worker either way; a Keeper receives only its reference.";
+   "Evidence stays preserved; sharing sends its reference. Reads and actions are separate.";
+   "An unanswered Broadcast retries the original saved send, including after restart.";
    "j/k:choose  Enter:preserve  Esc:back"]
   @ [choice 0 "Preserve only"]
   @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers
-  @ (if prompt.keepers=[] then ["No workspace Keeper is in the roster; preserve only."] else [])
+  @ [choice (List.length prompt.keepers+1) "Preserve and share the reference via Broadcast"]
 (* The receipt names what was frozen and, separately, whether the optional
    message reached its Keeper. A failed delivery leaves the bundle preserved. *)
 let evidence_receipt_lines json =
@@ -457,12 +473,17 @@ let evidence_receipt_lines json =
       let frozen = "Evidence preserved: " ^ count
         ^ (match text (member "sha256" evidence) with Some sha -> " · sha256 " ^ sha | None -> "") in
       let delivery = match member "delivery" json with
-        | None -> ["Not sent to a Keeper."]
+        | None -> ["Not shared."]
         | Some delivery ->
+            let destination = match text (member "destination" delivery) with
+              | Some "broadcast" -> "Broadcast" | _ -> "Keeper delivery" in
             (match text (member "status" delivery), text (member "error" delivery) with
-             | Some "failed", Some error -> ["Keeper delivery failed: " ^ error ^ " · the bundle stays preserved"]
-             | Some status, _ -> ["Keeper delivery " ^ status]
-             | None, _ -> ["Keeper delivery status unknown"]) in
+             | Some "failed", Some error -> [destination ^ " failed: " ^ error ^ " · the bundle stays preserved"]
+             | Some "pending_commit", _ -> [destination ^ " queued · workspace commit is pending; retry uses the same request"]
+             | Some "outcome_unknown", _ -> [destination ^ " outcome unknown · evidence preserved; verify before resending"]
+             | Some "committed", _ -> [destination ^ " committed · Keeper reads and actions are unverified"]
+             | Some status, _ -> [destination ^ " " ^ status]
+             | None, _ -> [destination ^ " status unknown"]) in
       frozen :: delivery
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
@@ -1256,7 +1277,7 @@ let flow_lines ?(embedded=false) view =
                     | None -> []
                     | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
            @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
-  @ [""; "Result -> retained evidence -> explicit Keeper delivery -> agent use";
+  @ [""; "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
      "Delivery acceptance and agent reading are separate recorded stages.";
      (if embedded then "f:open full flow  D:technical details  J/K:scroll"
       else "f:back to observations  D:technical details  J/K:scroll")]
@@ -1305,9 +1326,18 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       then installation_detail_lines ~width view
       else if view.presentation = Technical || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~height ~failed_note ~width view
-      else (match view.screen with
-        | Overview -> overview_lines ~width view
-        | Detail _ -> detail_lines ~width view
+      else
+        let receipt_lines = match view.receipt with
+          | None -> []
+          | Some json -> (match evidence_receipt_lines json with
+              | [] -> []
+              | receipt -> ["Last evidence receipt"] @ receipt @ [""]) in
+        let receipt_lines = List.concat_map (fun line ->
+          Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+            (Masc.Tui_terminal_text.sanitize_terminal_text line)) receipt_lines in
+        (match view.screen with
+        | Overview -> overview_lines ~width view @ receipt_lines
+        | Detail _ -> receipt_lines @ detail_lines ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
                    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)

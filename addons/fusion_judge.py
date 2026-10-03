@@ -36,5 +36,3 @@ def canonical_judge(post):
     if status is JudgeState.FAILED:
         return JudgeFailure(string(judge.get("failure_code"), "judge.failure_code"),
                             string(judge.get("error"), "judge.error"))
-
-

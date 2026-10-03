@@ -121,6 +121,16 @@ queued·running·confirmed·failed_before_effect·outcome_unknown과 executor·�
 Records에서 행을 `Space`로 표시한 뒤 `e`로 근거를 고정한다.
 표시한 행 수와 export 대상 인스턴스를 확인한다. Activity timeline의 선택 Lane과 export 대상 인스턴스는 별개다.
 직접 지정은 `:evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`, 선택 전달은 `keeper_name`을 추가한다.
+`e`의 마지막 선택인 `Preserve and share the reference via Broadcast`는 선택한 근거의
+읽기 가능한 참조를 workspace Broadcast로 공유한다. 기본값은 보존만 하기이며,
+선택 후 Enter로 제출한다. 직접 지정할 때는 `broadcast:true`와 보내기 동작마다 새 `request_id`를 추가하고 `keeper_name`은 함께 쓰지 않는다.
+응답을 받지 못한 같은 동작을 재시도할 때는 원래 `request_id`를 유지한다. TUI는 같은 근거의 미응답 보내기를 다시 열면 그 ID를 유지하고, 저장 영수증을 받은 후의 새 보내기에는 새 ID를 만든다.
+재시도는 원래 아티팩트와 이미 저장된 메시지의 영수증을 반환한다. 첫 요청의 Keeper 전달이 아직 진행 중이어도 메시지를 중복 생성하지 않는다.
+보고서 원문을 메시지에 끼워 넣지 않으며, Broadcast 영수증의 request ID·sequence는
+실제 메시지 저장 결과다. `committed`는 공유 기록이며 Keeper 열람이나 실행 완료가 아니다.
+공유가 실패해도 근거는 보존되고 자동으로 다시 보내지 않는다.
+전달 중 예외로 결과를 확정할 수 없으면 `outcome_unknown`으로 표시한다.
+이 경우 실제 공유·접수 기록을 확인한 뒤 재전송 여부를 결정한다.
 `d` 또는 `:detach <instance-ID>`는 해당 설치와 소유 worker를 제거한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.
 목록에 없는 실행을 붙일 때는 `:attach {"manifest_path":…,"run_id":…,"binding":…}`로 선언 없이도 붙일 수 있다.

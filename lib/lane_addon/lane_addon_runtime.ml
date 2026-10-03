@@ -1,10 +1,16 @@
 open Lane_addon_types
+module Fleet_ledger = Lane_addon_broadcast_delivery
 let ( let* ) = Result.bind
 type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
 type error = Request_rejected of string | Runtime_failed of string
+type evidence_destination = Preserve_only | To_keeper of string | To_broadcast
+type evidence_delivery = Delivery_receipt of Yojson.Safe.t | Delivery_failed of string
+  | Delivery_outcome_unknown of string | Delivery_pending_commit of string
 let error_to_string = function Request_rejected detail | Runtime_failed detail -> detail
 let request_result result = Result.map_error (fun detail -> Request_rejected detail) result
 let runtime_result result = Result.map_error (fun detail -> Runtime_failed detail) result
+exception Fleet_commit_uncertain of string
+exception Fleet_commit_pending of string
 exception Worker_detached
 exception Action_persistence_failed of string
 type connection = {
@@ -60,11 +66,21 @@ type entry = {
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
-  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
+  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
+  fleet_journals : (string, unit) Hashtbl.t;
+  fleet_operations : ((string * string), unit) Hashtbl.t;
+  fleet_recipients : (((string * string) * string), unit) Hashtbl.t; mutable fleet_nudge : unit -> unit; mutable configuration_status : Yojson.Safe.t;
   mutable configuration_nudge : unit -> unit;
   mutable configuration_visibility : (string * visibility) list }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
+type fleet_backend = {
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
+    recipient:string -> (unit,string) result;
+}
+let fleet_backend = ref None
+let register_fleet_backend backend = fleet_backend := Some backend
 let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let text fields key = match List.assoc_opt key fields with
@@ -221,15 +237,18 @@ let prove_released_shared ~bindings fields =
                else prove (id::visiting) producer
            | [] -> Error "missing retained producer" | _ -> Error "ambiguous retained producer")) (Ok ()) sources
   in prove [] fields
+let normalize_retained_binding ~bindings value =
+  let* fields = object_ value in
+  if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields
+  then let* _ = visibility_of_fields fields in
+    let* _ = match List.assoc_opt "source_access" fields with
+      | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in Ok value
+  else let* () = prove_released_shared ~bindings fields in
+    Ok (`Assoc (("visibility",visibility_to_json Shared)::
+      ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields))
 let normalized_retained_bindings bindings =
-  List.fold_right (fun value result -> let* values = result in let* fields = object_ value in
-    let* value = if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields
-      then let* _ = visibility_of_fields fields in
-        let* _ = match List.assoc_opt "source_access" fields with
-          | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in Ok value
-      else let* () = prove_released_shared ~bindings fields in
-        Ok (`Assoc (("visibility",visibility_to_json Shared)::
-          ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields)) in
+  List.fold_right (fun value result ->
+    let* values = result in let* value = normalize_retained_binding ~bindings value in
     Ok (value::values)) bindings (Ok [])
 let authorize_retained_read ~bindings ~access json =
   let* normalized = normalized_retained_bindings bindings in
@@ -690,7 +709,9 @@ let manager config =
   | Some m -> m
   | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
-                     action_mutex = Eio.Mutex.create ();
+                     action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
+                     fleet_journals=Hashtbl.create 8;
+                     fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = `Null; configuration_nudge = (fun () -> ()); configuration_visibility=[] } in
       Hashtbl.add managers root m; m
 (* Entries and their wake promises belong to the root-switch owner domain. A
@@ -716,12 +737,25 @@ let find m args = let* id = text args "instance_id" in
 let read_retained_bindings m =
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
   normalized_retained_bindings bindings
-let historical m =
-  let* bindings = read_retained_bindings m in
-  Ok (List.filter (function
+let without_live_bindings m bindings =
+  List.filter (function
     | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
         | Some (`String id) -> not (Hashtbl.mem m.entries id) | _ -> true)
-    | _ -> true) bindings)
+    | _ -> true) bindings
+let historical m =
+  let* bindings = read_retained_bindings m in
+  Ok (without_live_bindings m bindings)
+let historical_inventory m =
+  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  (* Omit unreadable inventory entries only after proving each against the
+     complete stored graph. Filtering producers first could grant authority. *)
+  let visible = List.filter_map (fun value ->
+    match normalize_retained_binding ~bindings value with
+    | Ok value -> Some value
+    | Error detail ->
+        Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
+        None) bindings in
+  Ok (without_live_bindings m visible)
 let persisted_binding m id =
   let* bindings = runtime_result (read_retained_bindings m) in
   match List.find_opt (function
@@ -803,16 +837,18 @@ let visible_configuration m ~access =
         :: List.remove_assoc "issues" (List.remove_assoc "declarations" fields))
   | (Keeper _ | Unauthenticated), json -> json
 let snapshot m ~access ?instance_id () =
-  let* past = historical m in
+  let* past = historical_inventory m in
   let live = entries m |> List.filter (fun e ->
     can_read access e.visibility && Option.fold ~none:true ~some:(String.equal e.instance_id) instance_id) in
   let past = List.filter (function `Assoc fields ->
     Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
     | _ -> Option.is_none instance_id) past in
-  let* past = List.fold_right (fun value acc ->
-    let* values = acc in
-    let* fields = object_ value in let* visibility = visibility_of_fields fields in
-    Ok (if can_read access visibility then value :: values else values)) past (Ok []) in
+  let past = List.filter (fun value ->
+    match Result.bind (object_ value) visibility_of_fields with
+    | Ok visibility -> can_read access visibility
+    | Error detail ->
+        Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
+        false) past in
   let* () = if Option.is_some instance_id && live = [] && past = []
     then Error "Lane instance is unavailable to this caller" else Ok () in
   let retained = function `Assoc fields ->
@@ -1211,6 +1247,180 @@ let enqueue_action ?caller m args =
           wake ~request:Run_actions e;
           Ok (Lane_addon_action.to_json receipt)))
 
+let rec fleet_error_to_string = function
+  | Fleet_ledger.Invalid_input e | Corrupt e | Io_error e -> e
+  | Conflict -> "Broadcast operation contradicts its durable intention"
+  | Unknown_operation -> "Broadcast operation was not admitted"
+  | Settlement_failed {primary;cleanup} -> fleet_error_to_string primary ^ "; " ^ cleanup
+let fleet_result value = Result.map_error fleet_error_to_string value
+let fleet_store m = Fleet_ledger.create ~root:(Filename.concat (Lane_addon_store.root m.store) "fleet-delivery")
+let observe_fleet_settlement (receipt : Fleet_ledger.receipt) =
+  Option.iter (fun detail -> Log.Misc.warn "Lane Fleet durable result has descriptor settlement failure: %s" detail)
+    receipt.settlement_error
+let admit_fleet m ~config ~caller ~access ~request_id evidence =
+  let* backend = match !fleet_backend with Some value -> Ok value
+    | None -> Error "Fleet delivery host boundary is unavailable" in
+  let* fields=object_ evidence in let* content=text fields "message" in
+  let* ()=Workspace_broadcast.validate_deferred_fleet_content content
+    |> Result.map_error Workspace_broadcast.broadcast_error_to_string in
+  let* artifact_sha256=match List.assoc_opt "keeper_artifact" fields with
+    | Some value -> (match Tool_output.normalized_artifact_ref_of_json value with
+        | Tool_output.Decoded_normalized_artifact_ref reference -> Ok reference.sha256
+        | Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ -> Error "published evidence artifact is invalid")
+    | None -> Error "published evidence artifact is missing" in
+  let* operation_id=Fleet_ledger.Request_id.of_string request_id in
+  let ledger=fleet_store m in
+  let* previous=offload (fun () -> Fleet_ledger.find ledger ~caller ~operation_id) |> fleet_result in
+  let* sender_authority,recipients=match previous with
+    | Some receipt -> Ok (receipt.record.payload.sender_authority,receipt.record.payload.recipients)
+    | None -> backend.snapshot ~config ~caller ~access in
+  let payload : Fleet_ledger.payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
+  let* receipt=offload (fun () -> Fleet_ledger.admit ledger payload) |> fleet_result in
+  observe_fleet_settlement receipt;
+  Ok receipt.record
+type fleet_commit_error = Fleet_pending_commit of string | Fleet_uncertain_commit of string
+let fleet_commit_error_to_string = function Fleet_pending_commit e | Fleet_uncertain_commit e -> e
+let commit_fleet m ~config (record : Fleet_ledger.record) =
+  let payload=record.payload in
+  let request_id=Fleet_ledger.Request_id.to_string record.workspace_request_id in
+  let* delivery=match record.workspace with
+    | Uncommitted -> Workspace_broadcast.broadcast_once ~fleet_delivery:Workspace_broadcast.Deferred_fleet ~request_id
+        config ~from_agent:payload.caller ~content:payload.content
+        |> Result.map_error (function
+          | Workspace_broadcast.Broadcast_not_persisted e | Broadcast_policy_rejected e -> Fleet_pending_commit e
+          | Broadcast_dependency_unavailable e -> Fleet_uncertain_commit e)
+    | Committed seq ->
+        let* found=Workspace_broadcast.find_broadcast ~request_id config
+          ~from_agent:payload.caller ~content:payload.content
+          |> Result.map_error (fun e -> Fleet_uncertain_commit (Workspace_broadcast.broadcast_error_to_string e)) in
+        (match found with
+         | Some delivery when delivery.seq=seq -> Ok delivery
+         | Some _ -> Error (Fleet_uncertain_commit "Fleet workspace sequence contradicts durable receipt")
+         | None -> Error (Fleet_uncertain_commit "Fleet committed workspace message is unavailable; it was not republished")) in
+  let* receipt=offload (fun () -> Fleet_ledger.commit (fleet_store m)
+    ~caller:payload.caller ~operation_id:payload.operation_id ~seq:delivery.seq) |> fleet_result
+    |> Result.map_error (fun e -> Fleet_uncertain_commit e) in
+  observe_fleet_settlement receipt;
+  (* The ledger now owns recovery independently of the requesting client. *)
+  Ok {delivery with Workspace_broadcast.fanout_state=Fanout_durable_admitted}
+(* These tables are owned by the Eio owner domain. Claim before forking and
+   retain the claim through the durable acknowledgement, not just projection.
+   No shared I/O lock or recipient await belongs to the Pulse consumer. *)
+let fork_fleet_job ~sw ~owners ~key ~label work =
+  if not (Hashtbl.mem owners key) then begin
+    Hashtbl.add owners key ();
+    try
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        Fun.protect ~finally:(fun () -> Hashtbl.remove owners key) (fun () ->
+          let result = try work () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          match result with
+          | Ok () -> ()
+          | Error detail -> Log.Misc.warn "Lane Fleet %s remains pending: %s" label detail);
+        `Stop_daemon)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> Hashtbl.remove owners key; raise exn
+    | exn -> Hashtbl.remove owners key; raise exn
+  end
+
+let recover_fleet ~config ~sw = Eio_context.run_on_owner_domain (fun () ->
+  let m=manager config in
+  let* backend=match !fleet_backend with Some backend -> Ok backend
+    | None -> Error "Fleet delivery host boundary is unavailable" in
+  let ledger=fleet_store m in
+  let* names=offload (fun () -> Fleet_ledger.pending_markers ledger) |> fleet_result in
+  let current payload =
+    let* found=offload (fun () -> Fleet_ledger.find ledger
+      ~caller:payload.Fleet_ledger.caller ~operation_id:payload.operation_id) |> fleet_result in
+    match found with
+    | Some receipt -> observe_fleet_settlement receipt; Ok receipt.record
+    | None -> Error "Fleet admitted operation is unavailable" in
+  List.iter (fun marker ->
+    fork_fleet_job ~sw ~owners:m.fleet_journals ~key:marker
+      ~label:("journal " ^ marker) (fun () ->
+        let outcome=offload (fun () -> Fleet_ledger.reconcile ledger marker) |> fleet_result in
+        match outcome with
+        | Error error ->
+            Log.Misc.warn "Lane Fleet journal %s isolated: %s"
+              marker error;
+            Ok ()
+        | Ok Fleet_ledger.Retired -> Ok ()
+        | Ok (Fleet_ledger.Settled_with_cleanup receipt) ->
+            observe_fleet_settlement receipt;
+            Ok ()
+        | Ok (Fleet_ledger.Pending receipt) ->
+            observe_fleet_settlement receipt;
+            let payload=receipt.record.payload in
+            let operation=payload.caller,Fleet_ledger.Request_id.to_string payload.operation_id in
+            fork_fleet_job ~sw ~owners:m.fleet_operations ~key:operation
+              ~label:("operation " ^ snd operation) (fun () ->
+                let* record=current payload in
+                let* delivery=commit_fleet m ~config record |> Result.map_error fleet_commit_error_to_string in
+                List.iter (fun (recipient,state) -> match state with
+                  | Fleet_ledger.Accepted -> ()
+                  | Pending _ ->
+                    fork_fleet_job ~sw ~owners:m.fleet_recipients ~key:(operation,recipient)
+                      ~label:("recipient " ^ recipient ^ " operation " ^ snd operation) (fun () ->
+                        (* A scan may predate another job's durable acceptance. Read
+                           again after claiming this recipient before projecting it. *)
+                        let* latest=current payload in
+                        match List.assoc_opt recipient latest.recipients with
+                        | Some Fleet_ledger.Accepted -> Ok ()
+                        | None -> Error "Fleet recipient is outside the admitted audience"
+                        | Some (Pending _) ->
+                          let result=try backend.project ~config ~sender_authority:payload.sender_authority
+                            ~delivery ~recipient with
+                            | Eio.Cancel.Cancelled _ as exn -> raise exn
+                            | exn -> Error (Printexc.to_string exn) in
+                          let next=match result with Ok () -> Fleet_ledger.Accepted
+                            | Error detail -> Fleet_ledger.Pending (Some detail) in
+                          let* receipt=offload (fun () -> Fleet_ledger.recipient_result ledger
+                            ~caller:payload.caller ~operation_id:payload.operation_id ~recipient next)
+                            |> fleet_result in
+                          observe_fleet_settlement receipt;
+                          result)) record.recipients;
+                Ok ());
+            Ok ())) names;
+  Ok ())
+
+let prepare_broadcast m ~base_path ~caller ~access ~instance_id ~request_id ~row_ids ~freeze =
+  let* () = match access with
+    | Lane_addon_sources.Operator_configuration -> Ok ()
+    | Keeper keeper when String.equal keeper caller -> Ok ()
+    | Keeper _ | Unauthenticated -> Error "Broadcast request is unavailable to this caller" in
+  let identity = `Assoc ["caller",`String caller;"instance_id",`String instance_id;
+    "row_ids",`List (List.sort String.compare row_ids |> List.map (fun id -> `String id))] in
+  let input_digest = Lane_addon_store.digest (Yojson.Safe.to_string identity) in
+  let request_digest = Lane_addon_store.digest (Yojson.Safe.to_string
+    (`List [`String caller;`String request_id])) in
+  (* Workspace request IDs carry 16 bytes, encoded as 32 lowercase hex digits. *)
+  let broadcast_id = "wmsg-" ^ String.sub request_digest 0 32 in
+  Eio.Mutex.use_ro m.broadcast_mutex (fun () ->
+    let* previous = offload (fun () -> Lane_addon_store.load_broadcast m.store ~instance_id ~request_id:broadcast_id) in
+    match previous with
+    | Some previous ->
+        let* fields = object_ previous in
+        let* visibility = visibility_of_fields fields in
+        let* () = require_read access visibility in
+        let* digest = text fields "input_digest" in
+        let* saved_request = text fields "request_id" in
+        if not (String.equal digest input_digest && String.equal saved_request request_id
+          && List.assoc_opt "identity" fields = Some identity)
+        then Error "Broadcast identity belongs to different evidence"
+        else (match List.assoc_opt "evidence" fields with
+          | Some (`Assoc _ as evidence) -> Ok (broadcast_id, evidence)
+          | _ -> Error "retained Broadcast record has no exact published evidence")
+    | None ->
+        let* frozen, visibility = freeze () in
+        let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
+          ~base_path m.store frozen) in
+        let record = `Assoc ["request_id",`String request_id;"input_digest",`String input_digest;
+          "identity",identity;"visibility",visibility_to_json visibility;"evidence",evidence] in
+        let* () = offload (fun () -> Lane_addon_store.save_broadcast m.store
+          ~instance_id ~request_id:broadcast_id record) in
+        Ok (broadcast_id, evidence))
+
 let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
   let* args = request_result (object_ json) in
   let allowed = match operation with
@@ -1218,7 +1428,7 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
     | Inspect -> ["instance_id"]
     | Observe | Detach -> ["instance_id"]
     | Slice -> ["run_id"; "lane_id"; "since"; "until"]
-    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"]
+    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"; "broadcast"; "request_id"]
     | Act -> ["instance_id"; "expected_incarnation"; "request_id"; "action"]
     | Action_status -> ["instance_id"; "request_id"] in
   let names = List.map fst args in
@@ -1230,8 +1440,8 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
   (* A durable delivery retry must authorize its saved caller before this
      lookup: its original source binding may already be gone. *)
   let* () = match operation with
-    | Inspect | Slice | Attach -> Ok ()
-    | Evidence | Observe | Detach | Act | Action_status ->
+    | Inspect | Slice | Attach | Evidence -> Ok ()
+    | Observe | Detach | Act | Action_status ->
         let* id = request_result (text args "instance_id") in
         let* visibility = match Hashtbl.find_opt m.entries id with
           | Some e -> Ok e.visibility
@@ -1246,42 +1456,104 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
       runtime_result (snapshot m ~access ?instance_id ())
   | Slice -> slice m ~access args
   | Evidence ->
+      let* broadcast = match List.assoc_opt "broadcast" args with
+        | None | Some (`Bool false) -> Ok false
+        | Some (`Bool true) -> Ok true
+        | Some _ -> Error (Request_rejected "broadcast requires a boolean") in
+      let* destination = match broadcast, List.assoc_opt "keeper_name" args with
+        | true, Some _ -> Error (Request_rejected "choose Broadcast or one Keeper, not both")
+        | true, None -> Ok To_broadcast
+        | false, None -> Ok Preserve_only
+        | false, Some _ -> request_result (text args "keeper_name") |> Result.map (fun name -> To_keeper name) in
+      let* broadcast_request_id = match destination, List.assoc_opt "request_id" args with
+        | To_broadcast, _ ->
+            let* value=request_result (text args "request_id") in
+            let* _valid=request_result (Fleet_ledger.Request_id.of_string value) in Ok (Some value)
+        | (Preserve_only | To_keeper _), None -> Ok None
+        | (Preserve_only | To_keeper _), Some _ -> Error (Request_rejected "request_id is only used with Broadcast") in
       let* id = request_result (text args "instance_id") in
-      let* binding = match Hashtbl.find_opt m.entries id with
-        | Some e -> Ok (entry_json e)
-        | None -> Result.map (fun fields -> `Assoc fields) (persisted_binding m id) in
-      let* fields = runtime_result (object_ binding) in
-      let* visibility = runtime_result (visibility_of_fields fields) in
-      let* () = request_result (require_read access visibility) in
       let* ids = match List.assoc_opt "row_ids" args with
         | Some (`List values) ->
             List.fold_left (fun acc -> function `String id -> let* ids = acc in Ok (id :: ids)
               | _ -> Error (Request_rejected "row_ids must contain strings")) (Ok []) values
         | _ -> Error (Request_rejected "row_ids requires an array") in
-      let* frozen = runtime_result (offload (fun () -> Lane_addon_store.freeze m.store ~instance_id:id ~binding ~row_ids:ids)) in
-      (match List.assoc_opt "keeper_name" args with
-       | None -> Ok frozen
-       | Some _ ->
+      let freeze_with_visibility () =
+        let* binding = match Hashtbl.find_opt m.entries id with
+          | Some e -> Ok (entry_json e)
+          | None -> Result.map (fun fields -> `Assoc fields) (persisted_binding m id) in
+        let* fields = runtime_result (object_ binding) in
+        let* visibility = runtime_result (visibility_of_fields fields) in
+        let* () = request_result (require_read access visibility) in
+        let* frozen = runtime_result (offload (fun () -> Lane_addon_store.freeze m.store
+          ~instance_id:id ~binding ~row_ids:ids)) in
+        Ok (frozen, visibility) in
+      let freeze () = Result.map fst (freeze_with_visibility ()) in
+      (match destination with
+       | Preserve_only -> freeze ()
+       | To_keeper _ | To_broadcast ->
+           let destination_name = match destination with
+             | To_keeper _ -> "keeper" | To_broadcast -> "broadcast" | Preserve_only -> "preserve" in
            let deliver () =
-             let* keeper_name = text args "keeper_name" in
              let* caller = match caller with
                | Some value when String.trim value <> "" -> Ok value
                | _ -> Error "evidence delivery requires an authenticated caller" in
-             let* handler = match !delivery_handler with
-               | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
-             let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
-               ~base_path:config.base_path m.store frozen) in
+             let* broadcast_request, evidence = match destination with
+               | To_broadcast ->
+                   let* request_id = Option.to_result ~none:"Broadcast request identity is missing" broadcast_request_id in
+                   prepare_broadcast m ~base_path:config.base_path ~caller ~access
+                     ~instance_id:id ~request_id ~row_ids:ids
+                     ~freeze:(fun () -> freeze_with_visibility () |> Result.map_error error_to_string)
+                   |> Result.map (fun (id,evidence) -> Some id,evidence)
+               | To_keeper _ | Preserve_only ->
+                   let* frozen = freeze () |> Result.map_error error_to_string in
+                   offload (fun () -> Lane_addon_store.publish_for_keeper
+                     ~base_path:config.base_path m.store frozen)
+                   |> Result.map (fun evidence -> None,evidence) in
              let* fields = object_ evidence in let* prompt = text fields "message" in
-             let receipt = try handler ~config ~caller ~keeper_name ~prompt with
+             let receipt = try (match destination with
+               | To_keeper keeper_name ->
+                   let* handler = match !delivery_handler with
+                     | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
+                   handler ~config ~caller ~keeper_name ~prompt
+               | To_broadcast ->
+                   let* request_id = match broadcast_request with
+                     | Some id -> Ok id | None -> Error "Broadcast request identity is missing" in
+                   let* operation=match broadcast_request_id with
+                     | Some value -> Ok value | None -> Error "Broadcast operation identity is missing" in
+                   let* record=admit_fleet m ~config ~caller ~access ~request_id:operation evidence in
+                   let* () = if Fleet_ledger.Request_id.to_string record.workspace_request_id<>request_id then
+                     Error "Fleet durable identity contradicts prepared evidence" else Ok () in
+                   m.fleet_nudge ();
+                   let delivery=match commit_fleet m ~config record with
+                     | Ok delivery -> delivery
+                     | Error (Fleet_pending_commit e) -> raise (Fleet_commit_pending e)
+                     | Error (Fleet_uncertain_commit e) -> raise (Fleet_commit_uncertain e) in
+                   Ok (Workspace_broadcast.broadcast_delivery_to_yojson delivery)
+               | Preserve_only -> Error "evidence preservation has no delivery destination")
+                 |> (function Ok receipt -> Delivery_receipt receipt | Error detail -> Delivery_failed detail) with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Printexc.to_string exn) in
+               | Fleet_commit_pending detail -> Delivery_pending_commit detail
+               | Fleet_commit_uncertain detail -> Delivery_outcome_unknown detail
+               | exn -> Delivery_outcome_unknown (Printexc.to_string exn) in
              Ok (evidence, receipt)
            in
-           let published, receipt = match deliver () with
-             | Ok result -> result | Error message -> frozen, Error message in
+           let* published, receipt = match deliver () with
+             | Ok result -> Ok result
+             | Error message ->
+                 let* frozen = freeze () in Ok (frozen, Delivery_failed message) in
            let delivery = match receipt with
-             | Ok receipt -> `Assoc ["status", `String "accepted"; "receipt", receipt]
-             | Error message -> `Assoc ["status", `String "failed"; "error", `String message] in
+             | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
+                 "status", `String (match destination with To_broadcast -> "committed"
+                   | To_keeper _ | Preserve_only -> "accepted"); "receipt", receipt]
+             | Delivery_failed message -> `Assoc ["destination",`String destination_name;
+                 "status", `String "failed"; "error", `String message]
+             | Delivery_pending_commit message -> `Assoc ["destination",`String destination_name;
+                 "status",`String "pending_commit";"detail",`String message]
+             | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
+                 "status",`String "outcome_unknown";"error",`String message] in
+           let delivery = match broadcast_request_id, delivery with
+             | Some request_id, `Assoc fields -> `Assoc (("request_id",`String request_id) :: fields)
+             | _ -> delivery in
            let* fields = runtime_result (object_ published) in Ok (`Assoc (("delivery", delivery) :: fields)))
   | Attach ->
       let* path = request_result (text args "manifest_path") in let* run_id = request_result (text args "run_id") in
@@ -1302,6 +1574,13 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
         | _, access -> access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
+      (* A private attachment keeps its source owner for every later wake.
+         Operator authority may discover the binding, but must not remain the
+         worker's acquisition authority after its Fusion owner changes. *)
+      let source_access = match visibility with
+        | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+        | Shared | Operator_only -> source_access in
+      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility)
   | Observe ->
       let* e = request_result (find m args) in
@@ -1499,6 +1778,28 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     m.configuration_status <- json;
     Ok json))
 
+let fleet_services : (string,unit -> unit) Hashtbl.t = Hashtbl.create 4
+let start_fleet_service ~config ~sw ~clock =
+  let key=Workspace.masc_dir config in
+  if not (Hashtbl.mem fleet_services key) then (
+    let active=ref true in
+    let consumer : (module Pulse.Consumer) = (module struct
+      let name="lane-addon-fleet-delivery"
+      let should_act _ = !active
+      let on_beat _ = recover_fleet ~config ~sw
+    end) in
+    let interval=Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec in
+    let pulse=Pulse.create ~clock
+      ~rhythm:{Pulse.base_s=interval;min_s=interval;max_s=interval;quiet=(0,0)}
+      ~lifecycle:Always_on ~consumers:[consumer] in
+    let stop ()=active:=false;Pulse.shutdown pulse in
+    Hashtbl.add fleet_services key stop;
+    let m=manager config in
+    m.fleet_nudge<-(fun () -> Pulse.nudge pulse ~reason:"durable Fleet delivery admitted");
+    Eio.Switch.on_release sw (fun () -> stop ();Hashtbl.remove fleet_services key;
+      m.fleet_nudge<-(fun () -> ()));
+    Pulse.run ~sw pulse)
+
 let configuration_services : (string, unit -> unit) Hashtbl.t = Hashtbl.create 4
 let start_configuration_service ~config ~sw ~clock =
   let key = Workspace.masc_dir config in
@@ -1563,5 +1864,6 @@ module For_testing = struct
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;
-    delivery_handler := None; skill_export_handler := None
+    Hashtbl.iter (fun _ stop -> stop ()) fleet_services; Hashtbl.clear fleet_services;
+    fleet_backend := None; delivery_handler := None; skill_export_handler := None
 end

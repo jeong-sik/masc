@@ -1,0 +1,18 @@
+{
+  "scope": "real Chromium local HTML and Python package MCP stdio fixtures; no MASC server or live provider execution",
+  "source_sha256": {
+    "docs/design/lane-addons-composer.html": "9d85c16a154374e55c987291f163e75a74b67dc9e6906434f22a0747c338689f",
+    "docs/design/lane-composition-export.js": "d7b2d05c1b97544f40fbec2532d3830e85ca2844bebfc3664048782b12fe1937",
+    "addons/fusion-report/server.py": "61a526172db1ae1e029a34c36afb131c8162825bf8f2853cb5903e83299ce5d9",
+    "test/test_lane_composition_browser.py": "2cecc985ae4174eb88f19e5825e40d2b9c15b9f5b028197687c50e345748d3ba"
+  },
+  "masc_server_execution": false,
+  "package_stdio_fixture": false,
+  "live_provider": false,
+  "broadcast": false,
+  "checks": [],
+  "status": "failed",
+  "browser": "147.0.7727.15",
+  "error": "b-after-a: expected Import fixture b / run-b, got Import fixture a / run-a",
+  "page_errors": []
+}

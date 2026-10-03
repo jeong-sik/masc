@@ -98,12 +98,18 @@ let response_content (response : L.api_response) =
   let text = L.visible_text_of_response response in
   if String.trim text <> "" then Ok (S.Text {type_="text";text})
   else
-    let images = List.filter (function L.Image _ -> true | _ -> false) response.content in
-    match images with
+    let content = List.filter (function
+      | L.Text text -> String.trim text <> ""
+      | L.Thinking _ | L.ReasoningDetails _ | L.RedactedThinking _ -> false
+      | L.Image _ | L.Audio _ | L.Document _ | L.ToolUse _ | L.ToolResult _ -> true)
+      response.content in
+    match content with
     | [L.Image {media_type;data;source_type=L.Base64}] ->
-        Ok (S.Image {type_="image";data;mime_type=media_type})
-    | [_] -> Error (Invalid_response "MCP sampling requires a base64 image response")
-    | _ :: _ :: _ -> Error (Invalid_response "MCP sampling cannot carry multiple image blocks")
+        (match Base64.decode data with
+         | Ok bytes when bytes <> "" -> Ok (S.Image {type_="image";data;mime_type=media_type})
+         | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
+    | [L.Image _] -> Error (Invalid_response "MCP sampling requires a base64 image response")
+    | _ :: _ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 

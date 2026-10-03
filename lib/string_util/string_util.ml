@@ -167,6 +167,41 @@ let contains_contiguous_token_sequence ~haystack ~needle =
     in
     loop haystack
 
+(* Trigram search cannot rank shorter terms. Short ASCII names use ASCII
+   word boundaries: RC excludes source/SRC, while RC가 retains Korean suffixes.
+   Longer and UTF-8 terms keep substring matching. Phrase endpoints obey the
+   same rule so "RC policy" does not match "SRC policy". *)
+let contains_query_term_ci haystack term =
+  let ascii_word = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+    | _ -> false in
+  let short_ascii token = String.length token > 0 && String.length token < 3
+    && String.for_all ascii_word token in
+  match query_tokens term with
+  | [] -> false
+  | tokens ->
+      let left_boundary = short_ascii (List.hd tokens) in
+      let right_boundary = short_ascii (List.hd (List.rev tokens)) in
+      if not (left_boundary || right_boundary) then contains_substring_ci haystack term
+      else
+        let haystack = String.lowercase_ascii haystack in
+        let term = String.lowercase_ascii term in
+        let rec find pos =
+          match find_substring ~pos haystack term with
+          | None -> false
+          | Some at ->
+              let after = at + String.length term in
+              if (not left_boundary || at = 0 || not (ascii_word haystack.[at - 1]))
+                 && (not right_boundary || after = String.length haystack
+                     || not (ascii_word haystack.[after])) then true
+              else find (at + 1) in
+        find 0
+
+let contains_all_query_terms_ci haystack query =
+  match query_tokens query with
+  | [] -> false
+  | tokens -> List.for_all (contains_query_term_ci haystack) tokens
+
 (* Token-AND containment: every whitespace-separated token of [query]
    must appear in [haystack] as a case-insensitive substring, in any
    order with arbitrary gaps ("갑오징어 ... 소주" matches the query

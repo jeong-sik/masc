@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+   MASC Workspace / Code  17:07:57  HTTP [connected]
+┌────────────────────────────────┐
+│  ▸ lib (1)                     │   lib/a.ml
+├────────────────────────────────┤ ────────────────────────────────────────────────────────────────────────────────────
+│  ◆ a.ml                        │      1 let x = 1
+│                                │      2 (* hi *)
+│                                │      3 let y = x
+│                                │      4
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+└────────────────────────────────┘
+  j/k:move  h/l:pane  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:open  Left / Esc:back  /:find  q:quit  …?
+ › to alpha   (i to write)

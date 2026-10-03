@@ -51,9 +51,206 @@ def digest(value: Json) -> str:
 
 
 def number(value: Json, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be finite numeric evidence")
-    return float(value)
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} exceeds finite numeric evidence") from error
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite numeric evidence")
+    return result
+
+
+def required(record: dict[str, Json], key: str) -> Json:
+    if key not in record:
+        raise ValueError(f"missing required input field {key}")
+    return record[key]
+
+
+def string(value: Json, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    return value
+
+
+def count(value: Json, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return value
+
+
+def array(value: Json, name: str) -> list[Json]:
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be an array")
+    return value
+
+
+def turn_ref(value: Json) -> None:
+    raw = text(value, "turn_ref")
+    trace, separator, turn = raw.rpartition("#")
+    if not trace or not separator or not turn.removeprefix("-").isascii() or not turn.removeprefix("-").isdigit():
+        raise ValueError("turn_ref must contain a trace and integer turn")
+
+
+def goals(value: Json) -> None:
+    # Keeper_librarian.goal_context_to_json and Keeper_turn_task_context.to_json
+    # share the same Goal_store criterion representation.
+    for item in array(value, "goals"):
+        goal = obj(item, "goal")
+        text(goal.get("goal_id"), "goal_id")
+        if goal.get("phase") not in ("executing", "verifying", "awaiting_confirmation", "completed", "dropped"):
+            raise ValueError("unknown Goal phase")
+        criterion = obj(goal.get("criterion"), "criterion")
+        text(criterion.get("revision"), "criterion revision")
+        string(criterion.get("title"), "criterion title")
+        for key in ("metric", "target_value"):
+            value = required(criterion, key)
+            if value is not None:
+                string(value, "criterion " + key)
+
+
+def goal_context(value: Json) -> None:
+    context = obj(value, "goal_context")
+    status = context.get("status")
+    if status == "no_task":
+        return
+    text(context.get("task_id"), "task_id")
+    if status == "available":
+        goals(context.get("goals"))
+    elif status == "unavailable":
+        string(context.get("detail"), "goal context detail")
+    else:
+        raise ValueError("unknown goal context status")
+
+
+def goal_source_error(value: Json) -> None:
+    # Match the durable Goal_store_unavailable record, including nested reason
+    # and mirror diagnostics, rather than treating an error object as complete.
+    record = obj(value, "goal source error")
+    string(record.get("file"), "goal source file")
+
+    def unix_error(value: Json) -> None:
+        error = obj(value, "unix error")
+        kind = text(error.get("kind"), "unix error kind")
+        if kind == "eunknownerr" and type(error.get("code")) is not int:
+            raise ValueError("unknown Unix error requires its integer code")
+
+    def reason(value: Json) -> None:
+        error = obj(value, "goal source reason")
+        kind = error.get("kind")
+        if kind == "unreadable":
+            unix_error(error.get("error"))
+        elif kind in ("not_json", "schema_rejected"):
+            string(error.get("detail"), "goal source detail")
+            if kind == "schema_rejected":
+                string(error.get("field"), "goal source field")
+        elif kind != "missing_after_init":
+            raise ValueError("unknown goal source reason")
+
+    reason(record.get("reason"))
+    mirror = obj(record.get("mirror"), "goal mirror")
+    if mirror.get("kind") == "mirror_unreadable":
+        unix_error(mirror.get("error"))
+    elif mirror.get("kind") == "mirror_decodes":
+        count(mirror.get("goal_count"), "mirror goal count")
+        string(mirror.get("updated_at"), "mirror updated_at")
+    elif mirror.get("kind") == "mirror_rejected":
+        reason(mirror.get("reason"))
+    elif mirror.get("kind") != "mirror_absent":
+        raise ValueError("unknown goal mirror kind")
+    reset = obj(record.get("reset_step"), "goal reset step")
+    if reset.get("kind") == "repair_field":
+        string(reset.get("field"), "goal repair field")
+    elif reset.get("kind") not in ("reset_goal_store", "restore_permission"):
+        raise ValueError("unknown goal reset step")
+
+
+def task_context(value: Json) -> None:
+    context = obj(value, "historical task context")
+    kind = context.get("kind")
+    if kind in ("no_task", "admission_not_recorded"):
+        return
+    if kind == "task_source_unavailable":
+        string(context.get("detail"), "task source detail")
+        return
+    if kind != "task":
+        raise ValueError("unknown historical task context kind")
+    text(context.get("task_id"), "historical task_id")
+    observation = obj(context.get("goals"), "historical goals")
+    if observation.get("kind") == "observed":
+        goals(observation.get("goals"))
+    elif observation.get("kind") == "unavailable":
+        error = obj(observation.get("error"), "historical goals error")
+        if error.get("kind") == "goal_links_unavailable":
+            string(error.get("detail"), "goal links detail")
+        elif error.get("kind") == "linked_goal_missing":
+            text(error.get("goal_id"), "missing goal_id")
+        elif error.get("kind") == "goal_source_unavailable":
+            goal_source_error(error.get("error"))
+        else:
+            raise ValueError("unknown historical goals error")
+    else:
+        raise ValueError("unknown historical goals observation")
+
+
+def input_payload(value: Json) -> None:
+    # SSOT: Keeper_librarian_runtime.exact_input_payload, prompt_material_payload
+    # and Keeper_librarian.prompt_variables (eligible Memory-only preflight).
+    payload = obj(value, "input payload")
+    messages = count(payload.get("message_count"), "message_count")
+    count(payload.get("current_fact_count"), "current_fact_count")
+    actual = obj(payload.get("actual_input"), "actual_input")
+    turn_ref(actual.get("turn_ref"))
+    goal_context(actual.get("goal_context"))
+    string(actual.get("keeper_instructions"), "keeper_instructions")
+    for item in array(actual.get("historical_task_contexts"), "historical_task_contexts"):
+        history = obj(item, "historical task range")
+        for first, after in (("first_message", "after_message"), ("first_tool_observation", "after_tool_observation")):
+            lower = count(history.get(first), first)
+            upper = count(history.get(after), after)
+            if lower > upper or (after == "after_message" and upper > messages):
+                raise ValueError("historical task range exceeds its frozen input")
+        source = obj(history.get("source"), "historical task source")
+        if source.get("kind") == "atoms":
+            text(source.get("trace_id"), "historical source trace_id")
+            if count(source.get("start_atom"), "start_atom") > count(source.get("end_atom"), "end_atom"):
+                raise ValueError("reversed historical atom range")
+        elif source.get("kind") not in ("official_turn", "boundary_only"):
+            raise ValueError("unknown historical source kind")
+        attribution = obj(history.get("attribution"), "historical attribution")
+        if attribution.get("kind") == "observed":
+            turn_ref(attribution.get("turn_ref"))
+            task_context(attribution.get("task_context"))
+        elif attribution.get("kind") != "unattributed":
+            raise ValueError("unknown historical attribution kind")
+    prompt = obj(actual.get("prompt"), "prompt")
+    if prompt.get("key") != "librarian":
+        raise ValueError("preflight comparison requires the eligible librarian prompt")
+    if prompt.get("source") not in ("override", "file", "missing"):
+        raise ValueError("unknown prompt source")
+    path = required(prompt, "file_path")
+    if path is not None:
+        string(path, "prompt file_path")
+    string(prompt.get("effective_template"), "effective_template")
+    count(prompt.get("rendered_bytes"), "rendered_bytes")
+    sha(prompt.get("rendered_sha256"), "rendered prompt hash")
+    variables = obj(actual.get("rendered_prompt_variables"), "rendered_prompt_variables")
+    for key in ("keeper_id", "facts_budget", "keeper_instructions", "historical_task_contexts",
+                "continuity", "working_context", "working_contexts_rule", "goal_context", "current_memory",
+                "conversation_history", "turn_tool_observations", "counterpart_observations"):
+        string(required(variables, key), "rendered variable " + key)
+    for key, variable in variables.items():
+        string(variable, "rendered variable " + key)
+
+
+def unique_object(pairs: list[tuple[str, Json]]) -> dict[str, Json]:
+    record: dict[str, Json] = {}
+    for key, value in pairs:
+        if key in record:
+            raise ValueError(f"duplicate JSON object key {key!r}")
+        record[key] = value
+    return record
 
 
 def attempts(value: Json, name: str) -> list[Json]:
@@ -87,13 +284,15 @@ def validate_observation(observation: dict[str, Json]) -> None:
     status = observation.get("status")
     received_fields = ("destination", "model", "request_body_sha256", "decision",
                        "probabilities", "confidence", "passed_over")
-    if status in ("awaiting_answer", "failed") and any(key in observation for key in received_fields):
+    if status in ("awaiting_answer", "failed", "skipped", "ineligible", "question_unavailable") and any(key in observation for key in received_fields):
         raise ValueError("answerless preflight cannot contain received-answer evidence")
-    if status == "awaiting_answer":
+    if status in ("awaiting_answer", "skipped", "ineligible", "question_unavailable"):
+        if status != "awaiting_answer":
+            text(observation.get("reason"), "uncalled preflight reason")
         if "elapsed_s" not in observation or observation["elapsed_s"] is not None:
-            raise ValueError("awaiting preflight must record null elapsed time")
+            raise ValueError("uncalled or awaiting preflight must record null elapsed time")
         if "failure" in observation:
-            raise ValueError("awaiting preflight cannot contain completed failure evidence")
+            raise ValueError("uncalled or awaiting preflight cannot contain completed failure evidence")
         return
     if number(observation.get("elapsed_s"), "preflight elapsed_s") < 0:
         raise ValueError("preflight elapsed_s must be nonnegative")
@@ -149,18 +348,18 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     output = obj(run.get("output"), "output")
     if run["status"] == "succeeded" and output.get("generation_path") == "full_lane":
         text(selected_slot, "successful full-lane selected_slot")
-    elapsed = run.get("elapsed_s")
-    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
-        raise ValueError("elapsed_s must be numeric")
-    if not math.isfinite(elapsed) or elapsed < 0:
+    if run["status"] == "failed":
+        text(run.get("code"), "failed run code")
+        text(run.get("detail"), "failed run detail")
+    elapsed = number(run.get("elapsed_s"), "run elapsed_s")
+    if elapsed < 0:
         raise ValueError("elapsed_s must be finite and nonnegative")
-    payload = obj(run.get("input"), "input").get("payload")
-    actual_input = obj(
-        obj(payload, "input payload").get("actual_input"), "actual_input"
-    )
-    prompt = obj(actual_input.get("prompt"), "prompt")
-    sha(prompt.get("rendered_sha256"), "rendered prompt hash")
-    return run, payload, output, float(elapsed)
+    source_input = obj(run.get("input"), "input")
+    if source_input.get("kind") != "exact":
+        raise ValueError("Librarian input must use the exact payload envelope")
+    payload = source_input.get("payload")
+    input_payload(payload)
+    return run, payload, output, elapsed
 
 
 def compare(manifest: Json) -> dict[str, Json]:
@@ -209,6 +408,7 @@ def compare(manifest: Json) -> dict[str, Json]:
             or baseline_output.get("full_llm_skipped") is not False
         ):
             raise ValueError("baseline must record disabled preflight and no skip")
+        validate_observation(baseline_jev)
         observation = obj(
             preflight_output.get("jev_preflight"), "preflight observation"
         )
@@ -277,6 +477,10 @@ def compare(manifest: Json) -> dict[str, Json]:
                 "preflight_run_id": preflight["run_id"],
                 "baseline_status": baseline["status"],
                 "preflight_status": preflight["status"],
+                "baseline_failure": {key: baseline[key] for key in ("code", "detail")}
+                    if baseline["status"] == "failed" else None,
+                "preflight_failure": {key: preflight[key] for key in ("code", "detail")}
+                    if preflight["status"] == "failed" else None,
                 "preflight_observation": observation,
                 "baseline_elapsed_s": baseline_s,
                 "preflight_elapsed_s": preflight_s,
@@ -307,7 +511,7 @@ def main() -> int:
     args = parser.parse_args()
     path = cast(Path, args.manifest)
     try:
-        manifest = cast(Json, json.loads(path.read_text()))
+        manifest = cast(Json, json.loads(path.read_text(), object_pairs_hook=unique_object))
         report = compare(manifest)
     except (OSError, ValueError) as error:
         print(f"preflight measurement refused: {error}", file=sys.stderr)

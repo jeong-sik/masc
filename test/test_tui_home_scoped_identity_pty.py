@@ -221,6 +221,9 @@ def superseded_scoped_match_journey(executable):
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
+    initial_briefing = copy.deepcopy(briefing)
+    initial_briefing[1]["summary"]["workspace_health"] = "initializing"
+    initial_briefing_read = False
 
     def record(path):
         with lock:
@@ -229,7 +232,11 @@ def superseded_scoped_match_journey(executable):
             return phase
 
     def read_briefing():
+        nonlocal initial_briefing_read
         record(BRIEFING)
+        if not initial_briefing_read:
+            initial_briefing_read = True
+            return initial_briefing
         return briefing
 
     def read_operator():
@@ -272,7 +279,7 @@ def superseded_scoped_match_journey(executable):
         config = Path(base, ".masc", "config")
         config.mkdir(parents=True, exist_ok=True)
         (config / "runtime.toml").write_text(
-            '[tui]\nopening = "keeper"\nopening_keeper = "alpha"\n'
+            '[tui]\nopening = "dashboard"\nopening_keeper = "alpha"\n'
             'last_chat_keeper = "alpha"\n', encoding="utf-8",
         )
         local = Path(base).resolve()
@@ -296,6 +303,10 @@ def superseded_scoped_match_journey(executable):
 
     def interact(process, fd, _slave, output, _base):
         try:
+            # Initial identity adoption schedules a full follow-up refresh.
+            # Its applied briefing must precede the scoped-navigation ledger.
+            h.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+            h.palette_go(process, fd, output, b"keeper alpha", b"Esc:list")
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
             h.drain_until_quiet(process, fd, output)
@@ -385,7 +396,7 @@ def superseded_scoped_match_journey(executable):
     h.run_terminal_scenario(
         executable, description="Home drops old scoped A after newer full B mismatch",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        prepare_workspace=prepare, refresh=60.0, starts_in_chat=True,
+        prepare_workspace=prepare, refresh=60.0,
     )
     home.assert_no_decision_posts(requests)
 

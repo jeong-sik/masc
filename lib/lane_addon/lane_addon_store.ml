@@ -314,17 +314,33 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
       | Ok (Some (path, handle)) ->
             let rec next () = match Unix.readdir handle with
               | name when Filename.check_suffix name ".json" && not (skip name) ->
+                  let pending_root =
+                    if t.root_parent_pending then
+                      Some (Unix.lstat t.root, Unix.stat (Filename.dirname t.root))
+                    else None in
                   let* bytes = bounded_file_for_sampling ~max_bytes (Filename.concat path name) in
                   let json = Yojson.Safe.from_string bytes in
                   (* Every record depends on this root, including pending
                      requests that have no outcome blob to verify. *)
-                  if t.root_parent_pending then (
-                    let parent_fd = Unix.openfile (Filename.dirname t.root)
+                  (match pending_root with
+                   | None -> ()
+                   | Some (root_before, parent_before) ->
+                    let parent_path = Filename.dirname t.root in
+                    let parent_fd = Unix.openfile parent_path
                       [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
                     Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
-                      if (Unix.fstat parent_fd).Unix.st_kind <> Unix.S_DIR then
-                        raise (Sys_error "retained evidence root parent is not a directory");
-                      sync_parent parent_fd);
+                      let same_directory before after =
+                        before.Unix.st_kind = Unix.S_DIR && after.Unix.st_kind = Unix.S_DIR
+                        && before.Unix.st_dev = after.Unix.st_dev
+                        && before.Unix.st_ino = after.Unix.st_ino in
+                      let verify_root () =
+                        if not (same_directory root_before (Unix.lstat t.root))
+                           || not (same_directory parent_before (Unix.stat parent_path))
+                           || not (same_directory parent_before (Unix.fstat parent_fd)) then
+                          raise (Sys_error "retained evidence root or parent changed during recovery") in
+                      verify_root ();
+                      sync_parent parent_fd;
+                      verify_root ());
                     t.root_parent_pending <- false);
                   (* The first terminal write includes exact outcome bytes, so a
                      crash before blob publication is recoverable. *)

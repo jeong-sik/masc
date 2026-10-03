@@ -48,7 +48,7 @@ type account_emails =
   | Email_list_unrecognized  (* the inventory carried no readable email list *)
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
-  mutable provider : provider option; mutable models : model list; mutable selected_models : string list;
+  mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
@@ -61,7 +61,7 @@ type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved of saved | Refresh_retry
   | Select_existing of provider
-      (** Open a configured account's remaining models without logging in again. *)
+      (** Open a configured account's models, including labelled existing connections, without logging in again. *)
   | Start of { provider : provider; existing : bool }
       (** Log in through [provider]: a new account, or explicitly again. *)
   | Input of int * Yojson.Safe.t | Cancel

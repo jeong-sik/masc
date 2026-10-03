@@ -119,7 +119,8 @@ class ItemWire(authority.WorkspaceWire):
             held = self.hold_next and phase == "a"
             if held:
                 self.hold_next = False
-            self.events.append({"event": "items", "phase": phase, "state": state, "held": held})
+            self.events.append({"event": "items", "phase": phase, "state": state, "held": held,
+                "missing_revision": self.missing_revision, "malformed_revision": self.malformed_revision})
         if held:
             self.held_started.set()
             if not self.release_held.wait(timeout=30.0):
@@ -160,6 +161,13 @@ def run(binary, captures):
                 (captures / (name + ".txt")).write_bytes(visible())
                 (captures / (name + ".pty")).write_bytes(output)
             print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
+
+        def item_read_observed(*, missing=False, malformed=False):
+            with wire.lock:
+                return any(event["event"] == "items"
+                    and event["missing_revision"] == missing
+                    and event["malformed_revision"] == malformed
+                    for event in wire.events)
 
         def item_row(name):
             rows = [line for line in visible().splitlines() if name in line]
@@ -240,7 +248,9 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Keeper account revision is not observed in the current roster" in text,
+            wait(lambda text: b"Account unavailable:" in text
+                 and (b"Keeper is not observed in the current roster" in text
+                      or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-unavailable")
@@ -248,16 +258,14 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
             wire.set_missing_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "missing revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(missing=True) and b"Balance 3.250 Candle" in text,
+                 "missing public revision blocked the authenticated Item account")
             wire.set_missing_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
-            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
-                 "malformed revision retained Item monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            wait(lambda text: item_read_observed(malformed=True) and b"Balance 3.250 Candle" in text,
+                 "malformed public revision blocked the authenticated Item account")
             capture("a-revision-malformed")
             wire.set_malformed_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,

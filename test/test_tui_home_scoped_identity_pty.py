@@ -221,6 +221,8 @@ def superseded_scoped_match_journey(executable):
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
+    initial_briefing = copy.deepcopy(briefing)
+    initial_briefing[1]["summary"]["workspace_health"] = "initializing"
 
     def record(path):
         with lock:
@@ -229,7 +231,12 @@ def superseded_scoped_match_journey(executable):
             return phase
 
     def read_briefing():
-        record(BRIEFING)
+        with lock:
+            phase = state["phase"]
+            calls.append((BRIEFING, phase))
+            initial_read = phase == "initial" and calls.count((BRIEFING, "initial")) == 1
+        if initial_read:
+            return initial_briefing
         return briefing
 
     def read_operator():
@@ -298,11 +305,18 @@ def superseded_scoped_match_journey(executable):
         try:
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
+            # Initial authority adoption schedules a second full reading while
+            # the connection badge stays connected. Its distinct Health row
+            # proves that bundle applied before the scoped-only baseline.
+            h.press_label_on_screen(process, fd, output, b"Dashboard",
+                                    row=1, needle=b"Enter:open")
+            h.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+            h.palette_go(process, fd, output, b"keeper alpha", b"Esc:list")
             h.drain_until_quiet(process, fd, output)
             with lock:
                 assert ("/health", "initial") in calls, calls
                 baseline = calls.count((BRIEFING, "initial"))
-                assert baseline >= 1, calls
+                assert baseline >= 2, calls
                 state["phase"] = "old-scoped"
             # Home's static footer is available before its scoped GET settles.
             h.press_label_on_screen(process, fd, output, b"Dashboard",

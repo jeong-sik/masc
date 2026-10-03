@@ -125,4 +125,5 @@ type keeper_usage_window =
 val decode_keeper_usage_window :
   Yojson.Safe.t -> (keeper_usage_window, string) result
 (** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero. *)
+    A null sum stays absent, and a loading placeholder never reads as zero.
+    [generated_at] must fit Ptime's supported civil-time range before rendering. *)

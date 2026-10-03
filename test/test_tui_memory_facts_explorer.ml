@@ -370,8 +370,8 @@ let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
-      , [ test_case "category toggle respects visible width" `Quick test_category_toggle_obeys_visible_surface_width;
-        test_case "category navigation" `Quick test_category_navigation
+      , [ test_case "category toggle respects visible width" `Quick test_category_toggle_obeys_visible_surface_width
+        ; test_case "category navigation" `Quick test_category_navigation
         ; test_case "category filtering isolation" `Quick test_category_filtering_isolation
         ] )
     ; ( "sorting"

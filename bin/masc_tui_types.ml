@@ -9798,16 +9798,16 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                String.compare (claim a) (claim b))
              filtered_rows)
 
-(* The categories the loaded ordinary store and source store actually hold,
-   distinct and in the taxonomy's constructor order -- the [c] cycle walks
-   these. Read from the rows rather than [all_categories], so the strip names
-   only the categories this keeper has written. *)
 let toggle_memory_facts_categories ~cols (state : state) =
   match Masc_tui_roster_pane.toggle_hidden
           ~hidden:(not state.memory_facts_categories_open) ~cols with
   | None -> ()
   | Some hidden -> state.memory_facts_categories_open <- not hidden
 
+(* The categories the loaded ordinary store and source store actually hold,
+   distinct and in the taxonomy's constructor order -- the [c] cycle walks
+   these. Read from the rows rather than [all_categories], so the strip names
+   only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
   match memory_facts_snapshot state with
   | None -> []

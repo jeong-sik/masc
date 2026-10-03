@@ -13,7 +13,7 @@ No row below implies a production rollout.
 | Usage Trend | Daily values and missing samples hard to distinguish | Implemented | #40906; fixed-scale daily plots, UTC labels, zero versus missing, responsive paired charts |
 | Login results | Small terminal loses summary and cannot reach every result | Implemented | #40924; 32 workflow tests, 11 PTY scenarios, exact browser frame replay |
 | Usage Keepers | Text-only tokens/cost; comparison and measurement coverage hard to scan | Implemented; candidate verified | #40930; separate metric scales, reported/missing evidence and generated UTC time; real HTTP snapshot found all costs unreported |
-| Keeper coverage | Decoder omits `metrics_read.unread_turn_rows` from partial coverage | Pending fix | #40931; source producer/decoder mismatch; no live affected sample observed |
+| Keeper coverage | Unread turn rows and malformed rows both make totals incomplete | Implemented; source reviewed | #40936 requires both counts and suppresses comparison bars for partial rows; current native execution remains unverified; historical #40931 evidence is retained |
 | Recent sidebar | Distinguish no events, disconnected observer and current inactivity | Pending audit | `masc_tui_observer.{ml,mli}` and sidebar rendering; trace typed data before changing labels |
 | Dashboard | Health/work summaries already distinguish some missing/partial states | Partially inspected | Audit source timestamps, denominator and navigation to details |
 | Work | Task, Goal, schedule and verification state comprehension | Pending audit | Trace list/detail views and supported interactions |

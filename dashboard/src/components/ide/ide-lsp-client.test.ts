@@ -624,10 +624,11 @@ describe('inlay hints in the editor', () => {
       { position: { line: 0, character: 3 }, label: 'first' },
       { position: { line: 0, character: 3 }, label: 'second' },
       { position: { line: 1, character: 999 }, label: 'line end' },
+      { position: { line: 1, character: 998 }, label: 'same effective end' },
     ], async view => {
       const hints = [...view.dom.querySelectorAll('.cm-inlayHint')]
-      expect(hints.map(hint => hint.textContent)).toEqual(['first', 'second', 'later', 'line end'])
-      expect(hints.map(hint => view.posAtDOM(hint))).toEqual([3, 3, 12, view.state.doc.length])
+      expect(hints.map(hint => hint.textContent)).toEqual(['first', 'second', 'later', 'line end', 'same effective end'])
+      expect(hints.map(hint => view.posAtDOM(hint))).toEqual([3, 3, 12, view.state.doc.length, view.state.doc.length])
     })
   })
 
@@ -643,9 +644,16 @@ describe('inlay hints in the editor', () => {
       expect(hint.querySelector('int')).toBeNull()
       expect(hint.querySelector('[title]')?.getAttribute('title')).toBe('**integer**')
       hints[0]!.label[1]!.tooltip = { kind: 'plaintext', value: 'updated part tooltip' }
-      // The label text stays identical. Widget equality must include part tooltips.
-      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } })
-      await replyHints(socket, hints)
+      // Refresh after reconnect without changing the document or clearing its
+      // hint field. Identical label text must not retain the old part tooltip.
+      socket.close()
+      await vi.runOnlyPendingTimersAsync()
+      const reconnected = mockSockets.at(-1)!
+      expect(reconnected).not.toBe(socket)
+      await completeHandshake(reconnected)
+      readyLanguage(reconnected)
+      expect(view.dom.querySelector('.cm-inlayHint [title]')?.getAttribute('title')).toBe('**integer**')
+      await replyHints(reconnected, hints)
       expect(view.dom.querySelector('.cm-inlayHint [title]')?.getAttribute('title')).toBe('updated part tooltip')
     })
   })

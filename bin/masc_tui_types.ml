@@ -7555,6 +7555,13 @@ let pending_detail_read (state : state) ~tab ~keeper =
     (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
     state.detail_reads
 
+(* The tick may reopen a provider read only after the old response settles and
+   the same workspace confirms the waiting Keeper's login. The expectation
+   carries no consent URL or authorization; it only keeps the read alive. *)
+let identity_login_recovery_poll_ready (state : state) keeper_name =
+  identity_login_pending_for_keeper state keeper_name
+  && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
+
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
     (pending_detail_read state ~tab ~keeper)

@@ -172,10 +172,13 @@ let lane_publication registry lane_id =
         registry.exact_output_lanes with
       | None -> []
       | Some lane -> List.map (fun (slot : admitted_slot) ->
+          let binding = List.assoc_opt slot.slot_id registry.runtime_observations
+            |> Option.map (fun observation -> observation.candidate) in
           slot.slot_id,
           (Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
            |> Result.map (fun candidate ->
-             Exact_output.target_identity_fingerprint candidate.Exact_output.identity.target_identity))) lane.slots in
+             Exact_output.target_identity_fingerprint candidate.Exact_output.identity.target_identity)),
+          binding) lane.slots in
     declaration, targets
 ;;
 
@@ -190,7 +193,14 @@ let changed_subscribers ~previous ~current =
       | None, None -> true
       | Some before, Some after -> Runtime_schema.equal_exact_output_lane_decl before after
       | None, Some _ | Some _, None -> false in
-    not same_declaration || before_targets <> after_targets) !lane_subscriptions
+    let same_targets = List.equal
+        (fun (before_id, before_target, before_binding)
+             (after_id, after_target, after_binding) ->
+          String.equal before_id after_id && before_target = after_target
+          && Option.equal Runtime_candidate_backpressure.same_candidate_binding
+               before_binding after_binding)
+        before_targets after_targets in
+    not same_declaration || not same_targets) !lane_subscriptions
 ;;
 
 let notify_lane_changes subscriptions =

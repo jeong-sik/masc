@@ -4,12 +4,10 @@ A Keeper assigned directly to one runtime has no alternative candidate when
 that account is quota-blocked. An active lifecycle or a successful account probe
 does not establish that its pending reviews are being completed.
 
-The October 3 runtime audit observed Antigravity quota refusals on two review
-Keepers, 30 pending completion-authority Tasks, 30 runnable events and 7 events
-retained under paused/dead owners. These are different queues and are not added
-together as a count of independent failures. The quota refusals had no observed
-next runtime. DNS and Codex routing errors also recurred between successful
-turns; do not classify a successful probe as a permanent repair.
+A recovery audit must capture timestamped health and attempt evidence before
+claiming queue counts, provider refusals or the absence of a next runtime.
+Keep runnable events, paused/dead-owner events and completion-authority Tasks
+as separate queues. A successful account probe is not durable queue progress.
 
 ## Configure an alternative
 
@@ -53,7 +51,13 @@ For an existing workspace:
    reviewer = "reviewer-failover"
    ```
 
-5. Inspect the next naturally scheduled turn's attempt/runtime evidence and the
+5. Before waiting for a scheduled turn, inspect the target Keeper's lifecycle
+   and owner fiber. A runtime assignment does not resume a paused Keeper or
+   create a missing owner. Use the separate lifecycle resume/recovery action
+   appropriate to the recorded state, then confirm the owner is runnable.
+   Preserve the original pending event and resolve any unknown outward effect
+   before permitting another dispatch.
+6. Inspect the next naturally scheduled turn's attempt/runtime evidence and the
    original event's durable acknowledgment. Do not claim recovery from a saved
    assignment or an account/read probe alone. A completed review must still
    satisfy current-head independent review rules.
@@ -63,7 +67,11 @@ candidate may run. A timeout after turn dispatch with an unknown outward effect
 requires resolving the original attempt; another candidate is not permission to
 repeat it. Do not delete events, advance Librarian progress or mark Tasks Done
 to make an outage disappear. Rollback restores the saved assignment and removes
-the new lane only if no other assignment or Fusion seat uses it.
+the new lane only after confirming that `[runtime].default`, every Keeper
+assignment and every Fusion seat no longer references it. If the default route
+was changed to this lane, restore its captured previous value before removal.
+Read back the configuration after each rollback step; an in-use refusal is not
+a completed rollback.
 
 ## Verify the separate judgment lane
 

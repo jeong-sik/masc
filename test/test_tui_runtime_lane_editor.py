@@ -370,6 +370,12 @@ def run(executable: str) -> None:
         os.write(fd, b"J")
         if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("J posted nothing")
+        frame = h.send_and_wait(
+            process, fd, output, b"R",
+            b"lane write refused: " + BUSY,
+        )
+        if f"rename lane {NEW_LANE} to:".encode() in h.screen_text(frame):
+            raise AssertionError("R opened a rename field while a write was pending")
         h.send_and_wait(
             process, fd, output, b"x",
             b"lane write refused: " + BUSY,

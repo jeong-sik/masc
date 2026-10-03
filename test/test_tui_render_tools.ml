@@ -197,6 +197,26 @@ let surface_text state =
   |> List.map snd
   |> String.concat "\n"
 
+let test_the_screen_distinguishes_unreported_bytes_from_zero () =
+  let unknown = surface_text (state_showing ~unavailable_skill_names:[] ()) in
+  Alcotest.(check bool) "missing byte counts are unknown" true
+    (contains "deferred bodies=? · skill tool schema=?/? all tools" unknown);
+  let effective =
+    match surface_with ~unavailable_skill_names:[] () with
+    | `Assoc fields ->
+      `Assoc (fields @ [ "tool_surface_bytes", `Int 0;
+                         "skill_tool_surface_bytes", `Int 0;
+                         "skill_body_bytes", `Int 0 ])
+    | _ -> Alcotest.fail "expected the surface fixture object"
+  in
+  let state = make_state () in
+  (match Masc.Tui_decode_tools.decode_tool_snapshot (tools_snapshot ~effective) with
+   | Ok snapshot -> state.tools_inventory <- Some snapshot
+   | Error detail -> Alcotest.failf "decode failed: %s" detail);
+  Alcotest.(check bool) "a reported zero remains zero" true
+    (contains "deferred bodies=0B · skill tool schema=0B/0B all tools"
+       (surface_text state))
+
 let test_the_screen_names_a_configured_skill_that_is_not_there () =
   let shown =
     surface_text
@@ -272,6 +292,9 @@ let () =
             test_the_usage_pane_names_both_sides_of_a_shadow
         ; Alcotest.test_case "the shared strip drawing" `Quick
             test_the_strip_is_the_shared_drawing
+        ; Alcotest.test_case
+            "missing Skill bytes are unknown, reported zero stays zero" `Quick
+            test_the_screen_distinguishes_unreported_bytes_from_zero
         ; Alcotest.test_case
             "the screen names a configured skill that is not there" `Quick
             test_the_screen_names_a_configured_skill_that_is_not_there

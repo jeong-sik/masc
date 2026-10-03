@@ -47,7 +47,7 @@ let existing_file = Env_config_core.existing_file
    PR-12.  The previous helper accepted an arbitrary executable name
    argument but every caller passed [Sys.executable_name] — the
    typed surface always reads the current binary so the parameter is
-   dropped.  See [test_pr_f_test_mode_migration]. *)
+   dropped.  See [test_host_config_resolution] for the typed test-mode behavior. *)
 let running_under_test_executable () =
   Host_config.is_test_mode
     (Host_config.host ()).test_mode

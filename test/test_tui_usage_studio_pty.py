@@ -100,9 +100,9 @@ def journey(executable, no_color=False):
         _keyboard_harness.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
                        48, 220, b"claude@example.com")
-        for value in (b"Plan usage", b"Used 0%", b"Used 25%", b"Used 33%", b"Reset",
+        for value in (b"Plan usage", b"Reported 0%", b"Reported 25%", b"Reported 33%", b"Reset",
                       b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
-                      b"Unclassified limit", b"Catalogue", b"heard", b"claude@example.com"):
+                      b"Unclassified limit", b"Catalogue", b"reported", b"claude@example.com"):
             if value not in wide:
                 raise AssertionError(f"Plan omitted {value!r}: {wide!r}")
         if b"Quota scope trend" in wide or b"Keeper usage" in wide:

@@ -1,4 +1,4 @@
-"""The active conversation's portrait below its roster, through the real TUI.
+"""The active conversation's portrait above its roster, through the real TUI.
 
 No model calls: two fixture Keepers let selection and the open chat disagree.
 The Kitty case decodes complete PNG transfers, including identity changes;
@@ -45,7 +45,7 @@ SOURCE_MODULES = (
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
 TALL_ROWS = 30
-SHORT_ROWS = 18
+SHORT_ROWS = 15
 ROSTER_COLUMNS = 34
 CAPTION = "대화 · ".encode()
 IMAGE_ID = b"42"
@@ -55,9 +55,9 @@ PLACED = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H(.*?)\x1b8", re.S)
 CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")
 # A put names pixels the terminal already holds: no payload, no format.
 PUT = re.compile(rb"\x1b_Ga=p,([^;\x1b]*)\x1b\\")
-PUT_KEYS = {b"i": IMAGE_ID, b"p": b"1", b"C": b"1", b"r": b"8", b"q": b"2"}
+PUT_KEYS = {b"i": IMAGE_ID, b"p": b"1", b"C": b"1", b"r": b"4", b"q": b"2"}
 HALF_BLOCKS = "▀▄"
-PORTRAIT_ROWS = 8  # png_transfers validates r=8.
+PORTRAIT_ROWS = 4  # Compact chat icon, independently of detail portraits.
 ROW_WRITE = re.compile(rb"\x1b\[(\d+);1H\x1b\[0m\x1b\[2K")  # Frame_presenter.append_row
 CHAT = "/api/v1/keepers/chat/stream"
 PROGRESS = b"IN PROGRESS"
@@ -109,7 +109,7 @@ def png_transfers(output: bytes) -> list[tuple[int, int, bytes]]:
         assert fields.get(b"f") == b"100", "portrait must use the PNG decoder"
         assert b"o" not in fields, "portrait must not use Kitty transport inflation"
         assert fields.get(b"p") == b"1" and fields.get(b"C") == b"1", "unstable placement identity/cursor"
-        assert fields.get(b"r") == b"8", "pixel portrait must reserve eight rows"
+        assert fields.get(b"r") == b"4", "chat icon must reserve four rows"
         for index, chunk in enumerate(chunks):
             keys = dict(item.split(b"=", 1) for item in chunk[1].split(b",") if b"=" in item)
             assert keys.get(b"m") == (b"0" if index == len(chunks) - 1 else b"1"), "unfinished PNG chunks"
@@ -121,6 +121,7 @@ def png_transfers(output: bytes) -> list[tuple[int, int, bytes]]:
         assert width == height and 0 < width <= 160, "portrait exceeds the existing pixel cap"
         assert png[24:26] == b"\x08\x06", "portrait lost 8-bit RGBA alpha"
         offset, compressed = 8, []
+        kind = b""
         while offset < len(png):
             length = int.from_bytes(png[offset:offset + 4], "big")
             kind = png[offset + 4:offset + 8]
@@ -271,10 +272,10 @@ def mosaic_resizes(binary: str) -> None:
             rows = screen(output)
             caption = caption_row(rows, b"alpha")
             band = mosaic_rows(rows)
-            assert len(band) >= 6 and all(caption < row <= caption + 12 for row in band), "mosaic escaped its reserved band"
-            # Row 1 is the tab strip; the roster starts at row 2. Its
-            # eight drawn rows leave four entries after its four chrome rows.
-            assert caption - 2 >= 8, "portrait left fewer than four selectable roster rows"
+            assert len(band) >= 4 and all(caption < row <= caption + 8 for row in band), "mosaic escaped its reserved band"
+            roster = [row for row, text in rows.items() if b"KEEPERS" in text[:ROSTER_COLUMNS]]
+            assert len(roster) == 1 and roster[0] > caption + 8, "conversation icon must precede the selectable roster"
+            assert any(b"alpha" in text[:ROSTER_COLUMNS] for row, text in rows.items() if row > roster[0]), "portrait displaced the roster entries"
             assert_chat_intact(rows, b"alpha")
 
         visible()
@@ -309,7 +310,7 @@ def pixels_follow_conversation(binary: str) -> None:
         rows = screen(output)
         caption = caption_row(rows, b"alpha")
         assert row == caption + 1, f"pixels at row {row} are not below caption row {caption}"
-        assert column == 10, "16-cell portrait is not centered in the 30-cell roster interior"
+        assert column == 14, "8-cell pixel icon is not centered in the 30-cell roster interior"
         assert row + 7 < _keyboard_harness.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"
         assert_chat_intact(rows, b"alpha")
@@ -450,7 +451,8 @@ def running_turn_keeps_the_portrait(binary: str) -> None:
             # nothing about the picture. The whole turn counts: where the
             # progress row lands is the layout's choice, so its rows are
             # recorded above rather than required beside the picture.
-            assert evidence["frames_beside_in_turn"] >= MOTION_STEPS, f"the turn barely touched the portrait's rows: {evidence}"
+            assert evidence["frames_beside_in_turn"] > 0, f"the turn never repainted the icon's rows: {evidence}"
+            assert puts > 0 or evidence["full_redraw"], f"the repainted icon was not restored: {evidence}"
             assert not resent, f"the running turn sent the unchanged portrait's pixels again: {resent[:3]}"
             assert_chat_intact(screen(output), b"alpha")
             close_chat(process, fd, output)

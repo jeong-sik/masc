@@ -7,10 +7,13 @@
 open Types
 include Mcp_schema
 module Stdio_transport = struct
-  include Mcp_protocol_eio.Stdio_transport
-
+  module Transport = Mcp_protocol_eio.Stdio_transport
+  type t = { transport : Transport.t; max_size : int option }
+  let create ~stdin ~stdout ?max_size () =
+    {transport = Transport.create ~stdin ~stdout ?max_size (); max_size}
+  let close t = Transport.close t.transport
   let read t =
-    try Mcp_protocol_eio.Stdio_transport.read t with
+    try Transport.read t.transport with
     | Eio.Buf_read.Buffer_limit_exceeded ->
       close t;
       Some (Error "MCP response exceeds the connection's byte limit")
@@ -18,6 +21,24 @@ module Stdio_transport = struct
       close t;
       Some (Error "MCP response nesting exceeds the parser's capacity")
   ;;
+  let write t msg =
+    let module J = Mcp_protocol.Jsonrpc in
+    let fits msg = Option.fold ~none:true ~some:(fun max_size ->
+      String.length (Yojson.Safe.to_string (J.message_to_yojson msg)) <= max_size) t.max_size in
+    let refuse () = close t; Error "MCP outgoing message exceeds the connection's byte limit" in
+    try
+      if fits msg then Transport.write t.transport msg
+      else match msg with
+        | J.Response response ->
+            let fallback = J.make_error ~id:response.id ~code:(-32603)
+              ~message:"response exceeds byte limit" () in
+            if fits fallback then Transport.write t.transport fallback else refuse ()
+        | J.Error response ->
+            let fallback = J.make_error ~id:response.id ~code:(-32603)
+              ~message:"response exceeds byte limit" () in
+            if fits fallback then Transport.write t.transport fallback else refuse ()
+        | J.Request _ | J.Notification _ -> refuse ()
+    with Stack_overflow | Yojson.Json_error _ | Invalid_argument _ -> refuse ()
 end
 
 module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)
@@ -28,6 +49,9 @@ type t =
   { client : Sdk_client.t
   ; kill : unit -> unit
   }
+
+type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
+  (Mcp_protocol.Sampling.create_message_result, string) result
 
 let text_of_tool_result (r : Sdk_types.tool_result) =
   List.filter_map
@@ -45,7 +69,7 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
     [command] is the executable path, [args] are command-line arguments.
     [env] optionally overrides the process environment. *)
 let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
-    ?max_response_bytes ?stderr () =
+    ?max_response_bytes ?stderr ?sampling_handler () =
   if Option.fold ~none:false ~some:(fun bytes -> bytes <= 0) max_response_bytes then
     Error (Error.Mcp (ServerStartFailed
       { command; detail = "max_response_bytes must be positive" }))
@@ -73,6 +97,14 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
         ()
     in
     let client = Sdk_client.create ~transport () in
+    let client = match sampling_handler with
+      | None -> client
+      | Some handler ->
+          let guarded_handler params =
+            try handler params with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          Sdk_client.on_sampling guarded_handler client in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()

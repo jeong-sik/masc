@@ -22,7 +22,7 @@ let test_space_and_identity () =
   check int "roster, caption, image and bottom use the existing left pane" 28
     (alpha.roster_rows + 1 + List.length alpha.picture_lines + 1);
   check bool "at least four roster entries remain" true (Masc_tui_frame.content_height ~rows:alpha.roster_rows >= 4);
-  check int "nominal placement reserves the caption row" (alpha.roster_rows + 1) p.row;
+  check int "placement is directly below the conversation caption" 1 p.row;
   check bool "pixels stay inside the roster border" true
     (p.column >= 2 && p.column + p.box.cols <= 32);
   check bool "pixels stay above the bottom border" true (p.row + p.box.rows < 28);
@@ -55,14 +55,14 @@ let test_observed_equipment () =
 let test_four_selectable_roster_rows_are_the_boundary () =
   let cache = Portrait.cache () in
   List.iter (fun display ->
-    let band = Option.get (Portrait.band_size display) in
+    let band = Option.get (Chat.band_size display) in
     let minimum_rows = Masc_tui_frame.chrome_rows + 4 + band.rows + 2 in
     check bool "one fewer row gives the space back to the roster" true
       (Option.is_none (prepare cache ~display ~rows:(minimum_rows - 1) "alpha"));
     let portrait = Option.get (prepare cache ~display ~rows:minimum_rows "alpha") in
     check int "the first fitting portrait leaves four selectable rows" 4
       (Masc_tui_frame.content_height ~rows:portrait.roster_rows))
-    [pixels; View.Mosaic]
+    [pixels; View.Pixels {cell_width = 9; cell_height = 20}; View.Mosaic]
 
 let test_small_and_colourless () =
   let cache = Portrait.cache () in
@@ -70,7 +70,7 @@ let test_small_and_colourless () =
     check bool "short pane gives all rows to the roster" true
       (Option.is_none (prepare cache ~display ~rows:12 "alpha"));
     check bool "narrow pane gives all columns to the roster" true
-      (Option.is_none (prepare cache ~display ~cols:15 "alpha")))
+      (Option.is_none (prepare cache ~display ~cols:7 "alpha")))
     [pixels; View.Mosaic];
   check bool "NO_COLOR suppresses the portrait" true
     (Option.is_none (prepare cache ~display:View.No_picture "alpha"));

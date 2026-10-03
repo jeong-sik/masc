@@ -219,7 +219,7 @@ def reopen_existing_without_login(binary):
         _keyboard_harness.send_and_wait(process, fd, output, b"j", b"> Codex account A")
         frame = _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"New account model")
         plain = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(frame))
-        assert b"Bound model A" not in plain and b"Bound model B" not in plain, "a bound model was offered again"
+        assert "[연결됨] Bound model A".encode() in plain and "[연결됨] Bound model B".encode() in plain, "connected models were hidden"
         assert b"[x] New account model" in plain, "the remaining model was not preselected"
         assert not any(path == LOGIN for path, _ in requests), "opening an existing account started login"
         leave_login_and_arm_quit(process, fd, output)

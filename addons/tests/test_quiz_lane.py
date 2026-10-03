@@ -11,7 +11,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tomllib
 import unittest
@@ -64,7 +64,7 @@ def run(package, calls):
     requests = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}]
     requests += [{"jsonrpc": "2.0", "id": i + 1, "method": "tools/call",
                   "params": {"name": name, "arguments": args}} for i, (name, args) in enumerate(calls)]
-    proc = subprocess.run([sys.executable, str(ADDONS / package / "server.py")],
+    proc = run_stdio([sys.executable, str(ADDONS / package / "server.py")],
                           input="".join(json.dumps(r) + "\n" for r in requests),
                           text=True, capture_output=True, check=True, timeout=10)
     assert proc.stderr == "", proc.stderr

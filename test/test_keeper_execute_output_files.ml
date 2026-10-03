@@ -17,7 +17,7 @@ let complete_path expected = function
   | Capture.Incomplete_file _ -> Alcotest.fail "child stream did not reach EOF"
   | Capture.Capture_failed { message; _ } -> Alcotest.fail message
 
-let with_process_output ?(stdout = stdout) ?(stderr = stderr) f =
+let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) f =
   let base_path = Filename.temp_dir "keeper-output-publication-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env ->
@@ -44,7 +44,19 @@ let with_process_output ?(stdout = stdout) ?(stderr = stderr) f =
             ~redact_identity_scalars:false ~additional_secret_files:[]
             ~base_path ~keeper_name:"output-publication-fixture"
         in
-        f ~base_path ~redaction ~stdout_path ~stderr_path files)))
+        let run () = f ~base_path ~redaction ~stdout_path ~stderr_path files in
+        if pool then
+          Eio.Switch.run (fun sw ->
+            let worker = Domain_pool.create ~sw ~domain_count:1
+                (Eio.Stdenv.domain_mgr env) in
+            let previous_pool = Domain_pool_ref.get () in
+            Domain_pool_ref.set worker;
+            Eio.Switch.on_release sw (fun () ->
+              match previous_pool with
+              | Some previous -> Domain_pool_ref.set previous
+              | None -> Domain_pool_ref.clear_for_tests ());
+            run ())
+        else run ())))
 
 let test_changed_eof_source_is_not_published () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
@@ -145,7 +157,7 @@ let blob_bytes ~base_path field fields =
 let test_non_utf8_child_output_is_preserved () =
   let stdout = "한글 intact\n" ^ "\x89PNG\r\n\x1a\n" in
   let stderr = "cut Korean: \xed\x95" in
-  with_process_output ~stdout ~stderr (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
+  with_process_output ~stdout ~stderr ~pool:true (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
     match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
     | Ok publication ->

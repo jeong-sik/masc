@@ -5719,6 +5719,7 @@ type state = {
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
+  mutable lane_run_preflight_details: bool;
   (* A projection of the last rendered payload, not another layout formula. *)
   mutable lane_run_detail_content_height: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
@@ -5846,6 +5847,7 @@ type state = {
   mutable memory_fact_claim_wrap:
     (string * int * string list * int) option;
   mutable memory_facts_category: memory_category_filter;
+  mutable memory_facts_categories_open: bool;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
   (* #39831: [d] on the Memory table shows the selected keeper's ledger rows;
@@ -8405,6 +8407,7 @@ let create_state
   lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
+  lane_run_preflight_details = false;
   lane_run_detail_content_height = 0;
   keeper_secrets = [];
   lanes_error = None;
@@ -8482,6 +8485,7 @@ let create_state
   memory_facts_scroll = 0;
   memory_fact_claim_wrap = None;
   memory_facts_category = Category_all;
+  memory_facts_categories_open = false;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
   memory_overview_detail = false;

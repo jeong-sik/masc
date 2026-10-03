@@ -9972,6 +9972,23 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
+  let with_after commit added =
+    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = List.assoc "output" fields in
+      let output = match output with `Assoc fields -> `Assoc
+        (("after", `Assoc ["commit", `String commit; "revision", `Int 4;
+                            "fact_count", `Int 2; "change", `Assoc
+                              ["added_count", `Int added; "removed_count", `Int 0]]) :: fields)
+        | _ -> Alcotest.fail "invalid fixture" in
+      `Assoc ["run", `Assoc (("output", output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let recorded = Tui_decode.decode_lane_run_detail (with_after "unchanged" 0) |> Result.get_ok in
+  Alcotest.(check bool) "snapshot result read from output, not JEV prediction" true
+    (Option.bind recorded.lrd_librarian_preflight (fun reading -> reading.lp_memory_result)
+     = Some (Tui_decode.Librarian_memory_unchanged (4,2)));
+  Alcotest.(check bool) "unchanged snapshot cannot report additions" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
   let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with

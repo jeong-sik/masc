@@ -25,6 +25,8 @@ SOURCE_MODULES = ("lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_render_memory.ml",
+    "bin/masc_tui_render_memory.mli",
 )
 
 DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
@@ -68,7 +70,12 @@ def detail_window(output: bytearray) -> tuple[int, int, int]:
 
 def run(executable: str) -> None:
     fixtures = h.memory_facts_http_fixtures()
-    status, payload = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    response = fixtures["/api/v1/keepers/alpha/memory-facts"]
+    if not isinstance(response, tuple):
+        raise AssertionError("memory fixture must be a status/payload response")
+    status, payload = response
+    if not isinstance(payload, dict):
+        raise AssertionError("memory fixture payload must be an object")
     for fact in payload["ordinary"]["facts"]:
         fact["claim"] = CLAIM
     for fact in payload["source_bound"]["facts"]:
@@ -96,6 +103,25 @@ def run(executable: str) -> None:
                 raise AssertionError(
                     f"the fact browser never drew {needle!r}: "
                     f"{plain_screen(output)[-900:]!r}")
+
+        # Category navigation is opt-in; it must give the fact width back.
+        h.resize_and_wait(process, master_fd, output, rows=38, columns=240,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("Category rail must be closed by default")
+        h.send_and_wait(process, master_fd, output, b"d", b"CATEGORIES")
+        h.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" not in plain_screen(output):
+            raise AssertionError("d did not open Category navigation")
+        h.send_and_wait(process, master_fd, output, b"d", LIST_STRIP)
+        h.drain_until_quiet(process, master_fd, output)
+        if b"CATEGORIES" in plain_screen(output):
+            raise AssertionError("d did not restore the full-width fact list")
+        h.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=h.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
+                          needle=b"MASC Memory", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, master_fd, output)
 
         # Recency opens on the dropped row, whose facts carry no claim; one step
         # down lands on an ordinary fact, and the list's block under that row is

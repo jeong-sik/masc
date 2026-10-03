@@ -1502,7 +1502,7 @@ let test_rows_and_header_share_one_grid () =
   let styled = ref [] in
   let collect_header line =
     let line = Masc_tui_theme.strip_sgr line in
-    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols cols) in
+    let line = Layout.drop_cells line (cols - Render_memory.memory_facts_pane_cols state cols) in
     styled := line :: !styled in
   Render_memory.render_memory_facts_body
     ~cols
@@ -1587,6 +1587,9 @@ let three_kinds_state ?(keeper = "alpha") ?(extra_ordinary = []) () =
 
 let test_category_rail_keeps_click_targets_and_frame_width () =
   let state = three_kinds_state () in
+  check int "default gives the facts all available width" 140
+    (Render_memory.memory_facts_pane_cols state 140);
+  state.memory_facts_categories_open <- true;
   state.memory_facts_category <- Types.Category_ordinary Cat.Preference;
   let render cols =
     Masc_tui_hit.reset Masc_tui_press.press_marks;
@@ -1611,7 +1614,11 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
       (Masc_tui_hit.to_list zones));
   let narrow, _ = render 80 in
   check bool "narrow frame keeps full fact width" false
-    (List.exists (contains "CATEGORIES") narrow)
+    (List.exists (contains "CATEGORIES") narrow);
+  state.memory_facts_categories_open <- false;
+  let closed, _ = render 140 in
+  check bool "closing Categories restores the fact reading" false
+    (List.exists (contains "CATEGORIES") closed)
 
 let test_category_rail_bounds_large_label_preview () =
   let name = "oversized_" ^ String.make 50_000 'a' in
@@ -1645,6 +1652,7 @@ let test_category_rail_wrapped_range_and_overflow () =
       ()
   in
   state.memory_facts_category <- cat_filter;
+  state.memory_facts_categories_open <- true;
   let render ~budget cols =
     Masc_tui_hit.reset Masc_tui_press.press_marks;
     let lines = ref [] in
@@ -1701,18 +1709,10 @@ let test_category_rail_wrapped_range_and_overflow () =
   let count = List.length detail_lines in
   let small_height = 4 in
   check bool "detail lines overflow small viewport" true (count > small_height);
-  let cat_line_indices =
-    List.filter_map
-      (fun (idx, line) ->
-        let stripped = Masc_tui_theme.strip_sgr line in
-        if contains "Category:" stripped || contains "custom_architecture" stripped then
-          Some idx
-        else None)
-      (List.mapi (fun i l -> (i, l)) detail_lines)
-  in
-  check bool "category field lines present in detail lines" true
-    (cat_line_indices <> []);
-  let last_cat_idx = List.fold_left max 0 cat_line_indices in
+  let indexed = List.mapi (fun i line -> i, Masc_tui_theme.strip_sgr line) detail_lines in
+  let first_cat_idx = indexed |> List.find (fun (_, line) -> contains "Category:" line) |> fst in
+  let next_field_idx = indexed |> List.find (fun (i, line) -> i > first_cat_idx && contains "Origin:" line) |> fst in
+  let last_cat_idx = next_field_idx - 1 in
   let initial_scroll = state.memory_fact_detail_scroll in
   check int "initial detail scroll starts at top" 0 initial_scroll;
   let scrolled =
@@ -1726,7 +1726,7 @@ let test_category_rail_wrapped_range_and_overflow () =
     (Option.is_some
        (Masc_tui_scroll.position_row ~scroll:scrolled ~height:small_height count));
   let end_scroll = Masc_tui_scroll.normalize ~count ~height:small_height max_int in
-  check bool "G reaches bottom of detail" true
+  check bool "normalizing the final viewport reaches bottom of detail" true
     (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
 
 (* The category row is the shared strip: the key first, then the entries
@@ -2202,10 +2202,10 @@ let test_facts_selection_follows_the_rendered_viewport () =
         incr used)
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let row = List.nth (Types.memory_fact_rows state) state.memory_facts_cursor in
-    let fact_cols = Render_memory.memory_facts_pane_cols cols in
+    let fact_cols = Render_memory.memory_facts_pane_cols state cols in
     let expected = Render_memory.memory_fact_row_line ~cols:fact_cols row
       |> Masc_tui_theme.strip_sgr in
-    if cols < Masc_tui_roster_pane.threshold_cols then
+    if fact_cols = cols then
       check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
     else
       let styled = Layout.fit_width
@@ -2228,6 +2228,9 @@ let test_facts_selection_follows_the_rendered_viewport () =
   (* Resizing is a redraw before input, so the renderer also follows a
      selection whose old scroll was computed for a larger body. *)
   move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- true;
+  move ~cols:140 ~budget:40 23;
+  state.memory_facts_categories_open <- false;
   assert_visible ~cols:60 ~budget:16 ();
   (* The search banner, retained read error and store error all consume
      actual rows above the list. Filtered End still selects a visible fact. *)

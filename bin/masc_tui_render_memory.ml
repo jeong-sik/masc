@@ -1277,14 +1277,14 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   in
   (detail_lines, height, overflowing, scroll)
 
-let memory_facts_pane_cols cols =
-  if cols >= Masc_tui_roster_pane.threshold_cols then
+let memory_facts_pane_cols state cols =
+  if state.memory_facts_categories_open && cols >= Masc_tui_roster_pane.threshold_cols then
     cols - Masc_tui_roster_pane.pane_cols - Message_layout.display_width " │ "
   else cols
 
 let memory_facts_content_height ~cols ~budget ~cursor state =
   let _, height, _, _ =
-    memory_facts_layout ~cols:(memory_facts_pane_cols cols) ~budget ~cursor state (memory_fact_rows state)
+    memory_facts_layout ~cols:(memory_facts_pane_cols state cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
 
@@ -1359,11 +1359,12 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                    store_ordinary_facts)
         in
         let keys = "  c/C:category  " in
+        let after = if state.memory_facts_categories_open then "  d:접기" else "  d:Category 펼치기" in
         let pills =
           if not show_category_strip then "  c/C:category · Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
-              ~width:(tab_strip_width ~cols ~before:keys ~after:"")
+              ~width:(tab_strip_width ~cols ~before:keys ~after)
               ~press:(fun filt text ->
                 Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
@@ -1373,6 +1374,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                    , state.memory_facts_category = filt
                    , filt ))
                  (Category_all :: all_categories))
+          ^ Ansi.dim ^ after ^ Ansi.reset
         in
         (stats, pills)
   in
@@ -1476,12 +1478,12 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
 
 let render_memory_facts_body ~cols ~budget (state : state)
     ~push ~push_styled ~push_selected ~push_divider ~push_empty =
-  if cols < Masc_tui_roster_pane.threshold_cols then
+  if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
       ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
-    let fact_cols = memory_facts_pane_cols cols in
+    let fact_cols = memory_facts_pane_cols state cols in
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
@@ -1555,9 +1557,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in
+    (* Both panes through the list-window helper the scroll panes read: two
+       arrays, one pass, each row reads its own cells -- no row of the loop
+       walks either list to find itself. *)
+    let rail_window = Rows.of_list ~first:0 ~height rail in
+    let facts_window = Rows.of_list ~first:0 ~height facts in
     for index = 0 to height - 1 do
-      let row lines = Option.value (List.nth_opt lines index) ~default:"" in
-      push (fit_width (row rail) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
-        ^ fit_width (row facts) fact_cols)
+      let cell window = Option.value (Rows.at window index) ~default:"" in
+      push (fit_width (cell rail_window) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+        ^ fit_width (cell facts_window) fact_cols)
     done
   end

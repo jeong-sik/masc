@@ -739,7 +739,6 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
 
 module For_testing = struct
   let write = write_with
-  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with
   let load_action = load_action_with
   let append_observation = append_observation_with

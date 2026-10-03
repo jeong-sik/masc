@@ -4,6 +4,7 @@ import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -23,6 +24,11 @@ def validate_result(row, runtime_id, case):
         if case['stage'] == 'weights':
             require(any(weight > 0 for weight in row['answer']['weights'].values()),
                     'successful weights must have positive sum')
+        # Frozen 4fae8f4 has one HTTP slot: validation records a response,
+        # then run_with records the accepted response before completion.
+        require([attempt['kind'] for attempt in receipt['output']['attempts']]
+                == ['dispatch', 'response', 'response'],
+                'successful receipt attempt trace disagrees with frozen execution')
         responses = [attempt for attempt in receipt['output']['attempts']
                      if attempt['kind'] == 'response']
         require(bool(responses) and all(attempt['slot'] == runtime_id
@@ -63,6 +69,10 @@ def validate_result(row, runtime_id, case):
                                           f'flow=[slot={runtime_id} {call}]'),
                 'HTTP failure detail disagrees with terminal failure structure')
 
+        require([attempt['kind'] for attempt in attempts]
+                == ['dispatch', 'http_failure', 'failure'],
+                'failed receipt attempt order disagrees with frozen execution')
+
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -73,6 +83,18 @@ def same_json(left, right):
         return json.dumps(value, sort_keys=True, ensure_ascii=False,
                           separators=(',', ':'), allow_nan=False)
     return canonical(left) == canonical(right)
+
+
+def render_prompt(template, encoded_input):
+    # Match Prompt_registry.extract_variables/render_template. The frozen
+    # appraiser supplies exactly one variable; other names fail pre-dispatch.
+    variable = re.compile(r"\{\{([^}]+)\}\}")
+    names = {match.group(1).strip(" \t\r\n\f") for match in variable.finditer(template)}
+    require(names - {""} == {"appraisal_input"},
+            'frozen prompt must bind only appraisal_input')
+    return variable.sub(lambda match: encoded_input
+                        if match.group(1).strip(" \t\r\n\f") == "appraisal_input"
+                        else match.group(0), template)
 
 
 def expected_schema(case):
@@ -212,7 +234,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         require(prompt['key'] == 'candle_appraiser_'+case['stage'], "audit check failed: prompt['key'] == 'candle_appraiser_'+case['stage']")
         require(prompt['effective_template'] == prompt_bodies[prompt['key']+'.md'], "audit check failed: prompt['effective_template'] == prompt_bodies[prompt['key']+'.md']")
         encoded_input = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
-        require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded_input), "audit check failed: prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded_input)")
+        require(prompt['rendered'] == render_prompt(prompt['effective_template'], encoded_input), "audit check failed: prompt['rendered'] == render_prompt(prompt['effective_template'], encoded_input)")
         prompt_hashes[case['id']].add(sha(prompt['rendered'].encode()))
         input_hashes[case['id']].add(sha(encoded_input.encode()))
         require(receipt['output']['semantic_verification'] == 'not_performed', "audit check failed: receipt['output']['semantic_verification'] == 'not_performed'")

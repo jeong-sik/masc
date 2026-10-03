@@ -13,6 +13,7 @@ from pathlib import Path
 AUDIT_MODULE = runpy.run_path(str(Path(__file__).with_name('audit-candidate.py')))
 AUDIT = AUDIT_MODULE['audit']
 same_json = AUDIT_MODULE['same_json']
+render_prompt = AUDIT_MODULE['render_prompt']
 
 def require(condition, detail):
     if not condition:
@@ -88,7 +89,7 @@ def load_run(directory, resources):
         require(prompt['effective_template'] == prompt_bodies[prompt['key'] + '.md'],
                 'receipt effective template disagrees with frozen prompt')
         encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
-        require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded),
+        require(prompt['rendered'] == render_prompt(prompt['effective_template'], encoded),
                 'receipt rendered prompt disagrees with frozen template and input')
     audited = AUDIT(directory, directory, resources)
     summaries = {}

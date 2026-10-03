@@ -486,7 +486,7 @@ class CandleEvidenceAudits(unittest.TestCase):
                 next(a for a in attempts if a['kind'] == 'response')['output'] = {'grade':'epic'}
             write_rows(bundle/'results.jsonl', rows)
             rewrite_fixture_registry(bundle, rows)
-            self.run_audit(script, bundle, bundle, error='response observations disagree')
+            self.run_audit(script, bundle, bundle, error='attempt trace' if missing else 'response observations disagree')
         rows = copy.deepcopy(original)
         row = next(row for row in rows if row['status'] != 'ok')
         row['receipt']['selected_slot'] = 'other.model'
@@ -510,12 +510,32 @@ class CandleEvidenceAudits(unittest.TestCase):
         for status, code in [('invalid_response', 'candle_appraisal_rejected'),
                              ('transport_unavailable', 'candle_appraisal_unavailable')]:
             row = rows[0]
-            row.update(status=status, answer='fixture failure')
-            row['receipt'].update(status='failed', code=code, detail='fixture failure')
-            row['receipt']['output']['result'] = {'error':'fixture failure'}
+            slot = row['receipt']['selected_slot']
+            http_detail = 'call_id=fixture cause=invalid JSON output raw_response=none'
+            detail = f'execution_failed: slot={slot} {http_detail}; flow=[slot={slot} call_id=fixture]'
+            if status == 'transport_unavailable':
+                http_detail = 'call_id=fixture cause=connection closed raw_response=none'
+                detail = f'execution_failed: slot={slot} {http_detail}; flow=[slot={slot} call_id=fixture]'
+            row.update(status=status, answer=detail)
+            row['receipt'].update(status='failed', code=code, detail=detail)
+            row['receipt']['output']['result'] = {'error':detail}
+            row['receipt']['output']['attempts'] = [
+                {'kind':'dispatch', 'slot':slot},
+                {'kind':'http_failure', 'slot':slot, 'detail':http_detail,
+                 'invalid_output':status == 'invalid_response', 'raw_response':None},
+                {'kind':'failure', 'transport':'http', 'detail':detail},
+            ]
             write_rows(bundle/'results.jsonl', rows)
             rewrite_fixture_registry(bundle, rows)
             self.run_audit(script, bundle, bundle)
+            row['receipt']['output']['attempts'].append(
+                {'kind':'response', 'slot':slot, 'output':{'grade':'small'}})
+            write_rows(bundle/'results.jsonl', rows)
+            rewrite_fixture_registry(bundle, rows)
+            self.run_audit(script, bundle, bundle, error='response or unsupported')
+            row['receipt']['output']['attempts'].pop()
+            write_rows(bundle/'results.jsonl', rows)
+            rewrite_fixture_registry(bundle, rows)
             original = [json.loads(line) for line in (bundle/'exact-lane-runs-v6.jsonl').read_text().splitlines()]
             for field in ('code', 'detail'):
                 with self.subTest(status=status, field=field):
@@ -523,6 +543,57 @@ class CandleEvidenceAudits(unittest.TestCase):
                     events[1]['completion'][field] = 'contradiction'
                     write_rows(bundle/'exact-lane-runs-v6.jsonl', events)
                     self.run_audit(script, bundle, bundle, error='registry failure code or detail disagrees')
+
+    def test_successful_receipts_reject_contradictory_or_reordered_attempts(self):
+        for source, script_name in [(CANDIDATE, 'audit-candidate.py'), (SURVEY, 'audit-provenance.py')]:
+            bundle = self.root/source.name
+            hydrate(source, bundle)
+            original = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+            for kind in ('failure', 'http_failure', 'rejected', 'reordered'):
+                with self.subTest(bundle=source.name, kind=kind):
+                    rows = copy.deepcopy(original)
+                    row = next(row for row in rows if row['status'] == 'ok')
+                    attempts = row['receipt']['output']['attempts']
+                    if kind == 'reordered':
+                        attempts.reverse()
+                    else:
+                        attempts.append({'kind':kind})
+                    write_rows(bundle/'results.jsonl', rows)
+                    rewrite_fixture_registry(bundle, rows)
+                    self.run_audit(source/script_name, bundle, bundle, error='attempt trace')
+
+    def test_unbound_template_variable_is_rejected_before_certifying_receipts(self):
+        for source, script_name in [(CANDIDATE, 'audit-candidate.py'), (SURVEY, 'audit-provenance.py')]:
+            bundle = self.root/source.name
+            hydrate(source, bundle)
+            prompt_file = bundle/'prompts/candle_appraiser_grade.md'
+            prompt_file.write_text(prompt_file.read_text() + '\n{{ unbound }}\n')
+            body = prompt_file.read_text().split('\n---\n', 1)[1]
+            plan = json.loads((bundle/'plan.json').read_text())
+            plan['prompt_sha256'][prompt_file.name] = hashlib.sha256(prompt_file.read_bytes()).hexdigest()
+            write_json(bundle/'plan.json', plan)
+            metadata = json.loads((bundle/'metadata.json').read_text())
+            metadata['plan'] = plan
+            write_json(bundle/'metadata.json', metadata)
+            if source == SURVEY:
+                for name in ('freeze.json', 'frozen-audit.json'):
+                    record = json.loads((bundle/name).read_text())
+                    record.update(prompt_sha256=plan['prompt_sha256'],
+                                  plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest())
+                    write_json(bundle/name, record)
+            rows = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+            for row in rows:
+                if row['stage'] == 'grade':
+                    payload = row['receipt']['input']['payload']
+                    payload['prompt']['effective_template'] = body
+                    encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
+                    payload['prompt']['rendered'] = body.replace('{{appraisal_input}}', encoded)
+            write_rows(bundle/'results.jsonl', rows)
+            rewrite_fixture_registry(bundle, rows)
+            self.run_audit(source/script_name, bundle, bundle, error='must bind only appraisal_input')
+            if source == CANDIDATE:
+                self.run_audit(source/'compare-evaluations.py', bundle, bundle,
+                               error='must bind only appraisal_input')
 
 
 if __name__ == '__main__':

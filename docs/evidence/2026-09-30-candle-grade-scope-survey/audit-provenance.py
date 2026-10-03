@@ -4,6 +4,7 @@ import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -20,6 +21,11 @@ def validate_result(row, runtime_id, case):
                 'successful result classification or slot mismatch')
         require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
         validate_answer(row['answer'], expected_schema(case))
+        # Frozen 4fae8f4 has one HTTP slot: validation records a response,
+        # then run_with records the accepted response before completion.
+        require([attempt['kind'] for attempt in receipt['output']['attempts']]
+                == ['dispatch', 'response', 'response'],
+                'successful receipt attempt trace disagrees with frozen execution')
         responses = [attempt for attempt in receipt['output']['attempts']
                      if attempt['kind'] == 'response']
         require(bool(responses) and all(attempt['slot'] == runtime_id
@@ -36,6 +42,35 @@ def validate_result(row, runtime_id, case):
                 and same_json(receipt['output']['result'], {'error': row['answer']}),
                 'failed answer mismatch')
 
+        attempts = receipt['output']['attempts']
+        require(all(attempt['kind'] in {'dispatch', 'http_failure', 'failure'}
+                    for attempt in attempts),
+                'failed receipt has response or unsupported attempt evidence')
+        failures = [attempt for attempt in attempts if attempt['kind'] == 'failure']
+        require(len(failures) == 1 and failures[0]['transport'] == 'http'
+                and failures[0]['detail'] == receipt['detail'],
+                'terminal failure attempt disagrees with receipt')
+        observations = [attempt for attempt in attempts if attempt['kind'] == 'http_failure']
+        require(len(observations) == 1, 'HTTP failure observation count disagrees with single dispatch')
+        observation = observations[0]
+        detail = observation['detail']
+        require(observation['slot'] == runtime_id
+                and type(observation['invalid_output']) is bool
+                and observation['invalid_output'] == (row['status'] == 'invalid_response')
+                and type(detail) is str,
+                'HTTP failure observations disagree with terminal failure')
+        # This frozen one-HTTP-slot bundle uses Exact's execution_failed
+        # rendering, with the same call identity in its detail and flow.
+        call, separator, _ = detail.partition(' cause=')
+        require(separator and call.startswith('call_id=') and len(call) > len('call_id=')
+                and receipt['detail'] == (f'execution_failed: slot={runtime_id} {detail}; '
+                                          f'flow=[slot={runtime_id} {call}]'),
+                'HTTP failure detail disagrees with terminal failure structure')
+
+        require([attempt['kind'] for attempt in attempts]
+                == ['dispatch', 'http_failure', 'failure'],
+                'failed receipt attempt order disagrees with frozen execution')
+
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -46,6 +81,18 @@ def same_json(left, right):
         return json.dumps(value, sort_keys=True, ensure_ascii=False,
                           separators=(',', ':'), allow_nan=False)
     return canonical(left) == canonical(right)
+
+
+def render_prompt(template, encoded_input):
+    # Match Prompt_registry.extract_variables/render_template. The frozen
+    # appraiser supplies exactly one variable; other names fail pre-dispatch.
+    variable = re.compile(r"\{\{([^}]+)\}\}")
+    names = {match.group(1).strip(" \t\r\n\f") for match in variable.finditer(template)}
+    require(names - {""} == {"appraisal_input"},
+            'frozen prompt must bind only appraisal_input')
+    return variable.sub(lambda match: encoded_input
+                        if match.group(1).strip(" \t\r\n\f") == "appraisal_input"
+                        else match.group(0), template)
 
 
 def expected_schema(case):
@@ -201,7 +248,7 @@ def main():
         require(prompt['key'] == 'candle_appraiser_'+case['stage'], "Evidence validation failed: prompt['key'] == 'candle_appraiser_' + case['stage']")
         require(prompt['effective_template'] == prompt_bodies[prompt['key']+'.md'], "Evidence validation failed: prompt['effective_template'] == prompt_bodies[prompt['key'] + '.md']")
         encoded_input = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
-        require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded_input), "Evidence validation failed: prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded_input)")
+        require(prompt['rendered'] == render_prompt(prompt['effective_template'], encoded_input), "Evidence validation failed: prompt['rendered'] == render_prompt(prompt['effective_template'], encoded_input)")
         prompt_hashes[case['id']].add(sha(prompt['rendered'].encode()))
         input_hashes[case['id']].add(sha(encoded_input.encode()))
         require(receipt['output']['semantic_verification'] == 'not_performed', "Evidence validation failed: receipt['output']['semantic_verification'] == 'not_performed'")

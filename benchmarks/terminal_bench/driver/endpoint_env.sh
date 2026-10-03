@@ -29,7 +29,6 @@
 
 # The shim's refusals besides PATH: Exec_ssh_protocol.github_token_env_names in
 # parse_env_file, and Exec_shim.runtime_env_allowlist.
-# tests/test_endpoint_env.py compares this list with those sources.
 BENCH_ENV_FILE_REFUSED_NAMES=(
   GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
   GH_CONFIG_DIR GIT_TERMINAL_PROMPT

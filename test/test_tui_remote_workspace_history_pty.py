@@ -954,6 +954,16 @@ def ask_workspace_withdrawal(binary: str) -> None:
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        admitted_answers: list[tuple[str, str]] = []
+        def answer_request(method):
+            if method != "POST":
+                return 405, {"error": "POST required"}
+            # The client may cancel its connection while the response is
+            # held. Count admission before responding: the harness's POST
+            # receipt is only appended after a successful response write.
+            with wire.lock:
+                admitted_answers.append((method, wire.phase))
+            return answer()
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -965,7 +975,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: answer})
+            h.KEEPER_ASK_ANSWER_PATH: h.MethodHttpResponse(answer_request)})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -982,14 +992,20 @@ def ask_workspace_withdrawal(binary: str) -> None:
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    # Approvals withdraws its decision authority in the
+                    # body; the composer can occupy the mismatch footer.
+                    lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
+                        and b"Enter:answer" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
                 assert h.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
+                if submit:
+                    assert h.wait_for_fixture_event(process, fd, output, answer.completed,
+                        timeout=WAIT_SECONDS), "held Ask response did not leave its fixture gate"
                 wire.publish("b-after-late")
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
@@ -998,7 +1014,10 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
-                assert len([p for p, _ in posts if p == h.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                with wire.lock:
+                    assert len(admitted_answers) == int(submit), admitted_answers
+                    assert all(method == "POST" and phase == "a"
+                               for method, phase in admitted_answers), admitted_answers
                 os.write(fd, b"q")
             finally:
                 answer.release.set()
@@ -1523,12 +1542,16 @@ def resource_workspace_withdrawal(binary: str) -> None:
                     match = re.search(rb"resource-b-read-(\d+)", screen(output))
                     return match is not None and int(match[1]) > refreshes
 
-                # A later B refresh can overtake this response before Ctrl-L.
+                # A later B refresh can overtake this response before resize.
                 # Any displayed B revision after the requested refresh is
                 # current; the exact superseded row need not remain visible.
                 assert h.wait_for_fixture_state(process, fd, output,
                     refreshed_b_visible, timeout=WAIT_SECONDS), "fresh B resource list was not displayed"
-                h.send_and_wait(process, fd, output, h.FULL_REDRAW, b"resource-b-read-")
+                # FULL_REDRAW is an output escape, not an input key. Resize
+                # the real terminal to require a complete new frame.
+                h.resize_and_wait(process, fd, output, rows=44, columns=300,
+                    needle=b"resource-b-read-", controls=(h.FULL_REDRAW,),
+                    final_cursor=b"\x1b[?25l")
                 assert refreshed_b_visible(), "redraw restored an older resource reading"
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)

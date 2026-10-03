@@ -358,8 +358,17 @@ def run(binary, captures):
                  and (b"Keeper is not observed in the current roster" in text
                       or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
-            h.send_and_wait(process, fd, output, b"r" + h.FULL_REDRAW,
-                b"Keeper roster authority is unavailable")
+            with wire.lock:
+                item_reads = sum(event["event"] == "items" for event in wire.events)
+            # The refusal may already be drawn. Moving the selection after
+            # retrying proves the input was processed without requiring the
+            # unchanged error to be emitted again.
+            h.send_and_wait(process, fd, output, b"rj", b"Items 2/18")
+            h.send_and_wait(process, fd, output, b"k", b"Items 1/18")
+            assert b"Keeper roster authority is unavailable" in visible()
+            with wire.lock:
+                assert sum(event["event"] == "items" for event in wire.events) == item_reads, \
+                    "explicit Item retry read the account without roster authority"
             assert b"Balance " not in visible() and b"owned" not in visible(), \
                 "explicit Item retry bypassed unavailable roster authority"
             capture("a-revision-unavailable")

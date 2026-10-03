@@ -1568,7 +1568,7 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
-let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
@@ -1576,7 +1576,10 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      let withdrawal = match schedule_form_action with
+        | None -> Workspace_identity_unconfirmed detail
+        | Some action -> Schedule_form_authority_refused {action; detail} in
+      enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
       Error detail
     end
 
@@ -12938,6 +12941,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
+  | Schedule_form_authority_refused {action; detail} ->
+      (* This receipt belongs to the guard's withdrawal, and is presented
+         only after that withdrawal retires the former workspace readings.
+         Its Workspace_scoped envelope rejects delivery to a successor. *)
+      apply_server_identity_reading state (Error detail);
+      state.schedule_form_refusal <- Some (action, detail, Unix.gettimeofday ());
+      report_action state "error" (action ^ ": " ^ detail)
   | Lane_package_preview_loaded (generation,path,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -13285,9 +13295,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         || Option.is_some state.keepers_error
       in
       let previous_detail_authority = state.detail_read_authority in
+      let was_unconfirmed = state.workspace_identity <> Workspace_identity_match in
       apply_http_surfaces state ~mailbox results;
-      refresh_visible_detail_after_authority_recovery state ~mailbox
-        ~previous_authority:previous_detail_authority;
+      (* Navigation can precede the first confirmed identity. Its cancelled
+         Lane read belongs to the old authority; start a fresh read now that
+         the visible surface can use this workspace. Steady refreshes do not
+         repeat it, and the loader retains its existing in-flight guard. *)
+      if was_unconfirmed && state.workspace_identity = Workspace_identity_match
+         && state.view = Lanes then launch_lanes_load state ~mailbox;
+      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority:previous_detail_authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (match state.view with
@@ -18352,7 +18368,8 @@ and is loaded on demand through keeper_skill.
             report_form_refusal ("body is not JSON: " ^ message)
           | `Assoc _ ->
             (match Result.bind
-               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (check_workspace_request ~schedule_form_action:action state
+                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
                (fun () -> post declaration) with
              | Error detail -> report_form_refusal detail
              | Ok response ->

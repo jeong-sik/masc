@@ -9407,13 +9407,9 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        # The palette initially leaves beta selected, exercising the call
-        # detail response guard above. A subsequent roster refresh reconciles
-        # chat navigation to its target alpha; Esc preserves that selection.
-        wait_for_output(process, master_fd, output, keeper_row_selected(b"alpha"),
-                        start=pane_start, timeout=3.0)
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"alpha"))
-        select_keeper_row(process, master_fd, output, b"beta")
+        # The palette targets alpha without moving the beta roster cursor.
+        # Esc returns to that roster selection, not the chat target's row.
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
     return interact
@@ -20832,9 +20828,7 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# Named families each have a Dune rule, while the keyboard aggregate runs six
-# separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
-# from test/dune and test/stanzas/*.inc and checks both forms of wiring.
+# Named families and keyboard scenario shards have their own Dune rules.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("dashboard-usage", "Dashboard and Usage regression", (run_dashboard_usage_regression,)),

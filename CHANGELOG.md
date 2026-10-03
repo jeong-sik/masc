@@ -21,6 +21,9 @@
 
 ### Release highlights
 
+- Keep incomplete memory-search acceptance checks valid when optional no-match and verification diagnostics are absent (#40929).
+- Preserve the selected Keeper when returning from palette chat after roster refresh, and retain Item authority and portrait layout acceptance coverage (#40932).
+
 - Keeper Items remain readable with read-state permission when public roster currency observations are omitted; workspace and response ownership checks remain enforced. Repair RC behavioral fixtures without excluding suites or increasing timeouts. (#40843)
 
 - Follow Keeper work through the shared Goal model, task activity, and clearer TUI navigation.

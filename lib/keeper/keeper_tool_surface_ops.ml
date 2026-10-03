@@ -804,6 +804,7 @@ let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
 ;;
 
 let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
+  Executor_pool_ref.submit_or_inline (fun () ->
   let unavailable reason =
     `Assoc [ "status", `String "unavailable"; "reason", `String reason ]
   in
@@ -823,7 +824,10 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
                         Keeper_chat_delivery_identity.Terminal_assistant; delivery_key = observed_key }
                when Keeper_chat_delivery_identity.delivery_key_equal delivery_key observed_key ->
                Some (`Assoc [ "message_id", `String message.id
-                            ; "text", `String message.content ])
+                            ; "text", `String message.content
+                            ; "blocks", (match message.blocks with
+                                | None -> `Null
+                                | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks) ])
              | _ -> None)
            transcript.assistant
        in
@@ -832,7 +836,7 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
        | _ ->
          `Assoc [ "status", `String "available"
                 ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
-                ; "replies", `List replies ])
+                ; "replies", `List replies ]))
 ;;
 
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =

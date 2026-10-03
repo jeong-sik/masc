@@ -750,7 +750,6 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
-  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with

@@ -11,8 +11,9 @@ No row below implies a production rollout.
 | Login model selection | Bound models looked absent; retained connections looked like a failed recheck | Implemented | #40863; login workflow and fixture PTY |
 | Usage Plan | Reported quota looked like current availability; remaining share hard to compare | Implemented | #40906; reported/remaining bars, source/time, candidate fixture and live snapshot replay |
 | Usage Trend | Daily values and missing samples hard to distinguish | Implemented | #40906; fixed-scale daily plots, UTC labels, zero versus missing, responsive paired charts |
-| Login results | Small terminal loses summary and cannot reach every result | In verification | `masc_tui_account_login.{ml,mli}`; result scrolling, wrapping and overflow position |
-| Usage Keepers | Text-only tokens/cost; comparison and measurement coverage hard to scan | Source inspected; pending implementation | `masc_tui_render.ml:usage_lines`, `lib/tui_decode_usage.mli`; preserve missing values and generated time in any comparison bars |
+| Login results | Small terminal loses summary and cannot reach every result | Implemented | #40924; 32 workflow tests, 11 PTY scenarios, exact browser frame replay |
+| Usage Keepers | Text-only tokens/cost; comparison and measurement coverage hard to scan | Implemented; candidate verified | #40930; separate metric scales, reported/missing evidence and generated UTC time; real HTTP snapshot found all costs unreported |
+| Keeper coverage | Decoder omits `metrics_read.unread_turn_rows` from partial coverage | Pending fix | #40931; source producer/decoder mismatch; no live affected sample observed |
 | Recent sidebar | Distinguish no events, disconnected observer and current inactivity | Pending audit | `masc_tui_observer.{ml,mli}` and sidebar rendering; trace typed data before changing labels |
 | Dashboard | Health/work summaries already distinguish some missing/partial states | Partially inspected | Audit source timestamps, denominator and navigation to details |
 | Work | Task, Goal, schedule and verification state comprehension | Pending audit | Trace list/detail views and supported interactions |

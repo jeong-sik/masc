@@ -177,10 +177,71 @@ def failure(executable):
                             http_fixtures=responses, terminal_cols=80, terminal_rows=30)
 
 
+def keeper_comparison(executable, no_color=False, unreported_cost=False):
+    responses, _ = fixtures()
+    def row(name, tokens, cost, missing=0, failed=False, malformed=0):
+        return {"keeper_name": name, "sample_count": 10,
+                "total_tokens": tokens, "total_cost_usd": cost,
+                "tokens_reported_samples": 0 if tokens is None else 10 - missing,
+                "tokens_unreported_samples": missing, "tokens_unread_samples": 0,
+                "cost_reported_samples": 0 if cost is None else 10 - missing,
+                "cost_unreported_samples": missing, "cost_unread_samples": 0,
+                "metrics_read": {"state": "failed", "reason": "fixture read failure"} if failed
+                                else {"state": "read", "malformed_rows": malformed}}
+    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, malformed=2),
+                   row("gamma-missing", None, None, missing=10),
+                   row("delta-failed", 900000, 900.0, failed=True), row("epsilon-zero", 0, 0.0)]
+    responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
+        "keepers": keeper_rows,
+        "window_minutes": 1440, "generated_at": 1790985600.0,
+        "cache": {"state": "stale_refreshing", "generated_at": 1790985600.0, "age_s": 120.0,
+                  "last_error": "fixture refresh failure"}})
+    if unreported_cost:
+        for keeper in keeper_rows:
+            keeper["total_cost_usd"] = None
+            keeper["cost_reported_samples"] = 0
+            keeper["cost_unreported_samples"] = 10
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        h.tab_until(process, fd, output, b"MASC Usage")
+        h.send_and_wait(process, fd, output, b"v", b"Quota scope trend")
+        h.send_and_wait(process, fd, output, b"v", b"Keeper usage")
+        suffix = "-unreported-cost" if unreported_cost else "-no-color" if no_color else ""
+        wide = capture(process, fd, output, "keeper-comparison-wide" + suffix,
+                       70, 120, b"epsilon-zero")
+        for text in ("Scale: tokens 1000", "cost unreported" if unreported_cost else "cost $1.0000", "As of 2026-10-03 00:00 UTC",
+                     "120s old", "refresh failed: fixture refresh failure",
+                     "partial (2 malformed rows)", "7 reported, 3 missing",
+                     "unreported", "fixture read failure", "bars are not quota",
+                     "[" + "█" * 16 + "░" * 16 + "]",
+                     "[unavailable" if unreported_cost else "[" + "█" * 8 + "░" * 24 + "]", "[" + "░" * 32 + "] 0"):
+            assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"
+        assert wide.count(b"[unavailable") == (7 if unreported_cost else 4), "missing/failed metrics drew a bar"
+        compact = capture(process, fd, output, "keeper-comparison-compact" + suffix,
+                          20, 80, b"Keeper usage")
+        assert b"Scale: tokens 1000" in compact
+        for _ in range(70):
+            current = h.press_and_settle(process, fd, output, b"j")
+            if b"epsilon-zero" in current:
+                break
+        else:
+            raise AssertionError("last Keeper was unreachable on compact screen")
+        capture(process, fd, output, "keeper-comparison-bottom" + suffix,
+                20, 80, b"epsilon-zero")
+        os.write(fd, b"q")
+    h.run_terminal_scenario(executable, description="Keeper reported usage comparison" + (" no color" if no_color else ""),
+                            interact=interact, http_fixtures=responses,
+                            terminal_cols=120, terminal_rows=70,
+                            extra_env={"NO_COLOR": "1"} if no_color else {})
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     print("STUDIO_BINARY_SHA256=" + hashlib.sha256(open(executable, "rb").read()).hexdigest())
     journey(executable)
     journey(executable, no_color=True)
     failure(executable)
+    keeper_comparison(executable)
+    keeper_comparison(executable, no_color=True)
+    keeper_comparison(executable, unreported_cost=True)
     print("tui usage studio PTY: PASS")

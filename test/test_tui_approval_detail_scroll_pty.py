@@ -6,17 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-# The regression this scenario stands over: the detail pane scrolls, but
-# nothing on it said the ask was longer than the frame, so an operator could
-# read the first screen, believe it whole, and press y. The footer now carries
-# the window line the other reading panes carry when the field list outgrows
-# the frame. See issue #38385.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_render.ml",
-)
+
 
 # Long enough that the wrapped value alone is taller than the pane at the rows
 # this scenario draws, so the tail exists only below the fold.

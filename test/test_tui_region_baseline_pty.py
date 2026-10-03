@@ -27,29 +27,7 @@ import time
 import test_tui_keyboard_input as h
 import tui_region_harness as region
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names: the frame's
-# count and its aliases (masc_tui_frame.ml, masc_tui_ansi.ml), the body's
-# rows (masc_tui_types.ml, surface_body_rows), the files holding the readers
-# measured here, the portrait band that sets the Info body's content height,
-# the chat's row actions (masc_tui_message_layout.ml) and the shared helpers.
-#
-# Kept out of the default keyboard walk, which already runs near the CI limit
-# (the PTY scenario guidance, #36343).
-SOURCE_MODULES = (
-    "bin/masc_tui_frame.ml",
-    "bin/masc_tui_frame.mli",
-    "bin/masc_tui_ansi.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_keeper_portrait.mli",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_message_layout.ml",
-    "test/tui_region_harness.py",
-)
+
 
 # 80 and 100 are the common terminals. The roster and the keeper detail's
 # framed split open at 110 (Masc_tui_roster_pane.threshold_cols), so 109 and

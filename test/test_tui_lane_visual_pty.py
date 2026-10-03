@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+from urllib.parse import parse_qs, urlsplit
 import re
 from pathlib import Path
 
@@ -224,6 +225,121 @@ def run_installation_detail(executable: str) -> None:
     print("Lane Add-on Installation detail: PASS")
 
 
+def run_grouped_history(executable: str, captures: Path | None) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    captured = snapshot()
+    active = captured["instances"][0]
+    active["title"] = "Current reporter"
+    active["configuration"] = {"source_path": "/fixture/lane-addons/report.toml"}
+    old_runs = []
+    old_rows = []
+    for index in range(9):
+        owner = f"retained-{index}"
+        old_runs.append({**active, "instance_id": owner, "incarnation": owner,
+            "title": "Repeated counters", "run_id": f"retained world/{index}", "phase": {"kind": "detached"},
+            "configuration": {"source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
+        old_rows.append({**captured["rows"][0], "id": owner + "/1/result", "lane_id": owner + "/browser",
+            "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
+    captured["instances"] = [old_runs[0], active, *old_runs[1:]]
+    captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
+        "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
+    inventory_reads: list[str] = []
+    def inventory(path: str):
+        inventory_reads.append(path)
+        response = json.loads(json.dumps(captured))
+        sequence = len(inventory_reads)
+        response["rows"][0]["title"] = f"Fresh DOM inventory {sequence}"
+        identities = {row["id"]: f"{active['instance_id']}/{sequence}/event-{index}"
+                      for index, row in enumerate(response["rows"])}
+        for row in response["rows"]:
+            row["id"] = identities[row["id"]]
+            row["related_ids"] = [identities.get(identity, identity) for identity in row["related_ids"]]
+        for instance in response["instances"]:
+            if instance["instance_id"] == active["instance_id"]:
+                instance["observation_seq"] = sequence
+        return 200, response
+    fixtures["/api/v1/lane-addons"] = terminal.PathHttpResponse(inventory)
+    slice_reads: list[str] = []
+
+    def retained_slice(path: str):
+        slice_reads.append(path)
+        query = parse_qs(urlsplit(path).query)
+        if query != {"run_id": ["retained world/0"]}:
+            raise AssertionError(f"history read changed its exact run target: {query!r}")
+        row = {**old_rows[0]}
+        if len(slice_reads) > 1:
+            row["title"] = "Refreshed old result"
+        return 200, {"rows": [row], "coverage": [], "complete": True}
+
+    fixtures["/api/v1/lane-addons/slice"] = terminal.PathHttpResponse(retained_slice)
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        opened = terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"> Current reporter")
+        screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
+        if b"> Current reporter" not in screen or b"Repeated counters" in screen:
+            raise AssertionError(f"old workers crowded current installations: {screen!r}")
+        first_detail_marker = f"Fresh DOM inventory {len(inventory_reads) + 1}".encode()
+        terminal.send_and_wait(process, master, output, b"\r", first_detail_marker)
+        terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
+        # Reopen the same live worker with a valid cached selection. The new
+        # observation replaces every row identity before the response arrives.
+        reopened_sequence = len(inventory_reads) + 1
+        reopened_marker = f"Fresh DOM inventory {reopened_sequence}".encode()
+        terminal.send_and_wait(process, master, output, b"\r", reopened_marker)
+        reopened_identity = f"{active['instance_id']}/{reopened_sequence}/event-0".encode()
+        terminal.send_and_wait(process, master, output, b"D", reopened_identity)
+        terminal.send_and_wait(process, master, output, b"\x1b", reopened_marker)
+        terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
+        history = terminal.send_and_wait(process, master, output, b"h", b"Instance retained-0")
+        history_screen = terminal.screen_text(terminal.frame_containing(history, b"Instance retained-0"))
+        if b"a.toml" not in history_screen or b"h:current installations" not in history_screen:
+            raise AssertionError("history lacked source grouping or return navigation")
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / "08-grouped-history.pty").write_bytes(bytes(output))
+        detail = terminal.send_and_wait(process, master, output, b"\r", b"Preserved old result")
+        if b"detached" not in terminal.screen_text(detail):
+            raise AssertionError("history detail did not retain detached state")
+        terminal.send_and_wait(process, master, output, b"D", b"retained-0/1/result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Preserved old result")
+        before_refresh = len(inventory_reads)
+        terminal.send_and_wait(process, master, output, b"r", b"Refreshed old result")
+        if len(inventory_reads) != before_refresh:
+            raise AssertionError("retained detail refresh replaced its run scope with inventory")
+        terminal.send_and_wait(process, master, output, b"D", b"retained-0/1/result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Refreshed old result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Instance retained-0")
+        returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
+        if b"Repeated counters" in terminal.screen_text(returned):
+            raise AssertionError("returning to installations expanded retained workers")
+        before_reopen = len(inventory_reads)
+        live_marker = f"Fresh DOM inventory {before_reopen + 1}".encode()
+        live = terminal.send_and_wait(process, master, output, b"\r", live_marker)
+        if len(inventory_reads) <= before_reopen:
+            raise AssertionError("live detail reused the retained output instead of fetching current inventory")
+        live_screen = terminal.screen_text(terminal.frame_containing(live, live_marker))
+        if b"Preserved old result" in live_screen or b"No observations yet" in live_screen:
+            raise AssertionError(f"live detail retained another run's slice: {live_screen!r}")
+        if b"Choose a result with j/k" in live_screen:
+            raise AssertionError("fresh detail failed to select a result after its cached row disappeared")
+        current_identity = f"{active['instance_id']}/{before_reopen + 1}/event-0".encode()
+        terminal.send_and_wait(process, master, output, b"D", current_identity)
+        terminal.send_and_wait(process, master, output, b"\x1b", live_marker)
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> Current reporter")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable, description="current installations and grouped retained history",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("history navigation sent a write")
+    if len(slice_reads) != 2:
+        raise AssertionError(f"retained detail open and refresh did not each perform a scoped GET: {slice_reads!r}")
+    print("Lane current list / grouped retained instances / fresh scoped GET / exact raw target / return: PASS")
+
+
 def run_navigation_consistency(executable: str) -> None:
     fixtures = terminal.overview_event_http_fixtures()
     fixtures["/api/v1/lane-addons"] = (200, snapshot())
@@ -379,3 +495,4 @@ if __name__ == "__main__":
         print("STUDIO_BINARY_SHA256=" + hashlib.sha256(binary.read()).hexdigest(), flush=True)
     run_navigation_consistency(os.path.abspath(args.executable))
     run_declared_report(os.path.abspath(args.executable), args.capture_dir)
+    run_grouped_history(os.path.abspath(args.executable), args.capture_dir)

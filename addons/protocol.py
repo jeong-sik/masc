@@ -304,6 +304,31 @@ class SamplingClient:
             return object_value(response.get("result"), "sampling result")
 
 
+def reply_id(value: Any) -> str | int | float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise InvalidInput("JSON-RPC ID must be valid UTF-8") from error
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidInput("JSON-RPC ID must be a string, number or null")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise InvalidInput("JSON-RPC ID must be finite")
+    return value
+
+
+def encode_output(value: Any) -> str:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
+        encoded.encode("utf-8")
+        return encoded
+    except (ValueError, TypeError, RecursionError, UnicodeEncodeError) as error:
+        raise InvalidInput("Observation must be serializable finite UTF-8 JSON") from error
+
+
 def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
           *, version: str = "0.1.0", sampling_client: SamplingClient | None = None,
           text_summary: Callable[[dict], str] | None = None, max_reply_bytes: int | None = None) -> None:
@@ -316,13 +341,7 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         method = None
         try:
             request = object_value(decode_json(line.decode("utf-8")), "request")
-            # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
-            supplied_id = request.get("id")
-            if not (supplied_id is None or isinstance(supplied_id, (str, int, float))
-                    and not isinstance(supplied_id, bool)):
-                raise InvalidInput("JSON-RPC id must be a string, number or null")
-            validate_json(supplied_id)
-            request_id = request.get("id")
+            request_id = reply_id(request.get("id"))
             method = request.get("method")
             if request.get("jsonrpc") != "2.0":
                 raise InvalidInput("expected a JSON-RPC 2.0 request")
@@ -361,9 +380,10 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
                     validate_json(output)
-                    encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
-                               if text_summary is None else string(text_summary(output), "output summary"))
-                    validate_json(encoded)
+                    encoded_output = encode_output(output)
+                    encoded = (encoded_output if text_summary is None
+                               else string(text_summary(output), "output summary"))
+                    encode_output(encoded)
                     result = {"content": [{"type": "text", "text": encoded}],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:

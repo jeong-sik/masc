@@ -524,10 +524,13 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
                         and b"Balance 12.500 Candle" not in frame)
             previous_reads = identity["matched_reads"]
             identity["base"] = str(base)
-            # Two serial full-refresh probes prove the first matching result
-            # was admitted before its successor could start.
+            # Request admission precedes the TUI applying its identity result.
+            # The recovered list's ready composer proves that the matching
+            # workspace and selected Keeper are visible before Enter is sent.
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            await_frame(process, fd, output, lambda frame: b"MASC Keepers" in frame
+                        and "› to alpha".encode() in frame)
             balance[0] = "13000"
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
@@ -1100,8 +1103,8 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
 
     def wait_refreshes(process, fd, output):
         before = identity["probes"]
-        # Full refreshes are serial: the following probe starts after applying
-        # the preceding identity response, so this crosses the state boundary.
+        # Observe endpoint activity; input boundaries also wait for the
+        # rendered authority because request admission precedes application.
         assert h.wait_for_fixture_state(process, fd, output,
             lambda: identity["probes"] >= before + 2, timeout=10)
 
@@ -1118,6 +1121,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
             wait_refreshes(process, fd, output)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"No keeper selected." in frame(output), timeout=10), \
+                "the TUI did not apply the detail authority withdrawal"
             # A manual read during revocation must not create a new token
             # that would admit an answering but unverified endpoint.
             os.write(fd, b"o" if sandbox_logs else b"r")

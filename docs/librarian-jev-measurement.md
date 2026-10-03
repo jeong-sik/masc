@@ -69,7 +69,9 @@ and preflight failure evidence can include provider response bodies.
 Each pair retains `preflight_observation`, including its own `status`, decision
 or failure, independently of `preflight_status` (the whole Librarian run).
 A successful fallback can therefore still show a failed JEV evaluation.
-Failed runs require their code and detail; `baseline_failure` and
+Failed runs require their code and detail; other terminal statuses must omit
+both fields. Goal contexts require exactly the fields emitted for their recorded
+status, so stale fields from another variant are refused. `baseline_failure` and
 `preflight_failure` retain these diagnostics separately, with null for other
 terminal statuses.
 

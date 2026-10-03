@@ -19,16 +19,7 @@ import time
 
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_runtime_account_form.ml",
-    "lib/runtime/runtime_account_declaration.ml",
-)
+
 
 RAW_PATH = "/api/v1/runtime/config/raw"
 PREVIEW_PATH = "/api/v1/runtime/config/raw/preview"

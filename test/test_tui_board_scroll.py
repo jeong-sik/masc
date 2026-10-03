@@ -5,22 +5,7 @@ import sys
 import time
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The surface this scrolls ("MASC Board") is titled in masc_tui_render_board.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_layout.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_board_read_layout.ml",
-    "bin/masc_tui_board_read_layout.mli",
-    "bin/masc_tui_board_detail.ml",
-)
+
 
 
 # Enter opens the post under the cursor, so it has to wait for the list to

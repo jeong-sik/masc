@@ -220,10 +220,12 @@ let keeper_supervisor_sweep_sec =
   register_float
     ~key:"keeper.supervisor_sweep_sec"
     ~default:Env_config_keeper.KeeperSupervisor.sweep_interval_sec
-    ~min:10.0 ~max:120.0
+    ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
+    ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec
     ~meta:{ description = "Supervisor sweep 주기(초)";
             value_type = "float";
-            min_value = Some (`Float 10.0); max_value = Some (`Float 120.0); choices = [] }
+            min_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec);
+            max_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec); choices = [] }
     ()
 
 let keeper_keepalive_interval_sec =

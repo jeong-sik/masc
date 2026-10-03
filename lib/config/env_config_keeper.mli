@@ -64,7 +64,9 @@ end
 
 module KeeperMetrics : sig
   val max_file_bytes : unit -> int
+  val max_rotated_files_min : int
   val max_rotated_files : unit -> int
+  (** At least one backup; zero is rejected by the TOML schema. *)
 end
 
 (** {1 Keeper wire capture} *)
@@ -78,6 +80,9 @@ end
 (** {1 Keeper supervisor} *)
 
 module KeeperSupervisor : sig
+  val sweep_interval_default_sec : float
+  val sweep_interval_min_sec : float
+  val sweep_interval_max_sec : float
   val sweep_interval_sec : unit -> float
 end
 

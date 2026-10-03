@@ -466,7 +466,9 @@ let all =
       ~category:"turn"
       "Stage timing telemetry ring capacity"
   ; setting
-      ~range:(float_range ~min:0.0 ())
+      ~range:(float_range
+        ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
+        ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec ())
       ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ())))
       ~env_name:"MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
       ~exposure:(Toml_and_env "supervisor.sweep_sec")
@@ -486,7 +488,7 @@ let all =
       ~category:"metrics"
       "Metrics file size before rotation"
   ; setting
-      ~range:(int_range ~min:0 ())
+      ~range:(int_range ~min:Env_config_keeper.KeeperMetrics.max_rotated_files_min ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_rotated_files ())))
       ~env_name:"MASC_KEEPER_METRICS_MAX_ROTATED"
       ~exposure:(Toml_and_env "metrics.max_rotated")

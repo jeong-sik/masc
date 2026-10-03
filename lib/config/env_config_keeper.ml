@@ -138,8 +138,11 @@ module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
   let max_file_bytes () = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
-  (** Number of rotated files to keep (default: 1, i.e. .1 only) *)
-  let max_rotated_files () = get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
+  (** Rotation retains at least one backup; disable rotation with max_bytes=0. *)
+  let max_rotated_files_min = 1
+  let max_rotated_files () =
+    Int.max max_rotated_files_min
+      (get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED")
 end
 
 (** {1 Keeper Wire Capture Configuration} *)

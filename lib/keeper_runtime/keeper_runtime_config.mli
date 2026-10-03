@@ -54,6 +54,9 @@ val load_failure_to_string : load_failure -> string
 (** Renders as before: "read <path>: <detail>", "parse …", "validate …". *)
 
 val load_and_apply : base_path:string -> (int, load_failure) result
+(** Validates the registry's effective readers before applying overrides, even
+    with no TOML file. Strict malformed environment input is a [Validate]
+    failure at startup rather than a later Keeper-cycle exception. *)
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
     Returns [None] when the key was absent from [runtime.toml]

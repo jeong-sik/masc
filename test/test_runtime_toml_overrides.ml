@@ -25,12 +25,12 @@ let with_base_path f =
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let toml_path base_path =
+  Filename.concat (Filename.concat base_path ".masc/config")
+    Config_dir_resolver.runtime_toml_filename
+
 let write_toml base_path content =
-  let path =
-    Filename.concat
-      (Filename.concat base_path ".masc/config")
-      Config_dir_resolver.runtime_toml_filename
-  in
+  let path = toml_path base_path in
   let oc = open_out path in
   output_string oc content;
   close_out oc
@@ -1039,6 +1039,52 @@ let test_preview_precondition_matches_save () =
       (Result.is_error validate = Result.is_error save))
 ;;
 
+let test_supervisor_and_rotation_bounds_reach_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  List.iter (fun toml ->
+    write_toml base_path toml;
+    match Keeper_runtime_config.load_and_apply ~base_path with
+    | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+    | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+    | Ok _ -> fail "out-of-range setting was accepted at boot")
+    ["[supervisor]\nsweep_sec = 0.0\n";
+     "[supervisor]\nsweep_sec = 121.0\n";
+     "[metrics]\nmax_rotated = 0\n"];
+  List.iter (fun (raw, expected) ->
+    with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" (Some raw) @@ fun () ->
+    check (float 0.) "process default respects scheduler bounds" expected
+      (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
+    ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" (Some "0") @@ fun () ->
+  check int "effective rotation count matches retained backup floor" 1
+    (Env_config_keeper.KeeperMetrics.max_rotated_files ())
+;;
+
+let test_strict_reader_validation_happens_at_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PARSE_WARN" (Some "true") @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  List.iter (fun key ->
+    with_env key (Some "malformed") @@ fun () ->
+    List.iter (fun has_toml ->
+      let path = toml_path base_path in
+      if has_toml then write_toml base_path "[metrics]\nmax_bytes = 17\n"
+      else if Sys.file_exists path then Sys.remove path;
+      match Keeper_runtime_config.load_and_apply ~base_path with
+      | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+      | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+      | Ok _ -> fail (key ^ " bypassed strict startup validation")) [false; true])
+    ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED";
+     "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"; "MASC_KEEPER_SNAPSHOT_SEC";
+     "MASC_KEEPER_WORK_AS_HEARTBEAT"; "MASC_KEEPER_SLEEP_CHUNK_SEC";
+     "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"; "MASC_KEEPER_DEBUG"]
+;;
+
 let test_boot_settings_reach_consumers_and_projection () =
   let keys =
     [ "MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED"
@@ -1118,6 +1164,8 @@ let () =
             test_unrelated_runtime_namespaces_are_not_claimed
         ; test_case "provider binding under Keeper namespace remains separately owned" `Quick
             test_runtime_provider_binding_under_keeper_namespace_is_not_claimed
+        ; test_case "boot enforces supervisor and rotation bounds" `Quick test_supervisor_and_rotation_bounds_reach_boot
+        ; test_case "strict readers fail during boot with or without TOML" `Quick test_strict_reader_validation_happens_at_boot
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "boot settings reach consumers and projection" `Quick
             test_boot_settings_reach_consumers_and_projection

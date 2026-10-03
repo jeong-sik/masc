@@ -72,6 +72,8 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 
 - Integrate the current-library compile and actual Item preview test corrections from #40978, and preserve authoritative Item accounts across unchanged partial-roster refreshes (#40313). The detailed notes retain the original #40978 fragment.
 
+- Include the current-main test cleanup and failed-identity fixture correction (#41028, #41034); preserve their complete notes in the detailed record.
+
 ## [0.48.0] - 2026-09-29
 
 ### Fresh state required

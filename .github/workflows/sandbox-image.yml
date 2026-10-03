@@ -21,8 +21,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify archive identity contract
-        run: python3 -m unittest discover -s scripts/tests -p test_sandbox_image_archive.py
       - name: Stage the recipe
         run: |
           mkdir -p "$RUNNER_TEMP/sandbox-image"

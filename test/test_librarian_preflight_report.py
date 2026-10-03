@@ -289,6 +289,8 @@ class ReportCliTest(unittest.TestCase):
                 manifest = fixture()
                 run = manifest["pairs"][0]["baseline"]["run"]
                 run.update(status=status, selected_slot=None)
+                if status == "failed":
+                    run.update(code="fixture_interrupted", detail="fixture failed before selection")
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(

@@ -41,6 +41,7 @@ type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
+  mutable saved_scroll_max : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -60,7 +61,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
@@ -264,8 +265,9 @@ let saved_rows = function
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
-  | Saved_partly { unverified; not_rechecked = _ } ->
+  | Saved_partly { unverified; not_rechecked } ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") unverified
+    @ List.map (fun runtime_id -> "  " ^ runtime_id ^ " (이번 저장에서 재검증하지 않음)") not_rechecked
 let saved_of_json json =
   let selected = match field "runtime_ids" json with
     | `List ids -> List.filter_map string ids
@@ -292,10 +294,11 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+  | Some saved -> t.cursor <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  t.cursor <- 0;
   t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
@@ -502,6 +505,10 @@ let key t key =
     let all_selected = List.for_all (fun (model:model) -> List.mem model.id t.selected_models) eligible in
     t.selected_models <- (if all_selected then [] else List.map (fun (model:model) -> model.id) eligible);
     Nothing
+  | Finished _ when key="up" || key="k" ->
+    t.cursor <- max 0 (t.cursor - 1); Nothing
+  | Finished _ when key="down" || key="j" ->
+    t.cursor <- min t.saved_scroll_max (t.cursor + 1); Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -576,7 +583,8 @@ let hints t = match t.phase with
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Loading | Saving | Finished _ | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Finished _ -> "j/k:스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Loading | Saving | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
@@ -641,12 +649,22 @@ let visible_lines ~height ~width t =
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
     | wrapped -> List.map (fun line -> Text line) wrapped in
-  let rows = notice @ body_rows t in
+  let body = match t.phase with
+    | Finished _ -> List.concat_map (fun row ->
+        Masc_tui_message_layout.wrap_words ~max_cells:width (row_text row)
+        |> List.map (fun text -> Text text)) (body_rows t)
+    | _ -> body_rows t in
+  let rows = notice @ body in
   let skip = match t.phase with
     | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
-    | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed -> max 0 (List.length rows - height) in
+    | Finished _ ->
+      t.saved_scroll_max <- max 0 (List.length rows - height);
+      let skip = min t.cursor t.saved_scroll_max in
+      t.cursor <- skip;
+      skip
+    | Loading | Logging | Documented_context _ | Saving | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

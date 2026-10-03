@@ -253,12 +253,16 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?(mounts = [])
-    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store () =
+    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
     else Error (Invalid_package "control_timeout_sec must be finite and positive") in
   let* () = validate_package package in
+  let* () = match package.model_access, sampling_handler with
+    | Model_disabled, None | Host_sampling, Some _ -> Ok ()
+    | Host_sampling, None -> Error (Invalid_package "package requires host sampling; no host model handler is configured")
+    | Model_disabled, Some _ -> Error (Invalid_package "package does not declare host sampling") in
   let* () = match package.action_tool, artifact_store with
     | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
     | _ -> Ok () in
@@ -351,7 +355,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         let* client = Agent_core.Mcp.connect ~sw ~mgr ~command:docker_command
             ~args:[ "container"; "start"; "--attach"; "--interactive"; id ]
             ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
-            ~max_response_bytes:package.resources.max_reply_bytes ()
+            ~max_response_bytes:package.resources.max_reply_bytes ?sampling_handler ()
           |> Result.map_error protocol_error in
         Eio.Flow.close stderr_w;
         worker.client <- Some client;

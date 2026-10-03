@@ -67,6 +67,17 @@ let task_cache_signal_of_args args =
   | Some _, None | None, Some _ -> Error task_cache_signal_partial_error
 ;;
 
+(** State of this immediate fanout invocation. [Fanout_not_started] reports an
+    early return before projection; [Fanout_finished] reports that the delivery
+    invocation ended, not that every Keeper accepted or read the message.
+    [Fanout_durable_admitted] is set by a host only after it commits both the
+    authoritative row and the durable recipient obligations. *)
+type fanout_state =
+  | Fanout_not_started
+  | Fanout_active
+  | Fanout_finished
+  | Fanout_durable_admitted
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -76,6 +87,7 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   ; mention_delivery : mention_delivery
+  ; fanout_state : fanout_state
   ; audience : audience
   }
 
@@ -199,6 +211,10 @@ let broadcast_delivery_to_yojson delivery =
     ; "mention", Json_util.string_opt_to_json delivery.mention
     ; "msg_type", `String delivery.msg_type
     ; "mention_delivery", mention_delivery_to_yojson delivery.mention_delivery
+    ; "fanout_state", `String (match delivery.fanout_state with
+        | Fanout_not_started -> "not_started"
+        | Fanout_active -> "active" | Fanout_finished -> "finished"
+        | Fanout_durable_admitted -> "durable_admitted")
     ]
 
 let emit_message_activity config ~from_agent ~content ~mention
@@ -269,6 +285,7 @@ let delivery_of_message ~audience (message : Masc_domain.message) =
        live call, and the projection commits at first delivery. Startup
        reconciliation exists for the mention obligation, so a replay defaults
        to [System_record] rather than re-projecting. *)
+  ; fanout_state = Fanout_active
   ; audience
   }
 
@@ -367,10 +384,17 @@ let durable_delivery_status = function
   | Rejected _ -> Mention_rejected
 
 let notify_workspace_message_mutation config message =
-  (Atomic.get Workspace_hooks.on_workspace_message_mutation_fn)
-    config
-    ~request_id:message.Masc_domain.request_id
-    ~mention_delivery:message.mention_delivery
+  try
+    (Atomic.get Workspace_hooks.on_workspace_message_mutation_fn)
+      config
+      ~request_id:message.Masc_domain.request_id
+      ~mention_delivery:message.mention_delivery
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.warn
+        "workspace message mutation observer failed after commit request_id=%s seq=%d: %s"
+        message.Masc_domain.request_id message.seq (Printexc.to_string exn)
 
 let persist_delivery_status config message mention_delivery =
   let status = durable_delivery_status mention_delivery in
@@ -820,7 +844,9 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
         Error (Broadcast_dependency_unavailable detail))
 ;;
 
-let broadcast_with_mention ?trace_context ~msg_type ~audience
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
+
+let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_delivery ~msg_type ~audience
     config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
@@ -832,7 +858,9 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
   ensure_initialized config;
 
   let seq = Workspace_state.next_seq config in
-  let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
+  let request_id = match request_id with
+    | Some request_id -> request_id
+    | None -> Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
   (* Stored as written. This used to HTML-escape the content, so a message
      containing a double quote was persisted as [&quot;] and every consumer
@@ -878,6 +906,7 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
     ; msg_type = stored_msg_type
     ; mention_delivery =
         (match mention with None -> Passive | Some _ -> Pending)
+    ; fanout_state = Fanout_active
     ; audience
     }
   in
@@ -909,8 +938,10 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
          Ok
            { delivery with
              mention_delivery = Deferred Workspace_status_unavailable
+           ; fanout_state = Fanout_not_started
            })
    | Ok { mirror_error } ->
+     Option.iter (fun notify -> notify ()) on_committed;
      Option.iter
        (fun message ->
           Log.Misc.warn
@@ -953,14 +984,16 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
      emit_message_activity config ~from_agent:stored_agent ~content:stored_content
        ~mention ();
      let mention_delivery =
-       match deferred_by_predecessor with
-       | None -> deliver_committed_mention ~audience config msg
-       | Some reason -> Deferred reason
+       match fleet_delivery, deferred_by_predecessor with
+       | Deferred_fleet, _ -> Passive
+       | Immediate_fleet, None -> deliver_committed_mention ~audience config msg
+       | Immediate_fleet, Some reason -> Deferred reason
      in
      observe stored_msg_type;
-     Ok { delivery with mention_delivery })
+     Ok { delivery with mention_delivery; fanout_state=(match fleet_delivery with
+       | Immediate_fleet -> Fanout_finished | Deferred_fleet -> Fanout_not_started) })
 
-let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
+let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
@@ -974,7 +1007,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
   | Ok (content, msg_type) ->
     let run deferred_by_predecessor =
       broadcast_with_mention
-        ?trace_context
+        ?trace_context ?request_id ?on_committed ~fleet_delivery
         ~msg_type
         ~audience
         config
@@ -1002,7 +1035,154 @@ let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
          in
          run deferred_by_predecessor))
 
+let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content =
+  broadcast_internal ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content
+
+(* The active operation owns message creation and fanout, but retries wait
+   only for the authoritative row (or for an attempt that ended without it).
+   A resolved promise also closes registration races across Eio domains; raw
+   threads wait on the same readiness under a synchronous condition variable. *)
+type exact_request_ready = Row_visible | Attempt_finished
+type exact_request_operation = {
+  ready : exact_request_ready Eio.Promise.t;
+  resolve_ready : exact_request_ready Eio.Promise.u;
+  ready_condition : Condition.t;
+  mutable readiness : exact_request_ready option;
+}
+type exact_request_admission =
+  | Own_request of exact_request_operation
+  | Active_request of exact_request_operation
+let exact_request_operations = Hashtbl.create 16
+let exact_request_operations_mutex = Mutex.create ()
+let on_exact_request_wait = Atomic.make (fun (_ : string) -> ())
+let signal_exact_request_locked operation readiness =
+    match operation.readiness with
+    | Some Row_visible | Some Attempt_finished -> ()
+    | None ->
+        operation.readiness <- Some readiness;
+        Eio.Promise.resolve operation.resolve_ready readiness;
+        Condition.broadcast operation.ready_condition
+let signal_exact_request operation readiness =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    signal_exact_request_locked operation readiness)
+let admit_exact_request key =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    match Hashtbl.find_opt exact_request_operations key with
+    | Some operation -> Active_request operation
+    | None ->
+        let ready, resolve_ready = Eio.Promise.create () in
+        let operation = {ready; resolve_ready;
+          ready_condition=Condition.create (); readiness=None} in
+        Hashtbl.add exact_request_operations key operation;
+        Own_request operation)
+let finish_exact_request key operation =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    Hashtbl.remove exact_request_operations key;
+    signal_exact_request_locked operation Attempt_finished)
+let await_exact_request request_id operation =
+  (Atomic.get on_exact_request_wait) request_id;
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> ignore (Eio.Promise.await operation.ready : exact_request_ready)
+  | Eio_guard.Non_eio ->
+      Mutex.protect exact_request_operations_mutex (fun () ->
+        while Option.is_none operation.readiness do
+          Condition.wait operation.ready_condition exact_request_operations_mutex
+        done)
+
+let validate_deferred_fleet_content content = match Mention.extract content with
+  | Some _ -> Error (Broadcast_policy_rejected "deferred Fleet publication cannot carry a mention")
+  | None -> Ok ()
+
+let find_broadcast_message ~request_id config ~from_agent ~content =
+  ensure_initialized config;
+  let audience = Fleet_conversation in
+  let open Result.Syntax in
+  let* () = match current_request_id_of_filename (request_id ^ ".json") with
+    | Some _ -> Ok ()
+    | None -> Error (Broadcast_policy_rejected "invalid Broadcast request identity") in
+  let lookup () =
+    let* names = authoritative_directory_names config (messages_dir config)
+      |> Result.map_error (fun detail -> Broadcast_dependency_unavailable detail) in
+    let suffix = "_" ^ request_id ^ "_broadcast.json" in
+    match List.filter (fun name -> Filename.check_suffix name suffix) names with
+    | [] -> Ok None
+    | [name] ->
+        let* message = match read_committed_message config (Filename.concat (messages_dir config) name) with
+          | Committed_message message -> Ok message
+          | Committed_message_absent -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
+          | Committed_message_unavailable detail | Committed_message_corrupt detail ->
+              Error (Broadcast_dependency_unavailable detail) in
+        if not (String.equal message.request_id request_id
+          && String.equal message.from_agent from_agent
+          && String.equal message.content content
+          && String.equal message.msg_type "broadcast") then
+          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
+        else
+          let delivery = delivery_of_message ~audience message in
+          let mention_delivery = match message.mention_delivery with
+            | Mention_passive -> Passive | Mention_pending -> Pending
+            | Mention_accepted -> Already_accepted
+            | Mention_rejected -> Rejected Invalid_request in
+          Ok (Some (message, {delivery with mention_delivery}))
+    | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
+  lookup ()
+
+let find_broadcast ~request_id config ~from_agent ~content =
+  Result.map (Option.map snd) (find_broadcast_message ~request_id config ~from_agent ~content)
+
+let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_agent ~content =
+  let audience = Fleet_conversation in
+  let open Result.Syntax in
+  let* () = match fleet_delivery with
+    | Deferred_fleet -> validate_deferred_fleet_content content
+    | Immediate_fleet -> Ok () in
+  let lookup () = find_broadcast_message ~request_id config ~from_agent ~content in
+  let replay message delivery =
+    (* Each Keeper's transcript projects by the persisted request ID. Replaying
+       fills recipients missed by cancellation/restart and deduplicates those
+       already written. A passive row proves commit, not completed fanout. *)
+    let run () = match fleet_delivery with
+      | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
+      | Immediate_fleet -> Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message;
+          fanout_state=Fanout_finished} in
+    match message.mention with
+    | None -> run ()
+    | Some _ -> Cross_context_mutex.with_lock mention_delivery_mutex run in
+  let key = masc_dir config, request_id in
+  let own operation f =
+    Fun.protect ~finally:(fun () -> finish_exact_request key operation) f in
+  let rec send () =
+    let* existing = lookup () in
+    match existing with
+    | Some (message, delivery) ->
+        (match fleet_delivery with
+         | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
+         | Immediate_fleet -> match admit_exact_request key with
+         | Active_request _ -> Ok delivery
+         | Own_request operation -> own operation (fun () ->
+             signal_exact_request operation Row_visible;
+             replay message delivery))
+    | None ->
+        (match admit_exact_request key with
+         | Active_request operation ->
+             await_exact_request request_id operation;
+             send ()
+         | Own_request operation -> own operation (fun () ->
+             (* Another process may have committed between our first read and
+                admission. Read again before creating any authoritative row. *)
+             let* existing = lookup () in
+             match existing with
+             | Some (message, delivery) ->
+                 signal_exact_request operation Row_visible;
+                 replay message delivery
+             | None -> broadcast_internal ~request_id ~fleet_delivery ~audience
+                 ~on_committed:(fun () -> signal_exact_request operation Row_visible)
+                 config ~from_agent ~content))
+  in
+  send ()
+
 module For_testing = struct
+  let replace_on_exact_request_wait handler = Atomic.exchange on_exact_request_wait handler
   let replace_on_broadcast_mention handler =
     Atomic.exchange on_broadcast_mention handler
 

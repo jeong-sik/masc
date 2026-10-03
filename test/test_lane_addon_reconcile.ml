@@ -5,10 +5,10 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    let access = match caller with
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration
-      | Some keeper -> Lane_addon_sources.Keeper keeper in
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
     Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end

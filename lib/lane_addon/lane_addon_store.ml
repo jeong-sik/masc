@@ -163,6 +163,18 @@ let save_action_with ~sync_parent t ~instance_id ~request_id json = protect (fun
   durable_action_directory ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json))
 let save_action = save_action_with ~sync_parent:sync_action_parent
+let broadcast_path ~instance_id ~request_id =
+  Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+let save_broadcast t ~instance_id ~request_id json =
+  write t (broadcast_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+let load_broadcast t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (broadcast_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "Broadcast evidence record is not a regular file"
+      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with

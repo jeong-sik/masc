@@ -289,6 +289,22 @@ let partly_checked_save () =
   check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
      List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
+  let visible () = Login.visible_lines ~height:2 ~width:32 t2 |> List.map Login.row_text in
+  let initial = visible () in
+  check bool "small result starts with its save notice" true
+    (List.exists (fun row -> contains row "저장했습니다") initial);
+  let expected = List.concat_map
+      (Masc_tui_message_layout.wrap_words ~max_cells:32)
+      [ "  " ^ added ^ " (quota_exhausted)";
+        "  " ^ kept ^ " (이번 저장에서 재검증하지 않음)" ] in
+  let seen = ref initial in
+  List.iter (fun _ -> ignore (Login.key t2 "j"); seen := visible () @ !seen)
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
+      (List.mem row !seen)) expected;
+  List.iter (fun _ -> ignore (Login.key t2 "k"))
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  check (list string) "scroll can return to the initial result" initial (visible ());
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
     [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();

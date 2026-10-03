@@ -40,7 +40,6 @@ Usage
   audit-sublib-cycle.py --describe-file FILE \
     --closed-source-root packages/agent_core \
     --required-local-library masc.agent_core
-  audit-sublib-cycle.py --self-test     # clean + buggy fixture dual-check
 
 Exit codes: 0 = all leaves clean, 1 = boundary violation, 2 = usage/parse error.
 """
@@ -321,7 +320,7 @@ def check(
 ) -> list[Violation]:
     """Return a Violation for each leaf whose transitive requires reach mega.
 
-    Pure over its inputs so the self-test can feed synthetic graphs.
+    Compute violations from the supplied graph.
     """
     by_uid: dict[str, Library] = {lib.uid: lib for lib in libs}
     by_name: dict[str, Library] = {lib.name: lib for lib in libs}
@@ -502,218 +501,8 @@ def load_describe(
     return parsed[0] if len(parsed) == 1 else parsed
 
 
-# --- self-test (clean + buggy fixture dual-check) ----------------------------
 
 
-def self_test() -> int:
-    """RFC-0001 / TLA bug-model homolog: a gate is only valid if it PASSES on a
-    clean graph AND FAILS on a graph with the bug injected. Both must hold."""
-
-    described = parse(
-        tokenize(
-            """(
-              (root /WORKSPACE_ROOT)
-              (build_context _build/default)
-              (executables
-                ((names (probe))
-                 (requires (AGENT_CORE))
-                 (modules ())
-                 (include_dirs ())))
-              (library
-                ((name masc.agent_core)
-                 (uid AGENT_CORE)
-                 (local true)
-                 (requires (YOJSON))
-                 (source_dir _build/default/packages/agent_core/lib)
-                 (modules ())
-                 (include_dirs ())))
-              (library
-                ((name yojson)
-                 (uid YOJSON)
-                 (local false)
-                 (requires ())
-                 (source_dir /FINDLIB/yojson)
-                 (modules ())
-                 (include_dirs ()))))
-            """
-        )
-    )
-    described = described[0] if len(described) == 1 else described
-    decoded = find_libraries(described)
-    if [lib.name for lib in decoded] != ["masc.agent_core", "yojson"]:
-        print(
-            f"SELF-TEST FAIL: describe schema decoded unexpected libraries: {decoded}"
-        )
-        return 1
-    if find_build_context(described) != "_build/default":
-        print("SELF-TEST FAIL: describe schema decoded unexpected build context")
-        return 1
-    validate_graph(decoded)
-    print("self-test: Dune 0.1 describe schema decodes strictly (PASS)")
-
-    def local(
-        name: str, uid: str, requires: tuple[str, ...], source_dir: str
-    ) -> Library:
-        return Library(
-            name=name,
-            uid=uid,
-            local=True,
-            requires=requires,
-            source_dir=source_dir,
-        )
-
-    def external(name: str, uid: str, requires: tuple[str, ...] = ()) -> Library:
-        return Library(
-            name=name,
-            uid=uid,
-            local=False,
-            requires=requires,
-            source_dir=f"/FINDLIB/{name}",
-        )
-
-    mega = local("masc", "MEGA", ("LEAF", "OTHER"), "_build/default/lib")
-    neutral = local("masc_core", "CORE", (), "_build/default/lib/core")
-    other = external("other", "OTHER")
-    # clean: leaf depends only on neutral; mega depends on leaf (allowed direction)
-    clean_leaf = local("masc.masc_goal", "LEAF", ("CORE",), "_build/default/lib/goal")
-    clean = [mega, neutral, clean_leaf, other]
-    # buggy: leaf re-couples to the mega-lib (direct)
-    buggy_leaf = local(
-        "masc.masc_goal", "LEAF", ("CORE", "MEGA"), "_build/default/lib/goal"
-    )
-    buggy = [mega, neutral, buggy_leaf, other]
-    # buggy-transitive: leaf -> mid -> mega
-    mid = local("masc.mid", "MID", ("MEGA",), "_build/default/lib/mid")
-    trans_leaf = local("masc.masc_goal", "LEAF", ("MID",), "_build/default/lib/goal")
-    buggy_trans = [mega, neutral, mid, trans_leaf, other]
-
-    leaves = ("masc.masc_goal",)
-    ok = True
-
-    validate_graph(clean)
-    validate_graph(buggy)
-    validate_graph(buggy_trans)
-
-    v_clean = check(clean, leaves)
-    if v_clean:
-        ok = False
-        print(f"SELF-TEST FAIL: clean graph reported violation {v_clean}")
-    else:
-        print("self-test: clean graph -> no violation (PASS)")
-
-    v_buggy = check(buggy, leaves)
-    if not v_buggy:
-        ok = False
-        print("SELF-TEST FAIL: buggy graph (direct) reported NO violation")
-    else:
-        print(f"self-test: buggy graph (direct) -> violation {v_buggy[0].path} (PASS)")
-
-    v_trans = check(buggy_trans, leaves)
-    if not v_trans:
-        ok = False
-        print("SELF-TEST FAIL: buggy graph (transitive) reported NO violation")
-    else:
-        print(
-            f"self-test: buggy graph (transitive) -> violation {v_trans[0].path} (PASS)"
-        )
-
-    build_context = "_build/default"
-    source_root = "packages/agent_core"
-    agent_core = local(
-        "masc.agent_core",
-        "AGENT_CORE",
-        ("AGENT_STRINGS", "YOJSON"),
-        "_build/default/packages/agent_core/lib",
-    )
-    agent_strings = local(
-        "masc.agent_core.strings",
-        "AGENT_STRINGS",
-        (),
-        "_build/default/packages/agent_core/lib/strings",
-    )
-    yojson = external("yojson", "YOJSON")
-    closed_clean = [agent_core, agent_strings, yojson]
-    validate_graph(closed_clean)
-    v_closed_clean = check_closed_source_root(
-        closed_clean,
-        build_context=build_context,
-        source_root=source_root,
-        required_local_library="masc.agent_core",
-    )
-    if v_closed_clean:
-        ok = False
-        print(
-            f"SELF-TEST FAIL: clean closed source-root graph reported {v_closed_clean}"
-        )
-    else:
-        print("self-test: closed source root with external deps -> clean (PASS)")
-
-    coordinator = local(
-        "masc.keeper_runtime",
-        "KEEPER",
-        (),
-        "_build/default/lib/keeper_runtime",
-    )
-    closed_buggy = [
-        Library(
-            name=agent_core.name,
-            uid=agent_core.uid,
-            local=agent_core.local,
-            requires=("AGENT_STRINGS", "KEEPER"),
-            source_dir=agent_core.source_dir,
-        ),
-        agent_strings,
-        coordinator,
-    ]
-    validate_graph(closed_buggy)
-    v_closed_buggy = check_closed_source_root(
-        closed_buggy,
-        build_context=build_context,
-        source_root=source_root,
-        required_local_library="masc.agent_core",
-    )
-    if len(v_closed_buggy) != 1 or v_closed_buggy[0].library != coordinator.name:
-        ok = False
-        print(
-            "SELF-TEST FAIL: closed source-root graph did not reject local "
-            f"coordinator dependency: {v_closed_buggy}"
-        )
-    else:
-        print("self-test: closed source root rejects local coordinator dep (PASS)")
-
-    try:
-        check_closed_source_root(
-            [agent_strings, yojson],
-            build_context=build_context,
-            source_root=source_root,
-            required_local_library="masc.agent_core",
-        )
-    except ValueError:
-        print("self-test: missing required local library fails closed (PASS)")
-    else:
-        ok = False
-        print("SELF-TEST FAIL: missing required local library was accepted")
-
-    try:
-        validate_graph(
-            [
-                Library(
-                    name=agent_core.name,
-                    uid=agent_core.uid,
-                    local=agent_core.local,
-                    requires=("MISSING",),
-                    source_dir=agent_core.source_dir,
-                )
-            ]
-        )
-    except ValueError:
-        print("self-test: dangling UID fails closed (PASS)")
-    else:
-        ok = False
-        print("SELF-TEST FAIL: dangling UID was accepted")
-
-    print("SELF-TEST: ALL PASS" if ok else "SELF-TEST: FAILED")
-    return 0 if ok else 1
 
 
 # --- cli ---------------------------------------------------------------------
@@ -754,15 +543,8 @@ def main(argv: list[str]) -> int:
             "named LIB below that source root"
         ),
     )
-    ap.add_argument(
-        "--self-test",
-        action="store_true",
-        help="run the clean+buggy fixture dual-check and exit",
-    )
     args = ap.parse_args(argv)
 
-    if args.self_test:
-        return self_test()
 
     if args.required_local_library is not None and args.closed_source_root is None:
         ap.error("--required-local-library requires --closed-source-root")

@@ -1993,6 +1993,7 @@ let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_la
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
 
 (** POST /api/v1/runtime/config/routing with [action = "drop"]: take
     [runtime_id] out of the standalone lane [lane]. Only the one id is sent,
@@ -2019,8 +2020,15 @@ let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane
     ; "action", `String "move"
     ; "runtime_id", `String runtime_id
     ; ( "direction"
-      , `String (match move with Move_slot_up -> "up" | Move_slot_down -> "down") )
+      , `String (match move with Move_slot_up -> "up" | Move_slot_down -> "down" | Move_slot_first -> "first") )
     ]
+
+let replace_exact_lane_slot ~host ~port ~lane ~runtime_id ~replacement_runtime_id =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route lane)
+    ; "action", `String "replace"
+    ; "runtime_id", `String runtime_id
+    ; "replacement_runtime_id", `String replacement_runtime_id ]
 
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
     declared lane [lane]. The server refuses while a keeper still routes

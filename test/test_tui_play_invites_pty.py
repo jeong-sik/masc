@@ -6,15 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_play_card.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-)
+
 
 LINK = "https://play.example.test/play#fixture-secret"
 CHAT = "Keepers ▸ alpha ▸ chat".encode()

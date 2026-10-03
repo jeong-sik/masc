@@ -297,7 +297,9 @@ type async_msg =
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
-      Masc_tui_types.runtime_lane_list * (unit, string) result
+      Masc_tui_types.runtime_lane_list
+      * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
+      * (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list

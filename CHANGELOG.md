@@ -79,6 +79,7 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 - Preserve Item balances, ownership and pending reads when a selected Keeper drops out of a partial roster; unavailable authority still withdraws those facts. (#41069)
 - Keep sampling metadata private, retain bounded failure identity and restore terminal request records from validated outcome journals. (#41018, #41040)
 - Repair runtime lane editing and workspace-authority verification for current model labels, terminal frames, request admission and canceled operations. Full fragment text is preserved in the detailed notes. (#41043, #41045, #41058, #41066, #41068)
+- Release checks wait for Board lists and workspace authority to appear before sending input, and handle unsupported event-stream reads explicitly. (#41083)
 
 ## [0.48.0] - 2026-09-29
 

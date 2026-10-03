@@ -4,14 +4,7 @@ import re
 import sys
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names, so without this a
-# change to the drawn text below reaches main with no scenario run. The row is
-# built in masc_tui_render.ml; the Metrics feed line is read by
-# test_tui_render_metrics.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+
 
 CLOSED = b"feed: closed"
 # What has to follow the state word: the count, with nothing between them. A

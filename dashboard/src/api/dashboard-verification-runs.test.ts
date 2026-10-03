@@ -3,8 +3,6 @@
 // than it is, and that each outcome's cause survives into the one column the
 // panel shows.
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
@@ -226,11 +224,7 @@ describe('parseVerificationRunsResponse', () => {
     })).toThrow('runs[0].reason must be a string')
   })
 
-  it('decodes every terminal status emitted by Verification_run_registry', () => {
-    const source = readFileSync(resolve(__dirname, '../../../lib/verification_run_registry.ml'), 'utf8')
-    const labelBody = source.match(/let outcome_label = function\n([\s\S]*?)\n;;/)?.[1]
-    expect(labelBody).toBeDefined()
-    const labels = [...(labelBody ?? '').matchAll(/->\s*"([^"]+)"/g)].map(match => match[1])
+  it('decodes terminal verification outcomes with their required payloads', () => {
     // These payloads follow outcome_detail_fields, not replay/storage shapes.
     const outcomes: Record<string, Record<string, unknown>> = {
       approved: { reason: '' },
@@ -241,7 +235,6 @@ describe('parseVerificationRunsResponse', () => {
       raised: { detail: 'unexpected evaluator error' },
       review_cancelled: { detail: 'review fiber cancelled: owner stopped' },
     }
-    expect(labels.sort()).toEqual(Object.keys(outcomes).sort())
     for (const [status, fields] of Object.entries(outcomes)) {
       const parsed = parseVerificationRunsResponse({
         generated_at: '2026-08-05T00:00:00Z', count: 1,

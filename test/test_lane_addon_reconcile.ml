@@ -589,19 +589,23 @@ let test_historical_never_started_leaves_no_binding () =
     let manifest = package packages "ready" in
     let path = Filename.concat directory "observer.toml" in
     let bytes = declaration ~id:"observer" ~manifest () in
+    state.startup_available := false;
     write path bytes;
     ignore (reconcile config directory);
     let old_id = declared_instance config "observer" |> text "instance_id" in
-    await_ready clock config old_id;
-    let captured = instance config old_id in
-    detach clock config old_id;
+    await clock (fun () -> phase (instance config old_id) = "failed");
+    let never_started = instance config old_id in
+    check int "failed startup has no observation history" 0
+      (number "observation_seq" never_started);
+    check bool "failed startup owns no container" true
+      (member "container_id" never_started = `Null);
+    check int "the backend never observed" 0 (List.length !(state.observations));
+    ignore (dispatch config Runtime.Detach ["instance_id", `String old_id]);
+    await clock (fun () ->
+      not (List.exists (fun value -> text "instance_id" value = old_id) (instances config)));
     Runtime.For_testing.reset ();
-    let fields = Yojson.Safe.Util.to_assoc captured in
-    let never_started =
-      `Assoc
-        (("container_id", `Null) :: ("observation_seq", `Int 0)
-         :: List.remove_assoc "observation_seq" (List.remove_assoc "container_id" fields))
-    in
+    state.events := [];
+    state.startup_available := true;
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id never_started);
     let has_binding () =

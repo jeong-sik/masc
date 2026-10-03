@@ -150,7 +150,7 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         h.drain_until_quiet(process, fd, output)
         assert sum(path == CONFIRM_PATH for path, _body in requests) == 1, requests
         fixtures[cards.OPERATOR_PATH] = (503, {"error": "confirm source offline"})
-        h.send_and_wait(process, fd, output, b"r", b"confirm queue not fully read")
+        h.send_and_wait(process, fd, output, b"r", "not fully read · confirm queue".encode())
         visible = cards.frame(process, fd, output, "removed-request-source-unavailable")
         assert b"No decision is waiting" not in visible and b"[home-a]" not in visible, visible
         os.write(fd, b"\ryy")

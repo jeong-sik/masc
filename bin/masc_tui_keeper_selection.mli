@@ -33,7 +33,8 @@ val next_message_target :
 (** Reconcile Keeper navigation across a roster replacement. List, detail, and
     logs selection follow roster identity. Message navigation follows its
     explicit target even while that Keeper is unavailable, so an exact pending
-    request remains recoverable. *)
+    request remains recoverable. Its cursor independently follows the roster
+    identity to return to after closing the message view. *)
 val reconcile :
   current_ids:string list ->
   next_ids:string list ->

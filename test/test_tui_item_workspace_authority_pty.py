@@ -271,16 +271,14 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
-            wait(lambda text: b"MASC Keepers" in text and b"server booting" in text
+            wait(lambda text: b"No keeper selected" in text
                  and "▸Items".encode() not in text,
                  "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
-            wait(lambda text: b"a.boot.ready" in text and b"server booting" not in text
-                 and "▸Items".encode() not in text,
-                 "ready roster did not follow the booting authority withdrawal")
-            open_items()
+            wait(lambda text: "▸Items".encode() in text and b"No keeper selected" not in text,
+                 "ready roster did not restore the retained Item detail")
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "ready server did not re-read Item account after boot")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \

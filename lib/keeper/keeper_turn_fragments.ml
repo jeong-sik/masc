@@ -157,20 +157,20 @@ let read ~session_dir file =
       path
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   in
-  let unreadable exn =
-    Error (Printf.sprintf "history store unreadable path=%s: %s" path (Printexc.to_string exn))
+  let unreadable error =
+    Error (Printf.sprintf "history store unreadable path=%s: %s" path (Fs_compat.Private_jsonl_rows.error_to_string error))
   in
   match Fs_compat.read_private_jsonl_rows_locked_result path with
   | Fs_compat.Private_file_succeeded rows -> of_rows rows
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
     settled cleanup_failure;
     of_rows value
-  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed exn) ->
-    unreadable exn
+  | Fs_compat.Private_file_failed error ->
+    unreadable error
   | Fs_compat.Private_file_failed_with_cleanup_failure
-      { error = Fs_compat.Private_jsonl_rows.Io_failed exn; cleanup_failure } ->
+      { error; cleanup_failure } ->
     settled cleanup_failure;
-    unreadable exn
+    unreadable error
 ;;
 
 let of_turn turn_ref lines =

@@ -21,6 +21,8 @@
 
 ### Release highlights
 
+- Keeper Items remain readable with read-state permission when public roster currency observations are omitted; workspace and response ownership checks remain enforced. Repair RC behavioral fixtures without excluding suites or increasing timeouts. (#40843)
+
 - Follow Keeper work through the shared Goal model, task activity, and clearer TUI navigation.
 - Use Candle and portrait Items with authoritative balances, ownership and workspace-bound readings; unavailable readings withdraw monetary facts and retain diagnostics.
 - Run isolated Lane Add-ons and inspect declared results, retained evidence and report lineage.
@@ -39,6 +41,12 @@
 - Resolve the workspace consistently for local voice and Lane probes. (#40729)
 
 ### Final main follow-up
+
+- Preserve the caller's absolute provider-permit deadline when queueing or timer scheduling takes time. (#40783)
+- Keep official-client spawn-failure tests at the real exec boundary, while separately verifying missing executables as invalid configuration and preserving claim release and pre-dispatch evidence. (#40783)
+- Dashboard execution responses keep serving their prepared bytes after #40393's observation-sequence stamp: both the default-light body and the parameterized fill are now built through the same keeper-observation projection the reuse gate reads back, so any fill — including ones the producer's own render did not make — is a fixed point of the gate instead of silently recomputing on every read (#40796).
+- Memory search reports incomplete source verification instead of a definitive miss when relevant stored claims must be withheld, including partial results and combined history searches. (#40826)
+- Removed 20 obsolete migration and constants-only test suites from the full test run while retaining current behavior assertions (#40828).
 
 - Use retrieval-first Keeper memory and validate only query-matching source candidates, retaining stale-source and concurrent-change checks. (#40782, #40784)
 - Repair chat compilation and refresh authenticated Item accounts from the current authoritative roster without requiring public currency revisions. (#40788)
@@ -104,6 +112,8 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 - A Goal's `due_date` is read in one place. It is `YYYY-MM-DD` for a day that exists and falls due at 23:59:59 UTC of that day, whatever the operator's time zone is. The overdue notice and the Overview countdown use it, and `masc_goal_upsert` refuses a value that is not such a date instead of storing it (#39923).
 
 ### Fixed
+
+- Show schedule editor and server refusal diagnostics in the TUI Schedules pane when workspace warnings occupy the footer. Long diagnostics reserve space for the selected schedule and remain readable in its detail view.
 
 - Declare a second Muse account from an existing `muse-serve` provider: the copy signs in at a new `account-home`, and the Config form shows the `HOME=<home> muse login` sign-in. #39578
 - The Verification screen reads the server's current cancelled, unreviewed and empty-approval-reason answers correctly, and the Lanes table now tells an empty recent observation window apart from run history that was not kept (#39807).

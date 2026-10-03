@@ -1019,10 +1019,14 @@ let run
          in
          let evaluation = { direction; destinations; state; questions; result } in
          evaluations := evaluation :: !evaluations;
+         (* Terminal payload persistence precedes the registry's protected
+            lock. Finish the whole callback even if cancellation arrives
+            after the provider has returned. *)
          Option.iter
            (fun finish ->
               Option.iter
-                (fun id -> finish ~evaluation_id:id evaluation)
+                (fun id ->
+                   Eio.Cancel.protect (fun () -> finish ~evaluation_id:id evaluation))
                 evaluation_id)
            after_evaluate;
          publish (Incomplete (List.rev !evaluations));

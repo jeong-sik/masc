@@ -321,6 +321,20 @@ let identity_provider_attached ~providers ~provider_id =
     providers
 ;;
 
+(* Declared at all, attached or not, including a declaration that could not
+   be read: the provider can still complete a pending consent, and an
+   unreadable row may come back readable on the next inventory. A provider
+   absent from the inventory never can, which is what lets its login intent
+   retire instead of polling forever. *)
+let identity_provider_declared ~providers ~provider_id =
+  List.exists
+    (function
+      | Identity_declared { idp_id; _ }
+      | Identity_unreadable { idp_id; _ } ->
+          String.equal idp_id provider_id)
+    providers
+;;
+
 let identity_login_landed ~providers ~login =
   identity_provider_attached ~providers ~provider_id:login.ils_provider
 ;;

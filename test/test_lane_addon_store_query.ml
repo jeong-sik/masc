@@ -135,6 +135,12 @@ let targeted_evidence () = with_store (fun root store ->
   let frozen = Store.freeze store ~instance_id ~binding:(binding 4096)
     ~row_ids:[(row 2 "").id] in
   check bool "selected evidence does not scan corrupt unrelated history" true (Result.is_ok frozen);
+  let receipt = unwrap frozen in
+  check string "receipt identifies the exact selected owner" instance_id
+    (Yojson.Safe.Util.member "instance_id" receipt |> Yojson.Safe.Util.to_string);
+  check (list string) "receipt keeps the exact validated selected rows" [(row 2 "").id]
+    (Yojson.Safe.Util.member "row_ids" receipt |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string);
   check bool "different instance rejected" true
     (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:["other/2/row"]));
   check bool "evidence envelope enforced" true
@@ -194,6 +200,8 @@ let published_evidence_is_readable_by_keeper () = with_store (fun root store ->
   let bundle_bytes = frozen |> member "evidence" |> member "path" |> to_string
     |> fun path -> In_channel.with_open_bin path In_channel.input_all in
   let published = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
+  List.iter (fun key -> check bool ("publication retains " ^ key) true
+    (Yojson.Safe.Util.member key published = Yojson.Safe.Util.member key frozen)) ["instance_id";"row_ids"];
   let root_reference = artifact_of_json (published |> member "keeper_artifact") in
   let prompt = published |> member "message" |> to_string in
   check string "delivery contains exactly the retention marker"

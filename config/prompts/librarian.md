@@ -197,7 +197,8 @@ claim의 `absorbs`에 넣지 마세요. `absorbs`는 그 claim이 재료의 내�
 재사용하세요. 알맞은 이름이 없으면 새 Category를 직접 만듭니다.
 `architecture_decision`, `deployment_recovery`처럼 내용을 드러내는 영문 소문자
 snake_case를 쓰세요. 첫 글자는 영문 소문자이며, 이후에는 소문자와 숫자,
-단어 사이의 밑줄 하나를 사용합니다. 같은 뜻의 이름을 매번 새로 만들거나
+단어 사이의 밑줄 하나를 사용합니다. `all`, `source`, `dropped`는 화면의
+구분 이름이므로 Category로 쓰지 마세요. 같은 뜻의 이름을 매번 새로 만들거나
 Keeper 이름·turn 번호를 Category로 쓰지 마세요. Category를 바꾸기 위해 같은
 claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억을 정당화하지는 않습니다.
 

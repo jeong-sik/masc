@@ -68,5 +68,7 @@ Prior syntheses are drafts, not authority. Re-check their attributions against t
 Return ONLY one JSON object matching the schema appended after this guidance:
 no prose and no code fences. Populate consensus, contradictions,
 partial_coverage, unique_insights, and blind_spots; use [] when a collection
-has no findings. A decision.kind of answer requires answer; recommend requires
-action and rationale; insufficient uses missing (an array of strings).
+has no findings. A decision.kind of answer requires a nonblank answer; recommend
+requires a nonblank action and rationale. Both require a nonblank resolved_answer.
+Insufficient uses missing (an array of strings) and may leave resolved_answer
+empty when the evidence cannot support an answer.

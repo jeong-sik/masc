@@ -198,12 +198,17 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
         let* () = match journal, primary with
           | Ok (), _ | _, Ok () -> Ok ()
           | Error _, Error _ -> Error "sampling outcome could not be indexed" in
-        let* _ = Store.write_blob store bytes |> Result.map_error (fun _ ->
-          "sampling outcome retained in recovery index") in
+        let references = `Assoc ["request",Types.evidence_to_json request;
+          "outcome",Types.evidence_to_json evidence] in
+        let* _ = Store.write_sampling_blob store bytes |> Result.map_error (fun _ ->
+          match encode_bounded ~max_bytes:package.resources.max_reply_bytes
+            (`Assoc ["status",`String "retention_error";"evidence",references]) with
+          | Ok bytes -> bytes
+          | Error _ -> "sampling outcome retained in recovery index") in
         let compact = record (Finished evidence) in
         ignore (Store.save_sampling_outcome store ~instance_id ~request_id compact);
         ignore (Store.save_sampling_request store ~instance_id ~request_id compact);
-        Ok (`Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence])) in
+        Ok references) in
     outcome, retained) in
     Eio.Fiber.check ();
     let* references = retained in

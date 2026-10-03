@@ -1159,7 +1159,66 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   check bool "recovery reconstructs outcome from first durable terminal record" true
     (Result.is_ok (Store.read_blob store reference)))
 
+let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module S = Mcp_protocol.Sampling in
+  let store = Store.create ~root:(Filename.concat dir "blob-publication-failure") in
+  let p = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let params = match S.create_message_params_of_yojson
+    (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  let evidence_directory = Filename.concat (Store.root store) "evidence" in
+  let invocations = ref 0 in
+  let broker = match Sampling.create ~store ~package:p ~instance_id:"blob-failure" ~route:"r"
+    ~invoke:(fun ~route:_ ~request:_ _ ->
+      incr invocations;
+      (* The request is already durable. Refuse only outcome blob publication;
+         the independent terminal indexes remain writable. *)
+      Unix.chmod evidence_directory 0o500;
+      Ok {S.role=Assistant;content=Text {type_="text";text="known answer"};
+        model="actual-model";stop_reason=None;_meta=None}) () with
+    | Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package:p ~instance_id:"blob-failure" with
+    | Ok value -> value | Error detail -> fail detail in
+  let reply = Fun.protect ~finally:(fun () -> Unix.chmod evidence_directory 0o700)
+    (fun () -> run_sampling_observation broker handler params) in
+  check int "publication failure does not reinvoke the model" 1 !invocations;
+  check bool "independent blob publication preserves the answer" true (Result.is_ok reply);
+  let refs = match reply with
+    | Ok answer -> (match answer.S._meta with
+        | Some json -> Yojson.Safe.Util.member "masc.lane_sampling" json
+        | None -> fail "answer lost sampling evidence")
+    | Error bytes ->
+        let json = try Yojson.Safe.from_string bytes with Yojson.Json_error _ ->
+          fail "publication failure lost structured request evidence" in
+        Yojson.Safe.Util.member "evidence" json in
+  let request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" refs) with
+    | Ok value -> value | Error detail -> fail detail in
+  check bool "request evidence remains readable" true (Result.is_ok (Store.read_blob store request));
+  let rows = match sampling_requests store ~instance_id:"blob-failure" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  let row = match rows with [row] -> row | _ -> fail "missing terminal record" in
+  check string "known result remains finished" "finished"
+    Yojson.Safe.Util.(row |> member "state" |> to_string);
+  let outcome = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
+    | Ok value -> value | Error detail -> fail detail in
+  let terminal = match Store.read_blob store outcome with
+    | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+  check string "recovery preserves known model result" "answered"
+    Yojson.Safe.Util.(terminal |> member "status" |> to_string);
+  let output : Types.output = {rows=[{id="answer";lane_id="fusion/computation";
+    kind=Types.Value;title="answer";observed_at=1.;subject_id="analysis";clock=None;
+    actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
+  let receipts = match Sampling.retained_receipts ~store ~instance_id:"blob-failure"
+    ~max_bytes:p.resources.max_reply_bytes output with
+    | Ok value -> value | Error detail -> fail detail in
+  check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
+  check string "receipt keeps actual model identity" "actual-model"
+    Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;

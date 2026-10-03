@@ -41,6 +41,7 @@ SOURCE_MODULES = (
     "test/tui_keyboard_observer.py",
     "test/tui_keyboard_tools.py",
     "test/tui_keyboard_startup.py",
+    "test/tui_keyboard_terminal.py",
 )
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.

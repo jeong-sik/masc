@@ -128,7 +128,7 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
           | None ->
             let store = Tool_blob_store.create ~base_path in
             let store_file path =
-              Tool_blob_store.put_file_durable store ~path ~mime:"text/plain"
+              Tool_blob_store.put_file_durable_blocking store ~path ~mime:"text/plain"
               |> Tool_output.normalized_artifact_ref_to_json
             in
             [ "output_artifact", store_file combined

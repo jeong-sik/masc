@@ -555,8 +555,7 @@ let same_ingest_source (before : Unix.stats) (after : Unix.stats) =
   && before.st_ctime = after.st_ctime
 ;;
 
-let put_file_durable_with ~after_hash t ~path:source_path ~mime =
-  Eio_guard.run_in_systhread ~label:"tool-blob-put-file-durable" (fun () ->
+let put_file_durable_blocking_with ~after_hash t ~path:source_path ~mime =
     try
       (* Nonblocking open lets the regular-file check reject a FIFO without
          waiting for a writer. It has no effect on a regular spool file. *)
@@ -642,8 +641,15 @@ let put_file_durable_with ~after_hash t ~path:source_path ~mime =
               "tool_blob_store.put_file_durable %s: %s"
               source_path
               (Printexc.to_string exception_)))
-        backtrace)
+        backtrace
 ;;
+
+let put_file_durable_with ~after_hash t ~path ~mime =
+  Eio_guard.run_in_systhread ~label:"tool-blob-put-file-durable" (fun () ->
+    put_file_durable_blocking_with ~after_hash t ~path ~mime)
+
+let put_file_durable_blocking =
+  put_file_durable_blocking_with ~after_hash:(fun () -> ())
 
 let put_file_durable = put_file_durable_with ~after_hash:(fun () -> ())
 

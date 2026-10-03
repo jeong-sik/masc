@@ -20,7 +20,9 @@ val read_blob_bounded : budget:read_budget -> t -> Lane_addon_types.evidence ->
 val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:string ->
   request_id:string -> (Yojson.Safe.t option, bounded_read_error) result
 (** Prefer the independently retained terminal link; otherwise read the pending
-    request index. Both use the caller's shared aggregate read allowance. *)
+    request index. Both use the caller's shared aggregate read allowance and
+    verify the exact file and parent durability before accepting a receipt.
+    Failed verification consumes the bytes read and never falls back to pending. *)
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
 val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a list ->
   encode:('a -> string) -> (jsonl_snapshot, string) result
@@ -44,10 +46,6 @@ val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t
     bytes and both path identities again. A visible rename alone is not durable
     confirmation. Sync/read/identity failures return [Error] without replay or
     changing the result. Reads keep the existing full-receipt allocation policy. *)
-val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
-val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
-(** Retain the exact published evidence before sending its idempotent Broadcast.
-    Repeated sends read that original artifact, not a changing live binding. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
@@ -61,9 +59,10 @@ val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
     memory. Terminal recovery links are visited first, then unresolved requests.
     The callback can stop immediately with [Error]; directory and decoding errors
     are explicit. Call from a system thread. No ordering is guaranteed. *)
-
-(** Discover requests after cancellation or restart, including pending rows that
-    have no terminal evidence. Records are atomically replaced, never removed. *)
+val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Retain the exact published evidence before sending its idempotent Broadcast.
+    Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
@@ -116,6 +115,10 @@ module For_testing : sig
     budget:read_budget -> t -> instance_id:string -> request_id:string ->
     (Yojson.Safe.t option, bounded_read_error) result
   val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
+  val load_sampling_request_bounded :
+    sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
+    budget:read_budget -> t -> instance_id:string -> request_id:string ->
+    (Yojson.Safe.t option, bounded_read_error) result
   val save_action : sync_parent:(string -> unit) -> t -> instance_id:string ->
     request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

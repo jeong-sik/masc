@@ -89,7 +89,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
                 producer = observations[0].get("producer", {}) if observations else {}
                 declared.append({"source_id": item["source_id"], "kind": "lane_output",
                     "installation_id": producer.get("installation_id", "unresolved-fixture"),
-                    "output_id": "computation", "selection": "latest_completed"})
+                    "output_id": "result", "selection": "latest_completed"})
             else:
                 declared.append({"source_id": item["source_id"], "kind": "snapshot_file",
                                  "path": "/fixture/" + item["source_id"] + ".json"})
@@ -150,6 +150,122 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
 
 
 class FusionCompute(unittest.TestCase):
+    def test_declared_upstream_without_observations_waits_without_sampling(self):
+        with tempfile.TemporaryDirectory() as root:
+            pending = source()
+            pending.update(observations=[], complete=False, cursor=None,
+                           detail="Producer has not completed an output")
+            host = Host(root)
+            result = call(host, [pending], binding("judge"))
+            self.assertFalse(result["isError"])
+            self.assertEqual(host.calls, [])
+            output = result["structuredContent"]
+            self.assertEqual(output["rows"], [])
+            self.assertFalse(output["coverage"][0]["complete"])
+            self.assertIn("Waiting", output["coverage"][0]["detail"])
+
+    def test_sampling_integer_decoder_refusal_preserves_next_request(self):
+        limit = sys.int_info.default_max_str_digits
+        bootstrap = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from protocol import SamplingClient, serve
+client = SamplingClient(max_request_bytes=int(sys.argv[2]))
+def observe(binding, sources):
+    client.create_message({"messages": [], "maxTokens": 1})
+    return {"rows": [], "coverage": []}
+serve("decoder-boundary", observe, sampling_client=client)
+"""
+        initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                      "params": {"capabilities": {"sampling": {}}}}
+        observe = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "lane_observe", "arguments": {"binding": {}, "sources": []}}}
+        reply = {"jsonrpc": "2.0", "id": "lane-sampling-1", "result": {"number": "__integer__"}}
+        wire = json.dumps(initialize) + "\n" + json.dumps(observe) + "\n"
+        wire += json.dumps(reply).replace('"__integer__"', "9" * (limit + 1)) + "\n"
+        wire += json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ping"}) + "\n"
+        process = subprocess.run([sys.executable, "-X", f"int_max_str_digits={limit}",
+                                  "-c", bootstrap, str(ADDONS), str(MAXIMUM_FRAME)],
+                                 input=wire, text=True, capture_output=True)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(process.stderr, "")
+        responses = [json.loads(line) for line in process.stdout.splitlines()]
+        self.assertEqual(len(responses), 4)
+        self.assertEqual(responses[0]["id"], 1)
+        self.assertEqual(responses[1]["method"], "sampling/createMessage")
+        self.assertEqual(responses[2]["id"], 2)
+        self.assertTrue(responses[2]["result"]["isError"])
+        self.assertNotIn("structuredContent", responses[2]["result"])
+        message = responses[2]["result"]["content"][0]["text"]
+        self.assertIn("JSON decoder limits", message)
+        self.assertIn("outcome is unconfirmed", message)
+        self.assertEqual(responses[3], {"jsonrpc": "2.0", "id": 3, "result": {}})
+
+    def test_interleaved_sampling_replies_preserve_ids_and_utf8_envelope(self):
+        limit = 1000
+        bootstrap = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from protocol import SamplingClient, serve
+client = SamplingClient(max_request_bytes=int(sys.argv[2]))
+def observe(binding, sources):
+    client.create_message({"messages": [], "maxTokens": 1})
+    return {"rows": [], "coverage": []}
+serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sys.argv[2]))
+"""
+        def wire(value):
+            return json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n"
+        def size(value):
+            return len(wire(value).encode("utf-8"))
+        minimal_error = {"jsonrpc": "2.0", "id": "",
+                         "error": {"code": -32603, "message": "Reply too large"}}
+        bounded_id = "q" * (limit - size(minimal_error))
+        largest_request = {"jsonrpc": "2.0", "id": "", "method": "other"}
+        impossible_id = "q" * (limit - size(largest_request))
+        scenarios = [
+            ("unicode ping", {"jsonrpc": "2.0", "id": "한" * 200, "method": "ping"},
+             {"result": {}}),
+            ("unicode unknown method", {"jsonrpc": "2.0", "id": "한" * 200, "method": "other"},
+             {"error": {"code": -32000, "message": "Worker is awaiting host sampling"}}),
+            ("bounded refusal", {"jsonrpc": "2.0", "id": bounded_id, "method": "other"},
+             {"error": minimal_error["error"]}),
+            ("unrepresentable refusal", {"jsonrpc": "2.0", "id": impossible_id, "method": "other"}, None),
+            ("non-scalar id", {"jsonrpc": "2.0", "id": [], "method": "ping"}, None),
+            ("boolean id", {"jsonrpc": "2.0", "id": True, "method": "ping"}, None),
+        ]
+        for name, nested, expected in scenarios:
+            with self.subTest(name=name):
+                self.assertLessEqual(size(nested), limit)
+                messages = [
+                    {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                     "params": {"capabilities": {"sampling": {}}}},
+                    {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                        "name": "lane_observe", "arguments": {"binding": {}, "sources": []}}},
+                    nested,
+                ]
+                # Even after refusal, a host completion may already be queued.
+                # It must not become a new request or a successful tool result.
+                messages.append({"jsonrpc": "2.0", "id": "lane-sampling-1", "result": {}})
+                messages.append({"jsonrpc": "2.0", "id": 3, "method": "ping"})
+                process = subprocess.run([sys.executable, "-c", bootstrap, str(ADDONS), str(limit)],
+                                         input="".join(wire(message) for message in messages),
+                                         text=True, capture_output=True)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(process.stderr, "")
+                frames = process.stdout.splitlines(keepends=True)
+                self.assertTrue(all(len(frame.encode("utf-8")) <= limit for frame in frames))
+                replies = [json.loads(frame) for frame in frames]
+                self.assertEqual(replies[1]["method"], "sampling/createMessage")
+                if expected is not None:
+                    self.assertEqual(replies[2], {"jsonrpc": "2.0", "id": nested["id"], **expected})
+                    self.assertFalse(replies[3]["result"]["isError"])
+                else:
+                    self.assertEqual(len(replies), 4)
+                    self.assertEqual(replies[2]["id"], 2)
+                    self.assertTrue(replies[2]["result"]["isError"])
+                    self.assertNotIn("structuredContent", replies[2]["result"])
+                self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 3, "result": {}})
+
     def test_oversized_terminal_sampling_reply_is_rejected_before_outcome_copy(self):
         class OversizedHost(Host):
             def answer(self, request):
@@ -205,7 +321,7 @@ class FusionCompute(unittest.TestCase):
             host = Host(root, response_fields={"extension": {"nested": [float("inf")]}})
             result = call(host, [source()], ping=True)
             self.assertTrue(result["isError"])
-            self.assertIn("finite JSON numbers", result["content"][0]["text"])
+            self.assertIn("finite numbers", result["content"][0]["text"])
             self.assertEqual(len(host.calls), 1)
 
     def test_actual_duplex_sampling_preserves_free_text_and_host_evidence(self):
@@ -271,7 +387,7 @@ class FusionCompute(unittest.TestCase):
                         {"jsonrpc": "2.0", "id": 2, "method": "ping"}])
                     result = responses[0]["result"]
                     self.assertTrue(result["isError"])
-                    self.assertIn("finite JSON numbers", result["content"][0]["text"])
+                    self.assertEqual(result["content"][0]["text"], "JSON data must contain only finite numbers")
                     self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
     def test_retained_snapshot_preserves_uri_citations_without_claiming_their_digest(self):
@@ -336,7 +452,7 @@ class FusionCompute(unittest.TestCase):
                     host = Host(root)
                     result = call(host, [captured], ping=True)
                     self.assertTrue(result["isError"])
-                    self.assertIn("finite JSON numbers", result["content"][0]["text"])
+                    self.assertEqual(result["content"][0]["text"], "JSON data must contain only finite numbers")
                     self.assertEqual(host.calls, [])
 
     def test_judge_validates_retained_panel_input_coverage(self):
@@ -557,6 +673,37 @@ class FusionCompute(unittest.TestCase):
             self.assertEqual(judge.calls, [])
             self.assertTrue(call_report("fusion-report", [captured])["isError"])
 
+    def test_judge_retains_digested_lineage_without_promoting_uri_citations(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = call(Host(root), [source()])["structuredContent"]
+            panel_refs = copy.deepcopy(output["rows"][0]["evidence"])
+            citations = [
+                {"uri": "https://example.org/original", "sha256": None},
+                {"uri": "lane-evidence:" + "c" * 64, "sha256": None},
+                {"uri": "lane-sequence:" + "d" * 64, "sha256": None},
+            ]
+            output["rows"][0]["evidence"].extend(citations)
+            judge = Host(root, instance_id="judge-worker")
+            result = call(judge, [upstream(output)], binding("judge"))
+            self.assertFalse(result["isError"])
+            item = result["structuredContent"]["rows"][0]
+            self.assertTrue(item["fields"]["input_complete"])
+            self.assertTrue(all(ref["sha256"] is not None for ref in item["evidence"]))
+            for ref in panel_refs:
+                self.assertIn(ref, item["evidence"])
+            payload = json.loads(judge.calls[0]["params"]["messages"][0]["content"]["text"])
+            raw = payload["untrusted_inputs"][0]["observations"][0]["output"]["rows"][0]
+            for citation in citations:
+                self.assertIn(citation, raw["evidence"])
+            reported = call_report("fusion-report", [upstream(result["structuredContent"],
+                instance_id="judge-worker", installation_id="fusion-judge")])
+            self.assertFalse(reported["isError"])
+            report = next(row for row in reported["structuredContent"]["rows"]
+                          if row["lane_id"] == "fusion/report")
+            self.assertTrue(all(ref["sha256"] is not None for ref in report["evidence"]))
+            for ref in panel_refs:
+                self.assertIn(ref, report["evidence"])
+
     def test_two_panels_judge_and_report_keep_answers_and_model_evidence(self):
         with tempfile.TemporaryDirectory() as root:
             panels = [Host(root, text=text, instance_id=f"panel-worker-{index + 1}")
@@ -608,6 +755,10 @@ class FusionCompute(unittest.TestCase):
             linked_refs = [input["observations"][0]["output"]["rows"][0]["fields"]["model_evidence"]["request"]
                            for input in context["untrusted_inputs"]]
             self.assertEqual(linked_refs, request_refs)
+            for panel_output in outputs:
+                for reference in panel_output["rows"][0]["evidence"]:
+                    self.assertIn(reference, item["evidence"])
+                    self.assertIn(reference, report["evidence"])
 
     def test_failed_and_uncertain_calls_preserve_error_and_retained_references(self):
         with tempfile.TemporaryDirectory() as root:

@@ -110,12 +110,13 @@ def computation_output(status="answered", *, role="panel", outcome=True, text="F
                   "status": status, "evidence": refs})},
               "input_coverage": [{"source_id": "project", "incarnation": "capture-1",
                   "cursor": "7", "complete": True, "detail": None}]}
-    terminal: dict | None = None
+    terminal: dict[str, object] | None = None
     if outcome:
         terminal = {"status": status}
         if answered or status == "invalid_response":
             terminal["response"] = {key: value for key, value in response.items() if key != "_meta"}
     if status == "invalid_response":
+        assert terminal is not None
         fields["sampling_response"] = response
         fields["validation_error"] = "Fusion requires an actual response model"
         fields["sampling_error"]["message"] = json.dumps({
@@ -197,7 +198,7 @@ class FusionReport(unittest.TestCase):
                     refused, pong = map(json.loads, worker.stdout.splitlines())
                     self.assertEqual(refused["id"], 2)
                     self.assertTrue(refused["result"]["isError"])
-                    self.assertIn("finite JSON numbers", refused["result"]["content"][0]["text"])
+                    self.assertEqual(refused["result"]["content"][0]["text"], "JSON data must contain only finite numbers")
                     self.assertNotIn("structuredContent", refused["result"])
                     self.assertEqual(pong, {"jsonrpc": "2.0", "id": 3, "result": {}})
 

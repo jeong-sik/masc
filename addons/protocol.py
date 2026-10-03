@@ -22,6 +22,37 @@ class UnknownMethod(ValueError):
     pass
 
 
+def validate_json(value: Any) -> None:
+    """Refuse values that cannot be encoded as finite UTF-8 JSON."""
+    pending = [(value, False)]
+    active = set()
+    while pending:
+        item, leaving = pending.pop()
+        if leaving:
+            active.remove(id(item))
+            continue
+        if isinstance(item, float) and not math.isfinite(item):
+            raise InvalidInput("JSON data must contain only finite numbers")
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise InvalidInput("JSON strings must be valid UTF-8") from error
+        elif isinstance(item, dict):
+            if id(item) in active:
+                raise InvalidInput("JSON data must not contain reference cycles")
+            active.add(id(item))
+            pending.append((item, True))
+            for key, child in item.items():
+                pending.extend(((key, False), (child, False)))
+        elif isinstance(item, (list, tuple)):
+            if id(item) in active:
+                raise InvalidInput("JSON data must not contain reference cycles")
+            active.add(id(item))
+            pending.append((item, True))
+            pending.extend((child, False) for child in item)
+
+
 def object_value(value: Any, field: str) -> dict:
     if not isinstance(value, dict):
         raise InvalidInput(f"{field} must be an object")
@@ -39,9 +70,15 @@ def optional_string(value: Any, field: str) -> str | None:
 
 
 def number(value: Any, field: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise InvalidInput(f"{field} must be a finite number")
-    return float(value)
+    try:
+        converted = float(value)
+    except OverflowError as error:
+        raise InvalidInput(f"{field} must be a finite number") from error
+    if not math.isfinite(converted):
+        raise InvalidInput(f"{field} must be a finite number")
+    return converted
 
 
 def finite_json(value: Any, field: str) -> None:
@@ -215,21 +252,39 @@ class SamplingClient:
             if not line:
                 raise InvalidInput("Host closed stdio before answering sampling")
             try:
-                response = object_value(json.loads(line.decode("utf-8")), "sampling response")
+                decoded = json.loads(line.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as error:
                 raise InvalidInput("Malformed host sampling response") from error
-            finite_json(response, "Host sampling response")
+            except ValueError as error:
+                raise InvalidInput("Host sampling response exceeds the JSON decoder limits; "
+                                   "no response was accepted and the model-call outcome is unconfirmed") from error
+            response = object_value(decoded, "sampling response")
+            validate_json(response)
             if response.get("jsonrpc") != "2.0":
                 raise InvalidInput("Expected JSON-RPC sampling response")
             if "method" in response:
                 if "id" not in response:
                     continue
+                nested_id = response["id"]
+                if (not isinstance(response["method"], str)
+                        or not (nested_id is None or isinstance(nested_id, (str, int, float))
+                                and not isinstance(nested_id, bool))):
+                    raise InvalidInput("Interleaved host request requires a string method and scalar JSON-RPC id")
                 if response["method"] == "ping":
                     reply = {"result": {}}
                 else:
                     reply = {"error": {"code": -32000,
                                        "message": "Worker is awaiting host sampling"}}
-                print(json.dumps({"jsonrpc": "2.0", "id": response["id"], **reply}), flush=True)
+                encoded = json.dumps({"jsonrpc": "2.0", "id": nested_id, **reply},
+                                     ensure_ascii=False, allow_nan=False)
+                if len((encoded + "\n").encode("utf-8")) > self.max_request_bytes:
+                    encoded = json.dumps({"jsonrpc": "2.0", "id": nested_id,
+                        "error": {"code": -32603, "message": "Reply too large"}},
+                        ensure_ascii=False, allow_nan=False)
+                    if len((encoded + "\n").encode("utf-8")) > self.max_request_bytes:
+                        raise InvalidInput("Interleaved host request cannot receive an exact-id reply "
+                                           "within the declared envelope; the model-call outcome is unconfirmed")
+                print(encoded, flush=True)
                 continue
             if response.get("id") != request_id:
                 raise InvalidInput("Sampling response ID does not match the request")
@@ -249,10 +304,30 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         request_id = None
         method = None
         try:
-            request = object_value(json.loads(line.decode("utf-8")), "request")
+            text_line = line.decode("utf-8")
+            try:
+                decoded = json.loads(text_line)
+            except json.JSONDecodeError:
+                raise
+            except ValueError as error:
+                raise InvalidInput("JSON value exceeds the decoder limits") from error
+            request = object_value(decoded, "request")
+            # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
+            supplied_id = request.get("id")
+            if not (supplied_id is None or isinstance(supplied_id, (str, int, float))
+                    and not isinstance(supplied_id, bool)):
+                raise InvalidInput("JSON-RPC id must be a string, number or null")
+            validate_json(supplied_id)
             request_id = request.get("id")
             method = request.get("method")
-            if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
+            if request.get("jsonrpc") != "2.0":
+                raise InvalidInput("expected a JSON-RPC 2.0 request")
+            if "method" not in request and ("result" in request or "error" in request):
+                # A sampling completion can already be queued when its nested
+                # host request is refused. Responses are not new requests and
+                # must not produce either a tool answer or a response loop.
+                continue
+            if not isinstance(method, str):
                 raise InvalidInput("expected a JSON-RPC 2.0 request")
             if "id" not in request:
                 continue
@@ -278,14 +353,19 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                     raise InvalidInput("unknown tool")
                 arguments = object_value(params.get("arguments"), "arguments")
                 try:
+                    validate_json(arguments)
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
+                    validate_json(output)
                     encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
                                if text_summary is None else string(text_summary(output), "output summary"))
+                    validate_json(encoded)
                     result = {"content": [{"type": "text", "text": encoded}],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:
                     result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
+                except RecursionError:
+                    result = {"content": [{"type": "text", "text": "JSON nesting exceeds the encoder limit"}], "isError": True}
             else:
                 raise UnknownMethod
             response = {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -298,7 +378,15 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         except InvalidInput as error:
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32602, "message": str(error)}}
-        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        except RecursionError:
+            response = {"jsonrpc": "2.0", "id": request_id,
+                        "error": {"code": -32602, "message": "JSON nesting exceeds the decoder limit"}}
+        try:
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        except RecursionError:
+            response = {"jsonrpc": "2.0", "id": request_id,
+                        "error": {"code": -32602, "message": "JSON nesting exceeds the encoder limit"}}
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
         if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
             if method == "tools/call":
                 response = {"jsonrpc": "2.0", "id": request_id, "result": {

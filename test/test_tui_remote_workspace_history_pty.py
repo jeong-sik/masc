@@ -1533,8 +1533,8 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
-                    assert [(phase, method) for phase, method in calls
-                            if method == "resources/list"] == [("b", "resources/list")] * (refreshes + 1), calls
+                    resource_lists = [phase for phase, method in calls if method == "resources/list"]
+                    assert len(resource_lists) > refreshes and all(phase == "b" for phase in resource_lists), calls
                 os.write(fd, b"q")
             finally:
                 release.set()

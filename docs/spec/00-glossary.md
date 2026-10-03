@@ -354,8 +354,10 @@ status: reference
   소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
   이름 기반 시작 장비로 복원한다. 서버와 원격 TUI, 대시보드는 `Keeper_portrait_equipment` 스냅숏을
   공유해 일관된 착용 모습을 렌더한다.
-  TUI에서는 Keeper 상세 화면 맨 위, 대화 화면의 Keeper 목록 아래, 아이템 미리보기, `/about`에
-  그려진다. 터미널이 알려 준 능력에 따라 실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
+  TUI의 Keeper 상세 화면과 대화 머리글에는 작은 아이콘으로 표시한다. 대화 화면에서는
+  `현재 대화` 표식과 초상화가 선택 가능한 Keeper 목록 위에 놓인다. Items에서는 장비를
+  살펴보는 큰 미리보기를 쓰며, `/about`에는 마스코트를 표시한다. 터미널 능력에 따라
+  실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
   `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
@@ -3002,7 +3004,8 @@ status: reference
       `Carries_new_statement`로 정상 적용한다. 역방향 판정만 실패하거나 입력이 커서
       `Not_judged`(`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)이면
       claim을 적용한다. 흡수 판정이 실패해 `Gate_judgment_failed`가 되면 Memory 회차의
-      스냅숏 커밋을 보류하므로 새 claim과 원본 모두 그대로 남는다.
+      스냅숏 커밋을 보류한다. 원본을 유지하고 제안된 새 claim도 저장하지 않으며, 같은 입력
+      범위를 다시 처리할 수 있도록 남긴다.
   - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
     실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
   → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
@@ -3137,8 +3140,10 @@ status: reference
   Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
   Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
   `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
-  `failed`는 검사 실패다. 모든 문장이 전달된다고 확인된 원문만 흡수하고,
-  확인하지 못한 원문은 현재 Memory에 남긴다. 새 claim 저장은 계속한다.
+  `failed`는 검사 실패다. 필요한 흡수 판정이 실패하면 해당 Memory 입력 범위의 저장을
+  보류하고 원본을 유지한다. 제안된 새 claim도 저장하지 않는다. 판정을 끝낸 `judged`에서는
+  모든 문장이 전달된다고 확인된 원문만 흡수하고, 전달되지 않은 원문은 현재 Memory에 남긴다.
+  이때 새 claim은 역방향 사본 판정과 저장 검사를 거쳐 적용한다.
   `judged`는 검사를 마친 결과다. 검사 비활성화 등 `skipped`일 때는 Librarian의 결정을 그대로 적용한다.
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
   반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면

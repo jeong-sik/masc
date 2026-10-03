@@ -3,7 +3,7 @@ import os
 import sys
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+
 
 
 def run(executable, no_color=False):

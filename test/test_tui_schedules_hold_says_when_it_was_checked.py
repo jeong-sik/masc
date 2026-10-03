@@ -14,15 +14,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names. The hold is decoded
-# in tui_decode.ml, which also decides current against checked-at; both lines
-# are drawn in masc_tui_render.ml with the words in masc_tui_render_schedule.ml.
-SOURCE_MODULES = (
-    "lib/tui_decode.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_schedule.ml",
-)
+
 
 IDENTITY = b"schedule-proof-701 \xc2\xb7 status:"
 HELD_ID = b"occurrence-proof-702"

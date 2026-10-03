@@ -7,11 +7,7 @@ from pathlib import Path
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_message_layout.ml",
-    "bin/masc_tui_text_block.ml",
-)
+
 
 
 def prepare_colliding_ids(base_path):

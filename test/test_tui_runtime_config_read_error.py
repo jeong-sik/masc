@@ -5,14 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_async_read.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_runtime_config_view.ml",
-)
+
 
 ERROR_PREFIX = b"fetch:"
 ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"

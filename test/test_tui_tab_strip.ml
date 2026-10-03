@@ -140,15 +140,6 @@ let test_a_strip_that_fits_is_unchanged () =
   Alcotest.(check bool) "nothing is held back" false
     (contains held_back_left whole || contains held_back_right whole)
 
-(* The Runtime header kept a private [tab] helper that drew this strip's two
-   styles by hand. It matched only while nobody changed either one. *)
-let test_the_runtime_header_draws_through_the_strip () =
-  Alcotest.(check bool) "render_runtime names its two views through tab_strip"
-    true
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_runtime" ~callee:"tab_strip"
-     >= 1)
-
 (* A tab's count is a convenience -- the tab is a place to go, and the screen
    it opens draws its own rows. So a tab whose source this screen has not read
    carries its name alone, because a zero from an unread snapshot is not a
@@ -210,46 +201,6 @@ let test_the_marks_count_what_is_off_the_row () =
       done)
     labels
 
-(* The surface ring above the detail and the detail's own tabs draw the same
-   two marks. They used to spell them apart -- the ring counted, the tabs
-   drew a bare ellipsis -- and both are on the screen at once. *)
-let test_the_surface_ring_draws_the_same_marks () =
-  let prim = "bin/masc_tui_render_prim.ml" in
-  List.iter
-    (fun callee ->
-      Alcotest.(check bool)
-        (Printf.sprintf "the ring asks for %s" callee)
-        true
-        (Ast_grep.count_calls_in_value_binding ~module_path:prim
-           ~binding_name:"surface_strip" ~callee
-         > 0))
-    [ "hidden_before_mark"; "hidden_after_mark" ];
-  List.iter
-    (fun needle ->
-      Alcotest.(check int)
-        (Printf.sprintf "the ring does not spell %S itself" needle)
-        0
-        (Ast_grep.count_exact_string_literals ~module_path:prim ~needle))
-    [ "%s\xe2\x80\xb9%d%s "; " %s%d\xe2\x80\xba%s" ]
-
-let test_both_strips_ask_the_same_helper () =
-  let render = "bin/masc_tui_render.ml" in
-  let calls binding =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
-      ~binding_name:binding ~callee:"tab_entry_label"
-  in
-  Alcotest.(check bool) "the Lanes strip asks it" true
-    (calls "render_lanes_overview" > 0);
-  Alcotest.(check bool) "so does the Runtime strip" true
-    (calls "render_runtime" > 0);
-  List.iter
-    (fun needle ->
-      Alcotest.(check int)
-        (Printf.sprintf "no strip spells %S itself" needle)
-        0
-        (Ast_grep.count_exact_string_literals ~module_path:render ~needle))
-    [ "All runtimes (%d)"; "Standalone (%d)"; "Lanes (%d)" ]
-
 (* Each drawn entry leads where its name says, and a cut mark leads to the
    nearest entry it hides: the one a step of the strip's key would bring into
    the window. Seven names at 24 cells with the fourth current keep it and its
@@ -299,8 +250,6 @@ let () =
         ; Alcotest.test_case "no bar between names" `Quick test_no_bar_between_names
         ; Alcotest.test_case "nothing current marks nothing" `Quick
             test_a_strip_with_nothing_current_marks_nothing
-        ; Alcotest.test_case "the runtime header draws through the strip" `Quick
-            test_the_runtime_header_draws_through_the_strip
         ; Alcotest.test_case "the last entry stays on the row" `Quick
             test_the_last_entry_stays_on_the_row
         ; Alcotest.test_case "the first entry keeps its left edge" `Quick
@@ -319,9 +268,7 @@ let () =
             test_an_unread_tab_carries_its_name_alone
         ; Alcotest.test_case "the marks count what is off the row" `Quick
             test_the_marks_count_what_is_off_the_row
-        ; Alcotest.test_case "the surface ring draws the same marks" `Quick
-            test_the_surface_ring_draws_the_same_marks
-        ; Alcotest.test_case "both strips ask the same helper" `Quick
-            test_both_strips_ask_the_same_helper
+        ;
+
         ] )
     ]

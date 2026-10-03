@@ -32,3 +32,5 @@ The independent reviewer also caught that RequestHttpResponse can route GET to i
 The final diagnostic observed a real cancelled-response BrokenPipe: the response-completion ledger recorded zero POSTs while the ingress ledger retained exactly one admitted answer from A. Both zero-admission and one-admission scenarios passed. The final manifest and captures refer to the POST-only fixture version.
 
 Final independent review covered all five source files including the GET refusal and MCP qualification, with no remaining P0-P2 findings. No runtime or build claim is inferred from that source review.
+
+The checked-in terminal text captures omit trailing blank cells; raw PTY captures remain in the diagnostic artifact directory.

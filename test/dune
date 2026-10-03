@@ -3296,34 +3296,35 @@
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
- masc_tui_answering
- masc_tui_keys
- masc.fusion_core
- masc_tui_fetched
- alcotest
- astring
- masc
- masc.masc_types
- masc_tui_footer
- masc_tui_interrupt_signal
- masc_tui_esc_interrupt
- masc_tui_send_disposition
- masc_tui_keeper_chat_live
- masc_tui_keeper_chat_log
- masc_tui_keeper_chat_projection
- masc_tui_keeper_chat_queue
- masc_tui_keeper_chat_transcript
- masc_tui_keeper_selection
- masc_tui_message_layout
- masc_tui_render_chat
- masc_tui_render_schedule
- masc_tui_frame_presenter
- masc_tui_ansi
- masc_tui_theme
- masc_tui_types
- masc_tui_roster_pane
- unix
- yojson))
+  masc_tui_answering
+  masc_tui_keys
+  masc_tui_fusion_model
+  masc.fusion_core
+  masc_tui_fetched
+  alcotest
+  astring
+  masc
+  masc.masc_types
+  masc_tui_footer
+  masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
+  masc_tui_send_disposition
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_selection
+  masc_tui_message_layout
+  masc_tui_render_chat
+  masc_tui_render_schedule
+  masc_tui_frame_presenter
+  masc_tui_ansi
+  masc_tui_theme
+  masc_tui_types
+  masc_tui_roster_pane
+  unix
+  yojson))
 
 (test
  (name test_tui_chat_rows_memo)
@@ -3482,7 +3483,7 @@
 (test
  (name test_tui_command)
  (modules test_tui_command)
- (libraries alcotest masc_tui_command masc_tui_mcp yojson))
+ (libraries alcotest masc masc_tui_command masc_tui_mcp yojson))
 
 (test
  (name test_tui_fetched)
@@ -5881,7 +5882,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries masc_tui_identity_model masc_tui_identity_updates alcotest masc masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)

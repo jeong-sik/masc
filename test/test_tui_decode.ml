@@ -10017,9 +10017,11 @@ let test_librarian_preflight_detail_reports_actual_route () =
        "elapsed_s", `Float nan; "elapsed_s", `Float infinity])
     ["judged", P.Judged (evaluated, judgment);"invalid", P.Invalid_answer (evaluated,"bad answer")];
   let judged = observed (P.Judged (evaluated, judgment)) (Some 0.1) in
+  accepted "confidence is independent of the chosen probability" ~path:"full_lane"
+    (with_field "confidence" (`Float 0.8) judged);
   List.iter (fun (key,value) -> rejected "native choice contract preserved" ~path:"full_lane"
     (with_field key value judged))
-    ["confidence",`Float 0.8; "decision",`String "keep_current";
+    ["confidence",`Float 1.1; "decision",`String "keep_current";
      "probabilities",`Assoc ["keep_current",`Float 0.05;"needs_generation",`Float 0.9]];
   let failed = observed (P.Failed {C.first_attempt=transport;later_attempts=[]}) (Some 0.1) in
   rejected "failed requires a nonempty refusal history" ~path:"full_lane"

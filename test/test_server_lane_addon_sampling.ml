@@ -31,6 +31,12 @@ let test_image_only_completion_is_sampling_content () =
     (S.sampling_content_of_yojson (S.sampling_content_to_yojson actual) = Ok actual);
   check bool "multiple image outputs are not silently reduced" true
     (Result.is_error (project (response [block;block])));
+  let url_image = L.Image {media_type="image/png";data="https://example.invalid/image.png";
+    source_type=L.Url} in
+  check bool "mixed image sources are not silently reduced" true
+    (Result.is_error (project (response [block;url_image])));
+  check bool "URL-only image cannot become MCP base64 content" true
+    (Result.is_error (project (response [url_image])));
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 

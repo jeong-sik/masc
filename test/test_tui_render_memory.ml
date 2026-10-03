@@ -1665,16 +1665,54 @@ let test_category_rail_wrapped_range_and_overflow () =
       first <= Masc_tui_roster_pane.pane_cols &&
       target = Masc_tui_press.Press_memory_category cat_filter)
       (Masc_tui_hit.to_list zones_small));
-  let title =
-    Render_memory.facts_title ~cols:140 ~screen:" MASC Memory"
-      ~keeper:(Render_memory.facts_keeper_label (Some "*"))
-      ~reading:(Render_memory.Facts_loaded
-        {total = 1; filter_label = Types.memory_category_filter_label state.memory_facts_category;
-         query_label = ""})
-      ~timestamp:"23:41:50" ~badge:"HTTP"
+  state.view <- Types.Memory;
+  check bool "keeper is selected for detail access" true
+    (Option.is_some state.memory_facts_keeper);
+  state.memory_fact_detail_open <- true;
+  state.memory_fact_detail_scroll <- 0;
+  let rows = Types.memory_fact_rows state in
+  check int "category filter isolates long category fact" 1 (List.length rows);
+  let fact_row = List.hd rows in
+  let compact text = String.split_on_char ' ' text |> String.concat "" in
+  List.iter
+    (fun cols ->
+      let lines = Render_memory.memory_fact_detail_lines ~cols fact_row in
+      let body = match lines with [] -> [] | _heading :: body -> body in
+      List.iter
+        (fun line ->
+          check bool "detail body fits inner frame width" true
+            (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+        body;
+      let text =
+        body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+      in
+      check bool "wrapped detail lines preserve full category label" true
+        (contains (compact long_cat_name) text))
+    [ 80; 40; 30; 16 ];
+  let detail_cols = 40 in
+  let detail_lines = Render_memory.memory_fact_detail_lines ~cols:detail_cols fact_row in
+  let count = List.length detail_lines in
+  let small_height = 4 in
+  check bool "detail lines overflow small viewport" true (count > small_height);
+  let indexed = List.mapi (fun i line -> i, Masc_tui_theme.strip_sgr line) detail_lines in
+  let first_cat_idx = indexed |> List.find (fun (_, line) -> contains "Category:" line) |> fst in
+  let next_field_idx = indexed |> List.find (fun (i, line) -> i > first_cat_idx && contains "Origin:" line) |> fst in
+  let last_cat_idx = next_field_idx - 1 in
+  let initial_scroll = state.memory_fact_detail_scroll in
+  check int "initial detail scroll starts at top" 0 initial_scroll;
+  let scrolled =
+    Masc_tui_scroll.ensure_visible ~cursor:last_cat_idx ~height:small_height
+      initial_scroll
   in
-  check bool "wide facts title includes the selected category label" true
-    (contains long_cat_name title)
+  state.memory_fact_detail_scroll <- scrolled;
+  check bool "scrolled window reaches final category line" true
+    (scrolled <= last_cat_idx && last_cat_idx < scrolled + small_height);
+  check bool "scroll position indicator reports window" true
+    (Option.is_some
+       (Masc_tui_scroll.position_row ~scroll:scrolled ~height:small_height count));
+  let end_scroll = Masc_tui_scroll.normalize ~count ~height:small_height max_int in
+  check bool "normalizing the final viewport reaches bottom of detail" true
+    (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
 
 (* The category row is the shared strip: the key first, then the entries
    with the one being read marked, two cells apart. It drew its own bracketed

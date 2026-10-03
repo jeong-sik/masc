@@ -4042,7 +4042,7 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
     with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
       let count = List.length slots in
       let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 | Move_slot_first -> 0 in
-      if target < 0 || target >= count
+      if target < 0 || target >= count || (move = Move_slot_first && position = 0)
       then
         Error
           (Printf.sprintf
@@ -4069,6 +4069,7 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
 ;;
 
 let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
+  let slot = String.trim slot in
   let replacement = String.trim replacement in
   if String.equal replacement "" || contains_newline replacement
   then Error "replacement must be a non-empty runtime id without newlines"

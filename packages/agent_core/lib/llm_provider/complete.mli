@@ -11,6 +11,11 @@
     @stability Internal
     @since 0.93.1 *)
 
+type model_identity = Reported_model | Configured_model_fallback
+(** [Reported_model] preserves the provider-parsed model, including absence as
+    an empty string, for callers that must validate attribution. It bypasses
+    response caches, which may already contain fallback-annotated identities. *)
+
 (** {1 Canonical Prepared Request} *)
 
 (** One opaque completion request after all caller-owned projection. *)
@@ -211,6 +216,7 @@ val complete
   -> messages:Types.message list
   -> ?tools:Yojson.Safe.t list
   -> ?trace_context:(string * string) list
+  -> ?model_identity:model_identity
   -> ?cache:Cache.t
   -> ?connection_cache:Http_client.cache
   -> ?metrics:Metrics.t

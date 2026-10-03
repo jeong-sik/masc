@@ -12162,6 +12162,26 @@ let test_keeper_usage_cache_failures_remain_visible () =
   Alcotest.(check bool) "unknown cache is rejected" true
     (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
 
+let test_keeper_usage_unread_turns_remain_partial () =
+  let decode unread =
+    let json = Yojson.Safe.from_string (Printf.sprintf
+      {|{"cache":{"state":"fresh"},"generated_at":1,"window_minutes":1440,
+      "keepers":[{"keeper_name":"alpha","sample_count":1,"total_tokens":100,
+      "total_cost_usd":1.0,"tokens_reported_samples":1,"tokens_unreported_samples":0,
+      "tokens_unread_samples":0,"cost_reported_samples":1,"cost_unreported_samples":0,
+      "cost_unread_samples":0,"metrics_read":{"state":"read","malformed_rows":0,
+      "unread_turn_rows":%d}}]}|} unread) in
+    Masc.Tui_decode_usage.decode_keeper_usage_window json in
+  (match decode 2 with
+   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage =
+       Keeper_usage_partial { malformed_rows = 0; unread_turn_rows = 2 }; _ }]; _ }) -> ()
+   | Ok _ -> Alcotest.fail "unread turns became complete coverage"
+   | Error detail -> Alcotest.fail detail);
+  (match decode 0 with
+   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage = Keeper_usage_complete; _ }]; _ }) -> ()
+   | _ -> Alcotest.fail "fully read window must remain complete");
+  Alcotest.(check bool) "negative unread count is rejected" true (Result.is_error (decode (-1)))
+
 let test_play_revoke_failure_detail () =
   Alcotest.(check string) "500 preserves actual controller failure"
     "controller busy (HTTP 500: controller release failed)"
@@ -13054,7 +13074,9 @@ let () =
       ] );
     ( "keeper usage cache"
     , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
-          test_keeper_usage_cache_failures_remain_visible ] );
+          test_keeper_usage_cache_failures_remain_visible;
+        Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
+          test_keeper_usage_unread_turns_remain_partial ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
           `Quick test_play_invite_responses_preserve_recovery_facts

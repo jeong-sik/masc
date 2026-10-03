@@ -215,10 +215,9 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                      "partial (2 malformed rows, 3 unread turn rows)",
                      "partial (0 malformed rows, 4 unread turn rows)", "totals are lower bounds", "7 reported, 3 missing",
                      "unreported", "fixture read failure", "bars are not quota",
-                     "[" + "█" * 16 + "░" * 16 + "]",
-                     "[unavailable" if unreported_cost else "[" + "█" * 8 + "░" * 24 + "]", "[" + "░" * 32 + "] 0"):
+                     "[unavailable", "[" + "░" * 32 + "] 0"):
             assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"
-        assert wide.count(b"[unavailable") == (7 if unreported_cost else 4), "missing/failed metrics drew a bar"
+        assert wide.count(b"[unavailable") == (8 if unreported_cost else 6), "missing/failed metrics drew a bar"
         compact = capture(process, fd, output, "keeper-comparison-compact" + suffix,
                           20, 80, b"Keeper usage")
         assert b"Scale: tokens 1000" in compact

@@ -49,6 +49,24 @@ let query_boundaries () =
     (Result.is_error (Routes.decode_body {|{"instance_id":"first","instance_id":"second"}|}));
   check bool "non-object body rejected" true (Result.is_error (Routes.decode_body "[]"))
 
+let broadcast_principal_requires_authenticated_actor () =
+  let principal standing caller = Routes.broadcast_principal_for_standing standing caller in
+  check (result string string) "operator token resolves canonical actor"
+    (Ok "principal:operator:operator-a")
+    (principal Server_auth.Operator_credential "operator-a");
+  check (result string string) "Keeper token resolves its verified actor"
+    (Ok "principal:keeper:keeper-a")
+    (principal Server_auth.Agent_credential "keeper-a");
+  check bool "operator and Keeper with same name remain separate principals" true
+    (principal Server_auth.Operator_credential "same-name"
+      <> principal Server_auth.Agent_credential "same-name");
+  List.iter (fun standing ->
+    check bool "unverified or Player identity cannot own Broadcast recovery" true
+      (Result.is_error (principal standing "operator-a")))
+    [Server_auth.No_credential; Server_auth.Player_credential];
+  check bool "blank authenticated actor is refused" true
+    (Result.is_error (principal Server_auth.Operator_credential ""))
+
 let subscription_items_keep_strict_schema () =
   let schema = match Tool_schemas_misc.misc_registered_schema Tool_schemas_misc.Misc_lane_updates with
     | Some schema -> schema | None -> fail "missing subscription schema" in
@@ -71,4 +89,6 @@ let () =
     [ "installed contract", [test_case "operator and Keeper discovery agree" `Quick reachable_operations;
         test_case "subscription TOML emits strict nested item schema" `Quick subscription_items_keep_strict_schema];
       "request boundaries", [test_case "source identity remains exact" `Quick readonly_parameters_preserve_identity;
-        test_case "query windows and duplicate identities" `Quick query_boundaries] ]
+        test_case "query windows and duplicate identities" `Quick query_boundaries;
+        test_case "Broadcast recovery requires authenticated principal" `Quick
+          broadcast_principal_requires_authenticated_actor] ]

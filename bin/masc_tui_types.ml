@@ -156,6 +156,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
+;;
+
 (* Retained input belongs to the complete observed server workspace. Local
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function

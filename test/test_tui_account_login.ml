@@ -693,7 +693,40 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
+let long_result_rows_are_reachable () =
+  let t = Login.create "codex" in
+  let ids = List.init 12 (fun i -> Printf.sprintf "codex-account-model-%02d-long-runtime-identifier" i) in
+  let receipt = `Assoc ["configured", `Bool true; "readiness", `String "usage_limited";
+    "runtime_ids", `List (List.map (fun id -> `String id) ids);
+    "unverified", `List (List.map (fun id -> `Assoc ["runtime_id", `String id;
+      "code", `String "quota_exhausted"]) ids)] in
+  ignore (ok (Login.saved t receipt));
+  let drawn () = List.map Login.row_text (Login.visible_lines ~height:5 ~width:40 t) in
+  let first = drawn () in
+  check bool "result starts with saved summary" true (contains (List.hd first) "저장했습니다");
+  check bool "first page has an overflow indicator" true (List.exists (fun line -> contains line "[결과") first);
+  let seen = ref first in
+  for _ = 1 to 80 do
+    ignore (Login.key t "j"); let page = drawn () in
+    check bool "every result row fits the viewport" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= 40) page);
+    seen := !seen @ page
+  done;
+  let text = String.concat "" !seen in
+  List.iter (fun id -> check bool "every wrapped runtime identifier is reachable" true (contains text id)) ids;
+  let bottom = t.result_scroll in
+  ignore (Login.key t "j"); ignore (drawn ());
+  check int "scroll clamps at the last result row" bottom t.result_scroll;
+  for _ = 1 to 80 do ignore (Login.key t "k"); ignore (drawn ()) done;
+  check int "scroll returns to the summary" 0 t.result_scroll;
+  Login.save_failed t (String.concat " " (List.init 30 (fun _ -> "verification detail")) ^ " reason-at-end");
+  let failed = ref [] in
+  for _ = 1 to 80 do failed := !failed @ drawn (); ignore (Login.key t "down") done;
+  check bool "a long failure's diagnostic end is reachable" true
+    (contains (String.concat "" !failed) "reason-at-end")
+
 let () = run "TUI account login" ["workflow",[
+  test_case "long result and failure rows are reachable" `Quick long_result_rows_are_reachable;
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
   test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;

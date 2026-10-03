@@ -32,7 +32,7 @@ val start :
   ?docker_command:string ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
-  ?sampling_handler:Agent_core.Mcp.sampling_handler ->
+  ?sampling_handler:Lane_addon_sampling.t ->
   unit -> (t, error) result
 
 val observe :

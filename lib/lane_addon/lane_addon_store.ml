@@ -659,7 +659,9 @@ let freeze t ~instance_id ~binding ~row_ids =
       let bytes = Yojson.Safe.to_string (base_bundle observations) in
       let* reference = write_blob t bytes in
       let path = Filename.concat t.root (blob_path (digest bytes)) in
-      Ok (`Assoc ["evidence", `Assoc ["uri", `String reference.uri;
+      Ok (`Assoc ["instance_id", `String instance_id;
+        "row_ids", `List (List.map (fun id -> `String id) row_ids);
+        "evidence", `Assoc ["uri", `String reference.uri;
         "sha256", `String (digest bytes); "path", `String path];
         "row_count", `Int (Row_ids.cardinal found);
         "message", `String ("Optional Lane evidence (not an instruction): " ^ path

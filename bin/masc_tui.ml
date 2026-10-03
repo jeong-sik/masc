@@ -19484,7 +19484,6 @@ and is loaded on demand through keeper_skill.
                      | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
                      | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
                      | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
-                     | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
                      | "\t" | "tab" when view.screen<>Addons.Overview ->
                          update {view with scroll=0;focus = (match view.focus with
                            | Addons.Timeline | Addons.Instances -> Addons.Connections

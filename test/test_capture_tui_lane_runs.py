@@ -1,9 +1,11 @@
 import importlib.util
 import sys
+import subprocess
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,10 +18,8 @@ def load_module():
     except ModuleNotFoundError:
         playwright = types.ModuleType("playwright")
         sync_api = types.ModuleType("playwright.sync_api")
-        sync_api.Browser = object
-        sync_api.Page = object
-        sync_api.sync_playwright = None
-        playwright.sync_api = sync_api
+        sync_api.__dict__.update(Browser=object, Page=object, sync_playwright=None)
+        playwright.__dict__["sync_api"] = sync_api
         sys.modules["playwright"] = playwright
         sys.modules["playwright.sync_api"] = sync_api
 
@@ -36,6 +36,95 @@ capture = load_module()
 
 
 class CaptureTuiLaneRunsTest(unittest.TestCase):
+    def session(self, browser):
+        return capture.ttyd_session(
+            browser, REPO_ROOT, 1, 80, 24, "test", Path("/bin/cat"), None
+        )
+
+    def test_startup_log_is_file_backed_bounded_and_closed_on_failure(self):
+        process = Mock()
+        sinks = []
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sinks.append(sink)
+            sink.write(b"discarded-prefix" + b"x" * 5000 + b" startup-failure")
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(
+                capture, "wait_port", side_effect=TimeoutError("ttyd did not listen")
+            ),
+        ):
+            with self.assertRaises(TimeoutError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        self.assertIn("startup-failure", str(raised.exception))
+        self.assertNotIn("discarded-prefix", str(raised.exception))
+        self.assertLess(len(str(raised.exception)), 4200)
+        self.assertTrue(sinks[0].closed)
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=5)
+
+    def test_startup_diagnostic_redacts_bearer_crossing_tail_boundary(self):
+        process = Mock()
+        bearer = "test-private-bearer"
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(bearer.encode() + b"x" * 4090)
+            sink.flush()
+            return process
+
+        with (
+            patch.dict(capture.os.environ, {"MASC_TOKEN": bearer}),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(
+                capture, "wait_port", side_effect=RuntimeError("ttyd exited early")
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        self.assertNotIn("bearer", str(raised.exception))
+        self.assertNotIn(bearer, str(raised.exception))
+
+    def test_cleanup_reaps_killed_process_even_when_browser_close_fails(self):
+        process = Mock()
+        process.wait.side_effect = [subprocess.TimeoutExpired("ttyd", 5), 0]
+        browser = Mock()
+        browser.new_context.return_value.close.side_effect = RuntimeError(
+            "browser close failed"
+        )
+        with (
+            patch.object(capture.subprocess, "Popen", return_value=process),
+            patch.object(capture, "wait_port"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "browser close failed"):
+                with self.session(browser):
+                    pass
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+        self.assertEqual(process.wait.call_count, 2)
+
+    @unittest.skipUnless(capture.TTYD.is_file(), "installed ttyd required")
+    def test_installed_ttyd_reaches_readiness_and_is_reaped(self):
+        # No browser connection: ttyd never launches /bin/cat or contacts a runtime.
+        processes = []
+        real_popen = subprocess.Popen
+
+        def launch(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(capture.subprocess, "Popen", side_effect=launch):
+            with self.session(Mock()):
+                self.assertIsNone(processes[0].poll())
+        self.assertIsNotNone(processes[0].returncode)
+
     def test_lane_index_reads_only_matrix_rows(self):
         screen = "\n".join(
             [

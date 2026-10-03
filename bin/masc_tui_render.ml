@@ -3820,16 +3820,19 @@ let render_lanes_overview (state : state) =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
               in
               let ctx =
-                Printf.sprintf " [%s ctx]"
+                Printf.sprintf " [%s context]"
                   (format_context_tokens runtime.ro_effective_max_context)
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s%s"
                    mark refusal_prefix
-                   (Masc_tui_types.runtime_picker_label_for picker.rlp_pick runtime)
+                   (Masc_tui_types.runtime_model_picker_title runtime)
                    ctx def
-                   (Ansi.dim ^ note ^ Ansi.reset)))
+                   (Ansi.dim ^ note ^ Ansi.reset));
+              box_line_styled buf cols ~style:(Theme.recede ())
+                ("      " ^ Terminal_text.single_line runtime.ro_provider_id
+                  ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do

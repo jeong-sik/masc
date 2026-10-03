@@ -9711,8 +9711,9 @@ type runtime_picker_projection = {
   rlp_selected_row : int option;
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
-  rlp_source_total : int;
       (* Eligible catalogue size before the text filter. *)
+  rlp_source_total : int;
+      (* Whole source catalogue size before candidate-group filtering. *)
   rlp_summary : string;
       (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
   rlp_filter : string option;

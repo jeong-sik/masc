@@ -25,7 +25,7 @@ let strings = function
     loop values
   | _ -> Error "messages must be an array"
 
-let parse_case json =
+let parse_case ~fact_observed_at json =
   let* id = Tui_decode_fields.required_string_field json "id" in
   let* () = if String.trim id = "" then Error "blank case ID" else Ok () in
   let* expected = Tui_decode_fields.required_string_field json "expectation" in
@@ -40,7 +40,7 @@ let parse_case json =
       let* () = if String.trim claim = "" then Error "blank claim" else Ok () in
       let* category = Tui_decode_fields.required_string_field json "category" in
       let* category = match M.category_of_string category with Some category -> Ok category | None -> Error "invalid category" in
-      let fact = M.observed ~claim ~category ~now:0.
+      let fact = M.observed ~claim ~category ~now:fact_observed_at
         ~origin:{M.kind=M.Authored; trace_id=id} in
       let+ rest = facts rest in fact :: rest in
   let* current = facts current in
@@ -49,14 +49,14 @@ let parse_case json =
   let* () = if messages = [] then Error "empty source" else Ok () in
   Ok {id;expectation;current;messages}
 
-let parse_dataset json =
+let parse_dataset ~fact_observed_at json =
   let* provenance = Tui_decode_fields.required_string_field json "provenance" in
   let* () = if provenance = "synthetic" then Ok () else Error "only explicit synthetic cases are accepted" in
   let* values = Tui_decode_fields.required_list_field json "cases" in
   let rec loop seen = function
     | [] -> Ok []
     | json :: rest ->
-      let* case = parse_case json in
+      let* case = parse_case ~fact_observed_at json in
       let* () = if List.mem case.id seen then Error "duplicate case ID" else Ok () in
       let+ rest = loop (case.id :: seen) rest in case :: rest in
   let* cases = loop [] values in
@@ -78,7 +78,7 @@ let run () =
     ["--input", Arg.Set_string input, "Synthetic corpus JSON";
      "--output", Arg.Set_string output, "New private report file";
      "--config", Arg.Set_string config, "Explicit runtime TOML (preflight opt-in required)";
-     "--prompt-dir", Arg.Set_string prompts, "Exact candidate config/prompts directory";
+     "--prompt-dir", Arg.Set_string prompts, "Candidate config/prompts directory; persisted overrides are not loaded";
      "--keeper", Arg.Set_string keeper, "Keeper identity whose configured exclusion applies"]
     (fun value -> raise (Arg.Bad ("unexpected argument " ^ value)))
     "masc-librarian-preflight-eval --input FILE --output FILE --config FILE --prompt-dir DIR --keeper NAME";
@@ -91,9 +91,12 @@ let run () =
   let output_path = Config_dir_resolver.absolute_path !output in
   let* () = match Fs_compat.exact_path_kind ~follow:false output_path with
     | Fs_compat.Exact_missing -> Ok () | _ -> Error "output must be a new file" in
+  (* Equal, recent fact ages avoid making a refresh look like a semantic win. *)
+  let fact_observed_at = Time_compat.now () in
+  let keeper_instructions = "" in
   let* bytes, cases = try
     let bytes = In_channel.with_open_bin input_path In_channel.input_all in
-    let+ cases = parse_dataset (Yojson.Safe.from_string bytes) in bytes, cases
+    let+ cases = parse_dataset ~fact_observed_at (Yojson.Safe.from_string bytes) in bytes, cases
     with Sys_error detail | Yojson.Json_error detail -> Error detail in
   let* config_observation =
     try
@@ -110,7 +113,7 @@ let run () =
     | case :: rest ->
       let inp : Keeper_librarian.input =
         {turn_ref=Ids.Turn_ref.make ~trace_id:case.id ~absolute_turn:1;
-         keeper_id=keeper_identity; keeper_instructions="Preserve explicit constraints, corrections, preferences and unfinished obligations.";
+         keeper_id=keeper_identity; keeper_instructions;
          current=Some {Keeper_librarian.facts=case.current};
          working_context=Keeper_librarian_context.empty;
          messages=List.map (fun text -> Agent_core.Types.make_message
@@ -131,6 +134,9 @@ let run () =
      "binary_commit", nullable identity.binary_commit;
      "executable_sha256", nullable identity.executable_sha256;
      "input_sha256", `String Digestif.SHA256.(to_hex (digest_string bytes));
+     "fact_observed_at", `Float fact_observed_at;
+     "keeper_instructions", `String keeper_instructions;
+     "prompt_mode", `String "candidate_directory_no_persisted_overrides";
      "config_revision", `String (Runtime.config_source_revision_to_string config_observation.source_revision);
      "memory_mutated", `Bool false; "range_consumed", `Bool false;
      "goal_completion", `String "not_established";

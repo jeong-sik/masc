@@ -13,13 +13,26 @@ transient-acknowledgement controls. Korean cases exercise the operator's input
 language. Each expected classification and rationale is visible for independent
 review. These cases attack the new preflight, not historical-record recovery.
 
-`masc-librarian-preflight-eval` renders the candidate's real Librarian template
+`masc-librarian-preflight-eval` renders the candidate directory's Librarian template
 with its normal variable builder, then calls the production preflight. Expected
 labels and rationale are not sent to the model. Every input is synthetic;
 there is no generation lane, snapshot replacement, range consumption or
 production Keeper write. The evaluation honors the runtime's preflight opt-in,
 lane/destination credentials and the supplied Keeper's exclusion. Use a separate
 test TOML with preflight enabled; do not change the production TOML for this run.
+The command deliberately does not restore workspace `prompt_overrides.json`.
+Its report declares `prompt_mode=candidate_directory_no_persisted_overrides`;
+a passing result therefore covers the supplied candidate files, not a deployed
+Keeper's effective template when persisted overrides are active. CLI help names
+this mode, and the report retains the actual rendered prompt for every case.
+
+All current facts receive the same timestamp captured at evaluation startup,
+so epoch-zero ages cannot reward generation merely for refreshing a stale fact.
+The synthetic Keeper instructions are empty for every case, independent of the
+expected labels. `--keeper` supplies identity and exclusion policy only; this
+corpus does not evaluate a production Keeper's configured instructions. The
+report records `fact_observed_at` and `keeper_instructions` alongside each fully
+rendered prompt so both input choices can be inspected.
 
 After a focused native build is explicitly requested under repository policy:
 

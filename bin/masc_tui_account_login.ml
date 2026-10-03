@@ -41,6 +41,7 @@ type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
+  mutable saved_scroll_max : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -60,7 +61,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
@@ -507,7 +508,7 @@ let key t key =
   | Finished _ when key="up" || key="k" ->
     t.cursor <- max 0 (t.cursor - 1); Nothing
   | Finished _ when key="down" || key="j" ->
-    t.cursor <- t.cursor + 1; Nothing
+    t.cursor <- min t.saved_scroll_max (t.cursor + 1); Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -659,7 +660,8 @@ let visible_lines ~height ~width t =
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
     | Finished _ ->
-      let skip = min t.cursor (max 0 (List.length rows - height)) in
+      t.saved_scroll_max <- max 0 (List.length rows - height);
+      let skip = min t.cursor t.saved_scroll_max in
       t.cursor <- skip;
       skip
     | Loading | Logging | Documented_context _ | Saving | Failed -> max 0 (List.length rows - height) in

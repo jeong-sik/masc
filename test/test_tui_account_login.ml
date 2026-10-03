@@ -303,6 +303,10 @@ let partly_checked_save () =
   List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
       (List.mem row !seen)) expected;
   let bottom = visible () in
+  ignore (Login.key t2 "j"); ignore (Login.key t2 "j");
+  ignore (Login.key t2 "k");
+  check bool "coalesced down down up moves from the bottom" true (visible () <> bottom);
+  ignore (Login.key t2 "j"); ignore (visible ());
   List.iter (fun _ -> ignore (Login.key t2 "j"); ignore (visible ())) expected;
   ignore (Login.key t2 "k");
   check bool "one up key moves after repeated down keys at the bottom" true

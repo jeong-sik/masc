@@ -300,7 +300,7 @@ let pending_notification_of_yojson = function
           | Some (`List values) ->
               let rec names acc = function
                 | [] -> Ok (Pending_recipients (List.rev acc))
-                | `String name :: rest when Result.is_ok (Validation.Id_shape.validate name) && not (List.mem name acc) -> names (name :: acc) rest
+                | `String name :: rest when Result.is_ok (Keeper_id.Keeper_name.of_string name) && not (List.mem name acc) -> names (name :: acc) rest
                 | _ -> rejected ~field:"pending_notifications" "invalid or duplicate recipient" in
               names [] values
           | _ -> rejected ~field:"pending_notifications" "missing recipients" in
@@ -1141,7 +1141,7 @@ let update_notification config (expected : pending_notification) change =
               |> Result.map (fun () -> next))
 
 let snapshot_notification_recipients config notice ~recipients =
-  if List.exists (fun name -> Result.is_error (Validation.Id_shape.validate name)) recipients then
+  if List.exists (fun name -> Result.is_error (Keeper_id.Keeper_name.of_string name)) recipients then
     Error (Rejected "invalid Goal notification recipient")
   else update_notification config notice (fun current -> match current.delivery with
     | Pending_recipients _ -> Ok (Some current)

@@ -1712,7 +1712,8 @@ let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
       let ctx = workspace_ctx config in
       let goal_id = create_goal ctx "Persisted @beta proof title" in
       ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
-      List.iter (persist_notification_keeper config) ["alpha"; "beta"; "verifier_exact"];
+      let extra_recipients = ["verifier_exact"; String.make 65 'k'; ".reviewer"] in
+      List.iter (persist_notification_keeper config) (["alpha"; "beta"] @ extra_recipients);
       (* These persisted recipients have never entered the live registry. *)
       let host = Server_bootstrap_loops.For_testing.goal_notification_backend in
       let fail_beta = ref true in
@@ -1750,6 +1751,8 @@ let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
          | [row] -> check bool "same spelling cannot turn an external verifier into the recipient Keeper" true
              (match row.speaker with Some {speaker_authority=Keeper_chat_store.External;_} -> true | _ -> false)
          | _ -> fail "system verifier name collision dropped a legitimate recipient");
+        List.iter (fun keeper -> check int "every valid persisted Keeper name receives the notice" 1
+          (List.length (notification_rows config keeper notice.notification_id))) extra_recipients;
         check int "workspace message is committed once" 1 (notification_message_count config notice.notification_id);
         ignore (must_succeed "exact verdict replay" (commit ()));
         check int "proof precommit is not rerun on effect retry"

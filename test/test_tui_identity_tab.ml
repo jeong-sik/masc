@@ -873,8 +873,6 @@ let () =
             `Quick test_oauth_polling_survives_unread_authority;
           Alcotest.test_case "workspace withdrawal retires identity consent"
             `Quick test_workspace_withdrawal_retires_identity_consent;
-          Alcotest.test_case "OAuth polling survives unread authority"
-            `Quick test_oauth_polling_survives_unread_authority;
           Alcotest.test_case "switching Keepers retains each consent URL"
             `Quick test_switching_keepers_retains_each_consent_url;
           Alcotest.test_case "multiple providers complete independently"

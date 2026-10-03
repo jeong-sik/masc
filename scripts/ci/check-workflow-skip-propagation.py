@@ -34,6 +34,7 @@ from pathlib import Path
 
 DEFAULT_WORKFLOWS = (
     ".github/workflows/release.yml",
+    ".github/workflows/release-build.yml",
     ".github/workflows/release-candidate.yml",
 )
 

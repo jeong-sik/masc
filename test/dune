@@ -1,5 +1,10 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
+
+(test
+ (name test_server_lane_addon_sampling)
+ (modules test_server_lane_addon_sampling)
+ (libraries masc_test_deps masc.server mcp_protocol eio_main unix))
 (include stanzas/test_librarian_working_state_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot.inc)
@@ -1651,6 +1656,16 @@
  (modules test_executor_pool_eio_mutex)
  (libraries masc_test_deps))
 
+(test
+ (name test_executor_pool_cancellation)
+ (modules test_executor_pool_cancellation)
+ (libraries alcotest masc.masc_core eio eio_main))
+
+(test
+ (name test_dashboard_cache_cancellation)
+ (modules test_dashboard_cache_cancellation)
+ (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))
+
 ; Focused single-module tests
 
 (test
@@ -2661,9 +2676,7 @@
  (modules test_keeper_external_resource_lease)
  (libraries alcotest masc_test_deps))
 
-(include stanzas/test_ci_run_tests_script.inc)
 
-(include stanzas/test_telemetry_gate_handler_detection.inc)
 
 (include stanzas/test_contract_harness_auth_script.inc)
 
@@ -2721,7 +2734,6 @@
 
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 
-(include stanzas/test_dune_local_script.inc)
 
 (include stanzas/test_docker_playground_gc_script.inc)
 
@@ -2772,7 +2784,6 @@
 
 (include stanzas/test_gate_protocol.inc)
 
-(include stanzas/test_git_fetch_retry_script.inc)
 
 (include stanzas/test_goal_phase_all.inc)
 
@@ -2993,9 +3004,7 @@
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
-(include stanzas/test_local_review_script.inc)
 
-(include stanzas/test_review_approve_guard.inc)
 
 (include stanzas/test_masc_dirname_ssot.inc)
 
@@ -3090,9 +3099,7 @@
 
 (include stanzas/test_parse_outcome.inc)
 
-(include stanzas/test_pr_open_script.inc)
 
-(include stanzas/test_pr_sync_script.inc)
 
 
 
@@ -3344,7 +3351,7 @@
 (test
  (name test_keeper_portrait_read)
  (modules test_keeper_portrait_read)
- (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
+ (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types masc_candle_store))
 
 (test
  (name test_keeper_image_dimensions)
@@ -4404,16 +4411,6 @@
  (modules test_tui_planning_order)
  (libraries alcotest masc.masc_goal masc_tui_types))
 
-(include stanzas/test_tui_stall_observation.inc)
-
-(rule
- (alias runtest-test_tui_keeper_row_selection)
- (deps test_tui_keeper_row_selection.py test_tui_keyboard_input.py)
- (action (run python3 %{dep:test_tui_keeper_row_selection.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_keeper_row_selection)))
 
 ; The named keyboard alias keeps the existing targeted-suite entry point.
 ; Each dependency has its own process, so Dune can run the six parts together.
@@ -4494,38 +4491,6 @@
  (alias runtest-test_tui_context_inspector)
  (deps test_tui_context_inspector.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_context_inspector.py} %{dep:../bin/masc_tui.exe})))
-
-(rule
- (alias runtest-test_tui_fixture_shutdown)
- (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
- (action (run python3 %{dep:test_tui_fixture_shutdown.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_fixture_shutdown)))
-
-; The harness decides what runs from --list, --scenario and the family name
-; before a terminal opens, and no rule here passes either flag. This suite
-; drives that choice with a stand-in binary, and holds the harness's family
-; table and the rules in this file to each other.
-(rule
- (alias runtest-test_tui_keyboard_scenario_selection)
- (deps
-  test_tui_keyboard_scenario_selection.py
-  test_tui_keyboard_input.py
-  test_tui_keyboard_general_pty.py
-  test_tui_keyboard_surfaces_pty.py
-  test_tui_keyboard_overview_pty.py
-  test_tui_keyboard_rosters_pty.py
-  test_tui_keyboard_board_terminal_pty.py
-  dune
-  (glob_files stanzas/*.inc))
- (action
-  (run python3 %{dep:test_tui_keyboard_scenario_selection.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_keyboard_scenario_selection)))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -5793,6 +5758,7 @@
 (include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
+(include stanzas/test_tui_keeper_automation_rows.inc)
 (include stanzas/test_tui_schedule_wake_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
@@ -7136,7 +7102,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc masc_random_id alcotest eio eio_main yojson unix))
+ (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -7236,7 +7202,9 @@
        ../docs/examples/lane-addons/dos-value-difference.toml
        ../docs/examples/lane-addons/dos-value-statistics.toml
        ../docs/examples/lane-addons/dos-statistics.toml
-       ../docs/examples/lane-addons/output-statistics.toml)
+       ../docs/examples/lane-addons/output-statistics.toml
+       ../addons/fusion-compute/lane.toml ../addons/fusion-report/lane.toml
+       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml))
  (libraries alcotest masc yojson unix))
 
 (test
@@ -7247,11 +7215,15 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
- (deps ../addons/protocol.py ../addons/output-statistics/server.py
-       ../addons/msx-observer/server.py ../addons/tests/test_packages.py)
+ (deps ../addons/fusion_judge.py ../addons/fusion_sampling.py ../addons/protocol.py ../addons/output-statistics/server.py
+       ../addons/msx-observer/server.py ../addons/tests/test_packages.py
+       ../addons/tests/stdio_fixture.py
+       ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
+       ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
  (libraries masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
+(include stanzas/test_lane_fusion_compute_packages.inc)
 
 (test
  (name test_lane_addon_reconcile)
@@ -7270,7 +7242,7 @@
 (test
  (name test_dashboard_execution_render_window)
  (modules test_dashboard_execution_render_window)
- (libraries alcotest eio eio.mock yojson masc.dashboard))
+ (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.
@@ -7328,6 +7300,11 @@
  (name test_lane_addon_subscription)
  (modules test_lane_addon_subscription)
  (libraries alcotest yojson unix masc masc.fs_compat))
+
+(test
+ (name test_tui_lane_broadcast_pending)
+ (modules test_tui_lane_broadcast_pending)
+ (libraries alcotest yojson unix masc.fs_compat masc_tui_lane_broadcast_pending))
 
 (test
  (name test_tui_lane_addons)
@@ -7849,6 +7826,11 @@
 (include stanzas/test_tui_prompts_layout_pty.inc)
 (include stanzas/test_tui_recorded_diff_pan_pty.inc)
 
+(test
+ (name test_lane_addon_broadcast_delivery)
+ (modules test_lane_addon_broadcast_delivery)
+ (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix yojson))
+
 
 
 
@@ -7948,6 +7930,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_continuity_admission)))
+
+(rule
+ (alias runtest-test_tui_lane_initial_authority)
+ (deps test_tui_lane_initial_authority.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_lane_initial_authority.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_lane_initial_authority)))
 
 (test
  (name test_server_keeper_build_maintenance)

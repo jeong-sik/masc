@@ -18,7 +18,9 @@ type mount = { source : string; destination : string }
     [lane_observe] in the initial MCP tools/list page. [docker_command] is an
     executable path, also allowing hermetic control-protocol tests.
     [control_timeout_sec] bounds each Docker control command and cancels its
-    switch so the child is killed and reaped. *)
+    switch so the child is killed and reaped. A host sampling declaration
+    requires [sampling_handler]; disabled packages refuse a supplied callback.
+    Both mismatches fail before container creation. *)
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
@@ -30,6 +32,7 @@ val start :
   ?docker_command:string ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
+  ?sampling_handler:Lane_addon_sampling.t ->
   unit -> (t, error) result
 
 val observe :

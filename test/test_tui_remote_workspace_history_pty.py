@@ -516,8 +516,8 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
-            h.escape_to_keeper_detail(process, fd, output, name=b"beta")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"MASC Dashboard")
+            h.press_label_on_screen(process, fd, output, b"Keepers", row=1, needle=b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
@@ -529,11 +529,11 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             attached = actual["attachments"][0]
             assert attached["name"] == h.IMAGE_NAME and attached["data"] == image_data[0], attached
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
-            assert images == [{"type": "image", "attachment_id": attached["id"]},
+            assert images == [{"type": "image", "attachment_id": attached["id"],
+                               "name": h.IMAGE_NAME, "mime_type": attached["mime_type"],
+                               "size": attached["size"]},
                               {"type": "image", "url": reference}], actual
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            os.write(fd, b"q")
+            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
         finally:
             admission.release.set()
             admission.release_interrupt.set()
@@ -541,7 +541,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
         description=("MASC-root-only transition: " if root_only else "")
             + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_cols=300)
+        refresh=0.5, terminal_cols=300, confirm_exit=b"\x03")
 
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:

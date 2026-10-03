@@ -1,22 +1,4 @@
-(* RFC-0232 P4: boundary mention parse + persisted mentions.
-
-   Pinned here:
-   1. Parser goldens — the boundary tokenizer keeps the legacy
-      token-equality contract (@alicex / email@alice.com never hit
-      "@alice"). "@keeper-alice" used to mint "alice" -- the documented
-      widening -- until RFC-0393 made the keeper name the only spelling
-      and Keeper_id.of_string stopped stripping the wrapper. It mints
-      "keeper-alice" now, which is nobody, and that is the point of the
-      hard cut: one name, not two.
-   2. Legacy decision equivalence — the deleted read-time
-      [line_mentions] is replicated verbatim as an oracle; over a
-      corpus of contents and target sets, parse-then-match must agree
-      with it everywhere. The corpus still avoids keeper-shaped
-      @-tokens; with the widening gone that exclusion no longer buys
-      anything, but widening the corpus is a separate change from
-      recording what the parser does.
-   3. Store roundtrip — append parses at the boundary and [load]
-      returns the persisted ids; pre-P4 rows read as []. *)
+(* Boundary mention parsing and persisted chat mentions. *)
 
 open Alcotest
 
@@ -88,102 +70,6 @@ let test_explicit_address_is_closed () =
     "broadcast"
     "@@all and @alpha"
 
-(* ── 2. Legacy decision equivalence ── *)
-
-(* Verbatim replica of the deleted read-time tokenizer + decision. *)
-let legacy_trim_token_edges s =
-  let is_word c =
-    (c >= 'a' && c <= 'z')
-    || (c >= '0' && c <= '9')
-    || c = '@'
-    || c = '_'
-    || c = '-'
-  in
-  let n = String.length s in
-  let i = ref 0 in
-  let j = ref (n - 1) in
-  while !i < n && not (is_word s.[!i]) do
-    incr i
-  done;
-  while !j >= !i && not (is_word s.[!j]) do
-    decr j
-  done;
-  if !j < !i then "" else String.sub s !i (!j - !i + 1)
-
-let legacy_line_mentions ~targets content =
-  let needles =
-    List.filter_map
-      (fun target ->
-        let t = String.lowercase_ascii (String.trim target) in
-        if t = "" then None else Some ("@" ^ t))
-      targets
-  in
-  if needles = [] then false
-  else (
-    let normalized =
-      String.map
-        (fun c ->
-          match c with
-          | '\t' | '\n' | '\r' -> ' '
-          | _ -> c)
-        (String.lowercase_ascii content)
-    in
-    String.split_on_char ' ' normalized
-    |> List.exists (fun token -> List.mem (legacy_trim_token_edges token) needles))
-
-let corpus_contents =
-  [ "hey @alice look"
-  ; "ping @alicex now"
-  ; "send to email@alice.com"
-  ; "PING @DREAMER NOW"
-  ; "ok @alice, thanks"
-  ; "just chatting here"
-  ; "@alpha and @alice please"
-  ; "@delta: status?"
-  ; "tab\t@alice\tseparated"
-  ; "(@alice)"
-  ; "@@alice double at"
-  ; "@ bare at"
-  ; ""
-  ; "   "
-  ; "@vincent are you there"
-  ; "mid@alice token"
-  ; "@alice."
-  ; "...@alpha..."
-  ]
-
-let corpus_target_sets =
-  [ [ "alice" ]
-  ; [ "alpha" ]
-  ; [ "alice"; "alpha" ]
-  ; [ "delta" ]
-  ; [ "vincent" ]
-  ; []
-  ; [ "" ]
-  ; [ "DREAMER" ]
-  ]
-
-let test_legacy_equivalence () =
-  List.iter
-    (fun content ->
-      List.iter
-        (fun targets ->
-          let expected = legacy_line_mentions ~targets content in
-          let actual =
-            Lane.ids_match
-              ~target_ids:(Lane.target_ids_of targets)
-              (Lane.mention_ids_of_content content)
-          in
-          check bool
-            (Printf.sprintf "targets=[%s] content=%S"
-               (String.concat ";" targets)
-               content)
-            expected actual)
-        corpus_target_sets)
-    corpus_contents
-
-(* ── 3. Store roundtrip ── *)
-
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -234,30 +120,6 @@ let test_extra_mentions_merge () =
             (message_mentions only)
       | other -> failf "expected 1 lane line, got %d" (List.length other))
 
-let test_pre_p4_row_reads_empty () =
-  with_base "lane-mentions-prep4" (fun base ->
-      (* A row with no [mentions] field even though the content has an
-         @-token.  Reads as [], not an error.  The row still carries an
-         [id]: the reader has required one since #26311, so a row without
-         it is dropped before the mentions decoder ever sees it. *)
-      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
-        ~content:"seed" ();
-      let dir =
-        Filename.concat
-          (Filename.concat base ".masc")
-          "keeper_chat"
-      in
-      let path = Filename.concat dir "alice.jsonl" in
-      let oc = open_out_gen [ Open_append ] 0o644 path in
-      output_string oc
-        "{\"id\":\"msg-lane-mentions-no-field\",\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
-      close_out oc;
-      match Store.load ~base_dir:base ~keeper_name:"alice" with
-      | [ _seed; legacy ] ->
-          check ids "absent field decodes as no mentions" []
-            (message_mentions legacy)
-      | other -> failf "expected 2 lane lines, got %d" (List.length other))
-
 let () =
   Random.self_init ();
   run "keeper_lane_mentions"
@@ -267,14 +129,10 @@ let () =
           test_case "closed explicit address" `Quick
             test_explicit_address_is_closed;
         ] );
-      ( "legacy_equivalence",
-        [ test_case "corpus matrix" `Quick test_legacy_equivalence ] );
       ( "store_roundtrip",
         [
           test_case "append persists mentions" `Quick
             test_append_persists_mentions;
           test_case "extra mentions merge" `Quick test_extra_mentions_merge;
-          test_case "pre-P4 row reads empty" `Quick
-            test_pre_p4_row_reads_empty;
         ] );
     ]

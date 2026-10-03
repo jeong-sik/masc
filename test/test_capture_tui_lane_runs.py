@@ -91,6 +91,96 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
         self.assertNotIn("bearer", str(raised.exception))
         self.assertNotIn(bearer, str(raised.exception))
 
+    def test_startup_diagnostic_redacts_partial_bearer_before_utf8_tail(self):
+        process = Mock()
+        bearer = "test-private-bearer"
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(bearer.encode() + "한".encode() * 1367 + b"!!")
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture, "free_port", return_value=0),
+            patch.dict(capture.os.environ, {"MASC_TOKEN": bearer}),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(capture, "wait_port", side_effect=RuntimeError("ttyd exited early")),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        self.assertNotIn(bearer[-10:], str(raised.exception))
+        self.assertIn("한", str(raised.exception))
+
+    def test_startup_diagnostic_redacts_operator_command_fields(self):
+        process = Mock()
+
+        def launch(command, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(("start command: " + " ".join(command)).encode())
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture, "free_port", return_value=0),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(capture, "wait_port", side_effect=RuntimeError("ttyd exited early")),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        detail = str(raised.exception)
+        for field in (str(REPO_ROOT), "/bin/cat", "test", str(capture.TTYD)):
+            self.assertNotIn(field, detail)
+        self.assertIn("start command:", detail)
+
+    def test_startup_diagnostic_masks_overlapping_workspace_and_bearer(self):
+        process = Mock()
+        bearer = "overlap-secret-token"
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(b"prefix-overlap-secret-token startup-failure")
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture, "free_port", return_value=0),
+            patch.dict(capture.os.environ, {"MASC_TOKEN": bearer}),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(capture, "wait_port", side_effect=RuntimeError("ttyd exited early")),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                with capture.ttyd_session(
+                    Mock(), REPO_ROOT, 1, 80, 24, "prefix-overlap", Path("/bin/cat"), None
+                ):
+                    self.fail("startup must fail")
+        self.assertNotIn("secret-token", str(raised.exception))
+        self.assertIn("startup-failure", str(raised.exception))
+
+    def test_startup_diagnostic_masks_bearer_incomplete_at_log_end(self):
+        process = Mock()
+        bearer = "operator-private-bearer-token"
+
+        def launch(*_args, **kwargs):
+            sink = kwargs["stdout"]
+            sink.write(b"starting with bearer: " + bearer[:-3].encode())
+            sink.flush()
+            return process
+
+        with (
+            patch.object(capture, "free_port", return_value=0),
+            patch.dict(capture.os.environ, {"MASC_TOKEN": bearer}),
+            patch.object(capture.subprocess, "Popen", side_effect=launch),
+            patch.object(capture, "wait_port", side_effect=TimeoutError("ttyd did not listen")),
+        ):
+            with self.assertRaises(TimeoutError) as raised:
+                with self.session(Mock()):
+                    self.fail("startup must fail")
+        self.assertNotIn(bearer[:-3], str(raised.exception))
+        self.assertIn("starting with bearer:", str(raised.exception))
+
     def test_cleanup_reaps_killed_process_even_when_browser_close_fails(self):
         process = Mock()
         process.wait.side_effect = [subprocess.TimeoutExpired("ttyd", 5), 0]

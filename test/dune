@@ -8041,10 +8041,6 @@
        (source_tree ../docs/evidence/2026-09-30-candle-grade-scope-survey))
  (action (run python3 %{dep:test_candle_evidence_audits.py})))
 
-(alias
- (name runtest)
- (deps (alias runtest-test_candle_evidence_audits)))
-
 (rule
  (alias runtest-test_prepare_keeper_collaboration)
  (deps

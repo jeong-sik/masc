@@ -390,10 +390,10 @@ let test_muse_save_rechecks_selected_catalog ?supported () = fixture (fun base r
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
     (Sys.file_exists (Filename.concat base "save-calls"));
   let configured = Runtime_toml.parse_file runtime |> Result.get_ok in
-  let model = List.find (fun (model : Runtime_schema.model) -> model.api_name = "reported-muse") configured.models in
+  let model = List.find (fun (model : Runtime_schema.model_spec) -> model.api_name = "reported-muse") configured.models in
   Alcotest.check (Alcotest.option Alcotest.bool)
     "omitted browser capability saves the authoritative reported value"
-    supported model.supports_image_input)
+    supported (Option.bind model.capabilities (fun caps -> caps.supports_image_input)))
 
 let test_named_lane_save () = fixture (fun base runtime binary _net ->
   let config = Runtime_toml.parse_file runtime |> Result.get_ok in

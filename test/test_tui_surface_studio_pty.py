@@ -12,15 +12,20 @@ SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_schedule.ml",
 
 def run(executable, no_color=False):
     fixtures = h.planning_selection_http_fixtures()
-    planning = fixtures[h.PLANNING_PATH][1]
+    planning_response = fixtures[h.PLANNING_PATH]
+    assert isinstance(planning_response, tuple)
+    planning = planning_response[1]
+    assert isinstance(planning, dict)
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
     _, repositories = h.repositories_fixture()
-    repositories["repositories"][0]["status"] = "wire\n\x1b[9D"
-    repositories["repositories"].append({**repositories["repositories"][0],
+    repository_rows = repositories["repositories"]
+    assert isinstance(repository_rows, list)
+    repository_rows[0]["status"] = "wire\n\x1b[9D"
+    repository_rows.append({**repository_rows[0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
         "resolved_local_path":"/srv/masc/workspace/next-repo"})
-    repositories["repositories"].append({**repositories["repositories"][0],
+    repository_rows.append({**repository_rows[0],
         "id":"failed-repo", "name":"failed-repo", "status":"error",
         "error_message":"checkout unavailable: refresh credentials",
         "local_path":"workspace/failed-repo",
@@ -28,10 +33,10 @@ def run(executable, no_color=False):
     repositories["total"] = 3
     page_names = [f"page-{index:02d}" for index in range(25)]
     for name in page_names:
-        repositories["repositories"].append({**repositories["repositories"][0],
+        repository_rows.append({**repository_rows[0],
             "id": name, "name": name, "local_path": "workspace/" + name,
             "resolved_local_path": "/srv/masc/workspace/" + name})
-    repositories["total"] = len(repositories["repositories"])
+    repositories["total"] = len(repository_rows)
     refresh_failed = False
     refresh_error = ("Workspace repository refresh unavailable while reading the registered checkout "
         "and its remote identity; the previous repositories remain available for selection. "
@@ -80,6 +85,23 @@ def run(executable, no_color=False):
         for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
             if needle not in narrow:
                 raise AssertionError(f"Narrow Work omitted {needle!r}")
+        joined = h.unwrapped(narrow)
+        for needle in (b"Goals done +0", b"Tasks done +0", b"Goal reviews pending +0"):
+            if needle not in joined:
+                raise AssertionError(f"Narrow Work omitted baseline change {needle!r}")
+        key(b"j", b"plan-beta-29424")
+        selected = h.screen_text(bytes(output))
+        if b"goal-b-29424" not in selected:
+            raise AssertionError("wrapped summaries obscured selected goal details")
+        key(b"k", b"plan-alpha-29424")
+        narrower = capture("work-narrow-60", 24, 60, b"goal-a-29424")
+        for needle in (b"todo=11", b"claimed=12", b"in_progress=13",
+                       b"awaiting_verification=14", b"done=15", b"cancelled=16"):
+            if needle not in h.unwrapped(narrower):
+                raise AssertionError(f"60-column Work omitted {needle!r}")
+        capture("work-short", 16, 80, b"goal-a-29424")
+        key(b"j", b"goal-b-29424")
+        key(b"k", b"goal-a-29424")
         for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
             if heading in narrow:
                 raise AssertionError("Narrow Work retained wide summary cards")
@@ -162,7 +184,13 @@ def run(executable, no_color=False):
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")
         capture("system-long-comparison",30,80,b"studio.mode")
-        current = fixtures["/api/v1/runtime/params"][1]["parameters"][1]["current"]
+        parameter_response = fixtures["/api/v1/runtime/params"]
+        assert isinstance(parameter_response, tuple)
+        parameter_payload = parameter_response[1]
+        assert isinstance(parameter_payload, dict)
+        parameters = parameter_payload["parameters"]
+        assert isinstance(parameters, list) and isinstance(parameters[1], dict)
+        current = parameters[1]["current"]
         read_selected((b"Current" + json.dumps(current).encode(),
                        b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")

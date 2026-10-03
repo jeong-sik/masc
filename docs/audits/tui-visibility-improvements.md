@@ -16,11 +16,12 @@ No row below implies a production rollout.
 | Keeper coverage | Decoder omits `metrics_read.unread_turn_rows` from partial coverage | Implemented; candidate verified | #40931; both counts retained, partial lower-bound label, before FAIL/after seven PTY journeys PASS; live affected row absent |
 | Recent sidebar | Distinguish no events, disconnected observer and current inactivity | Source inspected; runtime audit pending | `masc_tui_acting_pane.ml` separately labels feed opening/closed and no observed events; audit live/closed/no-record cases |
 | Dashboard | Health/work summaries already distinguish some missing/partial states | Partially inspected | Audit source timestamps, denominator and navigation to details |
-| Work | 80x24 summary clips done/cancelled counters and net changes | Measured defect; pending fix | #40947; surface studio work-narrow FAIL, wide/medium retain counts; resume broader Work audit after fix |
+| Work | 80x24 summary clips done/cancelled counters and net changes | Implemented; candidate verified | #40947; full counters60/80columns, selected Goal at16rows, color/no-color; live snapshot replay passed. Broader Work audit pending |
+| Work baseline time | Server snapshot age labeled as time since first TUI reading | Pending fix | #40959; fresh fixture displays42-day age; baseline stores server generated_at |
 | Keepers | Lane state, run progress and failure visibility | Pending audit | Inspect list/detail/chat and runtime observation views |
 | Board | Unread, relevance and thread navigation | Pending audit | Inspect list/detail and unavailable-data states |
-| Workspace | Repositories, memory, files and diffs | Pending audit | Inspect narrow layouts and source/error labels |
-| System | Clients, runtime/configuration, logs and verification | Pending audit | Inspect state versus last report and actionable details |
+| Workspace | Repositories, memory, files and diffs | Repository fixture cases verified; broader audit pending | Surface studio selected paths/errors/refresh/PageDown at narrow/short/wide dimensions PASS. Memory/files/diffs still pending |
+| System | Clients, runtime/configuration, logs and verification | Parameter fixture cases verified; broader audit pending | Surface studio current/default values, selected doc/long value paging PASS; clients/logs/runtime/harness still pending |
 
 For each pending row, record a concrete symptom before implementing a change.
 Verify the resulting behavior with relevant interactions and actual terminal

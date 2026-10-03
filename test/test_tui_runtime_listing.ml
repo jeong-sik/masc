@@ -1121,6 +1121,7 @@ let test_default_route_picker_keeps_the_lane_name () =
   (match state.runtime_surface with
    | None -> Alcotest.fail "resolved routes are unread"
    | Some snapshot ->
+       state.runtime_lanes <- snapshot.rss_resolved.rrs_lanes;
        state.runtime_surface <- Some { snapshot with
          rss_resolved = { snapshot.rss_resolved with rrs_default_route = Some "primary" } });
   open_runtime_lane_pick state Pick_route_default;

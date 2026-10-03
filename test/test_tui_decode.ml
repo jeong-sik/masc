@@ -9916,12 +9916,13 @@ let test_librarian_preflight_detail_reports_actual_route () =
     match lane_run_detail_json "librarian-preflight" with
     | `Assoc ["run", `Assoc fields] ->
       `Assoc ["run", `Assoc
-        (("lane", `String "librarian_exact") ::
+        (("selected_slot", (if path = "full_lane" then `String "fixture-generation" else `Null)) ::
+         ("lane", `String "librarian_exact") ::
          ("output", `Assoc ["jev_preflight", preflight decision;
                              "generation_path", `String path;
                              "full_llm_skipped", `Bool skipped;
                              "preflight_domain_rejection", rejection]) ::
-         List.remove_assoc "output" (List.remove_assoc "lane" fields))]
+         List.remove_assoc "selected_slot" (List.remove_assoc "output" (List.remove_assoc "lane" fields)))]
     | _ -> Alcotest.fail "invalid fixture" in
   let detail = Tui_decode.decode_lane_run_detail
     (make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true ())
@@ -9942,6 +9943,21 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | `Assoc ["run", `Assoc fields] ->
       `Assoc ["run", `Assoc (("status", `String status) :: List.remove_assoc "status" fields)]
     | _ -> Alcotest.fail "invalid fixture" in
+  let full_lane_without_slot status =
+    match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let fields = ("selected_slot", `Null) :: List.remove_assoc "selected_slot" fields in
+      let fields = if status = "failed" then
+        ("code", `String "interrupted") :: ("detail", `String "before slot selection") :: fields
+        else fields in
+      `Assoc ["run", `Assoc fields] |> with_status status
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "successful full lane requires its served slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (full_lane_without_slot "succeeded")));
+  List.iter (fun status ->
+    Alcotest.(check bool) (status ^ " may stop before slot selection") true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (full_lane_without_slot status))))
+    ["failed"; "cancelled"];
   let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with

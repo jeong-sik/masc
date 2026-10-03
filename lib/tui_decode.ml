@@ -5494,6 +5494,10 @@ type librarian_generation_path = Generation_not_entered | Generation_full_lane |
 type librarian_memory_result =
   | Librarian_memory_unchanged of int * int
   | Librarian_memory_rewritten of { revision : int; facts : int; added : int; removed : int }
+type librarian_side_write_status =
+  | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
+  | Side_committed | Side_answer_refused of string | Side_failed of string
+type librarian_side_write_kind = Context_write | Continuity_write
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -5503,6 +5507,7 @@ type librarian_preflight_reading =
   ; lp_domain_rejection : string option
   ; lp_memory_result : librarian_memory_result option
   ; lp_context_only : bool
+  ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 
 (* Decode the retained observation with the same alternatives emitted by
@@ -5651,7 +5656,27 @@ let decode_librarian_preflight output =
          | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
          | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
          | _ -> Error "unknown or inconsistent Librarian snapshot result") in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only})
+    let decode_side_write kind key =
+      match Json_util.assoc_member_opt key output with
+      | None -> Ok None
+      | Some record ->
+        let* status = required_string_field record "status" in
+        let* status = match kind, status with
+          | _, "not_attempted" -> Ok Side_not_attempted
+          | _, "outcome_unconfirmed" -> Ok Side_outcome_unconfirmed
+          | _, "committed" -> Ok Side_committed
+          | _, "failed" ->
+            let+ detail = required_string_field record "detail" in Side_failed detail
+          | Context_write, "answer_missing" -> Ok Side_answer_missing
+          | Context_write, "withheld" -> Ok Side_withheld
+          | Context_write, "answer_refused" ->
+            let+ detail = required_string_field record "detail" in Side_answer_refused detail
+          | _ -> Error ("unknown " ^ key ^ " status " ^ status) in
+        Ok (Some (kind, status)) in
+    let* context_write = decode_side_write Context_write "context_write" in
+    let* continuity_write = decode_side_write Continuity_write "continuity_write" in
+    let lp_side_writes = List.filter_map Fun.id [context_write; continuity_write] in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only;lp_side_writes})
 
 type lane_run_detail =
   { lrd_run_id : string

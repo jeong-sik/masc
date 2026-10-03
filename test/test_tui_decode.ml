@@ -9994,6 +9994,35 @@ let test_librarian_preflight_detail_reports_actual_route () =
     (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
   Alcotest.(check bool) "memory no-change is not context-only" false
     (Option.get recorded.lrd_librarian_preflight).lp_context_only;
+  let with_side_write key value = match with_after "unchanged" 0 with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> `Assoc
+          ((key, value) :: ("generation_path", `String "full_lane") ::
+           ("full_llm_skipped", `Bool false) ::
+           ("jev_preflight", `Assoc ["status", `String "ineligible";
+             "reason", `String "context pass"; "elapsed_s", `Null]) ::
+           List.filter (fun (key, _) ->
+             not (List.mem key ["generation_path"; "full_llm_skipped"; "jev_preflight"])) fields)
+        | _ -> Alcotest.fail "invalid output" in
+      `Assoc ["run", `Assoc (("output", output) ::
+        ("selected_slot", `String "fixture-generation") ::
+        List.remove_assoc "selected_slot" (List.remove_assoc "output" fields))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  List.iter (fun (key, kind) ->
+    let json = with_side_write key
+      (`Assoc ["status", `String "failed"; "detail", `String "side write refused"]) in
+    let run = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "Memory success retains independent side-write failure" true
+      ((Option.get run.lrd_librarian_preflight).lp_side_writes =
+       [kind, Tui_decode.Side_failed "side write refused"]);
+    Alcotest.(check bool) "side-write failure requires its recorded reason" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc ["status", `String "failed"]))));
+    Alcotest.(check bool) "unknown side-write status cannot look successful" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (with_side_write key (`Assoc ["status", `String "invented"]))))
+  ) ["context_write", Tui_decode.Context_write; "continuity_write", Tui_decode.Continuity_write];
   let context_only = match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with

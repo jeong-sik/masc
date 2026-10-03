@@ -55,7 +55,9 @@ The TUI's Librarian run detail first shows the recorded generation path and
 snapshot result in a full-width reading, then the JEV decision. `d` expands the
 model, confidence/probabilities, elapsed time and original Input/Output evidence.
 A judged no-change is distinct from validation acceptance and the snapshot
-result; the run's settlement status remains visible. Unknown or inconsistent
+result; the run's settlement status remains visible. Recorded Context and
+Continuity write statuses and failure reasons remain in the compact summary,
+including when Memory committed successfully. Unknown or inconsistent
 route evidence is rejected. Memory facts use the full width by default. `d`
 opens or closes the wide Category rail with counts and wrapped names; `c`/`C`
 and clicks select the same Category. Smaller terminals retain the full-width

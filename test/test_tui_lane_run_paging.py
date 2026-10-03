@@ -118,7 +118,7 @@ def run(
     columns: int,
     split: bool,
     refresh_error: bool,
-    preflight: Literal["context", "continuity", "memory", "failed_memory"]
+    preflight: Literal["context", "continuity", "memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"]
     | None = None,
 ) -> None:
     scenario = ("split" if split else "stacked") + (
@@ -178,7 +178,7 @@ def run(
                 "passed_over": [],
                 "elapsed_s": 0.05,
             }
-        elif preflight == "memory":
+        elif preflight in ("memory", "memory_context_failure", "memory_continuity_failure"):
             observed_output["after"] = {
                 "commit": "unchanged",
                 "revision": 4,
@@ -198,6 +198,11 @@ def run(
                     "end_atom": 42,
                     "prefix_sha256": "a" * 64,
                 }
+        if preflight in ("memory_context_failure", "memory_continuity_failure"):
+            side = "context" if preflight == "memory_context_failure" else "continuity"
+            observed_output[side + "_write"] = {
+                "status": "failed", "detail": side + "-side-write-refused",
+            }
         record["output"] = observed_output
     summary = {
         key: record[key]
@@ -270,13 +275,19 @@ def run(
 
             screen = completed_screen()
             marker = b"retained-generation-answer"
-            if preflight in ("memory", "failed_memory"):
+            if preflight in ("memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"):
                 if marker in screen or b"received-model" in screen:
                     raise AssertionError(
                         "memory evidence must start compact even without a snapshot"
                     )
-                if preflight == "memory" and "변경 없음".encode() not in screen:
+                if preflight in ("memory", "memory_context_failure", "memory_continuity_failure") and "변경 없음".encode() not in screen:
                     raise AssertionError("compact memory snapshot result is missing")
+                if preflight in ("memory_context_failure", "memory_continuity_failure"):
+                    side = "context" if preflight == "memory_context_failure" else "continuity"
+                    label = (side.capitalize() + ": failed").encode()
+                    reason = (side + "-side-write-refused").encode()
+                    if label not in screen or reason not in screen:
+                        raise AssertionError("compact Memory success hid a side-write failure")
                 if preflight == "failed_memory" and b"needs_generation" not in screen:
                     raise AssertionError("failed memory status summary is missing")
             else:
@@ -410,7 +421,7 @@ if __name__ == "__main__":
     run(executable, columns=180, split=True, refresh_error=False)
     run(executable, columns=100, split=False, refresh_error=False)
     run(executable, columns=180, split=True, refresh_error=True)
-    for preflight in ("context", "continuity", "memory", "failed_memory"):
+    for preflight in ("context", "continuity", "memory", "failed_memory", "memory_context_failure", "memory_continuity_failure"):
         run(
             executable,
             columns=180,

@@ -4364,8 +4364,21 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
         | Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
           Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
+      let side_writes = List.map (fun (kind, status) ->
+        let label = match kind with
+          | Tui_decode.Context_write -> "Context"
+          | Tui_decode.Continuity_write -> "Continuity" in
+        let outcome = match status with
+          | Tui_decode.Side_not_attempted -> "not attempted"
+          | Tui_decode.Side_answer_missing -> "answer missing"
+          | Tui_decode.Side_withheld -> "withheld"
+          | Tui_decode.Side_outcome_unconfirmed -> "outcome unconfirmed"
+          | Tui_decode.Side_committed -> "committed"
+          | Tui_decode.Side_answer_refused detail -> "answer refused · " ^ detail
+          | Tui_decode.Side_failed detail -> "failed · " ^ detail in
+        label ^ ": " ^ outcome) reading.lp_side_writes in
       let document = String.concat "\n"
-        ([path; memory; "JEV 판정 · " ^ decision] @ rejection
+        ([path; memory] @ side_writes @ ["JEV 판정 · " ^ decision] @ rejection
       @ (if details then model @ elapsed @ probabilities @ [""; "원문 실행 증거"]
          else ["d: 모델·확률·원문 펼치기"])) in
       let document =

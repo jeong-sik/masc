@@ -153,7 +153,7 @@ def identity_row(rows: dict[int, bytes]) -> int:
 
 def assert_facts_full_width(rows: dict[int, bytes], why: str) -> None:
     assert not portrait_rows(rows), f"{why}, the portrait still drew: {rows!r}"
-    identity = identity_row(rows)
+    identity_row(rows)
     assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
         f"{why}, Current Work obscured the Identity facts: {rows!r}"
 
@@ -166,8 +166,10 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
     assert band[0] == identity and band[-1] < identity + MOSAIC_BAND_ROWS, \
         f"the portrait is not the {MOSAIC_BAND_ROWS} rows beside Identity: rows {band}, Identity {identity}"
     assert len(band) >= MOSAIC_BAND_ROWS // 2, f"too little of the portrait drew: rows {band}"
-    for needle in (IDENTITY, NAME_ROW, PAUSED_ROW):
-        text = rows[row_of(rows, needle)].decode("utf-8", "replace")
+    for number, needle in ((identity, IDENTITY),
+                           (row_of(rows, NAME_ROW), NAME_ROW),
+                           (row_of(rows, PAUSED_ROW), PAUSED_ROW)):
+        text = rows[number].decode("utf-8", "replace")
         cells = [text.find(cell) for cell in HALF_BLOCK if cell in text]
         assert cells and min(cells) < text.find(needle.decode()), \
             f"{needle!r} is not beside the portrait: {text!r}"

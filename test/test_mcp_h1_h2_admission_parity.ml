@@ -566,16 +566,6 @@ let test_transport_guarded_paths_are_not_public_read () =
     ; "/api/v1/karma"
     ]
 
-(* serve_auto hands h2c connections to Server_h2_gateway and everything else to
-   the HTTP/1 router, so a route's authorization is decided independently on
-   each side. POST /graphql executed unauthenticated over h2c while HTTP/1
-   answered 401, because the H2 arm used [with_server_state] — which fetches
-   server state and authorizes nothing.
-
-   [with_h2_public_read] is not a substitute for [with_h2_read_auth]: it first
-   requires [http_auth_strict_enabled] and a non-public path, whereas H1's
-   [with_read_auth] authorizes unconditionally. Each H2 arm must name the
-   counterpart of the wrapper its H1 route uses. *)
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

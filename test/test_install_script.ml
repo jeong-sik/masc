@@ -920,8 +920,6 @@ let test_wizard_nontty_connectivity_check_opt_out () =
         "provider connectivity")
 ;;
 
-(* Cheap regression guard that runs without the masc binary: the non-TTY branch's
-   report line and its opt-out env both stay wired into install.sh. *)
 let test_wizard_reports_execution_sandboxes () =
   let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
   Sys.remove tmpdir;

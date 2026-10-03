@@ -1,12 +1,7 @@
-(** Regression guards for the keeper Agent Core raw-trace wiring.
+(** Keeper raw-trace storage, retention, and result projection.
 
-    [Keeper_turn_driver.run_named] has always accepted [?raw_trace] and
-    forwarded it into the Agent Core agent builder, but the sole keeper dispatch
-    site ([call_run_named] in keeper_agent_run.ml) never supplied it: Agent Core
-    started no raw-trace run for keeper turns, so
-    [run_result.trace_ref]/[run_validation] stayed permanently [None] in
-    the unified-metrics decision/snapshot rows and the keeper_turn.ml
-    progress-evidence disjunct.
+    The dispatch boundary requires an explicit [raw_trace] option. These cases
+    exercise the sink's effects and the references consumed by turn history.
 
     Trace-store safety guards (review on PR #22984):
     - P1a: sink creation must never scan previous turns' data, so a

@@ -3736,9 +3736,14 @@ let render_lanes_overview (state : state) =
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
+       let picker_rows =
+         match Masc_tui_types.runtime_picker_projection state with
+         | None -> 0
+         | Some picker -> 1 + max 1 (2 * List.length picker.rlp_choices)
+       in
        let available =
          max 0
-           (rows - count_frame_lines buf - action_error_rows - 3)
+           (rows - count_frame_lines buf - action_error_rows - picker_rows - 3)
        in
        if available > 0 then begin
          box_divider buf cols;
@@ -10932,10 +10937,10 @@ let render_runtime_pick (state : state) =
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
         ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
-      (match state.runtime_catalog_error, Masc_tui_types.keeper_runtime_picker_empty_note view with
-       | Some err, _ -> c.push (data_unreliable_row ~cols err)
-       | None, Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
-       | None, None ->
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note view with
+       | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), None ->
            (* The first header cell spans badge and target, as the rows
               do. *)
            let header =

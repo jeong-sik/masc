@@ -6602,6 +6602,7 @@ let handle_slot_edit state ~mailbox edit =
             Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -10063,7 +10064,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
-  state.runtime_catalog_error <- None;
+  state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_unread;
   state.runtime_assignments <- [];
   state.runtime_lanes <- [];
   state.keeper_yolo_names <- [];
@@ -15280,8 +15281,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None
-      | Error detail -> state.runtime_catalog_error <- Some detail)
+          state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_read
+      | Error detail -> state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_failed detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
       | Ok write ->

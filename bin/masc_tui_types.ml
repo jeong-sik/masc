@@ -4796,6 +4796,12 @@ type task_goal_links_reading =
   | Goal_links_read_failed of string
   | Goal_links_read of (string, string list) Hashtbl.t
 
+type runtime_catalog_reading =
+  | Runtime_catalog_unread
+  | Runtime_catalog_loading
+  | Runtime_catalog_read
+  | Runtime_catalog_failed of string
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5379,7 +5385,7 @@ type state = {
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
-  mutable runtime_catalog_error: string option;
+  mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Lazy loads for the two detail panes; the id names which row the answer
      belongs to so a stale load is discarded, not drawn under another item.
      [None] doubles as "in flight" right after entry resets it. *)
@@ -8021,7 +8027,7 @@ let create_state
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
-  runtime_catalog_error = None;
+  runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = None;
   task_history = None;
   verification_evidence = None;
@@ -9712,8 +9718,7 @@ type runtime_picker_projection = {
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
       (* Eligible catalogue size before the text filter. *)
-  rlp_source_total : int;
-      (* Whole source catalogue size before candidate-group filtering. *)
+  rlp_catalog_reading : runtime_catalog_reading;
   rlp_summary : string;
       (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
   rlp_filter : string option;
@@ -9756,7 +9761,7 @@ let runtime_picker_label_for = function
 let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
-      { Masc_tui_pick_list.closed with query = Some "" }
+      Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
     | _ -> Masc_tui_pick_list.closed in
   state.runtime_lane_pick <- Some (pick, list)
 
@@ -9894,12 +9899,19 @@ let runtime_picker_rows (state : state) pick =
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 && picker.rlp_source_total > 0
-     && (match picker.rlp_pick with Pick_exact_lane_replacement _ -> true | _ -> false) then
-    "  (no eligible replacement in this candidate group)"
-  else if picker.rlp_total = 0 then "  (runtime catalogue unread)"
-  else
-    Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
+  match picker.rlp_catalog_reading with
+  | Runtime_catalog_unread -> "  (runtime catalogue unread)"
+  | Runtime_catalog_loading -> "  (runtime catalogue loading)"
+  | Runtime_catalog_failed detail ->
+      "  (runtime catalogue read failed: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
+  | Runtime_catalog_read ->
+      if picker.rlp_total = 0 then
+        match picker.rlp_pick with
+        | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
+        | _ -> "  (runtime catalogue is empty)"
+      else
+        Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
 
 (* The keys the picker's header names, around the verb its Enter carries.
    While the filter is typed, letters are the filter's, so the header names
@@ -9937,8 +9949,13 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
       rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;
       rlp_selected_row = view.Masc_tui_pick_list.selected_row;
       rlp_total = view.Masc_tui_pick_list.total;
-      rlp_source_total = List.length state.runtime_catalog;
-      rlp_summary = Masc_tui_pick_list.summary view;
+      rlp_catalog_reading = state.runtime_catalog_reading;
+      rlp_summary = Masc_tui_pick_list.summary view ^
+        (match state.runtime_catalog_reading with
+         | Runtime_catalog_loading -> " · refreshing catalogue"
+         | Runtime_catalog_failed detail ->
+             " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+         | Runtime_catalog_unread | Runtime_catalog_read -> "");
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 

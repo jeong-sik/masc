@@ -690,10 +690,13 @@ let transact_goal ?effects config ~goal_id f =
           let notices = List.map (fun (sender, content) ->
             {notification_id=Random_id.prefixed ~prefix:"wmsg-" ~bytes:16;
              goal_id; sender; content; delivery=Awaiting_recipients}) effects.notifications in
-          let next = { state with version = revision; updated_at = now;
-                       goals = replace_goal state.goals updated;
-                       pending_events = state.pending_events @ events;
-                       pending_notifications = state.pending_notifications @ notices } in
+          let next =
+            { version = revision
+            ; updated_at = now
+            ; goals = replace_goal state.goals updated
+            ; pending_events = state.pending_events @ events
+            ; pending_notifications = state.pending_notifications @ notices
+            } in
           (match write_state_result config next with
            | Ok () -> Ok (updated, result)
            | Error detail -> Error (Persist_failed detail)))

@@ -278,10 +278,38 @@ codex = "sol"
 |}
     ]
 
+let test_provider_typos_do_not_hide_behind_explicit_bindings () =
+  let config field = shared_model ^ Printf.sprintf {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-first"
+%s = "codex"
+[models.next]
+api-name = "next-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "next"]
+[first.sol]
+enabled = true
+|} field in
+  let valid = parse_config (config "model-set") in
+  Alcotest.(check (list string)) "declared shared models augment explicit bindings"
+    ["first.next"; "first.sol"]
+    (List.sort String.compare (List.map Runtime_schema.binding_key valid.bindings));
+  List.iter (fun key ->
+    match Runtime_toml.parse_string (config key) with
+    | Ok _ -> Alcotest.failf "provider typo %s was silently accepted" key
+    | Error errors -> Alcotest.(check bool) "refusal identifies the exact provider key"
+        true (refused_at ("providers.first." ^ key) errors))
+    ["model_set"; "model-sets"]
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
-      , [ Alcotest.test_case "no provider takes a table another reader owns" `Quick
+      , [ Alcotest.test_case "provider typos cannot hide behind explicit bindings" `Quick
+            test_provider_typos_do_not_hide_behind_explicit_bindings
+        ; Alcotest.test_case "no provider takes a table another reader owns" `Quick
             test_no_provider_takes_a_table_another_reader_owns
         ; Alcotest.test_case "the names that loaded as providers are refused" `Quick
             test_the_names_that_loaded_as_providers_are_refused

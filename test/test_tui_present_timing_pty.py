@@ -8,12 +8,7 @@ import tempfile
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_frame_timing.ml",
-    "bin/masc_tui_frame_timing.mli",
-    "bin/masc_tui_frame_presenter.ml",
-)
+
 
 
 def run(executable: str) -> None:

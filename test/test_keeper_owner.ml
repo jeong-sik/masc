@@ -4202,7 +4202,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
-let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) ?(completed_reply=false) () =
+let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) ?(completed_reply=false) ?(media_only=false) () =
   init_runtime_default_for_tests ();
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4381,7 +4381,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
           check int "queued artifact bytes" artifact.blob.bytes (String.length bytes));
        if completed_reply then begin
          let turn_ref = Ids.Turn_ref.make ~trace_id:"owned-delegate" ~absolute_turn:7 in
-         let full_reply = "REVIEW-BEGIN\n" ^ String.make 900 'x' ^ "\nREVIEW-END" in
+         let full_reply = if media_only then "" else "REVIEW-BEGIN\n" ^ String.make 900 'x' ^ "\nREVIEW-END" in
          Keeper_chat_store.append_turn ~base_dir:base_path ~keeper_name:meta.name
            ~user_content:"PRIVATE-USER-INPUT" ~user_attachments:[]
            ~tool_calls:[{Keeper_chat_store.call_id="private-tool"; execution_id=None;
@@ -4423,6 +4423,9 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          check int "only exact utterance returned" 1 (List.length replies);
          check string "full review survives preview boundary" full_reply
            Yojson.Safe.Util.(List.hd replies |> member "text" |> to_string);
+         check bool "persisted media survives completed reply projection" true
+           (Yojson.Safe.Util.member "blocks" (List.hd replies) = Keeper_chat_blocks.blocks_to_yojson
+             [Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None}]);
          let denied = read "different-agent" in
          check bool "other caller cannot read completed body" false (Tool_result.is_success denied);
          check bool "denial does not expose full reply" false
@@ -5302,7 +5305,9 @@ let () =
             `Quick
             (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:false)
         ; test_case "completed delegate returns full owned exact-turn reply" `Quick
-            (test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true)
+            (fun () ->
+              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ();
+              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ~media_only:true ())
         ; test_case "peer artifacts reach the recipient Owner queue" `Quick
             (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:true)
         ; test_case

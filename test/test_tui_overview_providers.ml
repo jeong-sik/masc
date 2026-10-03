@@ -110,7 +110,7 @@ let test_section_draws_three_line_shapes () =
   in
   let section =
     match
-      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
+      Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
         ~width
     with
     | Some section -> section
@@ -127,9 +127,10 @@ let test_section_draws_three_line_shapes () =
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
     [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Reported 67%"; "Reported 44%"; "Reported 100%"
     ; "Model call limit"; " in 4h12m"; "reported 3m00s ago"; "reset time passed"
+    ; "Remaining 33%"; "At limit (reported) 1"; "Blocked (observed) 1"
     ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
   check bool "exhausted account is first" true
-    (match lines with first :: _ -> contains ~affix:"Kimi Coding" first | [] -> false);
+    (match List.find_opt (contains ~affix:"┌") lines with Some first -> contains ~affix:"Kimi Coding" first | None -> false);
   check bool "unreported, unblocked accounts draw no invented meters" false
     (contains ~affix:"Codex Pro" text || contains ~affix:"Ollama Cloud" text);
   let five_hour = List.find (fun line -> contains ~affix:"67%" line) lines in
@@ -149,7 +150,7 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
+    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
   with
   | None -> fail "a read draws a section"
   | Some section ->
@@ -175,7 +176,7 @@ let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
       ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
+    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -267,7 +268,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   in
   let section =
     match
-      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
+      Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~now ~width
     with
     | Some section -> section
@@ -313,10 +314,10 @@ let full_cells n = String.concat "" (List.init n (fun _ -> "\xe2\x96\x88"))
 
 let test_meter_uses_eighth_blocks () =
   check string "0.67 of 16 cells is 10 whole cells and five eighths"
-    (full_cells 10 ^ "\xe2\x96\x8b" ^ "     ")
+    (full_cells 10 ^ "\xe2\x96\x8b" ^ "░░░░░")
     (Providers.meter ~cells:16 0.67);
-  check string "zero is empty" "    " (Providers.meter ~cells:4 0.0);
-  check string "some use never reads as none" ("\xe2\x96\x8f" ^ "   ")
+  check string "zero has shaded remaining cells" "░░░░" (Providers.meter ~cells:4 0.0);
+  check string "some use never reads as none" ("\xe2\x96\x8f" ^ "░░░")
     (Providers.meter ~cells:4 0.001);
   check string "just under full is not full"
     (full_cells 15 ^ "\xe2\x96\x89")
@@ -346,7 +347,7 @@ let test_values_read_in_one_unit () =
 
 let test_failed_read_is_one_line () =
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_failed "connection refused")
+    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_failed "connection refused")
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
@@ -360,12 +361,13 @@ let test_empty_read_names_missing_usage_data () =
     { puws_since = now; puws_accounts = [] }
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read empty)
+    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read empty)
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
-      check (list string) "the missing data is visible" [ " no usage data" ]
-        (List.map plain section.lines)
+      let text = String.concat "\n" (List.map plain section.lines) in
+      List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
+        [ "Accounts 0"; "Reporting 0"; "Trend not read"; "no usage data" ]
   | None -> fail "an empty account list disappeared"
 
 (* Account email metadata never changes meter geometry. Unreported accounts
@@ -378,7 +380,7 @@ let test_account_emails_name_their_accounts () =
   in
   let section account_emails =
     match
-      Providers.section ~providers:(Types.Providers_read windows)
+      Providers.section ~history:Types.Provider_history_unread ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~account_emails ~now ~width
     with
     | Some section -> section
@@ -457,12 +459,26 @@ let test_trend_is_built_from_the_answer () =
   let none = Masc_tui_usage_trend.no_report_mark in
   check (list (triple string string int)) "rows, marks and reported days"
     [ ("s0", none ^ none ^ none, 0)
-    ; ("s1", "\xe2\x96\x81" ^ none ^ "\xe2\x96\x88", 2)
+    ; ("s1", "0" ^ none ^ "\xe2\x96\x88", 2)
     ]
     (List.map
        (fun (row : Masc_tui_usage_trend.row) ->
          (row.scope_id, row.marks, row.reported_days))
-       trend.rows)
+       trend.rows);
+  let row = List.find (fun (row:Masc_tui_usage_trend.row) -> row.scope_id = "s1") trend.rows in
+  let plot = Masc_tui_usage_trend.plot ~width:60 trend row in
+  check bool "daily chart has its fixed full-limit axis" true
+    (List.exists (contains ~affix:"100%") plot);
+  check bool "zero and missing report have distinct baseline marks" true
+    (List.exists (contains ~affix:("0   " ^ none)) plot);
+  check bool "a report retains its own timestamp, not response time" true
+    (match Masc_tui_usage_trend.latest row with
+     | Some sample -> Float.equal sample.observed_at generated_at
+     | None -> false);
+  List.iter (fun width -> List.iter (fun line ->
+    check bool "chart respects terminal cells" true
+      (Masc_tui_message_layout.display_width line <= width))
+    (Masc_tui_usage_trend.plot ~width trend row)) [1; 20; 60]
 
 (* The id the section names a scope by is the server's, carried on the row,
    so the trend's points and the current windows cannot disagree. *)
@@ -474,10 +490,75 @@ let test_scope_id_is_the_servers () =
         [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
         (List.map Providers.scope_id windows.puws_accounts)
 
+let test_plan_history_joins_exact_quota_window () =
+  let windows = match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
+    | Ok windows -> windows | Error reason -> fail reason in
+  let windows = { windows with puws_accounts = List.filter (fun account ->
+    Providers.scope_id account = "id-claude_code") windows.puws_accounts } in
+  let point scope kind limit value : Masc.Tui_decode_usage.provider_usage_history_point =
+    { puhp_scope_id = scope; puhp_kind = kind; puhp_limit_id = limit;
+      puhp_unit = Masc.Tui_decode_usage.Utilization_percent value; puhp_observed_at = now } in
+  let history : Masc.Tui_decode_usage.provider_usage_history =
+    { puh_days = 7; puh_generated_at = now; puh_unreadable_reports = 0;
+      puh_points = [point "id-claude_code" "five_hour" None 40;
+        point "id-other" "five_hour" None 100;
+        point "id-claude_code" "five_hour" (Some "different-limit") 100] } in
+  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
+  let section = match Providers.section ~history:(Types.Provider_history_read trend)
+    ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
+    ~account_emails:Types.Account_emails_unread ~now ~width:80 with
+    | Some section -> section | None -> fail "expected plan cards" in
+  let text = String.concat "\n" (List.map plain section.lines) in
+  check bool "exact window has its own daily trend" true
+    (contains ~affix:("Trend 7 UTC days  " ^ String.concat "" (List.init 6 (fun _ -> Masc_tui_usage_trend.no_report_mark)) ^ "▃") text);
+  check bool "a window without matching history stays unreported" true
+    (contains ~affix:"Trend 7 UTC days · no reports" text);
+  check bool "catalogue absence is not reported as no blocked accounts" true
+    (contains ~affix:"Blocked (observed) unknown" text)
+
+let test_plan_preserves_unknown_reports () =
+  let open Masc.Tui_decode_usage in
+  let windows = match decode_provider_usage_windows (resolved "reported") with
+    | Ok value -> value | Error detail -> fail detail in
+  let trend : Masc_tui_usage_trend.t =
+    { days = 7; generated_at = now; unreadable_reports = 2; rows = [] } in
+  let draw windows =
+    match Providers.section ~history:(Types.Provider_history_read trend)
+      ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
+      ~account_emails:Types.Account_emails_unread ~now ~width:100 with
+    | Some section -> String.concat "\n" (List.map plain section.lines)
+    | None -> fail "expected plan summary" in
+  let text = draw windows in
+  check bool "missing rows retain unreadable evidence" true
+    (contains ~affix:"no readable reports · 2 omitted" text);
+  let silent = { windows with puws_accounts = List.map (fun account ->
+    { account with pua_state = Account_not_reported_since_start }) windows.puws_accounts } in
+  let text = draw silent in
+  List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
+    [ "Accounts 4"; "Reporting 0"; "2 unreadable reports omitted" ];
+  let limit role share = { windows with puws_accounts = List.filter_map (fun account ->
+    match account.pua_state with
+    | Account_not_reported_since_start -> None
+    | Account_reported (first, _) -> Some { account with
+        pua_state = Account_reported ({ first with puw_role = role;
+          puw_utilization = Utilization_fraction share }, []) }) windows.puws_accounts } in
+  check bool "full unclassified limits count" true
+    (contains ~affix:"At limit (reported) 2" (draw (limit Role_unclassified_limit 1.0)));
+  check bool "other-use counters do not count" true
+    (contains ~affix:"At limit (reported) 0" (draw (limit Role_counts_other_use 1.0)));
+  List.iter (fun share ->
+    check bool "invalid values do not advertise remaining cells" false
+      (contains ~affix:"░" (String.concat "\n"
+        (String.split_on_char '\n' (draw (limit Role_gates_model_calls share))
+         |> List.filter (fun line -> contains ~affix:meter_open line)))))
+    [ -0.5; Float.nan; Float.neg_infinity ]
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
-      , [ test_case "three line shapes" `Quick test_section_draws_three_line_shapes
+      , [ test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
+          test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
+          test_case "account summary and reported gauges" `Quick test_section_draws_three_line_shapes
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line

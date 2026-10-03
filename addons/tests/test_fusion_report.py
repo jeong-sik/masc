@@ -90,13 +90,14 @@ def contexts(output):
     return [item for item in output["rows"] if item["lane_id"] == "fusion/report-context"]
 
 
-def computation_output(status="answered", *, role="panel", outcome=True, text="First measured finding\nSecond finding"):
+def computation_output(status="answered", *, role="panel", outcome=True, text="First measured finding\nSecond finding", response_fields=None):
     refs = {"request": {"uri": "lane-evidence:" + "a" * 64, "sha256": "a" * 64}}
     if outcome:
         refs["outcome"] = {"uri": "lane-evidence:" + "b" * 64, "sha256": "b" * 64}
     response = {"role": "assistant", "model": "actual-sampled-model",
                 "content": {"type": "text", "text": text},
                 "stopReason": "endTurn", "_meta": {"masc.lane_sampling": refs}}
+    response.update(response_fields or {})
     answered = status == "answered"
     if status == "invalid_response":
         response["model"] = ""
@@ -140,6 +141,73 @@ def computation_context(output, report):
 
 
 class FusionReport(unittest.TestCase):
+    def test_partial_analysis_names_input_gaps_and_exact_assembly_coordinates(self):
+        output = computation_output(role="judge")
+        gap = output["rows"][0]["fields"]["input_coverage"][0]
+        gap.update(complete=False, detail="Panel B result is missing from the captured inputs")
+        output["rows"][0]["fields"]["input_complete"] = False
+        captured = upstream(output, installation_id="fusion-judge", instance_id="judge-worker", sequence=7)
+        captured["detail"] = "Received partial Judge result"
+        result = call("fusion-report", [captured])
+        self.assertFalse(result["isError"])
+        fields = reports(result["structuredContent"])[0]["fields"]
+        body = fields["body"] + contexts(result["structuredContent"])[0]["fields"]["body"]
+        self.assertIn("First measured finding\nSecond finding", body)
+        self.assertIn("fusion-judge의 보존된 결과 → 보고서 입력 fusion-output", body)
+        self.assertIn("생산자: judge-worker · 완료 관측: 7", body)
+        self.assertIn("Panel B result is missing from the captured inputs", body)
+        self.assertIn("Received partial Judge result", body)
+        self.assertIn("누락된 근거가 채워진 것은 아닙니다", body)
+        self.assertFalse(fields["input_complete"])
+        self.assertEqual(fields["delivery_status"], "not_attempted")
+
+    def test_recorded_failure_states_produce_distinct_reading_guidance(self):
+        cases = [("host_error", "호출 실패 원인"),
+                 ("outcome_unknown", "결과가 확인되지 않은 호출을 바로 반복하지"),
+                 ("invalid_response", "검증 실패 응답을 분석 결과로 사용하지")]
+        for status, guidance in cases:
+            with self.subTest(status=status):
+                output = computation_output(status, role="judge", outcome=status != "outcome_unknown")
+                if status == "invalid_response":
+                    raw = output["rows"][0]["fields"]
+                    response = computation_output(response_fields={"role": "user"})["rows"][0]["fields"]["sampling_response"]
+                    raw.update(sampling_response=response, sampling_error=None,
+                               validation_error="Fusion requires an assistant sampling response")
+                result = call("fusion-report", [upstream(output)])
+                self.assertFalse(result["isError"])
+                fields = reports(result["structuredContent"])[0]["fields"]
+                self.assertIn(guidance, fields["body"])
+                raw = contexts(result["structuredContent"])[0]["fields"]["raw_computed_rows"][0]["fields"]
+                self.assertEqual(raw["sampling_error"], output["rows"][0]["fields"]["sampling_error"])
+                self.assertEqual(fields["delivery_status"], "not_attempted")
+                if status == "invalid_response":
+                    self.assertIsNotNone(raw["sampling_response"])
+                    self.assertIn(raw["validation_error"], fields["body"])
+                    self.assertIn("원본 응답은 입력 근거에 보존했습니다", fields["body"])
+                    self.assertNotIn("보존된 모델 응답이 없습니다", fields["body"])
+
+    def test_locally_invalid_response_keeps_raw_response_and_validation_failure(self):
+        output = computation_output(role="judge", response_fields={"role": "user"})
+        original = output["rows"][0]["fields"]
+        original["computation"].update(status="invalid_response", model=None,
+                                       text=None, stop_reason=None)
+        original["validation_error"] = "Fusion requires an assistant sampling response"
+        result = call("fusion-report", [upstream(output)])
+        self.assertFalse(result["isError"])
+        report = reports(result["structuredContent"])[0]
+        fields = report["fields"]
+        retained = computation_context(result["structuredContent"], report)["fields"]["raw_computed_rows"][0]["fields"]
+        self.assertEqual(fields["computation_status"], "invalid_response")
+        self.assertEqual(fields["validation_error"], original["validation_error"])
+        self.assertEqual(retained["sampling_response"], original["sampling_response"])
+        self.assertEqual(retained["sampling_error"], original["sampling_error"])
+        self.assertEqual(retained["validation_error"], original["validation_error"])
+        self.assertIn("원본 응답은 입력 근거에 보존했습니다", fields["body"])
+        self.assertIn(original["validation_error"], fields["body"])
+        self.assertIn("검증 실패 응답을 분석 결과로 사용하지", fields["body"])
+        self.assertNotIn("보존된 모델 응답이 없습니다", fields["body"])
+        self.assertEqual(fields["delivery_status"], "not_attempted")
+
     def test_report_rejects_conflicting_or_missing_fusion_producer(self):
         original = upstream(project(detail()))
         for change in ("other-owner", "missing-origin-owner", "missing-run-owner"):

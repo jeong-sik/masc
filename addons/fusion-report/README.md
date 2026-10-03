@@ -38,6 +38,14 @@ evidence while remaining failed; request-only `outcome_unknown` stays incomplete
 The [assembled examples](../../docs/examples/lane-addons/fusion-compute/) connect
 two panels to a judge and then this report package.
 
+The Markdown body also shows the declared report input, its producing
+installation/run/instance and completed observation, and the retained coverage
+details at each supplied boundary. Partial input reasons remain visible beside
+the analysis. A next-step section distinguishes an answered call, host failure,
+an uncertain outcome and a rejected response. These are reading guidance from
+recorded states; the package does not retry a call, repair an input or act for
+the receiving agent.
+
 Computed reports reference one `fusion/report-context` row per upstream
 observation. It retains exact original computation rows in `raw_computed_rows`, Native
 row coordinates in `upstream_rows`, producer coordinates, coverage and

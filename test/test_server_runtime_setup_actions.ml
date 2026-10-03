@@ -326,7 +326,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String "selected-muse";
       "account_home",`String "/arbitrary"]) = Error Actions.Invalid_request))
 
-let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime binary net ->
+let test_muse_save_rechecks_selected_catalog ?supported () = fixture (fun base runtime binary net ->
   let account_home=Filename.concat base "catalog-account" in
   Unix.mkdir account_home 0o700;
   Out_channel.with_open_gen [Open_append;Open_text] 0o600 runtime (fun out ->
@@ -345,7 +345,10 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
       @ (match image with None -> [] | Some value -> ["supports_image_input", value]))]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
   let row context=`Assoc ["id",`String "reported-muse";"context",context] in
-  let reported=row (`Int 8192) in
+  let reported = match row (`Int 8192) with
+    | `Assoc fields -> `Assoc (fields @ (match supported with None -> []
+        | Some value -> ["supports_image_input", `Bool value]))
+    | _ -> fail "fixture model is not an object" in
   let catalog_path=Filename.concat account_home "fixture-muse-catalog.json" in
   List.iter (fun (name,models,id,context) ->
     save catalog_path (Yojson.Safe.to_string (`List models));
@@ -366,7 +369,7 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
      "context nonpositive",[row (`Int 0)],"reported-muse",8192;
      "ambiguous catalog ID",[reported;reported],"reported-muse",8192];
   List.iter (fun (name, capability, requested) ->
-    let model = match reported with `Assoc fields ->
+    let model = match row (`Int 8192) with `Assoc fields ->
       `Assoc (fields @ (match capability with None -> []
         | Some value -> ["supports_image_input", `Bool value]))
       | _ -> fail "fixture model is not an object" in
@@ -385,7 +388,12 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
   save catalog_path (Yojson.Safe.to_string (`List [reported]));
   ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 8192)));
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
-    (Sys.file_exists (Filename.concat base "save-calls")))
+    (Sys.file_exists (Filename.concat base "save-calls"));
+  let configured = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let model = List.find (fun (model : Runtime_schema.model) -> model.api_name = "reported-muse") configured.models in
+  Alcotest.check (Alcotest.option Alcotest.bool)
+    "omitted browser capability saves the authoritative reported value"
+    supported model.supports_image_input)
 
 let test_named_lane_save () = fixture (fun base runtime binary _net ->
   let config = Runtime_toml.parse_file runtime |> Result.get_ok in
@@ -468,7 +476,10 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
-  Alcotest.test_case "Muse save rechecks selected account catalog before effects" `Quick test_muse_save_rechecks_selected_catalog;
+  Alcotest.test_case "Muse save rechecks selected account catalog before effects" `Quick (fun () ->
+    test_muse_save_rechecks_selected_catalog ();
+    test_muse_save_rechecks_selected_catalog ~supported:true ();
+    test_muse_save_rechecks_selected_catalog ~supported:false ());
   Alcotest.test_case "bound models follow account home across provider IDs" `Quick test_bound_models_follow_account_home;
   Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

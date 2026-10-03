@@ -124,6 +124,12 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
   let* provider = match providers with
     | [provider] -> Ok provider
     | [] | _ :: _ :: _ -> Error (Runtime_unavailable "runtime did not resolve one exact provider binding") in
+  let has_image = List.exists (fun (message : S.sampling_message) ->
+    match message.content with S.Image _ -> true | S.Text _ -> false) params.messages in
+  let capabilities = Llm_provider.Backend_openai_request.capabilities_of_config provider in
+  let* () = if has_image && not capabilities.supports_image_input then
+      Error (Runtime_unavailable "candidate cannot carry the requested image input")
+    else Ok () in
   let config = {provider with Llm_provider.Provider_config.max_tokens=Some params.max_tokens;
     temperature=(match params.temperature with
       | Some value -> Some (Runtime_inference.resolve_temperature ~runtime_id ~fallback:(fun () -> value))

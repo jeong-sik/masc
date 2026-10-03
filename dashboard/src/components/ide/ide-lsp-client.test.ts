@@ -502,6 +502,41 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
+  it.each([
+    ['/workspace/masc', 'src/hash#part.ml', '/workspace/masc/src/hash#part.ml'],
+    ['/workspace/masc', 'src/percent%20name.ml', '/workspace/masc/src/percent%20name.ml'],
+    ['/workspace/space #?%/한글', 'src/한글 ?name.ml', '/workspace/space #?%/한글/src/한글 ?name.ml'],
+    ['/workspace/unused', '/workspace/masc/src/hash#part.ml', '/workspace/masc/src/hash#part.ml'],
+  ])('preserves literal path characters in document traffic (%s, %s)', async (root, filePath, absolutePath) => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.syncDocument(filePath, 'let value = 1\n')
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket, root)
+    conn.syncDocument(filePath, 'let value = 2\n')
+    const lenses = conn.requestCodeLenses(filePath)
+    const inlays = conn.requestInlayHints(filePath, 1)
+    const hover = conn.requestHover(filePath, 0, 4)
+    conn.notifyDidClose(filePath)
+    const messages = socket.sent.map(value => JSON.parse(value))
+      .filter(value => value.method.startsWith('textDocument/'))
+    conn.dispose()
+    await Promise.all([lenses, inlays, hover])
+    expect(messages.map(value => value.method)).toEqual([
+      'textDocument/didOpen', 'textDocument/didChange', 'textDocument/codeLens',
+      'textDocument/inlayHint', 'textDocument/hover', 'textDocument/didClose',
+    ])
+    for (const message of messages) {
+      const uri = new URL(message.params.textDocument.uri)
+      expect(uri.protocol).toBe('file:')
+      expect(uri.host).toBe('')
+      expect(uri.hash).toBe('')
+      expect(uri.search).toBe('')
+      expect(decodeURIComponent(uri.pathname)).toBe(absolutePath)
+    }
+  })
+
   // Before the handshake reports the tree there is no way to name a document,
   // so a request must be skipped rather than sent with a guessed path.
   it('sends no document request before the workspace root is known', async () => {

@@ -221,6 +221,20 @@ class ReportCliTest(unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertEqual(result.stdout, "")
 
+    def test_nonfinite_aggregate_refuses_without_traceback(self) -> None:
+        manifest = fixture()
+        manifest["pairs"][0]["preflight"]["run"]["elapsed_s"] = 1e308
+        second = copy.deepcopy(manifest["pairs"][0])
+        second["sample_id"] = "two"
+        second["baseline"]["run"]["run_id"] = "base-2"
+        second["preflight"]["run"]["run_id"] = "jev-2"
+        manifest["pairs"].append(second)
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("preflight measurement refused:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_wall_clock_durations_are_preserved_without_an_invented_bound(self) -> None:
         manifest = fixture()
         run = manifest["pairs"][0]["preflight"]["run"]

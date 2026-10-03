@@ -1,0 +1,4 @@
+Parser-only check; no typecheck or native execution.
+PASS lib/runtime/runtime_toml.ml
+PASS lib/runtime/runtime_toml.mli
+PASS test/test_runtime_toml_namespace.ml

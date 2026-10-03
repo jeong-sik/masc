@@ -278,6 +278,72 @@ codex = "sol"
 |}
     ]
 
+let model_set_provider key =
+  Printf.sprintf {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+%s = "codex"
+|} key
+
+let model_set_members = {|[model_sets.codex]
+models = ["sol"]
+|}
+
+let test_model_set_typo_cannot_hide_behind_explicit_binding () =
+  List.iter
+    (fun explicit ->
+      let text key =
+        shared_model ^ model_set_provider key ^ model_set_members ^ explicit
+      in
+      let valid = parse_config (text "model-set") in
+      Alcotest.(check (list string)) "canonical field generates one binding"
+        ["first.sol"] (List.map Runtime_schema.binding_key valid.bindings);
+      match Runtime_toml.parse_string (text "model_set") with
+      | Ok _ -> Alcotest.fail "misspelled model set was silently ignored"
+      | Error errors ->
+        Alcotest.(check bool) "refusal identifies the original TOML path" true
+          (refused_at "providers.first.model_set" errors))
+    [ ""; "[first.sol]\nenabled = true\n[runtime]\ndefault = \"first.sol\"\n" ]
+
+let test_unknown_provider_fields_are_refused_in_all_table_forms () =
+  List.iter
+    (fun (path, text) ->
+      match Runtime_toml.parse_string text with
+      | Ok _ -> Alcotest.failf "unknown provider field %s was accepted" path
+      | Error errors -> Alcotest.(check bool) path true (refused_at path errors))
+    [ "providers.first.model_set",
+        "[providers]\nfirst = {protocol = \"codex-app-server\", command = \"codex\", model_set = \"codex\"}\n"
+    ; "providers.first.model_set",
+        "providers.first.protocol = \"codex-app-server\"\nproviders.first.command = \"codex\"\nproviders.first.model_set = \"codex\"\n"
+    ; "providers.first.account_home",
+        model_set_provider "model-set" ^ "account_home = \"/tmp/codex\"\n"
+        ^ shared_model ^ model_set_members
+    ; "providers.first.model_set",
+        model_set_provider "model-set" ^ "[providers.first.model_set]\nname = \"codex\"\n"
+        ^ shared_model ^ model_set_members
+    ];
+  match Runtime_toml.parse_string "[providers]\nfirst = 1\n" with
+  | Ok _ -> Alcotest.fail "scalar provider accepted"
+  | Error errors ->
+    Alcotest.(check bool) "non-table provider is a structured error" true
+      (refused_at "providers.first" errors)
+
+let test_provider_typo_is_refused_by_file_loader () =
+  let path = Filename.temp_file "provider-field-typo-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let content = shared_model ^ model_set_provider "model_set" ^ model_set_members
+      ^ "[first.sol]\nenabled = true\n[runtime]\ndefault = \"first.sol\"\n" in
+    Out_channel.with_open_bin path (fun channel -> output_string channel content);
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> Alcotest.fail "file loader silently dropped a misspelled model set"
+    | Error failure ->
+      let message = Runtime_config_error.to_diagnostic_text ~config_path:path failure in
+      Alcotest.(check bool) "diagnostic includes the configuration file" true
+        (String_util.contains_substring message path);
+      Alcotest.(check bool) "diagnostic includes the misspelled field" true
+        (String_util.contains_substring message "providers.first.model_set"))
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
@@ -303,5 +369,11 @@ let () =
             test_explicit_binding_overrides_a_set_default
         ; Alcotest.test_case "invalid model sets are refused" `Quick
             test_invalid_model_sets_are_refused
+        ; Alcotest.test_case "model-set typo cannot hide behind explicit bindings" `Quick
+            test_model_set_typo_cannot_hide_behind_explicit_binding
+        ; Alcotest.test_case "unknown provider fields in all table forms" `Quick
+            test_unknown_provider_fields_are_refused_in_all_table_forms
+        ; Alcotest.test_case "provider typo is refused by the file loader" `Quick
+            test_provider_typo_is_refused_by_file_loader
         ] )
     ]

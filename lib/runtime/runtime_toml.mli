@@ -10,6 +10,8 @@
     - [model_sets.<name>].models — shared model ids. A provider's
       [model-set] references one list, materializing its provider × model
       bindings. Explicit binding tables override the generated defaults.
+      Unknown provider fields (including [model_set]) are rejected with their
+      TOML path even when explicit bindings would otherwise suffice.
     - [\[runtime\].default] — the default Runtime id ([provider.model])
     - [\[exec.ssh.endpoints.*\]] — SSH remote execution endpoint registry
       (Phase 1 SSH lane, spec §4.2); exposed as

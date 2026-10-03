@@ -9862,14 +9862,14 @@ let runtime_picker_rows (state : state) pick =
       (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
   in
   let lanes =
-    match pick, state.runtime_surface with
-    | Pick_route_default, Some snapshot ->
-        snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_lanes
+    match pick with
+    | Pick_route_default ->
+        state.runtime_lanes
         |> List.filter (fun lane ->
              lane.Tui_decode.rrl_declared && lane.Tui_decode.rrl_runtime_ids <> [])
         |> List.map (fun lane -> Lane_choice lane)
-    | (Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
-      | Pick_media_failover | Pick_route_default), (None | Some _) -> []
+    | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
+    | Pick_media_failover -> []
   in
   let runtime_choices =
     landing @ refused

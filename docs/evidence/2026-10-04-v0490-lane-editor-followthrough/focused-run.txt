@@ -1,0 +1,24 @@
+START 1 Librarian replaces model and effort and promotes within its group
+RESULT 1 PASS
+START 2 Runtime lanes reading edits lanes
+RESULT 2 PASS
+START 3 Standalone lane picks wait for the standalone list
+RESULT 3 PASS
+START 4 Librarian provider editor includes CLI fallback slots
+RESULT 4 PASS
+START 5 An empty CLI group says a fills it, and a CLI pick lands there
+RESULT 5 PASS
+START 6 Workspace curator takes CLI slots; schema-less clients sink and refuse
+RESULT 6 PASS
+START 7 Runtime lane concurrent edit is refused
+RESULT 7 PASS
+START 8 Malformed runtime config explains lane refusal
+RESULT 8 PASS
+START 9 Runtime candidate picker filters and pages
+RESULT 9 PASS
+START 10 Slot editor opens an HTTP slot's provider table
+RESULT 10 PASS
+START 11 Rejected Librarian CLI slot opens its binding configuration
+RESULT 11 PASS
+runtime lane editor: PASS
+COMPLETE {"exit_code": 0, "started": 11, "passed": 11}

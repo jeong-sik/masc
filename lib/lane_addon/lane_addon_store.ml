@@ -256,7 +256,7 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
-    let scan relative ~skip =
+    let scan relative ~repair_primary ~skip =
       let path = Filename.concat t.root relative in
       match Fs_compat.exact_path_kind path with
       | Fs_compat.Exact_missing -> Ok ()
@@ -279,13 +279,31 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                             else write_blob t bytes |> Result.map (fun _ -> ())
                         | _ -> Ok ())
                     | _ -> Ok () in
+                  (* The independent outcome journal remains authoritative
+                     when primary publication failed. Once that directory is
+                     available again, restore its terminal row before visiting
+                     the request. A still-unavailable primary cannot hide the
+                     durable outcome. Only its exact stored identity can choose
+                     the repair path. *)
+                  let* () = if not repair_primary then Ok () else
+                    match json with
+                    | `Assoc fields ->
+                        (match List.assoc_opt "instance_id" fields,
+                               List.assoc_opt "request_id" fields,
+                               List.assoc_opt "state" fields with
+                         | Some (`String owner), Some (`String request_id), Some (`String "finished")
+                           when owner = instance_id && name = digest request_id ^ ".json" ->
+                             ignore (save_sampling_request t ~instance_id ~request_id json);
+                             Ok ()
+                         | _ -> Error "sampling terminal journal identity is invalid")
+                    | _ -> Error "sampling terminal journal is not an object" in
                   let* () = f json in
                   next ()
               | _ -> next ()
               | exception End_of_file -> Ok () in
             next ()) in
-    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
-    scan (sampling_directory instance_id) ~skip:(fun name ->
+    let* () = scan (sampling_outcome_directory instance_id) ~repair_primary:true ~skip:(fun _ -> false) in
+    scan (sampling_directory instance_id) ~repair_primary:false ~skip:(fun name ->
       Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable

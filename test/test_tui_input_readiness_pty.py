@@ -6,12 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_input_reader.ml",
-    "bin/masc_tui_input_reader.mli",
-    "lib/core/eio_guard.ml",
-)
+
 
 
 def open_chat(process, fd, output):

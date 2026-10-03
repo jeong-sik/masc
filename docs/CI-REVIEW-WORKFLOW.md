@@ -38,8 +38,7 @@ uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
 The publication job verifies its receipt and artifact checksums and uploads the
 existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
-one toolchain job; node behavior and stanza regeneration run only under the
-behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
+one toolchain job; node behavior runs under the behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
 there is no known-failure exemption list or second standalone compilation pass.
 The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
 Presentation tools are installed only for the behavior lane. The dashboard is

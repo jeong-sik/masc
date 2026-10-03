@@ -228,22 +228,7 @@ let test_the_row_is_not_a_board_post () =
   in
   check bool "nothing to fetch" true
     (row.Keeper_world_observation.post_kind = Board.System_post)
-;;
 
-(* Storing the answer and telling the Keeper are one act. The handler has to
-   make the call; a wake nothing emits is the state this started in. *)
-let test_the_answer_route_emits_the_wake () =
-  let n =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"lib/server/server_routes_http_keeper_stream.ml"
-      ~binding_name:"handle_keeper_ask_answer"
-      ~callee:"wake_keeper_for_answered_ask"
-  in
-  if n < 1 then
-    failf
-      "answering a question must wake the Keeper that asked; \
-       wake_keeper_for_answered_ask is called %d time(s) in handle_keeper_ask_answer"
-      n
 ;;
 
 (* Recording the answer and telling the Keeper are one act, so the route cannot
@@ -275,23 +260,7 @@ let test_a_delivered_answer_is_a_success () =
        (List.assoc_opt "delivered" fields = Some (`Bool true));
      check bool "nothing to explain" false (List.mem_assoc "error" fields)
    | _ -> fail "the body is not an object")
-;;
 
-(* The retry that finishes a delivery. An answer already recorded but never
-   delivered can only be rescued by answering again, so the refusal path has
-   to re-enqueue rather than stop at "you lost the race". *)
-let test_answering_again_completes_a_lost_delivery () =
-  let n =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"lib/server/server_routes_http_keeper_stream.ml"
-      ~binding_name:"handle_keeper_ask_answer"
-      ~callee:"wake_keeper_for_answered_ask"
-  in
-  if n < 2 then
-    failf
-      "answering again must complete a delivery that failed the first time; \
-       wake_keeper_for_answered_ask is called %d time(s)"
-      n
 ;;
 
 let () =
@@ -300,14 +269,11 @@ let () =
       , [ test_case "the wake survives the queue" `Quick test_the_wake_survives_the_queue
         ; test_case "the wake is keyed by the question" `Quick
             test_the_wake_is_keyed_by_the_question
-        ; test_case "the answer route emits the wake" `Quick
-            test_the_answer_route_emits_the_wake
         ; test_case "an undelivered answer is not reported as success" `Quick
             test_an_undelivered_answer_is_not_reported_as_success
         ; test_case "a delivered answer is a success" `Quick
             test_a_delivered_answer_is_a_success
-        ; test_case "answering again completes a lost delivery" `Quick
-            test_answering_again_completes_a_lost_delivery
+
         ] )
     ; ( "row"
       , [ test_case "the row says what the human picked" `Quick

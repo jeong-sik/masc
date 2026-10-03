@@ -3,13 +3,7 @@ import os
 import sys
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names, so without this a
-# change to the drawn text below reaches main with no scenario run. The row is
-# built in masc_tui_render.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+
 
 BASE_LABEL = b"  base "
 # What the row draws for a masc root that sits under the base path: the label

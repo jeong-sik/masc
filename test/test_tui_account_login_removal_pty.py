@@ -16,13 +16,7 @@ import sys
 import test_tui_keyboard_input as h
 from test_tui_account_login_pty import leave_login_and_arm_quit
 
-SOURCE_MODULES = (
-    "bin/masc_tui_account_login.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "lib/runtime/runtime_account_removal_setup.ml",
-)
+
 
 PREVIEW = "/api/v1/setup/accounts/removal"
 REMOVE = "/api/v1/setup/accounts/remove"

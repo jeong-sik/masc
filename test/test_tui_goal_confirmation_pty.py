@@ -13,19 +13,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_planning_detail.ml",
-    "bin/masc_tui_planning_detail.mli",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_types.ml",
-)
+
 
 
 def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> None:

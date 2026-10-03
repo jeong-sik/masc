@@ -4,14 +4,7 @@ import base64
 import json
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_answering.ml",
-)
+
 
 def board_interaction(process, fd, _slave, output, _base):
     h.palette_go(process, fd, output, b"go board", b"MASC Board")

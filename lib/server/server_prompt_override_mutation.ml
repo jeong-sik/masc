@@ -18,6 +18,11 @@ let apply ~base_path request =
         | Prompt_registry.Validation_error message -> Validation message
         | Prompt_registry.Persistence_error message -> Persistence message) in
   Result.map (fun message ->
+    if List.mem key
+         [ Prompt_names.candle_appraiser_grade
+         ; Prompt_names.candle_appraiser_relation
+         ; Prompt_names.candle_appraiser_weights ]
+    then Candle_payout_worker.wake ();
     let curator_refresh =
       if String.equal key Prompt_names.workspace_memory_curator
       then Some (Server_workspace_memory_curator.request ~base_path)

@@ -1,0 +1,1135 @@
+{
+  "reviewed_at": "2026-10-03T17:37:29.597078+00:00",
+  "reviewer": "audit_week_lane (independent adversarial source reviewer)",
+  "base": "ec0275ed4b8e6450ded83eb60d9728d38400d1b1",
+  "head": "4b640af170e5ef180064302a4840e57d80498b76",
+  "diff_sha256": "189d4a5ddbc57a3960ab21f02c58bb4184e20f37fbaf33ad09c48a9845b44ea6",
+  "diff_format": "git diff --binary BASE HEAD raw stdout; approval digest 아님",
+  "verdict": "PASS",
+  "scope": "base ec0275ed→head 4b640af의 10개 authored 파일 누적 source review와 각 수정 delta. 마지막 0377b46→4b640af의 store/test 2파일 전체 diff, reader admission/exact_path_kind, owner-domain startup 순서를 직접 확인했다. 외부 GitHub 승인 아님.",
+  "changed_files": [
+    "changelog.d/41033.md",
+    "lib/lane_addon/lane_addon_runtime.ml",
+    "lib/lane_addon/lane_addon_runtime.mli",
+    "lib/lane_addon/lane_addon_sampling.ml",
+    "lib/lane_addon/lane_addon_store.ml",
+    "lib/lane_addon/lane_addon_store.mli",
+    "lib/server/server_bootstrap_maintenance.ml",
+    "test/test_lane_addon.ml",
+    "test/test_lane_addon_sources.ml",
+    "test/test_lane_addon_worker.ml"
+  ],
+  "findings": [],
+  "resolved_findings": [
+    {
+      "id": "COLD1",
+      "status": "source-resolved",
+      "detail": "정상 FS와 정상 기록에서 명시적 startup/maintenance recovery가 query 밖에서 full journal과 existing canonical/fallback을 검증한 뒤 compact한다. query는 작은 record와 outcome 한 body를 읽어 3+3 MiB 실패를 해소한다. record 오류 격리, corrupt regular canonical 복원, non-regular canonical fallback 경로도 이번 누적 변경에서 처리했다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 514,
+          "end": 597,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_runtime.ml",
+          "start": 758,
+          "end": 779,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/server/server_bootstrap_maintenance.ml",
+          "start": 410,
+          "end": 415,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "id": "COLD2",
+      "status": "source-resolved",
+      "detail": "선택된 intact canonical 또는 fallback의 fsync/digest 검증 성공 시 해당 blob을 다시 쓰지 않는다. 새로운 recovery도 이 성질을 유지한다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 552,
+          "end": 563,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 335,
+          "end": 341,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "id": "COLD3",
+      "status": "source-resolved",
+      "detail": "compaction 실패 시 반드시 full journal이 남는다는 표현을 제거하고 이미 durable한 blob 보존과 inline copy가 남을 수 있음을 명시했다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.mli",
+          "start": 30,
+          "end": 36,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "id": "COLD4",
+      "status": "source-resolved",
+      "detail": "record별 protect가 JSON/Unix/Sys_error를 error로 보존하고 next가 계속 진행한다. terminal 결과와 무관하게 primary scan도 실행한 뒤 첫 오류를 반환한다. 같은 request의 terminal이 있는 경우 primary fallback을 건너뛰는 기존 권위 규칙은 유지한다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 577,
+          "end": 597,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 326,
+          "end": 351,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "id": "COLD5",
+      "status": "source-resolved",
+      "detail": "S_REG canonical의 digest/durability 검증이 실패하면 durable write_blob 성공 후에만 compact한다. 정상 fallback inode는 유지하고 canonical 복원 결과를 4개 위치/정렬 fixture가 확인한다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 557,
+          "end": 574,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 319,
+          "end": 324,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 353,
+          "end": 370,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "id": "COLD6",
+      "status": "source-resolved",
+      "detail": "exact_path_kind는 symlink를 기본 follow해 실제 kind를 구분한다. S_REG는 복원 필수, missing/nonregular는 durable exact fallback 검증을 허용하며 unknown은 Error다. nonregular 경로는 bounded reader가 bytes 차감 전에 거절하므로 fallback 한 body만 소비한다. Blocked_canonical fixture는 디렉터리를 유지하고 두 journal 위치/두 정렬 순서를 검사한다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 78,
+          "end": 102,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 557,
+          "end": 574,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/fs_compat/fs_compat.ml",
+          "start": 654,
+          "end": 679,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 264,
+          "end": 324,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    }
+  ],
+  "positive_evidence": [
+    {
+      "area": "실제 production 연결",
+      "detail": "server bootstrap의 sampling 등록 다음, configuration service 시작 전에 public recover_sampling을 호출한다. 기존 configuration maintenance pulse도 같은 public 함수를 호출하며 recovery Error여도 configuration reconciliation을 수행한다. record IO는 offload한다.",
+      "refs": [
+        {
+          "path": "lib/server/server_bootstrap_maintenance.ml",
+          "start": 404,
+          "end": 415,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_runtime.ml",
+          "start": 758,
+          "end": 779,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_runtime.ml",
+          "start": 1857,
+          "end": 1870,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "area": "derived raw journal 한도",
+      "detail": "원 bounded model_request의 공유 metadata 부분집합 길이 ≤ M, outcome bytes ≤ M, outer JSON escape는 byte당 최대 6자로 확장되므로 7M + 실제 추가필드 JSON 길이는 보수적인 상한이다. overflow를 포화 처리하고 decoded outcome도 M으로 재검사한다. query aggregate allowance는 변경하지 않았다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 502,
+          "end": 512,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 539,
+          "end": 540,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_sampling.ml",
+          "start": 128,
+          "end": 159,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_sampling.ml",
+          "start": 188,
+          "end": 216,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "area": "권위·exact bytes",
+      "detail": "durable journal을 읽은 뒤 instance/request filename identity와 inline outcome digest, terminal kind/instance/request reference를 확인한다. 기존 blob의 file/parent fsync·동일 bytes·inode 검증을 사용하고 compact write 성공을 recovery 성공 조건으로 삼는다. pending은 model 호출 없이 그대로 남는다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 325,
+          "end": 359,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 518,
+          "end": 574,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "area": "역사적 runtime fixture 범위",
+      "detail": "public attach/persist/detach binding을 바탕으로 고정 identity와 sampling journal/observation을 직접 구성한다. Runtime.reset→public recover_sampling→동일 4 MiB receipt→reset 반복, Slice/Evidence 및 publish_for_keeper를 작성했다. terminal/primary × missing/canonical/fallback/corrupt canonical/blocked canonical × hash 순서 20개, escaping 1개, corrupt terminal siblings+healthy primary 1개다.",
+      "refs": [
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 264,
+          "end": 379,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "area": "오류를 숨기지 않는 record 격리",
+      "detail": "두 malformed terminal sibling은 원본 bytes를 유지하고 public recovery는 Error를 반환하면서 healthy primary를 복구하도록 fixture가 작성됐다. 정상 canonical/fallback inode 보존과 repeated cold read assertion도 유지된다.",
+      "refs": [
+        {
+          "path": "lib/lane_addon/lane_addon_store.ml",
+          "start": 577,
+          "end": 597,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "test/test_lane_addon.ml",
+          "start": 326,
+          "end": 370,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    },
+    {
+      "area": "owner domain과 startup 연결",
+      "detail": "server startup은 Eio_context.set_switch를 먼저 설치하며 owner-domain 호출은 같은 domain에서 직접 실행된다. recovery는 파일 IO만 system thread로 offload한다. source상 새 startup 호출이 준비되지 않은 owner queue를 기다리는 경로는 발견하지 못했다.",
+      "refs": [
+        {
+          "path": "lib/server/server_runtime_bootstrap.ml",
+          "start": 432,
+          "end": 451,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/eio_context/eio_context.ml",
+          "start": 92,
+          "end": 114,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        },
+        {
+          "path": "lib/eio_context/eio_context.ml",
+          "start": 147,
+          "end": 164,
+          "sha": "4b640af170e5ef180064302a4840e57d80498b76"
+        }
+      ]
+    }
+  ],
+  "failure_contract_review": {
+    "readonly": "정상 canonical/fallback은 재쓰지 않는다. corrupt regular canonical의 복원 또는 journal compact 쓰기가 불가능하면 recovery Error를 유지한다. 큰 raw journal query는 explicit recovery가 끝날 때까지 unavailable일 수 있다. missing/nonregular canonical은 exact fallback을 사용할 수 있다. unknown 경로는 검증 없이 정상으로 승격하지 않는다.",
+    "cancellation": "protect는 Eio.Cancel을 일반 Error로 삼키지 않는다. recovery에는 invoke/observer 시작 호출이 없다. raw journal을 제거하기 전에 blob을 durable하게 확인하고 compact는 atomic helper를 사용한다. 취소·동시 writer 실행은 미검증이다.",
+    "inventory": "instance 간 실패 격리는 Store.bindings가 전체 inventory를 성공적으로 반환한 뒤의 record 처리에 적용된다. malformed binding/observation inventory가 Store.bindings 자체를 실패시키면 전체 recovery가 중단되는 기존 authority 경계가 남는다.",
+    "after_rename": "compact rename 후 parent fsync 실패는 Error지만 compact 파일이 이미 visible할 수 있다. 다음 query/maintenance에서 record durability를 다시 확인한다. 이미 검증된 durable outcome blob은 보존된다."
+  },
+  "test_review_limits": "Native 미실행. 22개 fixture는 public Runtime.recover_sampling 직접 호출이며 actual server bootstrap 함수/Pulse callback/provider 실행 증거는 아니다. fake observer 호출 수를 관측한다. corrupt sibling 원본 보존·Error와 healthy primary 성공, corrupt regular canonical 복원/fallback inode 보존, directory canonical을 남긴 fallback 읽기, repeated fresh Store 읽기를 assertion한다. Slice/Evidence 역사적 노출은 active downstream installation 재연결 증거가 아니다.",
+  "recommendation": "source PASS: 이 고정 head/base의 검토 범위에서 남은 P0/P1/P2를 발견하지 못했다. 과거 4회의 FAIL 이력은 아래 previous_reviews에 보존한다. 외부 승인·merge는 별도 정책/행동이며 수행하지 않았다. 실제 타입·Native 실행과 fault injection 결과는 미검증으로 유지한다.",
+  "executed": [
+    "고정 head/base, clean status 확인",
+    "기존 review scope와 이번 전체 authored delta 및 caller/interface/test source 읽기",
+    "git diff --check BASE HEAD (exit 0)",
+    "report JSON 직렬화·읽기 확인"
+  ],
+  "not_executed": [
+    "제품 코드 변경",
+    "OCaml parsing/typecheck/build/Dune/Native tests",
+    "제품 Python 테스트",
+    "server/bootstrap/Pulse 실행",
+    "provider/Docker/production",
+    "CI",
+    "GitHub 댓글·리뷰·승인·merge"
+  ],
+  "parent_reported_checks": "부모 보고: parsing/diffcheck 통과, Native 미실행. reviewer는 source read와 git diff --check(exit 0)만 직접 실행했다.",
+  "previous_reviews": [
+    {
+      "reviewed_at": "2026-10-03T16:45:41.798842+00:00",
+      "base": "ec0275ed4b8e6450ded83eb60d9728d38400d1b1",
+      "head": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437",
+      "diff_sha256": "57b36bf98ab706f35ec30bb5dfa019afc6024b8ce6693378af897256e5ee3061",
+      "verdict": "FAIL",
+      "findings": [
+        {
+          "id": "COLD1",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "title": "큰 정상 outcome은 cold journal과 blob을 중복 차감하여 복구 후에도 영구적으로 읽히지 않는다",
+          "trigger": "max_bytes=4 MiB, 3 MiB ASCII 정상 답변(기존 test_receipt_projection_reads_shared_outcome_once가 보장하는 유효 크기). outcome_bytes가 담긴 terminal/primary journal만 남은 뒤 실제 retained_receipts/Sources.acquire로 읽는다.",
+          "flow": "load_sampling_request_bounded는 inline outcome_bytes를 포함한 journal 파일 전체(약 3 MiB)를 budget.remaining에서 차감한다. 복원이 성공한 뒤 retained_receipts는 같은 outcome bytes를 blob으로 다시 읽어 약 3 MiB를 또 차감한다. 이번 함수는 journal을 compact하거나 읽은 inline bytes를 반환/캐시에 넘기지 않으므로 매 cold read와 후속 read가 4 MiB를 넘는다. outcome-first 순서에서 blob이 이미 생긴 두 번째 읽기는 outcome 3 MiB 뒤 journal 3 MiB admission 단계에서 다시 거절된다.",
+          "impact": "writer가 수용하고 hot compact 경로에서 읽을 수 있는 정상 결과가 L3 복구 경로에서는 계속 unavailable로 남는다. 첫 시도에 blob이 복원돼도 후속 조회가 스스로 회복하지 못한다. 단순한 테스트 누락이 아니라 합법적인 large outcome 경로의 source-confirmed 실패다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 439,
+              "end": 461,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 293,
+              "end": 306,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            },
+            {
+              "path": "test/test_lane_addon_worker.ml",
+              "start": 1007,
+              "end": 1039,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            }
+          ],
+          "fix": "검증·budget 차감이 끝난 journal의 정확한 outcome bytes를 typed 결과로 전달하여 retained_receipts의 blob 캐시에 넣거나, 검증된 bytes를 공유하는 동등한 read-through 경로를 만든다. 무조건 envelope를 크게 늘리거나 이미 읽은 다른 artifact의 차감을 취소하지 않는다. compact를 쓴다면 내구성/동시 게시 안전성과 첫 요청의 결과까지 고려해야 한다.",
+          "verification": "기존 4 MiB/3 MiB 응답 fixture를 terminal-only 및 primary-only journal+fresh store로 변형하고 실제 Sources.acquire를 반복 호출한다. request/outcome 두 정렬 순서 모두에서 최초 및 두 번째 조회가 같은 답변을 전달해야 한다. quote-heavy inline encoding으로 journal이 outcome보다 커지는 경우도 실제 byte 상한을 따로 확인한다. 이번 리뷰는 실행하지 않았다."
+        },
+        {
+          "id": "COLD2",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "title": "정상 blob이 이미 있어도 복구 reader가 재게시를 요구하여 읽기 가능한 증거를 거절한다",
+          "trigger": "writer 또는 이전 복구가 blob을 성공적으로 게시했지만 compact index 쓰기가 실패/중단되어 outcome_bytes가 journal에 남아 있다. 그 뒤 evidence와 sampling-evidence 디렉터리의 새 파일 생성만 실패한다(예: 남은 저장 공간 없음, 읽기/탐색은 허용되지만 쓰기 권한 없음). journal file/parent fsync와 기존 blob 읽기는 정상인 조건이다.",
+          "flow": "load_sampling_request_bounded는 outcome_bytes가 있으면 무조건 restore_sampling_outcome을 호출한다. helper는 현재 canonical/recovery blob의 유효 여부를 확인하지 않고 write_sampling_blob→write_blob→atomic replace를 수행한다. 두 디렉터리 모두 새 게시가 실패하면 이미 정확한 outcome bytes가 존재해도 reader 전체가 Read_failed를 돌려준다. journal을 compact하지 않아 매 조회가 같은 재쓰기를 반복한다.",
+          "impact": "순수 receipt 조회가 불필요한 쓰기 가용성을 요구하게 되는 신규 회귀다. 정상 보존 증거도 storage-pressure 상황에서 사라진 것처럼 downstream unavailable가 된다. 성공하더라도 모든 조회가 같은 blob에 temp write/rename/fsync를 반복한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 42,
+              "end": 61,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 266,
+              "end": 275,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 456,
+              "end": 461,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 232,
+              "end": 234,
+              "sha": "00152e0a17820d7806fdd3b4e0e9792e6a8ed437"
+            }
+          ],
+          "fix": "이미 읽고 hash/durability를 검증한 정확한 blob은 재게시하지 않는다. 필요한 복원만 수행하고 immutable byte를 consumer와 공유한다. canonical가 손상/누락된 경우 recovery 게시는 유지하되 단순 존재 확인만으로 trust를 올리지 않는다.",
+          "verification": "inline journal+정상 canonical blob을 준비한 뒤 새 blob 쓰기만 deterministic하게 실패시킨 fixture에서 실제 bounded reader/retained_receipts가 기존 답변을 돌려줘야 한다. blob도 없고 게시도 실패하는 대조군은 기존처럼 오류로 남아야 한다. 첫 복구 뒤 후속 읽기가 atomic publication을 반복하지 않는지도 관측한다. 이번 리뷰는 실행하지 않았다."
+        }
+      ]
+    },
+    {
+      "reviewed_at": "2026-10-03T17:00:18.615111+00:00",
+      "reviewer": "audit_week_lane (independent adversarial source reviewer)",
+      "base": "ec0275ed4b8e6450ded83eb60d9728d38400d1b1",
+      "head": "d6b451b101644684d7f828c1c72f2301dcb63815",
+      "diff_sha256": "4b23e12b53df6ef758aafbbae9f33cda60977623df1999ea5ee39b1691a28d4b",
+      "diff_format": "git diff --binary BASE HEAD raw stdout",
+      "verdict": "FAIL",
+      "scope": "5개 authored 파일의 base→head 전체 변화(이전 완전 리뷰와 이번 delta), Store→retained_receipts→Sources.acquire caller/fixture, atomic compaction 오류 의미. PR 게시 판정/승인 아님.",
+      "changed_files": [
+        "lib/lane_addon/lane_addon_sampling.ml",
+        "lib/lane_addon/lane_addon_store.ml",
+        "lib/lane_addon/lane_addon_store.mli",
+        "test/test_lane_addon_sources.ml",
+        "test/test_lane_addon_worker.ml"
+      ],
+      "findings": [
+        {
+          "id": "COLD1",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "status": "partially-fixed",
+          "title": "큰 inline journal과 이미 게시된 blob이 함께 남으면 여전히 복구·압축 전에 예산 거절된다",
+          "trigger": "max_bytes=4 MiB와 유효한 3 MiB 답변. 첫 terminal journal 기록과 blob 게시가 성공한 뒤 compact index 저장 전에 프로세스가 중단되거나 그 저장만 실패한다. 이후 파일·디렉터리는 모두 정상 읽기/쓰기 가능하다.",
+          "flow": "request-first: 작은 request 읽기 후 store.ml:453이 inline journal 약 3 MiB를 차감한다. :480의 missing 검사에서 기존 blob을 발견하고 :475의 durable verification이 같은 budget에서 추가 3 MiB를 요구한다. :437이 Read_limit_exceeded를 반환하여 :492 compaction과 sampling.ml:309 cache 공유 전에 종료한다. outcome-first: row evidence blob 약 3 MiB를 먼저 읽어 journal 자체가 :453에서 거절된다. 두 순서 모두 상태 변화가 없어 반복 실패한다.",
+          "impact": "writer가 정상 수용한 결과의 합법적 crash 상태가 계속 downstream unavailable로 남는다. missing blob 경로는 이번 head에서 inline cache와 성공한 compaction으로 개선됐지만 L3 전체 복구 완료는 아니다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 432,
+              "end": 498,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 274,
+              "end": 309,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 218,
+              "end": 234,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "test/test_lane_addon_worker.ml",
+              "start": 1013,
+              "end": 1060,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ],
+          "fix": "aggregate allowance를 늘리거나 실제 읽은 bytes를 refund하지 않는다. query 시작 전에 독립적인 durable recovery/compaction 단계로 raw journal을 정리하거나, 작은 authoritative lookup index를 정식 저장 계약으로 만들어 opaque evidence를 읽기 전에 필요한 request/journal을 해석할 수 있게 한다. 현재 wire/API만으로 같은 호출에서 두 3 MiB artifact를 검증하는 것은 4 MiB allowance와 양립하지 않는다.",
+          "verification": "현재 large test의 :1052 Unix.unlink를 제거한 fixture를 terminal/primary 두 위치와 request-first/outcome-first 두 순서에서 반복 조회한다. compaction before-rename 실패 뒤 별도 fresh store 재시도도 확인한다. 본 리뷰는 Native 실행하지 않았다."
+        }
+      ],
+      "positive_evidence": [
+        {
+          "area": "검증한 inline bytes 공유",
+          "detail": "Store가 journal bytes와 outcome digest를 검증한 뒤 원본 JSON을 반환하고 consumer가 outcome을 positive cache에 넣는다. missing blob 첫 복구의 중복 읽기를 제거했다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 464,
+              "end": 498,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 303,
+              "end": 311,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ]
+        },
+        {
+          "area": "blob exactness와 작은 existing blob",
+          "detail": "기존 blob 검증은 regular file, file/parent fsync, 재읽기 bytes, file/parent identity, content address를 확인한다. 성공하면 blob을 바꾸지 않고 index만 compact 시도한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 325,
+              "end": 352,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 474,
+              "end": 495,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ]
+        },
+        {
+          "area": "큰 missing blob fixture",
+          "detail": "3 MiB answer/4 MiB allowance fixture는 terminal inline journal만 남겨 첫 cold receipt와 compaction 성공 뒤 두 번째 fresh store receipt가 같음을 assertion한다. existing blob+raw journal 조합은 작은 fixture만 있으며 large failure window는 미포함이다.",
+          "refs": [
+            {
+              "path": "test/test_lane_addon_worker.ml",
+              "start": 1040,
+              "end": 1060,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "test/test_lane_addon_sources.ml",
+              "start": 316,
+              "end": 325,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ]
+        }
+      ],
+      "trust_cancellation_review": "digest/identity 불일치를 승인하거나 provider를 재호출하는 신규 경로는 찾지 못했다. compaction은 durable blob 확인 후 수행되어 원본 또는 compact journal이 남는 rename 결과에 exact outcome blob이 있다. 전체 source scope에서 추가 P0/P1/P2는 발견하지 못했다. Native 타입·취소·병렬 read 실행은 미검증이다.",
+      "test_review_limits": "새 acquisition fixture는 실제 Sources.acquire 함수를 쓰지만 resolve_lane_output은 주입된 함수다. fresh Store와 저장 observation은 실제이며 full server bootstrap/worker/Docker/provider 통합 증거는 아니다. 모든 Native 테스트는 미실행이다.",
+      "recommendation": "잔존 COLD1으로 draft/FAIL 유지. parent가 residual P2를 인정하고 현재 후보를 draft로 남겼다. sampling-recovery-design-review.md에 bootstrap/maintenance recovery와 durable lookup 저장계약 두 방안을 비교했다.",
+      "executed": [
+        "고정 base/head의 git diff, source/interface/caller/test 읽기",
+        "현재 worktree head와 clean status 확인",
+        "리뷰 JSON 작성"
+      ],
+      "not_executed": [
+        "제품 코드 변경",
+        "Dune/OCaml build/Native tests",
+        "Python 제품 테스트",
+        "CI",
+        "production/provider/Docker",
+        "GitHub 댓글·리뷰·승인·merge"
+      ],
+      "parent_reported_checks": "부모가 보고한 parsing/diffcheck는 참고 정보이며 이 reviewer가 실행한 build/type/runtime 결과로 채택하지 않았다.",
+      "resolved_findings": [
+        {
+          "id": "COLD2",
+          "status": "source-resolved",
+          "detail": "기존 blob을 동일 file/parent durability와 exact digest로 읽어 확인한 경우 write_sampling_blob을 호출하지 않는다. compact index 쓰기의 반환 Error는 현재 receipt를 거절하지 않는다. 충분한 예산의 small fixture는 blob inode가 바뀌지 않는 assertion을 추가했다. COLD1의 중복 읽기 한도는 별도 잔존한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 469,
+              "end": 495,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "test/test_lane_addon_sources.ml",
+              "start": 316,
+              "end": 325,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ],
+          "runtime": "미실행; deterministic 새 파일 생성 실패 주입은 fixture에 없으며 inode assertion의 소스만 확인했다."
+        }
+      ],
+      "suggestions": [
+        {
+          "id": "COLD3",
+          "severity": "P3",
+          "title": "compaction 실패가 항상 full journal 보존을 뜻하지는 않는다",
+          "detail": "atomic replacement는 rename 후 parent fsync 실패도 Error로 반환한다. 해당 경우 compact record는 이미 visible하다. blob durability가 먼저 확인되므로 이것만으로 데이터 유실 버그는 아니지만 store.mli:33과 store.ml:490의 문구는 before-rename 실패와 after-rename 불확실성을 구분해야 한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.mli",
+              "start": 30,
+              "end": 36,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 488,
+              "end": 494,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            },
+            {
+              "path": "lib/fs_compat/atomic_write.ml",
+              "start": 2660,
+              "end": 2662,
+              "sha": "d6b451b101644684d7f828c1c72f2301dcb63815"
+            }
+          ],
+          "fix": "압축 실패 시 original 또는 이미 rename된 compact record가 남을 수 있으며, 먼저 확보한 durable blob을 유지한다는 계약으로 표현한다. fsync 실패를 테스트할 때 rename 전후를 나눈다."
+        }
+      ],
+      "followup_head": {
+        "head": "3215c42f26240faf5122459822c3626b253031be",
+        "observed": "리뷰 후 worktree HEAD 이동 확인. git diff --stat은 store.ml/mli 문구와 changelog 3개 파일만 표시했다.",
+        "parent_reported": "#41033 draft, compaction 문구 P3 수정과 changelog만 추가했고 실행 로직 동일. PR 본문에 잔존 P2 명시. GitHub 상태는 이 reviewer가 조회하지 않았다.",
+        "verdict_scope": "이 JSON의 독립 source verdict와 상세 refs는 d6b451b에 고정한다."
+      }
+    },
+    {
+      "reviewed_at": "2026-10-03T17:30:35.088335+00:00",
+      "reviewer": "audit_week_lane (independent adversarial source reviewer)",
+      "base": "ec0275ed4b8e6450ded83eb60d9728d38400d1b1",
+      "head": "cd94731a6691f99a706df185a979c8e697da9b06",
+      "diff_sha256": "718ae06b14e811960232e2a4d507a73d1b4f4dd6f39656b180d3234165bd1585",
+      "diff_format": "git diff --binary BASE HEAD raw stdout; approval digest 아님",
+      "verdict": "FAIL",
+      "scope": "10개 authored 파일 base→head 변화(이전 전체 리뷰+이번 전체 delta), public runtime recovery/bootstrap/pulse, Store reader/atomic helper, 기존·신규 fixture 소스. 외부 GitHub 승인 아님.",
+      "changed_files": [
+        "changelog.d/41033.md",
+        "lib/lane_addon/lane_addon_runtime.ml",
+        "lib/lane_addon/lane_addon_runtime.mli",
+        "lib/lane_addon/lane_addon_sampling.ml",
+        "lib/lane_addon/lane_addon_store.ml",
+        "lib/lane_addon/lane_addon_store.mli",
+        "lib/server/server_bootstrap_maintenance.ml",
+        "test/test_lane_addon.ml",
+        "test/test_lane_addon_sources.ml",
+        "test/test_lane_addon_worker.ml"
+      ],
+      "findings": [
+        {
+          "id": "COLD4",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "title": "terminal 기록 하나의 지속 오류가 같은 instance의 다른 정상 primary 기록 복구를 영구히 가로막는다",
+          "trigger": "동일 instance에서 request A의 terminal journal이 malformed JSON/digest mismatch/읽기 실패 또는 compaction 실패 상태이고, 별개 request B는 정상 3 MiB inline primary journal과 existing outcome blob을 보유한다. B의 terminal journal은 없다.",
+          "flow": "store.ml:575의 let*가 A의 첫 Error에서 terminal directory scan을 종료한다. :579의 let* 때문에 primary scan 자체를 호출하지 않는다. 다음 maintenance pulse는 같은 terminal A부터 다시 실패하므로 B에 도달하지 않는다. 이 terminal-A/primary-B 구성은 readdir 순서에 의존하지 않는다. B의 일반 4 MiB query는 기존 full journal+blob 중복 읽기로 계속 거절된다.",
+          "impact": "A의 증거를 보존해야 하는 정상 오류 정책이 무관한 request B의 복구 기회까지 제거한다. instance 간 fold는 계속되지만 동일 instance의 과거 request 하나가 나머지 복구를 무기한 막는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 518,
+              "end": 530,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 565,
+              "end": 581,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 758,
+              "end": 779,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 1857,
+              "end": 1870,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ],
+          "fix": "각 record의 읽기/JSON 예외/검증/compact 오류를 record 경계에서 포착·보존하고 나머지 record와 두 directory의 다른 request는 계속 처리한다. 마지막에 오류 상태/첫 오류/집계를 반환해 미완료를 숨기지 않는다. 같은 request의 authoritative terminal 오류를 primary pending으로 우회하지 않는 규칙은 유지한다.",
+          "verification": "같은 instance에 corrupt terminal A와 정상 primary-only B(existing 3 MiB blob)를 작성한다. public Runtime.recover_sampling은 A 때문에 Error를 유지하면서 B는 durable compact되어 4 MiB retained_receipts가 성공해야 한다. 두 번 반복하고 A의 원본 증거가 보존되는지 확인한다. 이 reviewer는 실행하지 않았다."
+        },
+        {
+          "id": "COLD5",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "title": "손상된 canonical 앞에 정상 fallback이 있어도 복구 완료로 압축하여 bounded 조회가 계속 실패한다",
+          "trigger": "정확한 inline terminal 또는 primary journal과 정상 3 MiB fallback outcome이 있고, 동일 content-address의 canonical 경로에는 3 MiB 잘못된 bytes가 있다. query allowance는 4 MiB이고 FS 복원 쓰기는 가능한 상태다.",
+          "flow": "store.ml:557 canonical 검증은 실패하지만 :559–560 fallback 검증이 성공하면 :562에서 journal의 inline bytes를 제거하고 Ok를 반환한다. read_blob_bounded는 :87에서 corrupt canonical 3 MiB도 차감하고 :102에서 fallback 3 MiB를 추가로 요구하므로 query가 Read_limit_exceeded로 끝난다. 다음 maintenance는 compact record의 inline=None을 :537에서 즉시 성공 처리하므로 canonical을 치유하지 않는다.",
+          "impact": "명시적 recovery가 성공을 반환했는데 실제 bounded consumer가 정상 fallback에 도달하지 못한다. 단순히 장애가 지속되는 경우가 아니라 정상 쓰기 가능한 상태에서도 스스로 회복할 경로가 사라진다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 78,
+              "end": 102,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 531,
+              "end": 563,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 315,
+              "end": 322,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ],
+          "fix": "canonical 검증 실패를 missing/읽기 전에 거절되는 상태와 실제 corrupt/oversized regular blob로 구분하여 처리한다. 실제 reader가 예산 안에서 exact blob을 읽을 수 있도록 잘못된 canonical을 검증된 bytes로 복원하거나 안전한 격리/명시적 접근 경로를 확보한 뒤 compact한다. 정상 fallback inode는 보존하고 실제 읽은 corrupt bytes를 refund하지 않는다. 복원이 불가능하면 recovery 미완료와 raw journal을 유지한다.",
+          "verification": "3 MiB inline journal + 같은 길이의 corrupt canonical + exact fallback을 준비해 public Runtime.recover_sampling→4 MiB retained_receipts를 두 hash 순서에서 확인한다. recovery 후 canonical 치유/접근 경로와 fallback inode 보존을 관측한다. compact 후 두 번째 fresh store 읽기도 확인한다. 현재 Fallback fixture는 canonical를 rmdir하여 missing으로 만든 상태만 검사한다. 이 reviewer는 실행하지 않았다."
+        }
+      ],
+      "resolved_findings": [
+        {
+          "id": "COLD1",
+          "status": "source-resolved-for-valid-recovery-path",
+          "detail": "정상 FS와 정상 기록에서 명시적 maintenance recovery가 query 밖에서 full journal과 existing canonical/fallback을 검증한 뒤 compact한다. 이후 query는 작은 record와 outcome 한 body를 읽어 이전 3+3 MiB 실패를 해소한다. 아래 COLD4/COLD5의 별도 오류 경로는 남는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 514,
+              "end": 581,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 758,
+              "end": 779,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/server/server_bootstrap_maintenance.ml",
+              "start": 410,
+              "end": 415,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        },
+        {
+          "id": "COLD2",
+          "status": "source-resolved",
+          "detail": "선택된 intact canonical 또는 fallback의 fsync/digest 검증 성공 시 해당 blob을 다시 쓰지 않는다. 새로운 recovery도 이 성질을 유지한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 552,
+              "end": 563,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 335,
+              "end": 341,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        },
+        {
+          "id": "COLD3",
+          "status": "source-resolved",
+          "detail": "compaction 실패 시 반드시 full journal이 남는다는 표현을 제거하고 이미 durable한 blob 보존과 inline copy가 남을 수 있음을 명시했다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.mli",
+              "start": 30,
+              "end": 36,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        }
+      ],
+      "positive_evidence": [
+        {
+          "area": "실제 production 연결",
+          "detail": "server bootstrap의 sampling 등록 다음, configuration service 시작 전에 public recover_sampling을 호출한다. 기존 configuration maintenance pulse도 같은 public 함수를 호출하며 recovery Error여도 configuration reconciliation을 수행한다. record IO는 offload한다.",
+          "refs": [
+            {
+              "path": "lib/server/server_bootstrap_maintenance.ml",
+              "start": 404,
+              "end": 415,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 758,
+              "end": 779,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 1857,
+              "end": 1870,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        },
+        {
+          "area": "derived raw journal 한도",
+          "detail": "원 bounded model_request의 공유 metadata 부분집합 길이 ≤ M, outcome bytes ≤ M, outer JSON escape는 byte당 최대 6자로 확장되므로 7M + 실제 추가필드 JSON 길이는 보수적인 상한이다. overflow를 포화 처리하고 decoded outcome도 M으로 재검사한다. query aggregate allowance는 변경하지 않았다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 502,
+              "end": 512,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 539,
+              "end": 540,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 128,
+              "end": 159,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 188,
+              "end": 216,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        },
+        {
+          "area": "권위·exact bytes",
+          "detail": "durable journal을 읽은 뒤 instance/request filename identity와 inline outcome digest, terminal kind/instance/request reference를 확인한다. 기존 blob의 file/parent fsync·동일 bytes·inode 검증을 사용하고 compact write 성공을 recovery 성공 조건으로 삼는다. pending은 model 호출 없이 그대로 남는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 325,
+              "end": 359,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 518,
+              "end": 563,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        },
+        {
+          "area": "역사적 runtime fixture 범위",
+          "detail": "새 fixture는 public attach/persist/detach의 binding을 바탕으로 고정 identity와 sampling journal/observation을 직접 구성한다. Runtime.reset→public recover_sampling→동일 4 MiB receipt→reset 반복을 작성했고 Slice/Evidence 및 publish_for_keeper도 호출한다. 정상 terminal/primary × missing/canonical/fallback × hash 순서 12개와 escaping 1개다.",
+          "refs": [
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 264,
+              "end": 359,
+              "sha": "cd94731a6691f99a706df185a979c8e697da9b06"
+            }
+          ]
+        }
+      ],
+      "failure_contract_review": {
+        "readonly": "existing blob 읽기/fsync는 성공해도 journal compact 쓰기가 불가능하면 recovery Error를 유지한다. 큰 raw journal query는 그동안 실패할 수 있으며 이는 선택한 별도 maintenance 설계의 명시적 한계다. 작은 query는 기존 opportunistic recovery 경로를 유지한다.",
+        "cancellation": "protect는 Eio.Cancel을 일반 Error로 삼키지 않는다. recovery에는 invoke/observer 시작 호출이 없다. raw journal을 제거하기 전에 blob을 durable하게 확인하고 compact는 atomic helper를 사용한다. 취소·동시 writer 실행은 미검증이다.",
+        "inventory": "instance 간 실패 격리는 Store.bindings가 전체 inventory를 성공적으로 반환한 뒤의 record 처리에 적용된다. malformed binding/observation inventory가 Store.bindings 자체를 실패시키면 전체 recovery가 중단되는 기존 authority 경계가 남는다.",
+        "after_rename": "compact rename 후 parent fsync 실패는 Error지만 compact 파일이 이미 visible할 수 있다. 다음 query/maintenance에서 record durability를 다시 확인한다. 이미 검증된 durable outcome blob은 보존된다."
+      },
+      "test_review_limits": "Native 미실행. 13개 fixture는 public Runtime.recover_sampling을 직접 호출하며 실제 server bootstrap 함수나 Pulse callback을 실행하지 않는다. wiring은 소스로 확인했다. fake backend의 observer 호출 수는 관측하지만 provider를 구동/계수하지 않는다. 별도의 Sources fixture는 resolver를 주입한다. Slice/Evidence 역사적 노출은 active downstream installation 재연결 증거가 아니다.",
+      "recommendation": "원 COLD1 정상 복구 경로는 해소됐으나 COLD4/COLD5 P2 수정 후 같은 base의 새 head를 다시 검토해야 한다. L3 전체 복구 완료로 올리지 않는다.",
+      "executed": [
+        "고정 head/base, clean status 확인",
+        "기존 review scope와 이번 전체 authored delta 및 caller/interface/test source 읽기",
+        "git diff --check BASE HEAD (exit 0)",
+        "report JSON 직렬화·읽기 확인"
+      ],
+      "not_executed": [
+        "제품 코드 변경",
+        "OCaml parsing/typecheck/build/Dune/Native tests",
+        "제품 Python 테스트",
+        "server/bootstrap/Pulse 실행",
+        "provider/Docker/production",
+        "CI",
+        "GitHub 댓글·리뷰·승인·merge"
+      ],
+      "parent_reported_checks": "부모가 보고한 parsing/diffcheck는 참고 정보이며 이 reviewer의 타입/runtime 실행 증거가 아니다. diffcheck만 이번 reviewer도 별도 실행했다."
+    },
+    {
+      "reviewed_at": "2026-10-03T17:35:20.600202+00:00",
+      "reviewer": "audit_week_lane (independent adversarial source reviewer)",
+      "base": "ec0275ed4b8e6450ded83eb60d9728d38400d1b1",
+      "head": "0377b46cf2e37a028bc523650d78a6140ff4fb5f",
+      "diff_sha256": "291cd6b0eb781e2852e3e316ce6db1f2a1959c23c4017f4c04f5d5dc3bc2c156",
+      "diff_format": "git diff --binary BASE HEAD raw stdout; approval digest 아님",
+      "verdict": "FAIL",
+      "scope": "10개 authored 파일의 누적 source review와 cd94731a→0377b46 전체 3파일 delta. COLD4/COLD5 대응, reader admission/atomic replacement/source fixture를 대조. 외부 GitHub 승인 아님.",
+      "changed_files": [
+        "changelog.d/41033.md",
+        "lib/lane_addon/lane_addon_runtime.ml",
+        "lib/lane_addon/lane_addon_runtime.mli",
+        "lib/lane_addon/lane_addon_sampling.ml",
+        "lib/lane_addon/lane_addon_store.ml",
+        "lib/lane_addon/lane_addon_store.mli",
+        "lib/server/server_bootstrap_maintenance.ml",
+        "test/test_lane_addon.ml",
+        "test/test_lane_addon_sources.ml",
+        "test/test_lane_addon_worker.ml"
+      ],
+      "findings": [
+        {
+          "id": "COLD6",
+          "severity": "P2",
+          "confidence": "source-confirmed",
+          "title": "non-regular canonical 경로에서도 재쓰기를 강제하여 정상 fallback 복구가 막힌다",
+          "trigger": "선택된 raw journal과 3 MiB exact fallback outcome이 있고 canonical outcome 경로는 디렉터리다. journal directory와 fallback 읽기/fsync는 정상이며 journal compaction도 가능하다. query allowance는 4 MiB다.",
+          "flow": "verify canonical는 non-regular fd를 store.ml:356에서 거절한다. 새 :563–565는 canonical가 Exact_missing이 아니므로 무조건 write_blob을 요구한다. atomic temp file을 directory 경로로 rename할 수 없어 오류가 나며 :569 compact에 도달하지 못한다. 다음 maintenance에서도 같은 상태가 반복된다. 반면 실제 read_blob_bounded는 :84에서 non-regular를 budget 차감(:87) 전에 거절하고 fallback을 읽으므로, index만 compact하면 정상 fallback 한 body로 query가 가능하다.",
+          "impact": "COLD5 대응이 budget을 소비하는 corrupt regular와 byte 차감 전에 거절되는 non-regular 경로를 합쳐 기존의 독립 fallback 보장을 회귀시킨다. 정상 retained outcome과 쓰기 가능한 journal을 가지고도 큰 결과는 raw journal 때문에 계속 unavailable로 남는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 78,
+              "end": 102,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 353,
+              "end": 359,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 557,
+              "end": 570,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 319,
+              "end": 324,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon_worker.ml",
+              "start": 1247,
+              "end": 1254,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ],
+          "fix": "canonical 경로의 typed file kind 또는 정확한 reader admission 결과로 non-regular/missing과 budget을 소비하거나 Read_limit_exceeded로 fallback을 차단하는 regular 상태를 구분한다. non-regular canonical는 정상 fallback의 exact durability 검증 후 보존한 채 compact할 수 있다. corrupt/oversized regular canonical의 성공적인 복원 요구는 유지한다. unknown/경쟁 상태는 검증 없이 정상으로 추정하지 않는다.",
+          "verification": "현재 Fallback fixture에서 canonical directory를 rmdir하지 않는 별도 placement를 추가한다. terminal/primary와 두 hash 순서에서 public Runtime.recover_sampling→4 MiB retained_receipts→fresh store 재조회가 성공하고 fallback inode와 canonical directory가 보존되는지 검사한다. 해당 경로에서 verify 후 directory를 파일로 덮어쓰는 시도가 없어야 한다. Native 실행은 하지 않았다."
+        }
+      ],
+      "resolved_findings": [
+        {
+          "id": "COLD1",
+          "status": "source-resolved-for-valid-recovery-path",
+          "detail": "정상 FS와 정상 기록에서 명시적 maintenance recovery가 query 밖에서 full journal과 existing canonical/fallback을 검증한 뒤 compact한다. 이후 query는 작은 record와 outcome 한 body를 읽어 이전 3+3 MiB 실패를 해소한다. 아래 COLD4/COLD5의 별도 오류 경로는 남는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 514,
+              "end": 593,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 758,
+              "end": 779,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/server/server_bootstrap_maintenance.ml",
+              "start": 410,
+              "end": 415,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "id": "COLD2",
+          "status": "source-resolved",
+          "detail": "선택된 intact canonical 또는 fallback의 fsync/digest 검증 성공 시 해당 blob을 다시 쓰지 않는다. 새로운 recovery도 이 성질을 유지한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 552,
+              "end": 563,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 335,
+              "end": 341,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "id": "COLD3",
+          "status": "source-resolved",
+          "detail": "compaction 실패 시 반드시 full journal이 남는다는 표현을 제거하고 이미 durable한 blob 보존과 inline copy가 남을 수 있음을 명시했다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.mli",
+              "start": 30,
+              "end": 36,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "id": "COLD4",
+          "status": "source-resolved",
+          "detail": "record별 protect가 JSON/Unix/Sys_error를 error로 보존하고 next가 계속 진행한다. terminal 결과와 무관하게 primary scan도 실행한 뒤 첫 오류를 반환한다. 같은 request의 terminal이 있는 경우 primary fallback을 건너뛰는 기존 권위 규칙은 유지한다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 573,
+              "end": 593,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 326,
+              "end": 351,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "id": "COLD5",
+          "status": "source-resolved-for-corrupt-regular-canonical",
+          "detail": "present canonical 검증이 실패하면 durable write_blob이 성공해야만 compact한다. corrupt canonical+정상 fallback의 4개 위치/정렬 fixture가 canonical exact bytes와 fallback inode 보존을 assertion한다. 다만 present 판정이 non-regular까지 포함하여 COLD6 회귀가 생겼다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 557,
+              "end": 570,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 319,
+              "end": 324,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 353,
+              "end": 370,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        }
+      ],
+      "positive_evidence": [
+        {
+          "area": "실제 production 연결",
+          "detail": "server bootstrap의 sampling 등록 다음, configuration service 시작 전에 public recover_sampling을 호출한다. 기존 configuration maintenance pulse도 같은 public 함수를 호출하며 recovery Error여도 configuration reconciliation을 수행한다. record IO는 offload한다.",
+          "refs": [
+            {
+              "path": "lib/server/server_bootstrap_maintenance.ml",
+              "start": 404,
+              "end": 415,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 758,
+              "end": 779,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_runtime.ml",
+              "start": 1857,
+              "end": 1870,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "area": "derived raw journal 한도",
+          "detail": "원 bounded model_request의 공유 metadata 부분집합 길이 ≤ M, outcome bytes ≤ M, outer JSON escape는 byte당 최대 6자로 확장되므로 7M + 실제 추가필드 JSON 길이는 보수적인 상한이다. overflow를 포화 처리하고 decoded outcome도 M으로 재검사한다. query aggregate allowance는 변경하지 않았다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 502,
+              "end": 512,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 539,
+              "end": 540,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 128,
+              "end": 159,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_sampling.ml",
+              "start": 188,
+              "end": 216,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "area": "권위·exact bytes",
+          "detail": "durable journal을 읽은 뒤 instance/request filename identity와 inline outcome digest, terminal kind/instance/request reference를 확인한다. 기존 blob의 file/parent fsync·동일 bytes·inode 검증을 사용하고 compact write 성공을 recovery 성공 조건으로 삼는다. pending은 model 호출 없이 그대로 남는다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 325,
+              "end": 359,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 518,
+              "end": 570,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "area": "역사적 runtime fixture 범위",
+          "detail": "public attach/persist/detach binding을 바탕으로 고정 identity와 sampling journal/observation을 직접 구성한다. Runtime.reset→public recover_sampling→동일 4 MiB receipt→reset 반복, Slice/Evidence 및 publish_for_keeper를 작성했다. terminal/primary × missing/canonical/fallback/corrupt canonical × hash 순서 16개, escaping 1개, corrupt terminal siblings+healthy primary 1개다.",
+          "refs": [
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 264,
+              "end": 379,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        },
+        {
+          "area": "오류를 숨기지 않는 record 격리",
+          "detail": "두 malformed terminal sibling은 원본 bytes를 유지하고 public recovery는 Error를 반환하면서 healthy primary를 복구하도록 fixture가 작성됐다. 정상 canonical/fallback inode 보존과 repeated cold read assertion도 유지된다.",
+          "refs": [
+            {
+              "path": "lib/lane_addon/lane_addon_store.ml",
+              "start": 573,
+              "end": 593,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            },
+            {
+              "path": "test/test_lane_addon.ml",
+              "start": 326,
+              "end": 370,
+              "sha": "0377b46cf2e37a028bc523650d78a6140ff4fb5f"
+            }
+          ]
+        }
+      ],
+      "failure_contract_review": {
+        "readonly": "intact blob 검증 후 journal compact 쓰기가 불가능하면 recovery Error를 유지한다. 이 명시적 실패 계약과 달리 COLD6은 compact 쓰기가 가능한 상태에서도 unrelated non-regular canonical의 교체를 요구한다.",
+        "cancellation": "protect는 Eio.Cancel을 일반 Error로 삼키지 않는다. recovery에는 invoke/observer 시작 호출이 없다. raw journal을 제거하기 전에 blob을 durable하게 확인하고 compact는 atomic helper를 사용한다. 취소·동시 writer 실행은 미검증이다.",
+        "inventory": "instance 간 실패 격리는 Store.bindings가 전체 inventory를 성공적으로 반환한 뒤의 record 처리에 적용된다. malformed binding/observation inventory가 Store.bindings 자체를 실패시키면 전체 recovery가 중단되는 기존 authority 경계가 남는다.",
+        "after_rename": "compact rename 후 parent fsync 실패는 Error지만 compact 파일이 이미 visible할 수 있다. 다음 query/maintenance에서 record durability를 다시 확인한다. 이미 검증된 durable outcome blob은 보존된다."
+      },
+      "test_review_limits": "Native 미실행. 18개 fixture는 public Runtime.recover_sampling 직접 호출이며 actual server bootstrap 함수/Pulse callback/provider 실행 증거는 아니다. fake observer 호출 수를 관측한다. corrupt sibling 보존·Error와 healthy primary 성공, corrupt regular canonical 복원/fallback inode 보존을 새로 assertion한다. non-regular canonical를 그대로 유지한 fallback 복구는 fixture에 없다. Slice/Evidence 역사적 노출은 active downstream installation 재연결 증거가 아니다.",
+      "recommendation": "COLD4와 원 COLD5는 해소됐으나 새 COLD6 P2 수정 후 재검토가 필요하다. 이전 FAIL 이력과 Native 미실행 상태를 보존한다.",
+      "executed": [
+        "고정 head/base, clean status 확인",
+        "기존 review scope와 이번 전체 authored delta 및 caller/interface/test source 읽기",
+        "git diff --check BASE HEAD (exit 0)",
+        "report JSON 직렬화·읽기 확인"
+      ],
+      "not_executed": [
+        "제품 코드 변경",
+        "OCaml parsing/typecheck/build/Dune/Native tests",
+        "제품 Python 테스트",
+        "server/bootstrap/Pulse 실행",
+        "provider/Docker/production",
+        "CI",
+        "GitHub 댓글·리뷰·승인·merge"
+      ],
+      "parent_reported_checks": "부모가 보고한 parsing/diffcheck는 참고 정보이며 이 reviewer의 타입/runtime 실행 증거가 아니다. diffcheck만 이번 reviewer도 별도 실행했다."
+    }
+  ],
+  "verdict_meaning": "고정 base/head의 독립 source review 범위에서 미해결 P0/P1/P2를 발견하지 못했다. Native 타입/빌드/테스트, actual bootstrap 실행, production 성공, GitHub approval 또는 merge를 뜻하지 않는다."
+}

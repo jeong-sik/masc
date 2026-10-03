@@ -499,12 +499,21 @@ let announce_proof_verdict
     | Goal_verification.Proven -> "proven"
     | Goal_verification.Refuted { reason } -> "refuted: " ^ reason
   in
+  let confirmation_line =
+    match goal.phase with
+    | Goal_phase.Awaiting_confirmation ->
+      "\nconfirmation: human confirmation is still required before Goal completion."
+    | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed | Goal_phase.Dropped ->
+      ""
+  in
   let content =
     Printf.sprintf
-      "[goal_verdict] %s — %s\noutcome: %s\nevidence: %s"
+      "[goal_verdict] %s — %s\noutcome: %s\nphase: %s%s\nevidence: %s"
       goal.Goal_store.id
       goal.Goal_store.title
       outcome_line
+      (Goal_phase.to_string goal.phase)
+      confirmation_line
       verdict.evidence
   in
   match

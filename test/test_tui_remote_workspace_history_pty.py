@@ -213,7 +213,7 @@ def run(binary: str, captures: Path | None) -> None:
                 assert not [event for event in wire.events
                     if event["event"] == "memory" and str(event["phase"]).startswith("b")],                     "a withdrawn A history read continued into B's memory journal"
             refusal = b"Chat requires a matching workspace"
-            for key in (b"m", b"i"):
+            def clear_refusal():
                 # A repeated refusal leaves identical footer cells, so the
                 # incremental renderer need not emit those bytes again.
                 # Require the previous notice to leave the current screen
@@ -224,8 +224,11 @@ def run(binary: str, captures: Path | None) -> None:
                                  "previous chat refusal did not clear")
                     h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                     h.select_keeper_row(process, fd, output, b"alpha")
+            for key in (b"m", b"i"):
+                clear_refusal()
                 h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
+            clear_refusal()
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
                 assert not [event for event in wire.events
@@ -349,7 +352,8 @@ def scoped_roster_authority(binary: str) -> None:
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace identity is unverified" in text,
+            await_screen(lambda text: b"workspace identity is unverified" in text
+                         and b"[workspace mismatch]" in text,
                          "B authority did not refuse the unverified Board read")
             with wire.lock:
                 wire.hold_roster = True
@@ -975,6 +979,18 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
             refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
+def connection_disconnected(connection: socket.socket) -> bool:
+    """Observe EOF/reset without consuming or closing the held peer socket."""
+    if not select.select([connection], [], [], 0)[0]:
+        return False
+    try:
+        pending = connection.recv(1, socket.MSG_PEEK)
+    except ConnectionResetError:
+        return True
+    assert pending == b"", "unexpected input on the held Ask connection"
+    return True
+
+
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
@@ -983,7 +999,6 @@ def ask_workspace_withdrawal(binary: str) -> None:
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
         admitted_answers: list[tuple[str, str]] = []
         answer_connections: list[socket.socket] = []
-        answer_deadlines: list[float] = []
         def answer_request(method, connection):
             if method != "POST":
                 return 405, {"error": "POST required"}
@@ -993,20 +1008,12 @@ def ask_workspace_withdrawal(binary: str) -> None:
             with wire.lock:
                 admitted_answers.append((method, wire.phase))
                 answer_connections.append(connection)
-                answer_deadlines.append(time.monotonic() + WAIT_SECONDS)
             return answer()
         def answer_disconnected():
             with wire.lock:
                 assert len(answer_connections) == 1, answer_connections
                 connection = answer_connections[0]
-            if not select.select([connection], [], [], 0)[0]:
-                return False
-            try:
-                pending = connection.recv(1, socket.MSG_PEEK)
-            except ConnectionResetError:
-                return True
-            assert pending == b"", "unexpected input on the held Ask connection"
-            return True
+            return connection_disconnected(connection)
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -1030,6 +1037,10 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.send_and_wait(process, fd, output, b"1", b"1 (o) ")
                 h.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
                 if submit:
+                    # This precedes client dispatch, including a delayed
+                    # server admission. Starting at the fixture gate would
+                    # incorrectly extend the client's timeout observation.
+                    answer_deadline = time.monotonic() + WAIT_SECONDS
                     os.write(fd, b"\r")
                     assert h.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
@@ -1050,14 +1061,14 @@ def ask_workspace_withdrawal(binary: str) -> None:
                     # bytes can leave the held gate. A fixture-return event
                     # alone cannot establish that the old client is gone.
                     assert not answer.release.is_set() and not answer.completed.is_set()
-                    # Bound the whole admitted request, not only this wait:
+                    # Bound the whole request from before dispatch:
                     # the existing 8s fixture bound is below the TUI's 10s
                     # HTTP timeout, which must not masquerade as withdrawal.
-                    remaining = answer_deadlines[0] - time.monotonic()
-                    assert remaining > 0, "Ask withdrawal exceeded its admission deadline"
+                    remaining = answer_deadline - time.monotonic()
+                    assert remaining > 0, "Ask withdrawal exceeded its dispatch deadline"
                     assert h.wait_for_fixture_state(process, fd, output, answer_disconnected,
                         timeout=remaining), "withdrawn Ask client kept its held connection alive"
-                    assert time.monotonic() < answer_deadlines[0], \
+                    assert time.monotonic() < answer_deadline, \
                         "Ask disconnect was too late to establish workspace cancellation"
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()

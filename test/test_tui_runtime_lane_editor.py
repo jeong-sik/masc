@@ -1113,8 +1113,9 @@ def run_default_route(executable: str) -> None:
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
                           needle=b"MASC System", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
-        h.send_and_wait(process, fd, output, b"f", b"Enter replace")
+        h.send_and_wait(process, fd, output, b"f", b"primary   lane")
         frame = h.screen_text(bytes(output))
+        assert b"Enter replace" in frame, frame
         assert b"primary   lane" in frame, frame
         os.write(fd, b"\r")
         assert h.wait_for_fixture_state(process, fd, output,

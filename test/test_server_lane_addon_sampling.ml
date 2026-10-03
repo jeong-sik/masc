@@ -40,7 +40,7 @@ let test_image_only_completion_is_sampling_content () =
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 
-let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
+let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(primary_images=true) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -106,7 +106,7 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?i
   Eio.Fiber.fork_daemon ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat root "models.toml" in
   write catalog_path (String.concat "\n" (List.map (fun provider -> Printf.sprintf
-    "[[models]]\nid_prefix=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=true\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider)
+    "[[models]]\nid_prefix=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=%b\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider (primary_images || provider <> "primary"))
     ["primary";"secondary"]));
   let catalog = require (Llm_provider.Model_catalog.load_file catalog_path) in
   Llm_provider.Model_catalog.set_global catalog;
@@ -185,7 +185,8 @@ max_reply_bytes=4194304
   check (option string) "provider stop reason maps to MCP vocabulary" (Some "endTurn") answer.stop_reason;
   let sent_requests = List.rev !requests in
   let expected_paths = match initial_pressure with
-    | None -> ["/primary/chat/completions";"/secondary/chat/completions"]
+    | None when primary_images -> ["/primary/chat/completions";"/secondary/chat/completions"]
+    | None -> ["/secondary/chat/completions"]
     | Some _ -> ["/secondary/chat/completions"] in
   check (list string) "shared backpressure orders only the declared route"
     expected_paths (List.map fst sent_requests);
@@ -392,6 +393,8 @@ let () = run "Server Lane sampling HTTP composition" ["host boundary",[
     test_image_only_completion_is_sampling_content;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
+  test_case "image-incapable primary is skipped before HTTP dispatch" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_images:false);
   test_case "missing model identity walks the secondary" `Quick
     (test_actual_http_route_and_durable_sampling ~primary_reply:`Missing_model);
   test_case "blank model identity walks the secondary" `Quick

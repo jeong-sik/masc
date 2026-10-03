@@ -1890,15 +1890,22 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
         String.concat "\n" frame.Masc_tui_frame_presenter.lines
       in
-      let check_output stage =
+      let start_clock = Masc_tui_render_chat.keeper_message_clock 42. in
+      let running_span = start_clock ^ "→" in
+      let settled_span =
+        running_span ^ Masc_tui_render_chat.keeper_message_clock 49.
+      in
+      let check_output stage span =
         let screen = frame () in
         List.iter (fun marker -> check int (stage ^ ": " ^ marker) 1
           (count marker screen))
           ["PROMOTED_QUESTION"; "EARLY_ANSWER"; "LATER_ANSWER"];
         check bool (stage ^ ": tool remains visible") true
-          (count "read_file" screen > 0)
+          (count "read_file" screen > 0);
+        check int (stage ^ ": one request span") 1 (count running_span screen);
+        check int (stage ^ ": transcript timing") 1 (count span screen)
       in
-      check_output "still running";
+      check_output "still running" running_span;
       (* A run that finished records its reply first (KEEPER_REPLY_DETAILS),
          and the record is the last stretch of the attempt -- here the text
          after the tool round. A finish with no reply is how a cancelled
@@ -1913,7 +1920,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         terminal;
       Tui_types.settle_turn_log state entry;
       state.msg_inflight <- [];
-      check_output "settled";
+      check_output "settled" settled_span;
       (* A durable page overlaps already streamed text. The frame must keep
          each source once, including after cancellation or a failed run. *)
       let replay : Masc.Keeper_chat_event_log.journaled_event list =
@@ -1922,7 +1929,16 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
-      check_output "overlapping replay")
+      check_output "overlapping replay" settled_span;
+      (* A fresh history-only view has no transcript timing authority. *)
+      state.msg_live <- None;
+      state.msg_settled_logs <- [];
+      state.msg_history <-
+        state.msg_history @
+        [chat_entry ~request_id:entry.sent_request.request_id
+           ~role:Tui_types.Message_keeper ~text:"DURABLE_REPLY" ~at:49. ()];
+      check int "durable history does not invent a running span" 0
+        (count running_span (frame ())))
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 

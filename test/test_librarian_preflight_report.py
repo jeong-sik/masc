@@ -235,6 +235,29 @@ class ReportCliTest(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_preflight_variants_reject_foreign_fields(self) -> None:
+        for status, fields in (("invalid_answer", ("decision", "confidence", "probabilities", "failure")),
+                               ("judged", ("reason", "failure")), ("failed", ("reason",)),
+                               ("awaiting_answer", ("reason", "failure"))):
+            for field in fields:
+                with self.subTest(status=status, field=field):
+                    manifest = fixture()
+                    run = manifest["pairs"][0]["preflight"]["run"]
+                    awaiting = status == "awaiting_answer"
+                    run.update(status="cancelled" if awaiting else "succeeded",
+                               selected_slot=None if awaiting else "fixture-cli")
+                    run["output"].update(
+                        jev_preflight=observation(status, "needs_generation"),
+                        generation_path="not_entered" if awaiting else "full_lane",
+                        full_llm_skipped=False)
+                    valid = self.execute(manifest)
+                    self.assertEqual(valid.returncode, 0, valid.stderr)
+                    run["output"]["jev_preflight"][field] = None
+                    invalid = self.execute(manifest)
+                    self.assertEqual(invalid.returncode, 1)
+                    self.assertIn("must not report " + field, invalid.stderr)
+                    self.assertEqual(invalid.stdout, "")
+
     def test_wall_clock_durations_are_preserved_without_an_invented_bound(self) -> None:
         manifest = fixture()
         run = manifest["pairs"][0]["preflight"]["run"]

@@ -4390,7 +4390,8 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          let delivery_key = Keeper_chat_delivery_identity.Operation
            (Keeper_chat_delivery_identity.Request_id.of_string operation_id_raw |> Result.get_ok) in
          Keeper_chat_store.append_assistant_message_once ~base_dir:base_path
-           ~keeper_name:meta.name ~delivery_key ~turn_ref ~content:full_reply ()
+           ~keeper_name:meta.name ~delivery_key ~turn_ref ~content:full_reply
+           ~blocks:[Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None}] ()
          |> Result.get_ok |> ignore;
          Keeper_chat_store.append_assistant_message_result ~base_dir:base_path
            ~keeper_name:meta.name ~turn_ref

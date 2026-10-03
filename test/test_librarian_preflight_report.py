@@ -14,6 +14,32 @@ from typing import Any
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/librarian/compare-preflight.py"
 
 
+def observation(status: str = "judged", decision: str = "keep_current") -> dict[str, Any]:
+    if status == "awaiting_answer":
+        return {"status": status, "elapsed_s": None}
+    if status == "failed":
+        return {"status": status, "elapsed_s": 0.05, "failure": {
+            "kind": "every_destination_refused", "attempts": [{
+                "destination_uri": "https://fixture.invalid/jev", "model": "fixture-model",
+                "refusal": {"kind": "transport", "detail": "fixture connection failure"},
+            }],
+        }}
+    result: dict[str, Any] = {
+        "status": status, "elapsed_s": 0.05,
+        "destination": {"destination_uri": "https://fixture.invalid/jev", "model": "fixture-model"},
+        "model": "fixture-answering-model", "request_body_sha256": "d" * 64,
+        "passed_over": [],
+    }
+    if status == "invalid_answer":
+        result["reason"] = "fixture missing choice answer"
+    else:
+        result.update(decision=decision, confidence=0.8, probabilities={
+            label: 0.8 if label == decision else 0.1
+            for label in ("keep_current", "needs_generation", "uncertain")
+        })
+    return result
+
+
 def fixture() -> dict[str, Any]:
     def run(run_id: str, enabled: bool, elapsed: float) -> dict[str, Any]:
         return {
@@ -39,7 +65,7 @@ def fixture() -> dict[str, Any]:
                     }
                 },
                 "output": {
-                    "jev_preflight": {"status": "judged", "decision": "keep_current"}
+                    "jev_preflight": observation()
                     if enabled
                     else {
                         "status": "skipped",
@@ -104,7 +130,7 @@ class ReportCliTest(unittest.TestCase):
         run = second["preflight"]["run"]
         run.update(run_id="jev-2", status="failed", elapsed_s=6.0)
         run["output"].update(
-            jev_preflight={"status": "failed"},
+            jev_preflight=observation("failed"),
             generation_path="full_lane",
             full_llm_skipped=False,
         )
@@ -121,10 +147,7 @@ class ReportCliTest(unittest.TestCase):
                     run = manifest["pairs"][0][arm]["run"]
                     if arm == "preflight":
                         run["output"].update(
-                            jev_preflight={
-                                "status": "judged",
-                                "decision": "needs_generation",
-                            },
+                            jev_preflight=observation("judged", "needs_generation"),
                             generation_path="full_lane",
                             full_llm_skipped=False,
                         )
@@ -144,6 +167,41 @@ class ReportCliTest(unittest.TestCase):
                 self.assertEqual(
                     json.loads(result.stdout)["pairs"][0]["baseline_status"], status
                 )
+
+    def test_completed_judgment_requires_typed_provenance(self) -> None:
+        for field in ("destination", "model", "request_body_sha256", "passed_over", "elapsed_s", "probabilities", "confidence"):
+            with self.subTest(field=field):
+                manifest = fixture()
+                manifest["evidence_kind"] = "live"
+                del manifest["pairs"][0]["preflight"]["run"]["output"]["jev_preflight"][field]
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+        for field, value in (("confidence", True), ("elapsed_s", -1),
+                             ("model", ""), ("request_body_sha256", "missing"),
+                             ("passed_over", {}), ("destination", {}),
+                             ("probabilities", {"keep_current": 0.2, "needs_generation": 0.7, "uncertain": 0.1}),
+                             ("probabilities", {"keep_current": 0.8, "needs_generation": 0.2, "uncertain": 0.2})):
+            with self.subTest(field=field, value=value):
+                manifest = fixture()
+                manifest["pairs"][0]["preflight"]["run"]["output"]["jev_preflight"][field] = value
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+
+    def test_fallback_success_retains_actual_preflight_outcome(self) -> None:
+        for status in ("failed", "invalid_answer", "judged"):
+            with self.subTest(status=status):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                run["selected_slot"] = "fixture-cli"
+                evidence = observation(status, "needs_generation")
+                run["output"].update(jev_preflight=evidence, generation_path="full_lane", full_llm_skipped=False)
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                pair = json.loads(result.stdout)["pairs"][0]
+                self.assertEqual(pair["preflight_status"], "succeeded")
+                self.assertEqual(pair["preflight_observation"], evidence)
 
     def test_mismatched_or_contradictory_evidence_is_refused(self) -> None:
         for mode in (
@@ -174,7 +232,7 @@ class ReportCliTest(unittest.TestCase):
                     run["input"]["payload"]["current_fact_count"] = True
                 elif mode == "awaiting":
                     run["output"].update(
-                        jev_preflight={"status": "awaiting_answer"},
+                        jev_preflight=observation("awaiting_answer"),
                         generation_path="full_lane",
                         full_llm_skipped=False,
                     )

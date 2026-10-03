@@ -11,6 +11,7 @@ not provider dispatch counts, semantic quality or installed TUI behavior.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -47,6 +48,81 @@ def digest(value: Json) -> str:
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()
     ).hexdigest()
+
+
+def number(value: Json, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{name} must be finite numeric evidence")
+    return float(value)
+
+
+def attempts(value: Json, name: str) -> list[Json]:
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be an array")
+    for item in value:
+        attempt = obj(item, "preflight attempt")
+        text(attempt.get("destination_uri"), "attempt destination")
+        text(attempt.get("model"), "attempt model")
+        refusal = obj(attempt.get("refusal"), "attempt refusal")
+        if not isinstance(refusal.get("detail"), str):
+            raise ValueError("refusal detail must be a string")
+        if refusal.get("kind") == "http_response":
+            if type(refusal.get("status")) is not int:
+                raise ValueError("HTTP refusal status must be an integer")
+            text(refusal.get("destination_uri"), "HTTP refusal destination")
+            body = refusal.get("body")
+            if not isinstance(body, str):
+                encoded = obj(body, "HTTP refusal body")
+                if encoded.get("encoding") != "base64" or not isinstance(encoded.get("content"), str):
+                    raise ValueError("HTTP refusal body must contain base64 text")
+                raw = base64.b64decode(cast(str, encoded["content"]), validate=True)
+                if type(encoded.get("total_bytes")) is not int or encoded["total_bytes"] != len(raw):
+                    raise ValueError("HTTP refusal body byte count disagrees")
+        elif refusal.get("kind") != "transport":
+            raise ValueError("unknown preflight refusal kind")
+    return value
+
+
+def validate_observation(observation: dict[str, Json]) -> None:
+    status = observation.get("status")
+    if status == "awaiting_answer":
+        if "elapsed_s" not in observation or observation["elapsed_s"] is not None:
+            raise ValueError("awaiting preflight must record null elapsed time")
+        if any(key in observation for key in ("destination", "model", "request_body_sha256", "decision", "failure")):
+            raise ValueError("awaiting preflight cannot contain completed evidence")
+        return
+    if number(observation.get("elapsed_s"), "preflight elapsed_s") < 0:
+        raise ValueError("preflight elapsed_s must be nonnegative")
+    if status == "failed":
+        failure = obj(observation.get("failure"), "preflight failure")
+        if failure.get("kind") != "every_destination_refused" or not attempts(failure.get("attempts"), "failure attempts"):
+            raise ValueError("failed preflight must record destination refusals")
+        return
+    if status not in ("judged", "invalid_answer"):
+        raise ValueError("unknown completed preflight observation status")
+    destination = obj(observation.get("destination"), "preflight destination")
+    text(destination.get("destination_uri"), "preflight destination URI")
+    text(destination.get("model"), "preflight requested model")
+    text(observation.get("model"), "preflight answering model")
+    sha(observation.get("request_body_sha256"), "preflight request hash")
+    attempts(observation.get("passed_over"), "passed-over attempts")
+    if status == "invalid_answer":
+        text(observation.get("reason"), "invalid preflight answer reason")
+        return
+    labels = ("keep_current", "needs_generation", "uncertain")
+    decision = text(observation.get("decision"), "preflight decision")
+    probabilities = obj(observation.get("probabilities"), "preflight probabilities")
+    if decision not in labels or set(probabilities) != set(labels):
+        raise ValueError("preflight probabilities must cover exactly the declared choices")
+    confidence = number(observation.get("confidence"), "preflight confidence")
+    values = {label: number(probabilities[label], "preflight probability") for label in labels}
+    if not 0 <= confidence <= 1 or any(not 0 <= value <= 1 for value in values.values()):
+        raise ValueError("preflight confidence and probabilities must be within zero and one")
+    # Match Typesafeai_types.decode_choice's one-rounding-error-per-option bound.
+    if abs(sum(values.values()) - 1) > sys.float_info.epsilon * len(labels):
+        raise ValueError("preflight probabilities must sum to one")
+    if values[decision] != max(values.values()):
+        raise ValueError("preflight decision must have a highest probability")
 
 
 def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], float]:
@@ -144,6 +220,7 @@ def compare(manifest: Json) -> dict[str, Json]:
             "judged",
         ):
             raise ValueError("unknown preflight observation status")
+        validate_observation(observation)
         if status == "awaiting_answer" and path != "not_entered":
             raise ValueError("awaiting preflight cannot enter generation")
         if status == "judged" and observation.get("decision") not in (
@@ -196,6 +273,7 @@ def compare(manifest: Json) -> dict[str, Json]:
                 "preflight_run_id": preflight["run_id"],
                 "baseline_status": baseline["status"],
                 "preflight_status": preflight["status"],
+                "preflight_observation": observation,
                 "baseline_elapsed_s": baseline_s,
                 "preflight_elapsed_s": preflight_s,
                 "paired_delta_s": delta,

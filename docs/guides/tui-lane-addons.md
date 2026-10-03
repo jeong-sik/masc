@@ -46,6 +46,11 @@ Activity timeline에서 같은 시각의 사건도 각각 선택할 수 있다.
 Source clock의 domain·value는 원천에서 받은 값이다. 게임 프레임이나 시뮬레이션 시간을 UTC로 바꾸지 않는다.
 관계는 명시된 `related_ids`만 표시하며, 현재 slice 밖의 ID는 연결 대상이 보이지 않는다고 표시한다.
 Links의 화살표는 선언된 binding이다. 성공한 전달이나 인과관계를 증명하지 않는다.
+Links와 `f`의 연결 보기에서는 현재 Add-on의 의존 관계를 층으로 정렬한다.
+같은 Layer의 항목은 서로에게 입력을 요구하지 않으며, 다음 층은 앞선 생산자의 출력을 받는다.
+입력이 확인되지 않거나 순환하는 항목은 `Layer unavailable`로 표시한다.
+현재 설치 선언이 가리키는 인스턴스만 생산자로 연결하며, 보존된 이력의 binding에서는
+실제 생산자 incarnation을 임의로 복원하지 않는다. Layer 숫자는 연결 구조이며 실행 순서·성공 기록이 아니다.
 상세 설계와 검증 항목은 [TUI Lane 경험 설계](../design/tui-lane-experience.md)를 참고한다.
 
 ## 설치된 항목 사용하기

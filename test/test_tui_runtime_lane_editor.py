@@ -544,7 +544,7 @@ def run_exact(executable: str) -> None:
         # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)
-        h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output, b"> model-b default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
         # A pick sends only the slot it adds. A whole order built from the

@@ -63,6 +63,12 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
         raise ValueError("run must have a durably recorded terminal result")
     if "selected_slot" not in run:
         raise ValueError("terminal run must explicitly record selected_slot")
+    selected_slot = run["selected_slot"]
+    if selected_slot is not None:
+        text(selected_slot, "selected_slot")
+    output = obj(run.get("output"), "output")
+    if run["status"] == "succeeded" and output.get("generation_path") == "full_lane":
+        text(selected_slot, "successful full-lane selected_slot")
     elapsed = run.get("elapsed_s")
     if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
         raise ValueError("elapsed_s must be numeric")
@@ -74,7 +80,7 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     )
     prompt = obj(actual_input.get("prompt"), "prompt")
     sha(prompt.get("rendered_sha256"), "rendered prompt hash")
-    return run, payload, obj(run.get("output"), "output"), float(elapsed)
+    return run, payload, output, float(elapsed)
 
 
 def compare(manifest: Json) -> dict[str, Json]:

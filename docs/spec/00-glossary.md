@@ -1664,6 +1664,20 @@ status: reference
   판정 전에는 Keeper가 다시 맡을 수 없다. 완료 판정은 Keeper가 내리지 못하고,
   서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
 
+**Pre-Pagination Backlog Task Selection Query (페이징 전 백로그 태스크 선별 쿼리)**
+: `keeper_tasks_list`는 기본 상태 조건과 함께 전달된 `task_ids`, `assignee`, `goal_id`,
+  `query` 필터를 AND로 적용한 뒤 정렬·페이징한다. `query`는 제목과 설명에 대한
+  대소문자 무시 리터럴 부분 문자열이다. `matching_count`는 이 조건을 통과한 전체 행 수다.
+  다음 페이지 커서는 같은 필터를 담으며 호출 필터가 달라지면 거절한다.
+  → [Keeper_tasks_list_query](../../lib/keeper/keeper_tasks_list_query.mli) ·
+  [Keeper_tasks_list_cursor](../../lib/keeper/keeper_tasks_list_cursor.mli)
+
+**First-Page-Only Discovery Window (첫 페이지 한정 신규 태스크 발견 창)**
+: 커서 없는 첫 `keeper_tasks_list` 응답은 현재 조회의 모든 조건을 통과하고 현재 페이지에는 없는
+  최신 Task를 최대 10행 `new_tasks`에 함께 싣는다. 후속 페이지는 이 발견 목록을 반복하지 않고
+  정렬된 페이지 흐름만 이어 간다. 첫 페이지를 새로 요청하면 그 시점의 발견 목록을 다시 계산한다.
+  → [keeper_tool_task_runtime](../../lib/keeper/keeper_tool_task_runtime.ml)
+
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
@@ -1702,10 +1716,15 @@ status: reference
     잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
-  - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
-    `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
-    선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
-    일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
+  - 지급 의무 보존(Payout Obligation Preservation)·평가 후 채무 지속성(Post-Appraisal Debt Retention):
+    기록 설정이 활성화되고 통과한 검증 결과의 `Snapshot`이 있으며
+    같은 지급 의무가 이미 없으면, 사람의 확정 기록을 저장한 뒤 `Completed` phase를 쓰기 전에
+    `Payout_owed` 행을 원장에 추가한다. 이 행이 지급 의무를 만들므로 phase 저장이 실패해도 의무는
+    남는다. 평가자 레인이 없거나 평가가 미뤄져도 의무 행은 유지된다. 평가 뒤 정산 시점에
+    Candle이 비활성화되면 지급을 미루되 의무를 취소하지 않고 원장에 보존한다.
+  - 정산: 백그라운드 지급 일꾼이 기여 Task와 Keeper를 후보(`Candidates`)로 선별해 모델 평가를
+    거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로 일부
+    Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
@@ -1726,13 +1745,14 @@ status: reference
   [Candle_equipment](../../lib/candle_runtime/candle_equipment.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
+  [Candle_payout_owed](../../lib/candle_runtime/candle_payout_owed.mli) ·
   [Candle_time](../../lib/candle/candle_time.mli) ·
   [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
 
 **Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
-: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039).
+: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039). 지갑 잔액은 Keeper별 지급·구매 기록과 그 지갑의 감쇠 구간을 원장 순서로 재생해 계산한다. `issued`·`burned`·`circulating`은 작업공간 전체 합계이므로 한 Keeper의 잔액을 총공급량에서 나누어 구하지 않는다.
   - 대시보드 Item 탭([`keeper-items-panel.ts`](../../dashboard/src/components/keeper-items-panel.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
   - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
   - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
@@ -2776,10 +2796,10 @@ status: reference
   **Cluster** 항목에 적었다.
 
 **Memory OS Recall (기억 회상 / 전송 투영)**
-: 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
+: Keeper Memory OS의 저장 사실을 턴별 모델 문맥으로 전달하는 투영 경계. 저장된 사실과 프롬프트에 들어가는 내용은 같은 범위가 아니다.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 아티팩트 조회 도구가 없거나 아티팩트 출판·핀 쓰기가 실패하면, `memory_search_available`에 따라 폴백이 달라진다. 메모리 검색이 가능하면 스토어 가용성·실패 사유·검색 안내와 소스 무효화·보류 식별자를 전달하며, 사실 본문 전체를 인라인으로 넣지 않는다. 이 폴백에서 메모리 검색도 불가능하면 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인으로 넣는다. 읽지 못한 소스의 주장 본문은 어느 경우에도 보류한다.
-  소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 인라인으로 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 표면이 가진 조회 기능에 따라 투영을 나눈다. `keeper_memory_search`를 쓸 수 있는 표면에는 저장소 가용성·건수와 현재 조회 안내만 전달하며, 주장 본문을 싣거나 소스 파일을 재검증하거나 아티팩트를 발행하지 않는다. 아티팩트 전용 표면은 전체 투영을 재검증해 보존되는 페이지형 아티팩트로 발행하고, 프롬프트에는 상태·건수·타입화된 무효화·읽지 못한 소스 식별자와 아티팩트 핸들만 보낸다. 이때도 주장 본문은 프롬프트에 복사하지 않는다. 조회 기능이 없거나 아티팩트 발행이 실패하면 가용성과 과거 참조 철회 안내를 보내며 사실 전량을 폴백 주입하지 않는다. Recall 경로의 선택은 저장 기억을 삭제하지 않는다.
+  소스 바인딩 사실은 반환되기 전에 저장된 SHA-256과 대상 파일의 정확한 바이트를 대조한다. 검색 표면은 쿼리에 맞는 소스 후보만 재검증하고, 아티팩트 전용 표면은 전체 투영을 확인한다. 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)가 된다. 읽기 실패·접근 불능이면 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
   유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
   - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
@@ -2788,6 +2808,14 @@ status: reference
   - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
   - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
   → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
+
+**Keeper Demand Recall (요구 기반 회상)**
+: 저장된 기억과 현재 턴의 문맥을 분리해, 필요한 사실을 쓸 때 현재 검색 결과를 다시 얻도록 하는 방식. 저장소 상태·건수 안내는 사실을 회상했다는 증거가 아니며, 이전 검색 결과도 이번 턴의 사실 확인을 대신하지 않는다. 회상 경로의 제한이나 실패는 저장 사실을 삭제하지 않고, 사실 전량을 대신 프롬프트에 싣지도 않는다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli)
+
+**Selective Source Candidate Validation (질의 매칭 소스 후보 선별 검증)**
+: `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
+  → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

@@ -169,6 +169,18 @@ describe('noteKeeperChatAppended', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread).toHaveLength(2)
     expect(thread[1]?.text).toBe('recovered')
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
+  it('preserves a newer action error when history recovers', async () => {
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
+    await hydrateKeeperChatHistory('echo')
+    keeperActionErrors.value = { echo: 'Message delivery failed' }
+    fetchKeeperChatHistory.mockResolvedValueOnce([])
+
+    await hydrateKeeperChatHistory('echo', { force: true })
+
+    expect(keeperActionErrors.value.echo).toBe('Message delivery failed')
   })
 
   it('debounces a burst of appends into one forced refetch', async () => {

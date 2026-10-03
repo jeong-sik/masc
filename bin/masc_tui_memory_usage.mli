@@ -28,7 +28,9 @@ type t =
 val of_records : Turn_record.t list -> t
 (** Records in chronological endpoint order. Token samples require
     [Per_request] usage; bytes require an observed serialized request.
-    Missing values are excluded, reported zeros are included. *)
+    Missing values are excluded, reported zeros are included. A per-request
+    token value can originate from a runtime context estimate; TurnRecord
+    does not preserve that measurement basis. *)
 
 val decode : keeper:string -> Yojson.Safe.t -> (t, string) result
 (** Decodes the turn-record page, including an empty page. Every record must

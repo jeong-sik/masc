@@ -2249,6 +2249,59 @@ let test_memory_state_tracks_current_pass_not_history () =
   check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
 ;;
 
+let test_memory_refresh_keeps_the_selected_keeper () =
+  let module H = Masc.Tui_decode_memory_health in
+  let keeper name facts =
+    make_keeper_health ~keeper_id:name ~facts ~snapshot_bytes:1024
+  in
+  let alpha = keeper "alpha" 20 in
+  let health keepers = { (make_fleet_health alpha) with H.mhs_keepers = keepers } in
+  List.iter (fun query ->
+    let state = make_state () in
+    state.memory_overview_sort <- Types.Mem_overview_facts;
+    state.search_last <- query;
+    Types.apply_memory_health_snapshot state
+      (health [alpha; keeper "beta" 10; keeper "gamma" 5; keeper "hidden" 0]);
+    let selected_id () =
+      Option.map (fun row -> row.H.mkh_keeper_id) (Types.selected_memory_keeper state)
+    in
+    check (option string) "start on alpha" (Some "alpha") (selected_id ());
+    let usage : Masc_tui_memory_usage.t =
+      { records = 1
+      ; tokens =
+          { distribution = Some { samples = 1; mean = 100.; minimum = 100; maximum = 100 }
+          ; last = Some 100 }
+      ; bytes = { distribution = None; last = None }
+      }
+    in
+    let request =
+      match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key:"alpha" with
+      | Already_loading -> fail "fresh fixture was loading"
+      | Started (next, request) -> state.memory_input <- next; request
+    in
+    Types.apply_memory_health_snapshot state
+      (health [alpha; keeper "beta" 30; keeper "gamma" 25; keeper "hidden" 100]);
+    check (option string) "ranking changes keep the selected Keeper" (Some "alpha")
+      (selected_id ());
+    state.memory_input <-
+      Masc_tui_fetched.complete ~equal:String.equal state.memory_input request (Ok usage);
+    check bool "the pending input still belongs to the selected Keeper" true
+      (Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
+         ~key:(Option.get (selected_id ())) = Ready usage);
+    Types.apply_memory_health_snapshot state
+      (health [keeper "beta" 30; keeper "gamma" 25; keeper "hidden" 100]);
+    check (option string) "removal clamps to the last visible Keeper" (Some "gamma")
+      (selected_id ());
+    check int "removed selection leaves an in-range cursor"
+      (List.length (Types.visible_memory_keepers state) - 1) state.memory_health_cursor;
+    check bool "removed Keeper input cannot appear under the fallback selection" true
+      (Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:"gamma" = Absent);
+    Types.apply_memory_health_snapshot state (health []);
+    check (option string) "empty refreshed roster has no selection" None (selected_id ());
+    check int "empty refreshed roster resets the cursor" 0 state.memory_health_cursor)
+    [""; "a"]
+;;
+
 let test_memory_input_summary_survives_units_and_detail_folding () =
   let module Usage = Masc_tui_memory_usage in
   let state = make_state () in
@@ -2271,12 +2324,12 @@ let test_memory_input_summary_survives_units_and_detail_folding () =
     List.iter (fun cols ->
       let text = String.concat "\n" (body_lines ~cols ~budget:20 state) in
       List.iter (fun needle -> check bool ("visible input " ^ needle) true (contains needle text))
-        ["Input tok"; "avg 100"; "max 300"; "min 0"; "last unreported"; "3/4 measured"])
+        ["Input tok"; "avg 100"; "max 300"; "min 0"; "last unreported"; "3/4 recorded"])
       [80; 140]) [false; true];
   state.memory_unit <- Usage.next_unit state.memory_unit;
   let bytes = String.concat "\n" (body_lines ~cols:80 ~budget:20 state) in
   List.iter (fun needle -> check bool ("visible byte input " ^ needle) true (contains needle bytes))
-    ["Request KiB"; "avg 1.5"; "max 2.0"; "min 1.0"; "last 2.0"; "2/4 measured"];
+    ["Request KiB"; "avg 1.5"; "max 2.0"; "min 1.0"; "last 2.0"; "2/4 recorded"];
   state.memory_unit <- Usage.next_unit state.memory_unit;
   answer (Error "read failed");
   let stale = String.concat "\n" (body_lines ~cols:80 ~budget:22 state) in
@@ -2286,7 +2339,10 @@ let test_memory_input_summary_survives_units_and_detail_folding () =
 
 let () =
   run "tui_render_memory"
-    [ "input statistics", [test_case "units and folded detail" `Quick test_memory_input_summary_survives_units_and_detail_folding]
+    [ "input statistics",
+      [ test_case "units and folded detail" `Quick test_memory_input_summary_survives_units_and_detail_folding
+      ; test_case "refresh preserves Keeper selection" `Quick test_memory_refresh_keeps_the_selected_keeper
+      ]
     ; ( "age_label"
       , [ test_case "age_label_formatting" `Quick test_age_label ] )
     ; ( "row_lines"

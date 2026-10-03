@@ -39,12 +39,18 @@ def run(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
-        h.wait_for_output(process, fd, output, b"3/5 measured", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"3/5 recorded", start=0, timeout=10)
         for columns, rows in ((140, 40), (80, 30), (80, 24)):
             for byte_mode in (False, True):
-                needle = b"4/5 measured" if byte_mode else b"3/5 measured"
+                needle = b"4/5 recorded" if byte_mode else b"3/5 recorded"
                 if byte_mode:
                     h.send_and_wait(process, fd, output, b"u", needle)
+                    # TIOCSWINSZ at unchanged dimensions emits no resize. Get
+                    # an acknowledged alternate frame before returning to the
+                    # exact size whose byte-mode layout we are testing.
+                    h.resize_and_wait(process, fd, output, rows=rows + 1,
+                                      columns=columns, needle=needle,
+                                      controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
                 frame = h.resize_and_wait(
                     process, fd, output, rows=rows, columns=columns,
                     needle=needle, controls=(h.FULL_REDRAW,),
@@ -70,7 +76,7 @@ def run(executable):
                     "screen": screen.decode(errors="replace"),
                 }), flush=True)
                 if byte_mode:
-                    h.send_and_wait(process, fd, output, b"u", b"3/5 measured")
+                    h.send_and_wait(process, fd, output, b"u", b"3/5 recorded")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Memory input statistics and units",

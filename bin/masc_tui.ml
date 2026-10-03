@@ -15738,8 +15738,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       state.memory_health_inflight <- false;
       (match result with
       | Ok snapshot ->
-          state.memory_health <- Some snapshot;
-          state.memory_health_error <- None
+          apply_memory_health_snapshot state snapshot
       | Error detail -> state.memory_health_error <- Some detail);
       launch_memory_input_load state ~mailbox ~refresh:true
   | Memory_input_loaded (request, result) ->

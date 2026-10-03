@@ -193,8 +193,8 @@ let memory_input_lines ~cols ~unit reading =
     wrap [label; "avg " ^ avg; "max " ^ maximum; "min " ^ minimum; "last " ^ last]
     @ wrap
         [ Printf.sprintf "Recent %d recorded turns" snapshot.records
-        ; Printf.sprintf "%d/%d measured" samples snapshot.records
-        ; (match unit with Memory_usage.Tokens -> "whole request input" | Memory_usage.Bytes -> "serialized body")
+        ; Printf.sprintf "%d/%d recorded" samples snapshot.records
+        ; (match unit with Memory_usage.Tokens -> "input may include runtime estimates" | Memory_usage.Bytes -> "serialized body")
         ]
   in
   match reading with

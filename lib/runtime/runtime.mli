@@ -475,6 +475,22 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+val dashboard_runtime_resolved_snapshot : unit -> dashboard_runtime_resolved_snapshot
+(** All routing fields and assignment resolution from one loaded-state read. *)
+
 type keeper_dispatch_snapshot
 (** Effective route, ordered candidates and their frozen dispatch identities
     from one loaded-state read. Unrelated config edits do not change it. *)
@@ -1031,6 +1047,7 @@ val append_exact_output_lane_slot :
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
       (** Which way {!move_exact_output_lane_slot} walks a slot through the
           declared order, which is the order the lane walks. *)
 
@@ -1056,11 +1073,21 @@ val move_exact_output_lane_slot :
   move:exact_slot_move ->
   unit ->
   (config_commit_receipt, string) result
-(** Exchange [slot] with its neighbour in the declared order of the list that
+(** Exchange [slot] with its neighbour, or promote it to the first position
+    while preserving the relative order of the other candidates, in the list that
     holds it -- [slots] or [cli_slots] -- read under the write lock like
     {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
     into the other one. Refused when the lane declares no such slot, and when
-    the slot is already at the end of its list the move heads for. *)
+    a neighbour move would pass the end. Promoting an already first candidate
+    keeps the order unchanged. *)
+
+val replace_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane -> slot:string -> replacement:string -> unit ->
+  (config_commit_receipt, string) result
+(** Replace one declared candidate at its current position under the write
+    lock. The replacement must belong to the same HTTP/CLI group and must
+    not already occur in the lane. Other candidates are preserved. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

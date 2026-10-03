@@ -114,7 +114,7 @@ type async_msg =
   | Workspace_identity_unconfirmed of string
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
-  | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
+  | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -209,7 +209,7 @@ type async_msg =
   | Keeper_chat_older_loaded of
       int * string * float * (Masc_tui_keeper_chat_history.page, string) result
   | Lanes_loaded of
-      ( Masc.Tui_decode.keeper_lanes_snapshot
+      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
@@ -284,7 +284,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
-  | Connectors_loaded of (Masc.Tui_decode_connectors.connector_snapshot, string) result
+  | Connectors_loaded of unit ref * (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
       results :
@@ -297,7 +297,9 @@ type async_msg =
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
-      Masc_tui_types.runtime_lane_list * (unit, string) result
+      Masc_tui_types.runtime_lane_list
+      * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
+      * (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
@@ -397,7 +399,8 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_action_done of
-      string
+      Masc.Tui_decode.server_identity option
+      * string
       * Masc_tui_keeper_control.action
       * (Masc_tui_keeper_control.outcome, string) result
   | Board_new_post_done of {

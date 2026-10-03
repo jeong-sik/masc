@@ -1008,13 +1008,12 @@ let tool_definition_fields definition =
   | None -> []
 ;;
 
-(* Provider-compat projection (#34033): OpenAI's function tools reject JSON-Schema
-   combinators (enum, oneOf, anyOf, allOf) inside parameter schemas. The
-   dispatcher's [[params]] validation remains the authority for what a tool
-   accepts, so the wire schema can carry the conformant subset without losing
-   enforcement: enum values fold into the description (the model still sees
-   the vocabulary), and a combinator keeps its first variant's shape (the
-   common nullable-optional pattern degrades to the plain member type). *)
+(* Provider-compat projection (#34033): providers requiring the conformant
+   subset receive parameter schemas with enum values folded into descriptions
+   and oneOf/anyOf/allOf removed recursively. Variants are not selected or
+   merged: a schema whose type exists only inside a combinator loses that
+   type information, while sibling fields remain. The dispatcher's [[params]]
+   validation stays authoritative for accepted tool inputs. *)
 let conformant_schema_value json =
   let vocabulary_note values =
     let vocabulary =

@@ -264,6 +264,14 @@ let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
   let* before = read () in
   if blob_reference before.content <> expected then Error "sampling outcome blob digest mismatch"
   else protect (fun () ->
+    if t.root_parent_pending then (
+      let parent_fd = Unix.openfile (Filename.dirname t.root)
+        [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+        if (Unix.fstat parent_fd).Unix.st_kind <> Unix.S_DIR then
+          raise (Sys_error "retained evidence root parent is not a directory");
+        sync_parent parent_fd);
+      t.root_parent_pending <- false);
     let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
       let stat = Unix.fstat fd in

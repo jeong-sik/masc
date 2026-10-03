@@ -1761,7 +1761,17 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
                  timeline_at;
-             span_clock = None;
+             (* Only the request's opening row carries the dispatch-to-now
+                span ("16:38→"), which the layout folds into the body beside
+                [Rail_opens]; [turn_rail_of] hands that rail to this same
+                [Turn_opens] edge, so the two meet here. Settled turns grow
+                the closing clock when their reply row settles. *)
+             span_clock =
+               (match edge with
+                | Masc_tui_types.Turn_opens ->
+                  Some (Printf.sprintf "%s→" (keeper_message_clock message.me_at))
+                | Masc_tui_types.Turn_outside | Turn_alone | Turn_closes
+                | Turn_continues -> None);
              speaker;
              role_label;
              role_label_mark_cells =

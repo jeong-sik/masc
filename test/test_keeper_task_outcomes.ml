@@ -197,6 +197,49 @@ let test_keeper_broadcast_rejects_partial_typed_cache_signal () =
    within one priority the newest task sits last and falls off [limit] first.
    Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
    todo listings because the response gave no sign it had cut anything (#29101). *)
+let test_tasks_list_completed_census_omits_receipts () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore (Masc.Workspace.add_task config ~title:"completed census"
+                 ~priority:3 ~description:"body");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let seed = List.hd backlog.tasks in
+       let notes = String.make 4096 'x' in
+       let tasks = List.init 101 (fun index ->
+         { seed with id = Printf.sprintf "task-%03d" index;
+           task_status = Masc_domain.Done
+             { assignee = "worker"; completed_at = "2026-10-01T18:00:00Z";
+               notes = Some notes } }) in
+       Workspace_backlog.write_backlog config { backlog with tasks };
+       let page fields =
+         Task.handle_keeper_task_tool_with_outcome ~config ~meta:(keeper_meta ())
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc ([ "status", `String "done"; "limit", `Int 100 ] @ fields))
+         |> fun execution -> Option.get execution.data
+       in
+       let first = page [] in
+       let second = page [ "cursor", U.(first |> member "next_cursor") ] in
+       let rows = U.(first |> member "snapshot" |> to_list)
+                  @ U.(second |> member "snapshot" |> to_list) in
+       check int "all completed tasks can be counted" 101 (List.length rows);
+       List.iter (fun row ->
+         check bool "receipt body is absent" false (List.mem "notes" (U.keys row));
+         check string "completion timestamp is retained" "2026-10-01T18:00:00Z"
+           U.(row |> member "completed_at" |> to_string)) rows;
+       let full = page [ "projection", `String "full" ] in
+       let first_full = List.hd U.(full |> member "snapshot" |> to_list) in
+       check string "full projection preserves the receipt" notes
+         U.(first_full |> member "notes" |> to_string);
+       Printf.printf "completed census: compact=%d bytes, full first page=%d bytes\n%!"
+         (String.length (Yojson.Safe.to_string first)
+          + String.length (Yojson.Safe.to_string second))
+         (String.length (Yojson.Safe.to_string full)))
+;;
+
 let test_tasks_list_reports_truncation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -427,6 +470,13 @@ let test_tasks_list_pages_with_cursor () =
        let page2 = page ~cursor:(next page1) 2 in
        check bool "page 2 is cut" true (cut page2);
        let page3 = page ~cursor:(next page2) 2 in
+       List.iter
+         (fun data ->
+           check int "continuations do not replay the discovery window" 0
+             U.(data |> member "new_tasks_count" |> to_int);
+           check int "continuations carry no extra task rows" 0
+             U.(data |> member "new_tasks" |> to_list |> List.length))
+         [ page2; page3 ];
        check bool "the last page is not cut" false (cut page3);
        check bool "the last page carries no cursor" false
          (List.mem "next_cursor" (U.keys page3));
@@ -467,6 +517,84 @@ let test_tasks_list_pages_with_cursor () =
             ~config ~meta ~name:"keeper_tasks_list"
             ~args:(`Assoc [ "limit", `Int 2; "cursor", `Int 7 ]))
          "cursor_unparseable")
+;;
+
+let test_tasks_list_targeted_queries () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore (Masc.Workspace.add_task config ~title:"seed" ~priority:3 ~description:"");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let seed = List.hd backlog.tasks in
+       let working assignee = Masc_domain.InProgress
+         { assignee; started_at = "2026-10-01T18:00:00Z" } in
+       let tasks =
+         [ { seed with id = "a"; title = "Release CI"; task_status = working "alice" }
+         ; { seed with id = "b"; title = "Other"; description = "release contract";
+             task_status = working "alice" }
+         ; { seed with id = "c"; title = "Release docs"; task_status = working "bob" }
+         ; { seed with id = "d"; title = "Release done";
+             task_status = Masc_domain.Done { assignee = "alice";
+               completed_at = "2026-10-01T19:00:00Z"; notes = Some "receipt" } }
+         ] in
+       Workspace_backlog.write_backlog config { backlog with tasks };
+       Workspace_goal_index.write_goal_task_links config [ "goal-a", [ "a"; "b"; "d" ] ];
+       let execute fields = Task.handle_keeper_task_tool_with_outcome
+         ~config ~meta:(keeper_meta ()) ~name:"keeper_tasks_list" ~args:(`Assoc fields) in
+       let page fields =
+         let execution = execute fields in
+         (match execution.disposition with
+          | Tool_result.Completed () -> ()
+          | Tool_result.Deferred () | Tool_result.Failed _ -> fail execution.raw_output);
+         Option.get execution.data
+       in
+       let ids data = U.(data |> member "snapshot" |> to_list
+         |> List.map (fun row -> row |> member "id" |> to_string)) in
+       let filters = [ "assignee", `String "alice"; "goal_id", `String "goal-a";
+                       "query", `String "RELEASE"; "limit", `Int 1 ] in
+       let first = page filters in
+       check (list string) "AND filters select the first matching task" [ "a" ] (ids first);
+       check int "matching count reflects all filters" 2
+         U.(first |> member "matching_count" |> to_int);
+       let newest_ids = U.(first |> member "new_tasks" |> to_list
+         |> List.map (fun row -> row |> member "id" |> to_string)) in
+       check (list string) "discovery uses the same filters" [ "b" ] newest_ids;
+       let cursor = U.(first |> member "next_cursor") in
+       let second = page (("cursor", cursor) :: filters) in
+       check (list string) "cursor reaches description match" [ "b" ] (ids second);
+       let selected = page [ "task_ids", `List [ `String "d"; `String "a" ];
+                             "include_done", `Bool true; "projection", `String "full" ] in
+       check (list string) "known IDs batch full contracts including completion" [ "a"; "d" ] (ids selected);
+       let changed = execute [ "cursor", cursor; "query", `String "RELEASE" ] in
+       (match changed.disposition with
+        | Tool_result.Failed Tool_result.Policy_rejection -> ()
+        | _ -> fail "changed cursor selection was not rejected");
+       let revision = U.(first |> member "revision") in
+       let same = page (("if_revision", revision) :: filters) in
+       check string "same filtered result is unchanged" "unchanged"
+         U.(same |> member "kind" |> to_string);
+       let different_selection = page [ "task_ids", `List [ `String "a" ];
+                                        "limit", `Int 1; "if_revision", revision ] in
+       check string "another selection cannot inherit the revision" "snapshot"
+         U.(different_selection |> member "kind" |> to_string);
+       List.iter (fun field ->
+         match (execute [ field ]).disposition with
+         | Tool_result.Failed Tool_result.Policy_rejection -> ()
+         | _ -> fail "invalid selection was silently ignored")
+         [ "task_ids", `List []; "task_ids", `List [ `Int 1 ];
+           "assignee", `Int 1; "goal_id", `String " "; "query", `String "" ];
+       check (list string) "unlinked Goal has no matches" []
+         (ids (page [ "goal_id", `String "unknown" ]));
+       let path = Workspace_goal_index.goal_task_links_path config in
+       let channel = open_out path in
+       output_string channel "corrupt registry";
+       close_out channel;
+       (match (execute [ "goal_id", `String "goal-a" ]).disposition with
+        | Tool_result.Failed Tool_result.Runtime_failure -> ()
+        | _ -> fail "unreadable Goal registry was presented as an empty selection"))
 ;;
 
 let test_tasks_list_returns_snapshot_and_unchanged () =
@@ -1415,6 +1543,10 @@ let () =
             "keeper_tasks_list is compact by default and full on request"
             `Quick
             test_tasks_list_projection_compact_by_default_full_on_request
+        ; test_case "completed census omits receipts" `Quick
+            test_tasks_list_completed_census_omits_receipts
+        ; test_case "targeted task queries preserve pagination and failures" `Quick
+            test_tasks_list_targeted_queries
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

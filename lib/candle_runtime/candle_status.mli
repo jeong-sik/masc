@@ -46,5 +46,11 @@ val current : base_path:string -> Candle_config.t
 (** Goal control availability and first-use recovery only. A live writer lock
     retains Enabled so Snapshot/Owed's own CAS refuses the transition instead
     of silently skipping its mandatory record. This is not a monetary view. *)
+val for_recording : base_path:string -> Candle_config.t
+(** Configuration and ledger recovery for durable Snapshot and PayoutOwed
+    facts. An unavailable appraiser postpones settlement without discarding
+    these facts. Configuration and recovery failures retain the same
+    Off/Disabled semantics as {!current}. Each append still acquires its lock. *)
+
 val report_at_start : base_path:string -> unit
 val install_appraiser_check : (unit -> (unit, string) result) -> unit

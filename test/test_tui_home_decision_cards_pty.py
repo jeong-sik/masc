@@ -537,6 +537,13 @@ def goal_opens_exact_detail(executable):
         visible = h.screen_text(bytes(output))
         assert b"goal-home-exact" in visible and b"metric-goal-home-exact" in visible, visible
         assert b"metric-goal-home-other" not in visible, visible
+        # Stable phase/priority ordering is [other, exact]. The initial Planning
+        # cursor is zero; Home must bind it to exact before relative navigation.
+        h.send_and_wait(process, fd, output, b"[", b"Other goal confirmation")
+        visible = h.screen_text(bytes(output))
+        assert b"metric-goal-home-other" in visible, visible
+        h.send_and_wait(process, fd, output, b"]", b"Exact goal confirmation")
+        assert b"metric-goal-home-exact" in h.screen_text(bytes(output))
         assert path.read_bytes() == before
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")

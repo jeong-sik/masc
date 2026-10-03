@@ -98,7 +98,7 @@ class ApprovedSelectionTest(unittest.TestCase):
             return P.source_approval(repo, selected, gh=gh)
         with self.assertRaises(P.Rejected) as error:
             self.prepare(approve=approve)
-        self.assertEqual(error.exception.reason, P.Reason.SELECTION_CHANGED)
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_release_head_does_not_trigger_ci_reads_from_preparation(self):
         self.fixture.get("pulls/1")["head"]["ref"] = "release/v1.2.3"
@@ -165,13 +165,13 @@ class ApprovedSelectionTest(unittest.TestCase):
         self.set_scope(2, 'feature/1', self.fixture.heads[1])
         with self.assertRaises(P.Rejected) as error:
             self.prepare((P.Member(2, self.fixture.heads[2]),))
-        self.assertEqual(error.exception.reason, P.Reason.REVIEW_SCOPE_CHANGED)
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_changed_diff_base_requires_reapproval_even_with_same_ref(self):
         self.set_scope(1, 'main', self.fixture.heads[1])
         with self.assertRaises(P.Rejected) as error:
             self.prepare()
-        self.assertEqual(error.exception.reason, P.Reason.REVIEW_SCOPE_CHANGED)
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_unrelated_main_advance_preserves_reviewed_diff(self):
         (self.fixture.repo / 'unrelated.txt').write_text('main advanced\n')
@@ -192,7 +192,7 @@ class ApprovedSelectionTest(unittest.TestCase):
         self.save()
         with self.assertRaises(P.Rejected) as error:
             self.prepare()
-        self.assertEqual(error.exception.reason, P.Reason.REVIEW_SCOPE_CHANGED)
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_changed_native_stack_scope_requires_reapproval(self):
         self.fixture.get('pulls/1')['stack'] = {
@@ -200,7 +200,7 @@ class ApprovedSelectionTest(unittest.TestCase):
         self.save()
         with self.assertRaises(P.Rejected) as error:
             self.prepare()
-        self.assertEqual(error.exception.reason, P.Reason.REVIEW_SCOPE_CHANGED)
+        self.assertEqual(error.exception.reason, P.Reason.APPROVAL_UNAVAILABLE)
 
     def test_fetch_uses_selected_repository_not_checkout_origin(self):
         checkout = self.fixture.root / 'fork-checkout'

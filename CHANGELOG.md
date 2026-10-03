@@ -113,6 +113,8 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 
 ### Fixed
 
+- Show schedule editor and server refusal diagnostics in the TUI Schedules pane when workspace warnings occupy the footer. Long diagnostics reserve space for the selected schedule and remain readable in its detail view.
+
 - Declare a second Muse account from an existing `muse-serve` provider: the copy signs in at a new `account-home`, and the Config form shows the `HOME=<home> muse login` sign-in. #39578
 - The Verification screen reads the server's current cancelled, unreviewed and empty-approval-reason answers correctly, and the Lanes table now tells an empty recent observation window apart from run history that was not kept (#39807).
 - Show active runtime rate limits in the TUI list, details and assignment picker. Provider Retry-After expiry and successful answers clear the observation; narrow picker rows retain combined quota and rate-limit warnings. Missing rate-limit observations fail decoding instead of appearing ready. (#39815)

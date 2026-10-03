@@ -13200,9 +13200,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.workspace_identity <> Workspace_identity_match
         || Option.is_some state.keepers_error
       in
-      let previous_authority = state.detail_read_authority in
+      let previous_detail_authority = state.detail_read_authority in
       apply_http_surfaces state ~mailbox results;
-      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority;
+      refresh_visible_detail_after_authority_recovery state ~mailbox
+        ~previous_authority:previous_detail_authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (match state.view with

@@ -695,7 +695,7 @@ let test_memory_surface_keeps_the_starvation_axes () =
     ; "mkh_librarian"
     ];
   Alcotest.(check bool) "the title names the starving count" true
-    (calls_in ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_memory"
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_memory"
        ~callee:"current_memory_starving_count" > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
     (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);

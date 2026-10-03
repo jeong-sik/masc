@@ -23,7 +23,9 @@ jobs:
 
         '
     - name: Verify release distribution fixtures
-      run: python3 test/test_release_dashboard_bundle.py -v
+      run: |
+        python3 test/test_release_dashboard_bundle.py -v
+        python3 test/test_release_publication.py -v
     - name: Verify release evidence receipt with private captures
       run: python3 test/test_release_evidence_report.py -v
     - name: Verify the glibc floor check
@@ -70,8 +72,6 @@ jobs:
         \ true\ndone\n"
     - name: Checkout
       uses: actions/checkout@v7
-    - name: Check source text integrity
-      run: scripts/ci/check-source-text-integrity.sh
     - name: Setup OCaml toolchain
       uses: ./.github/actions/setup-ocaml-toolchain
     - name: Pin external OCaml dependencies

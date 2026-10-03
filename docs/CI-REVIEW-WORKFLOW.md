@@ -33,11 +33,16 @@ verification and does not grant merge permission.
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
 profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
-requires an explicit `publish=true` dispatch on an existing version tag and full
-successful verification. Development and release-profile OCaml type checks share
+uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
+`publish=true`. The tagged commit must match the latest successful full RC.
+The publication job verifies its receipt and artifact checksums and uploads the
+existing distribution; it does not rebuild or rerun tests. A publication run is
+not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
 one toolchain job; node behavior and stanza regeneration run only under the
-behavior lane's root `@runtest`. Test-only presentation tools and standalone-runner
-fixtures are not installed or executed by the typecheck job. The dashboard is
+behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
+there is no known-failure exemption list or second standalone compilation pass.
+The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
+Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and backend-coupled dashboard tests stay in their own job.
 Installer script tests run once on Linux in the distribution
@@ -64,3 +69,16 @@ failures. Bulk source-style lints, prose rules, byte inventories, historical cou
 and recursive checks about other checks are not release gates. Feature work
 continues while verification runs; agents do not watch, wait or repeatedly poll.
 The disabled hosted workflows are not enabled by editing these source definitions.
+
+To publish a verified candidate after creating its version tag, use the same
+commit's completed full RC run:
+
+```bash
+gh workflow run release.yml --ref vX.Y.Z -f rc_run_id=RUN_ID -f publish=true
+```
+
+The current-attempt receipt and the run's assembled distribution must remain
+available. A failed-job rerun can reuse installation artifacts from an earlier
+successful job in the same run. The exact RC-checked release body travels with
+the receipt and is not regenerated at publication. Missing or expired artifacts require another RC; rebuilding inside the
+publication job would no longer publish the bytes that were verified.

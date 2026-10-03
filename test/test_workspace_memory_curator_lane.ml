@@ -230,6 +230,41 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Worker.For_testing.stop ~base_path)))
 
+let test_subscriber_cancellation_keeps_commit_receipt () = with_registry (fun () ->
+  let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
+  registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore;
+  let prepare lane =
+    registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes:[lane]
+      ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
+  let notified = ref 0 in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+      (fun () -> incr notified) in
+  (* Subscribers run newest first: cancellation must not skip the earlier
+     subscriber or hide the write's committed result. *)
+  let unsubscribe_cancel = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+      (fun () -> raise (Eio.Cancel.Cancelled (Failure "cancelled subscriber"))) in
+  Fun.protect ~finally:(fun () -> unsubscribe_cancel (); unsubscribe ()) (fun () ->
+    let changed = { curator_lane with max_output_tokens = Some 100 } in
+    (match Registry.transact_replacement (prepare changed)
+        ~apply_write:(fun () -> Registry.Committed "saved") |> registry_ok with
+     | Registry.Committed receipt -> Alcotest.(check string) "committed receipt returned" "saved" receipt
+     | Registry.Not_committed _ -> Alcotest.fail "notification hid a committed write");
+    let current = Registry.current () |> registry_ok in
+    Alcotest.(check bool) "replacement remains published" true
+      (Registry.declared_lane current ~lane_id:curator_lane.id = Some changed);
+    Alcotest.(check int) "other subscriber receives committed change" 1 !notified;
+    (* Cancellation at the write boundary is still pre-publication and must
+       escape; only post-commit callback exceptions are isolated. *)
+    let cancelled = try
+        ignore (Registry.transact_replacement (prepare curator_lane)
+          ~apply_write:(fun () -> raise (Eio.Cancel.Cancelled (Failure "cancelled write"))));
+        false
+      with Eio.Cancel.Cancelled _ -> true in
+    Alcotest.(check bool) "write cancellation still propagates" true cancelled;
+    Alcotest.(check bool) "cancelled write keeps prior publication" true
+      (registry_ok (Registry.current ()) == current);
+    Alcotest.(check int) "cancelled write sends no recovery signal" 1 !notified))
+
 let test_publication_during_failed_call_keeps_wake () = with_registry (fun () ->
   with_base (fun base_path clock ->
     let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
@@ -273,5 +308,7 @@ let () = Alcotest.run "workspace curator lane"
         test_enable_publication_resumes_existing_fact
     ; Alcotest.test_case "configuration recovery requires relevant committed publication" `Quick
         test_transaction_recovery_is_relevant_and_committed
+    ; Alcotest.test_case "subscriber cancellation preserves committed receipt" `Quick
+        test_subscriber_cancellation_keeps_commit_receipt
     ; Alcotest.test_case "publication survives an in-flight failure" `Quick
         test_publication_during_failed_call_keeps_wake ] ]

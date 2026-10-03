@@ -194,17 +194,15 @@ let changed_subscribers ~previous ~current =
 ;;
 
 let notify_lane_changes subscriptions =
-  let cancellation = ref None in
+  (* Publication is already committed. A wake callback's cancellation is a
+     subscriber failure, not cancellation of the preceding write: propagating
+     it would hide the committed receipt from the runtime-config caller.
+     Callbacks only signal work; cancellation from [apply_write] still escapes
+     through [transact_replacement]'s pre-publication exception path. *)
   List.iter (fun subscription ->
     try subscription.wake () with
-    | Eio.Cancel.Cancelled _ as error ->
-      if Option.is_none !cancellation then
-        cancellation := Some (error, Printexc.get_raw_backtrace ())
     | exn -> Log.Misc.warn "exact-output lane publication subscriber failed lane=%s: %s"
-        subscription.lane_id (Printexc.to_string exn)) subscriptions;
-  match !cancellation with
-  | None -> ()
-  | Some (error, backtrace) -> Printexc.raise_with_backtrace error backtrace
+        subscription.lane_id (Printexc.to_string exn)) subscriptions
 ;;
 
 let ( let* ) = Result.bind

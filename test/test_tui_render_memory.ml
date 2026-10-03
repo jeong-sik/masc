@@ -2249,9 +2249,45 @@ let test_memory_state_tracks_current_pass_not_history () =
   check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
 ;;
 
+let test_memory_input_summary_survives_units_and_detail_folding () =
+  let module Usage = Masc_tui_memory_usage in
+  let state = make_state () in
+  state.memory_health <- Some (make_fleet_health
+    (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:262144));
+  let snapshot : Usage.t =
+    { records = 4
+    ; tokens = { distribution = Some { samples = 3; mean = 100.; minimum = 0; maximum = 300 }; last = None }
+    ; bytes = { distribution = Some { samples = 2; mean = 1536.; minimum = 1024; maximum = 2048 }; last = Some 2048 }
+    } in
+  let answer result =
+    match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key:"alpha" with
+    | Already_loading -> fail "fixture was already loading"
+    | Started (next, request) ->
+      state.memory_input <- Masc_tui_fetched.complete ~equal:String.equal next request result in
+  answer (Ok snapshot);
+  check bool "token units by default" true (state.memory_unit = Usage.Tokens);
+  List.iter (fun detail ->
+    state.memory_overview_detail <- detail;
+    List.iter (fun cols ->
+      let text = String.concat "\n" (body_lines ~cols ~budget:20 state) in
+      List.iter (fun needle -> check bool ("visible input " ^ needle) true (contains needle text))
+        ["Input tok"; "avg 100"; "max 300"; "min 0"; "last unreported"; "3/4 measured"])
+      [80; 140]) [false; true];
+  state.memory_unit <- Usage.next_unit state.memory_unit;
+  let bytes = String.concat "\n" (body_lines ~cols:80 ~budget:20 state) in
+  List.iter (fun needle -> check bool ("visible byte input " ^ needle) true (contains needle bytes))
+    ["Request KiB"; "avg 1.5"; "max 2.0"; "min 1.0"; "last 2.0"; "2/4 measured"];
+  state.memory_unit <- Usage.next_unit state.memory_unit;
+  answer (Error "read failed");
+  let stale = String.concat "\n" (body_lines ~cols:80 ~budget:22 state) in
+  check bool "failed refresh marks retained values stale" true (contains "stale" stale);
+  check bool "failed refresh retains observed statistics" true (contains "avg 100" stale)
+;;
+
 let () =
   run "tui_render_memory"
-    [ ( "age_label"
+    [ "input statistics", [test_case "units and folded detail" `Quick test_memory_input_summary_survives_units_and_detail_folding]
+    ; ( "age_label"
       , [ test_case "age_label_formatting" `Quick test_age_label ] )
     ; ( "row_lines"
       , [ test_case "fact_row" `Quick test_fact_row_line

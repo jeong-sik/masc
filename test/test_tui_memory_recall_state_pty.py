@@ -31,6 +31,8 @@ def run(executable, baseline=False):
         def interact(process, fd, _slave, output, _base):
             h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
             h.wait_for_output(process, fd, output, b"Memory saved", start=0, timeout=10)
+            if not baseline:
+                h.send_and_wait(process, fd, output, b"u", b"256.0 KiB")
             for columns in (140, 80):
                 frame = h.resize_and_wait(process, fd, output, rows=40, columns=columns,
                                          needle=b"Memory saved", controls=(h.FULL_REDRAW,),

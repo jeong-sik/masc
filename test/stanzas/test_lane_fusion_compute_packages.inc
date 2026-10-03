@@ -9,7 +9,7 @@
        ../addons/fusion-results/lane.toml
        ../addons/tests/test_fusion_compute.py ../addons/tests/test_fusion_report.py
        ../addons/tests/test_fusion_results.py ../addons/tests/test_packages.py
-       ../addons/tests/stdio_fixture.py
+       ../addons/tests/stdio_fixture.py ../addons/output-statistics/server.py
        (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml))
  (action (progn
   (run python3 %{dep:test_lane_fusion_compute_packages.py})

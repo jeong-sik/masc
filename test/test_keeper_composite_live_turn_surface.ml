@@ -371,6 +371,36 @@ let test_run_state_suspended_for_non_running_phase () =
     (J.member "phase" rs |> J.to_string)
 ;;
 
+let test_live_turn_survives_non_running_lifecycle () =
+  let base = temp_base () in
+  List.iter (fun phase ->
+    let phase_name = Keeper_state_machine.phase_to_string phase in
+    let name = "live-" ^ phase_name in
+    ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+    (match Keeper_registry.update_entry ~base_path:base name (fun entry -> { entry with phase }) with
+     | Ok () -> ()
+     | Error _ -> fail "could not set lifecycle fixture");
+    let token = Masc.Keeper_turn_observation_token.fresh () in
+    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+      ~wake:Keeper_registry.Chat_request name;
+    Keeper_registry.record_turn_tool_inflight ~observation_token:token ~base_path:base name ~count:2;
+    let read () =
+      match Keeper_registry.get ~base_path:base name with
+      | None -> fail "keeper disappeared"
+      | Some entry -> Observer.snapshot_to_json (Observer.observe entry) in
+    let live = read () in
+    check string "lifecycle remains visible beside execution" phase_name
+      (J.member "phase" live |> J.to_string);
+    check string "live execution wins over non-running lifecycle" "in_turn"
+      (J.member "run_state" live |> J.member "kind" |> J.to_string);
+    check int "active tools survive projection" 2
+      (J.member "run_state" live |> J.member "active_tool_count" |> J.to_int);
+    Keeper_registry.mark_turn_finished ~observation_token:token ~base_path:base name;
+    check string "without a live turn the lifecycle explains suspension" "suspended"
+      (J.member "run_state" (read ()) |> J.member "kind" |> J.to_string))
+    Keeper_state_machine.[Failing; Paused; Draining]
+;;
+
 (* ── Idle default shape: additive fields degrade to null/zero ───────── *)
 
 let test_idle_defaults_are_null_or_zero () =
@@ -419,6 +449,8 @@ let () =
             test_run_state_waiting_when_running_idle;
           test_case "suspended for a non-Running phase" `Quick
             test_run_state_suspended_for_non_running_phase;
+          test_case "live execution survives a non-running lifecycle" `Quick
+            test_live_turn_survives_non_running_lifecycle;
         ] );
       ( "board",
         [

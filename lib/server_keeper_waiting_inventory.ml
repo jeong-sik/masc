@@ -63,6 +63,19 @@ let source_to_string = function
   | Read_error -> "read_error"
 ;;
 
+let source_of_string = function
+  | "event_queue_pending" -> Ok Event_queue_pending
+  | "chat_operation_queued" -> Ok Chat_operation_queued
+  | "chat_operation_running" -> Ok Chat_operation_running
+  | "hitl_pending" -> Ok Hitl_pending
+  | "fusion_running" -> Ok Fusion_running
+  | "schedule_waiting" -> Ok Schedule_waiting
+  | "owner_shutdown" -> Ok Owner_shutdown
+  | "operator_pending_confirm" -> Ok Operator_pending_confirm
+  | "read_error" -> Ok Read_error
+  | value -> Error (Printf.sprintf "Unknown Keeper inventory source: %S" value)
+;;
+
 let all_waiting_sources =
   [ Event_queue_pending
   ; Chat_operation_queued
@@ -564,7 +577,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_queued
           ; waiting_on = "owner_fifo"
-          ; what = Printf.sprintf "운영자 채팅 %d건 대기" projection.queued_count
+          ; what = Printf.sprintf "대화 요청 %d건 대기" projection.queued_count
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None
@@ -580,7 +593,7 @@ let chat_operation_rows ~base_path keeper_name =
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_running
           ; waiting_on = "keeper_turn"
-          ; what = "운영자와 진행 중인 대화"
+          ; what = "진행 중인 대화 요청"
           ; wake_producer = Keeper_owner_actor
           ; since = None
           ; due_at = None

@@ -138,10 +138,11 @@ type board_cursor = {
 (** Total run-state classification (#16, 38-bug campaign PR-5). Previously
     the dashboard collapsed "actively executing a turn", "idle waiting for
     proactive cadence", and "reactively woken (and by what stimulus)" into
-    a single "진행 중 / 실행 중" label. Precedence: [phase <> Running]
-    always yields [Suspended] (the phase itself explains why the keeper is
-    not runnable); otherwise a live turn yields [In_turn]; otherwise
-    [Waiting]. *)
+    a single "진행 중 / 실행 중" label. A live turn yields [In_turn]
+    independently of lifecycle phase; a prior failure or paused admissions
+    do not erase an execution that still owns its observation. With no live
+    turn, [Running] yields [Waiting] and other phases yield [Suspended].
+    The lifecycle phase remains separately available on [snapshot]. *)
 type run_state =
   | In_turn of {
       rs_wake : Keeper_registry.wake_reason;
@@ -151,8 +152,9 @@ type run_state =
   | Waiting of {
       rs_queue_depth : int;
           (** [Keeper_event_queue.length] of the entry's event queue at
-              observation time — stimuli already enqueued but not yet
-              drained by a turn. *)
+              observation time — durable stimuli not yet acknowledged.
+              This count alone does not establish whether a turn admitted
+              an individual source. *)
       rs_last_skip : last_skip option;
     }
   | Suspended of Keeper_state_machine.phase

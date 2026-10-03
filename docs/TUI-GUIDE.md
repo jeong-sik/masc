@@ -1359,6 +1359,14 @@ hands back the line that is waiting rather than stepping over it into what was
 already delivered. The draft is put aside on the first step back and returned
 on the way forward past the newest.
 
+`/queue` reads the selected Keeper's server inventory. Its counts separate
+pending inputs, running work, future schedules, due schedules and unavailable
+sources. An aggregated chat row counts every queued request. Future schedules
+show their due instant instead of treating their creation age as waiting time.
+Pending events are durable sources not yet acknowledged; they may already be
+part of the current turn. This inventory does not prove individual admission
+or completion of an external effect.
+
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders

@@ -32,6 +32,9 @@ completed output is a frozen capture, not a live mirror of arbitrary Board edits
 Native `fusion_run` captures are visible to the authoritative registry Keeper
 and to the operator. HTTP access uses verified operator or agent credentials;
 local actor attribution and player credentials cannot grant private source access.
+The MCP facade also carries verified Lane authority separately from the attributed
+name; omitted authority is unauthenticated. Unreadable retained visibility is
+omitted from inventory without discarding its evidence or exposing its rows.
 Unknown and foreign run identities receive the same acquisition denial.
 
 Every retained binding records a strict read visibility: shared, operator, or one
@@ -62,6 +65,11 @@ The native regression fixtures cover direct and historical access, unverified
 attribution, private graph propagation, subscription cursor preservation and an
 upstream shared-to-private replacement. These are pending native execution; this
 change does not claim current-head CI or production validation.
+
+Prepared Broadcast operations retain the same strict visibility and exact saved
+caller identity. A verified retry authorizes that durable operation before looking
+up the original source binding, so its committed receipt remains recoverable after
+source removal. Unverified attribution and foreign callers cannot retrieve it.
 
 ## Composer
 
@@ -158,3 +166,36 @@ retained from historical integration commit
 `preview-checks.json`; they are not screenshots or browser execution of this
 merged revision. The parent preview bundle is separately archived as described
 in `docs/evidence/fusion-report-20260930/README.md`.
+
+## Explicit report sharing
+
+The host Evidence operation requires a caller-generated `request_id` for every
+`broadcast=true` send. An unanswered send is retried with its original ID; a new
+deliberate send uses a fresh ID even for the same selected rows. The TUI retains
+unacknowledged IDs until a committed receipt and carries them across reopening
+that evidence selection. The host retains the first published artifact and
+reconciles the authoritative message by its exact derived workspace request ID,
+so a retry can recover its receipt while the original fleet fanout is blocked.
+This does not claim fleet delivery or reading has finished.
+
+The host Evidence operation accepts `broadcast=true` as an explicit alternative
+to a single `keeper_name`. The TUI export menu offers workspace sharing after
+the named Keeper choices and defaults to preservation only. Enter submits;
+selection and cancellation do not publish a message.
+
+The host publishes the selected immutable evidence as Keeper-readable artifacts
+and sends the exact artifact marker through the existing workspace Broadcast
+authority with `Fleet_conversation` audience. Report bodies remain inside the
+retained artifacts, so untrusted text cannot introduce message mentions.
+The receipt carries the committed message's request ID and sequence. A failed
+publication preserves evidence; an unexpected recipient exception has an
+unknown outcome and never triggers automatic resend. Non-cancellation failures
+in the postcommit observation hook are logged without discarding the receipt.
+
+The native composition scenario checks the actual isolated workspace message
+row against its receipt and the same artifact sent to the selected Keeper.
+A separate failure scenario checks rejected writes, caller requirements, invalid
+destinations, retained evidence, and absence of automatic resend. The PTY
+scenario checks selection, cancellation, explicit submission and visible receipt
+using controlled HTTP data. All native/PTY execution remains pending current-head
+CI; no live fleet Broadcast or model use is claimed.

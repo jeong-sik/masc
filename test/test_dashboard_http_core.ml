@@ -3643,6 +3643,19 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   check string "ETag identifies the exact response bytes"
     (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
   let open Yojson.Safe.Util in
+  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
+  let keeper_money json field =
+    json |> member field |> to_list |> List.map (fun row ->
+      `List (List.map (fun key -> member key row)
+        ["name"; "portrait"; "candle_balance_milli"; "candle_account_revision"])) in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check bool "HTTP fill and warm read preserve the fixture Candle summary" true
+      (member "candle" payload.json = member "candle" expected);
+    List.iter (fun field ->
+      check bool ("HTTP fixture preserves money and portraits in " ^ field) true
+        (keeper_money payload.json field = keeper_money expected field))
+      ["keepers"; "continuity_briefs"])
+    [first; second];
   check string "actor metadata is part of cached body" "alice"
     (first.json |> member "query" |> member "actor" |> to_string);
   check string "workspace metadata is part of cached body" config.workspace_path

@@ -10,6 +10,7 @@ type subscription = {keeper_name:string; run_id:string; installation_id:string; 
 type operation = Inspect | Save | Read | Acknowledge
 val json : subscription -> Yojson.Safe.t
 val decode : Yojson.Safe.t -> (subscription, string) result
+(** Omitted [access] is unauthenticated; caller text cannot grant private ownership. *)
 val dispatch : ?access:Lane_addon_sources.access -> config:Workspace.config -> caller:string -> operation:operation ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** [caller] selects a subscription; only explicit, verified [access] grants

@@ -240,6 +240,26 @@ let test_mosaic_previews_every_catalog_accessory () =
       expected.Draw.rgba shown.Portrait.image.Draw.rgba)
     Keeper_portrait_item.all
 
+let test_mosaic_previews_every_catalog_accessory () =
+  let cache = Portrait.cache () in
+  let bare = Option.get (band ~cache ()) in
+  List.iter (fun item ->
+    let equipment = Keeper_portrait_item.preview item Look.bare in
+    let shown = Option.get (band ~cache ~equipment ()) in
+    let id = Keeper_portrait_item.id item in
+    check bool (id ^ " changes the Mosaic portrait") false
+      (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
+    let body = Look.body_of_name alpha in
+    let expected = match Keeper_portrait_item.slot item with
+      | Keeper_portrait_item.Base ->
+          Draw.render_compact_posed body equipment Draw.still shown.Portrait.box.View.size
+      | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
+      | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
+          Draw.render body equipment shown.Portrait.box.View.size in
+    check string (id ^ " preserves equipped rendering")
+      expected.Draw.rgba shown.Portrait.image.Draw.rgba)
+    Keeper_portrait_item.all
+
 
 let test_item_mosaic_preview_changes_with_selected_accessory () =
   let previous = View.current_display () in

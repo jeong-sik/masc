@@ -408,6 +408,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
+  Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
   (* Exclusive startup ownership: before any new server request can submit a
      worker, settle disk-only nonterminal rows left by the prior process.  Poll
      and cancel deliberately cannot infer process death, so this bootstrap

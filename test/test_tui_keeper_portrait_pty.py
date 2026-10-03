@@ -858,6 +858,87 @@ def item_account_refreshes_without_public_currency(binary: str) -> None:
         refresh=0.5, terminal_cols=200)
 
 
+def item_account_survives_partial_roster_refresh(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    public_roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    # Alpha is known in the local workspace but omitted from this capped page.
+    partial = dict(public_roster, count=1, total=2, truncated=True,
+                   keepers=[row for row in public_roster["keepers"] if row["name"] == "beta"])
+    observed = {"roster_reads": 0, "held_reads": 0, "hold": False, "failed": False}
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+             "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
+                 {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
+                 for item, slot in ITEM_CATALOG]}
+    held = h.GatedHttpResponse((200, dict(ready, balance_milli="13000")), hold_seconds=30.0)
+    following = h.GatedHttpResponse((200, dict(ready, balance_milli="14000")), hold_seconds=30.0)
+
+    def roster():
+        observed["roster_reads"] += 1
+        return ((503, {"error": "roster unread"}) if observed["failed"] else (200, partial))
+
+    def account():
+        if held.release.is_set():
+            return following()
+        if observed["hold"]:
+            observed["held_reads"] += 1
+            return held()
+        return 200, ready
+
+    items = ItemWorkspaceFixture(account)
+    fixtures["/api/v1/gate/keepers?detailed=true"] = roster
+    fixtures["/api/v1/keepers/alpha/items"] = h.PathHttpResponse(items.read)
+
+    def interact(process, fd, _slave, output, _base):
+        def text():
+            return b"\n".join(last_frame_rows(output).values())
+
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            assert b"Selected: 1.000" in text() and b"1.000 owned" in text()
+            observed["hold"] = True
+            assert h.wait_for_fixture_event(process, fd, output, held.requested, timeout=10), \
+                "successful partial roster did not refresh the authoritative Item account"
+            before = observed["roster_reads"]
+            # A following serial roster request proves that the preceding
+            # successful cadence was applied while the Item reply stayed held.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: observed["roster_reads"] >= before + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output)
+            capture_item_screen(output, "partial-roster-held-account")
+            assert b"Balance 12.500 Candle" in text(), \
+                f"partial roster withdrew the loaded account during its refresh: {observed!r}; {text()!r}"
+            assert b"Selected: 1.000" in text() and b"1.000 owned" in text(), \
+                "partial roster withdrew authoritative prices or ownership"
+            assert observed["held_reads"] == 1, \
+                f"partial roster replaced the pending Item read: {observed!r}"
+            # Only the held answer has 13.000: a replacement request must not
+            # make a rejected original response look like successful refresh.
+            # Later cadence replies stay gated until that answer is observed,
+            # so a newer valid reply cannot overtake the screen assertion.
+            held.release.set()
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"Balance 13.000 Candle" in text(), timeout=10)
+            capture_item_screen(output, "partial-roster-account-refreshed")
+            following.release.set()
+            observed["failed"] = True
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"Account unavailable:" in text() and b"Balance " not in text(), timeout=10), \
+                f"failed roster retained the Item account: {text()!r}"
+            assert b"1.000 owned" not in text() and b"Selected: 1.000" not in text()
+            capture_item_screen(output, "partial-roster-failure-withdrawn")
+            os.write(fd, b"q")
+        finally:
+            held.release.set()
+            following.release.set()
+
+    h.run_terminal_scenario(binary,
+        description="partial roster preserves an authoritative Item account and one pending refresh",
+        interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=COLUMNS)
+
+
 def item_account_withdraws_unread_authority(binary: str, boundary="identity") -> None:
     fixtures = item_roster_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
@@ -1114,6 +1195,7 @@ if __name__ == "__main__":
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
     item_account_refreshes_without_public_currency(binary)
+    item_account_survives_partial_roster_refresh(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_private_changes(binary)
@@ -1126,4 +1208,4 @@ if __name__ == "__main__":
     instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
     instructions_read_recovers_workspace_authority(binary, leave=True)
     instructions_read_recovers_workspace_authority(binary, fallback_exit=True)
-    print("tui keeper portrait: PASS (16 scenarios)")
+    print("tui keeper portrait: PASS (17 scenarios)")

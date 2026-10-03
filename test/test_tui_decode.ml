@@ -9897,6 +9897,232 @@ let lane_run_detail_json ?(output = true) run_id =
       )
     ]
 
+let test_librarian_preflight_detail_reports_actual_route () =
+  let preflight decision =
+    let probs = match decision with
+      | "keep_current" -> ["keep_current", `Float 0.9; "needs_generation", `Float 0.05; "uncertain", `Float 0.05]
+      | "needs_generation" -> ["keep_current", `Float 0.05; "needs_generation", `Float 0.9; "uncertain", `Float 0.05]
+      | _ -> ["keep_current", `Float 0.05; "needs_generation", `Float 0.05; "uncertain", `Float 0.9]
+    in
+    `Assoc
+      ["status", `String "judged"; "decision", `String decision;
+       "confidence", `Float 0.9;
+       "probabilities", `Assoc probs;
+       "model", `String "jev-fixture"; "elapsed_s", `Float 0.1;
+       "destination", `Assoc ["destination_uri", `String "https://jev.invalid/v1/evaluate";
+                              "model", `String "jev-requested"];
+       "request_body_sha256", `String (String.make 64 'a'); "passed_over", `List []] in
+  let make ?(rejection = `Null) ~decision ~path ~skipped () =
+    match lane_run_detail_json "librarian-preflight" with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc
+        (("selected_slot", (if path = "full_lane" then `String "fixture-generation" else `Null)) ::
+         ("lane", `String "librarian_exact") ::
+         ("output", `Assoc ["jev_preflight", preflight decision;
+                             "generation_path", `String path;
+                             "full_llm_skipped", `Bool skipped;
+                             "preflight_domain_rejection", rejection]) ::
+         List.remove_assoc "selected_slot" (List.remove_assoc "output" (List.remove_assoc "lane" fields)))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let detail = Tui_decode.decode_lane_run_detail
+    (make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true ())
+    |> Result.get_ok in
+  (match detail.lrd_librarian_preflight with
+   | Some {lp_generation_path = Tui_decode.Generation_jev_no_change;
+           lp_full_llm_skipped = true; lp_model = Some "jev-fixture"; _} -> ()
+   | _ -> Alcotest.fail "actual JEV route not decoded");
+  Alcotest.(check bool) "JEV does not invent Board provenance" true
+    (detail.lrd_answer_source = None);
+  let invented_slot = match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("selected_slot", `String "codex.fake") :: List.remove_assoc "selected_slot" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "no-change must not invent a generation slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
+  let with_status status = function
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("status", `String status) :: List.remove_assoc "status" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  let full_lane_without_slot status =
+    match make ~decision:"needs_generation" ~path:"full_lane" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let fields = ("selected_slot", `Null) :: List.remove_assoc "selected_slot" fields in
+      let fields = if status = "failed" then
+        ("code", `String "interrupted") :: ("detail", `String "before slot selection") :: fields
+        else fields in
+      `Assoc ["run", `Assoc fields] |> with_status status
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "successful full lane requires its served slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (full_lane_without_slot "succeeded")));
+  List.iter (fun status ->
+    Alcotest.(check bool) (status ^ " may stop before slot selection") true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (full_lane_without_slot status))))
+    ["failed"; "cancelled"];
+  let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+      let awaiting = `Assoc ["status", `String "awaiting_answer"; "elapsed_s", `Null] in
+      `Assoc ["run", `Assoc (("selected_slot", slot) ::
+        ("output", `Assoc (("jev_preflight", awaiting) :: List.remove_assoc "jev_preflight" output)) ::
+        List.remove_assoc "output" (List.remove_assoc "selected_slot" fields))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "awaiting without generation or slot is valid" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (not_entered `Null |> with_status "cancelled")));
+  Alcotest.(check bool) "not-entered must not invent a generation slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (not_entered (`String "codex.fake") |> with_status "cancelled")));
+  Alcotest.(check bool) "successful run cannot retain awaiting preflight" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (not_entered `Null |> with_status "succeeded")));
+  let persistence status intended json = match json with
+    | `Assoc ["run", `Assoc fields] ->
+      let intended_fields = match intended with
+        | None -> [] | Some value -> ["intended_status", `String value] in
+      let failed_fields = if intended = Some "failed" then
+        ["intended_code", `String "interrupted"; "intended_detail", `String "before selection"]
+        else [] in
+      `Assoc ["run", `Assoc
+        (("status", `String status) :: ("persistence_error", `String "append failed") ::
+         ("persistence_state", `String
+           (if status = "completion_persistence_failed" then "not_persisted" else "durability_unknown")) ::
+         intended_fields @ failed_fields @ List.remove_assoc "status" fields)]
+    | _ -> Alcotest.fail "invalid persistence fixture" in
+  List.iter (fun status ->
+    List.iter (fun intended ->
+      Alcotest.(check bool) "intended success cannot claim awaiting preflight" true
+        (Result.is_error (Tui_decode.decode_lane_run_detail
+          (persistence status intended (not_entered `Null))))
+    ) [Some "succeeded"; None; Some "running"; Some "invented"];
+    Alcotest.(check bool) "intended full-generation success requires slot" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (persistence status (Some "succeeded") (full_lane_without_slot "succeeded"))));
+    List.iter (fun intended ->
+      Alcotest.(check bool) "intended failure or cancellation can precede generation" true
+        (Result.is_ok (Tui_decode.decode_lane_run_detail
+          (persistence status (Some intended) (not_entered `Null))))
+    ) ["failed"; "cancelled"];
+    List.iter (fun (decision, path, skipped) ->
+      Alcotest.(check bool) "valid intended success survives persistence failure" true
+        (Result.is_ok (Tui_decode.decode_lane_run_detail
+          (persistence status (Some "succeeded") (make ~decision ~path ~skipped ()))))
+    ) ["needs_generation", "full_lane", false; "keep_current", "jev_no_change", true]
+  ) ["completion_persistence_failed"; "completion_durability_unknown"];
+  let without_observation output =
+    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("output", `Assoc output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "output without any preflight bundle remains valid" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (without_observation [])));
+  List.iter (fun (field, value) ->
+    Alcotest.(check bool) ("route field without observation rejected: " ^ field) true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (without_observation [field, value]))))
+    ["generation_path", `String "jev_no_change";
+     "full_llm_skipped", `Bool true; "preflight_domain_rejection", `Null];
+  let replace_preflight ~path observation =
+    match make ~decision:"uncertain" ~path ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+      `Assoc ["run", `Assoc (("output", `Assoc (("jev_preflight", observation)
+        :: List.remove_assoc "jev_preflight" output)) :: List.remove_assoc "output" fields)]
+      |> with_status (if path = "not_entered" then "cancelled" else "succeeded")
+    | _ -> Alcotest.fail "invalid fixture" in
+  let fields = function `Assoc fields -> fields | _ -> Alcotest.fail "invalid observation" in
+  let with_field key value observation =
+    `Assoc ((key, value) :: List.remove_assoc key (fields observation)) in
+  let accepted label ~path observation =
+    match Tui_decode.decode_lane_run_detail (replace_preflight ~path observation) with
+    | Ok _ -> () | Error detail -> Alcotest.failf "%s: %s" label detail in
+  let rejected label ~path observation =
+    Alcotest.(check bool) label true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (replace_preflight ~path observation))) in
+  let module P = Typesafeai_librarian_preflight in
+  let module C = Typesafeai_client in
+  let transport : C.attempt =
+    { destination_uri="https://first.invalid/evaluate"; model="first";
+      refusal=C.Transport_failure "offline" } in
+  let http body : C.attempt =
+    { destination_uri="https://second.invalid/evaluate"; model="second";
+      refusal=C.Http_response_failure {status=503; destination_uri="https://second.invalid/evaluate";
+        body; detail="unavailable"} } in
+  let evaluated : C.evaluated =
+    { response={Typesafeai_types.model="jev-fixture"; answers=[]; usage=None};
+      destination={C.destination_uri="https://jev.invalid/evaluate";model="requested-model"};
+      request_body_sha256=String.make 64 'a'; passed_over=[transport; http "busy"; http "\255"] } in
+  let judgment : P.decision Typesafeai_types.decoded_choice =
+    {choice=P.Needs_generation;confidence=0.9;
+     probabilities=[P.Keep_current,0.05;P.Needs_generation,0.9;P.Uncertain,0.05]} in
+  let observed outcome elapsed_s = P.to_yojson {outcome;elapsed_s} in
+  let received_fields = ["model";"destination";"request_body_sha256";"passed_over";
+                         "decision";"confidence";"probabilities"] in
+  List.iter (fun (label, outcome, elapsed_s, path) ->
+    let observation = observed outcome elapsed_s in
+    accepted label ~path observation;
+    List.iter (fun key -> rejected (label ^ " forbids " ^ key) ~path
+      (with_field key `Null observation)) received_fields;
+    if path = "full_lane" then
+      rejected (label ^ " is terminal, so cannot claim not_entered") ~path:"not_entered" observation
+    else rejected "awaiting cannot claim full_lane" ~path:"full_lane" observation)
+    [ "awaiting", P.Awaiting_answer, None, "not_entered"
+    ; "skipped", P.Skipped Typesafeai_config.Lane_disabled, None, "full_lane"
+    ; "ineligible", P.Ineligible "context pass", None, "full_lane"
+    ; "question unavailable", P.Question_unavailable "missing", None, "full_lane"
+    ; "failed", P.Failed {C.first_attempt=transport;later_attempts=[http "busy";http "\255"]},
+      Some 0.1, "full_lane" ];
+  List.iter (fun (label, outcome) ->
+    let observation = observed outcome (Some 0.1) in
+    accepted label ~path:"full_lane" observation;
+    rejected (label ^ " cannot claim not_entered") ~path:"not_entered" observation;
+    List.iter (fun key ->
+      rejected (label ^ " requires " ^ key) ~path:"full_lane"
+        (`Assoc (List.remove_assoc key (fields observation))))
+      ["model";"destination";"request_body_sha256";"passed_over";"elapsed_s"];
+    List.iter (fun (key,value) -> rejected (label ^ " rejects malformed " ^ key) ~path:"full_lane"
+      (with_field key value observation))
+      ["destination", `Assoc ["model",`String "requested"];
+       "request_body_sha256", `String "fake"; "passed_over", `List [`Assoc []];
+       "passed_over", `Null; "elapsed_s", `Null; "elapsed_s", `Float (-0.1);
+       "elapsed_s", `Float nan; "elapsed_s", `Float infinity])
+    ["judged", P.Judged (evaluated, judgment);"invalid", P.Invalid_answer (evaluated,"bad answer")];
+  let judged = observed (P.Judged (evaluated, judgment)) (Some 0.1) in
+  accepted "confidence is independent of the chosen probability" ~path:"full_lane"
+    (with_field "confidence" (`Float 0.8) judged);
+  List.iter (fun (key,value) -> rejected "native choice contract preserved" ~path:"full_lane"
+    (with_field key value judged))
+    ["confidence",`Float 1.1; "decision",`String "keep_current";
+     "probabilities",`Assoc ["keep_current",`Float 0.05;"needs_generation",`Float 0.9]];
+  let mismatched_http = C.attempt_to_yojson (http "busy")
+    |> with_field "destination_uri" (`String "https://different.invalid/evaluate") in
+  rejected "received answer cannot misattribute a refused endpoint" ~path:"full_lane"
+    (with_field "passed_over" (`List [mismatched_http]) judged);
+  let failed = observed (P.Failed {C.first_attempt=transport;later_attempts=[]}) (Some 0.1) in
+  rejected "failed observation cannot misattribute a refused endpoint" ~path:"full_lane"
+    (with_field "failure" (`Assoc ["kind", `String "every_destination_refused";
+      "attempts", `List [mismatched_http]]) failed);
+  rejected "failed requires a nonempty refusal history" ~path:"full_lane"
+    (with_field "failure" (`Assoc ["kind",`String "every_destination_refused";"attempts",`List []]) failed);
+  List.iter (fun (decision, path, skipped) ->
+    Alcotest.(check bool) "inconsistent or unknown route rejected" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make ~decision ~path ~skipped ()))))
+    ["uncertain", "jev_no_change", true;
+     "keep_current", "full_lane", true;
+     "keep_current", "new_route", false;
+     "new_choice", "full_lane", false];
+  Alcotest.(check bool) "keep_current falling back to full lane requires domain rejection" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~decision:"keep_current" ~path:"full_lane" ~skipped:false ())));
+  Alcotest.(check bool) "keep_current with full lane and domain rejection accepted" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "missing context") ~decision:"keep_current" ~path:"full_lane" ~skipped:false ())));
+  Alcotest.(check bool) "needs_generation with domain rejection rejected" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "invalid domain") ~decision:"needs_generation" ~path:"full_lane" ~skipped:false ())));
+  Alcotest.(check bool) "accepted no-change with domain rejection rejected" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (make ~rejection:(`String "invalid domain") ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true ())))
+
 let test_decode_lane_run_detail_carries_prompt_and_output () =
   match Tui_decode.decode_lane_run_detail (lane_run_detail_json "cmp-1") with
   | Error detail -> Alcotest.fail detail
@@ -12459,6 +12685,8 @@ let () =
           test_decode_verifier_lane_summary_keeps_subject_and_verdict;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
+        Alcotest.test_case "Librarian preflight keeps actual route and rejects inconsistent evidence" `Quick
+          test_librarian_preflight_detail_reports_actual_route;
         Alcotest.test_case "Board answer source rejects an invented selected slot" `Quick
           test_decode_board_answer_source_rejects_invented_selected_slot;
         Alcotest.test_case "Board answer source survives persistence failure" `Quick

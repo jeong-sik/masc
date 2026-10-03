@@ -14,6 +14,13 @@ let choices = Types.choice_set
     | Needs_generation -> Some "A memory should be added, corrected, deleted or consolidated. A text-generating Librarian must decide the actual change."
     | Uncertain -> Some "The supplied evidence does not establish that leaving all memories unchanged is correct.")
 
+let decision_label = label
+let decode_judgment json =
+  let ( let* ) = Result.bind in
+  let* choices = choices in
+  let* answer = Types.answer_of_yojson json in
+  Types.decode_choice choices answer
+
 type outcome =
   | Awaiting_answer
   | Skipped of Typesafeai_config.unavailable_reason

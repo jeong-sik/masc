@@ -51,6 +51,15 @@ failure observations can contain provider response bodies.
 
 ## Verification and measurement
 
+In the TUI's Librarian run detail, the output pane shows the received decision,
+model, confidence/probabilities, elapsed time and recorded generation path before
+the raw output. A judged no-change is distinct from validation acceptance and
+from the final memory commit. Unknown or inconsistent route evidence is rejected.
+Memory screens at the existing wide-layout threshold show a Category rail with
+counts and wrapped names. `c`/`C` and clicks select the same Category; smaller
+terminals retain the full-width fact list. Page movement uses the rendered pane
+width so wrapped details and cursor visibility share the same geometry.
+
 `test/test_keeper_librarian_preflight.exe` exercises the actual effect boundary
 with synthetic HTTP and an official-client runner: no-change skips generation,
 preserves Memory and records its normal receipt; generation-needed, uncertain,

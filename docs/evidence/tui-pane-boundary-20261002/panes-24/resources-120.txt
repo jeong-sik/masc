@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+   MASC System / Resources  17:07:55  HTTP [connected]
+┌────────────────────────────────┐
+│  ▸ Resources (2)               │   Resource · Event Log (JSON)
+├────────────────────────────────┤ ────────────────────────────────────────────────────────────────────────────────────
+│  Event Log (JSON)              │    MCP resource — read-only data exposed by this server.
+│  Operator Handbook             │
+│                                │    About: Recent event log snapshot as JSON
+│                                │
+│                                │    URI: masc://events.json?limit=50
+│                                │
+│                                │    Name: Recent Events (JSON)
+│                                │
+│                                │    Type: application/json · Size: 321 bytes
+│                                │
+│                                │    ──────────────────────────────────────────────────────────────────────────────
+│                                │
+│                                │    ┌─ json ──────────────────────────────────────────────────────────────────────
+│                                │    │ {
+│                                │    │   "status": "ok",
+│                                │    │   "count": 2,
+└────────────────────────────────┘
+  j/k:move  h/l:pane  Ctrl-W:focus  J/K:scroll text  PgUp/PgDn:page  Enter:read  Esc:back  q:quit  …?
+ › to alpha   (i to write)

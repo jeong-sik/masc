@@ -1,0 +1,44 @@
+Testing `Executor pool cancellation'.
+This run has ID `3ONLHA3Q'.
+
+> [FAIL]        compute          0   running worker stops with its caller.
+  [OK]          compute          1   waiting work does not run after cancella...
+  [OK]          compute          2   successful, nested and inline compute.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        compute          0   running worker stops with its caller.     │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT caller cancellation stops the suspended worker
+File "test/test_executor_pool_cancellation.ml", line 45, character 8:
+FAIL caller cancellation stops the suspended worker
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_executor_pool_cancellation.test_running_job.(fun) in file "test/test_executor_pool_cancellation.ml", line 45, characters 8-80
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Executor pool cancellation/compute.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Executor pool cancellation'.
+1 failure! in 1.009s. 3 tests run.

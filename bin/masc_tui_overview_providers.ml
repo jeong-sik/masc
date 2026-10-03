@@ -38,6 +38,7 @@ let meter_close = "\xe2\x96\x8f" (* U+258F, left one-eighth block *)
 
 let meter ~cells share =
   let cells = max 0 cells in
+  let valid_share = Float.is_finite share && share >= 0.0 && share <= 1.0 in
   let share =
     if Float.is_nan share then 0.0 else Float.min 1.0 (Float.max 0.0 share)
   in
@@ -64,7 +65,7 @@ let meter ~cells share =
     else whole
   in
   for _ = drawn + 1 to cells do
-    Buffer.add_string buf "░"
+    Buffer.add_string buf (if valid_share then "░" else " ")
   done;
   Buffer.contents buf
 
@@ -264,6 +265,9 @@ let history_line ~history ~scope_id (window:Masc.Tui_decode_usage.provider_usage
       String.equal row.scope_id scope_id && String.equal row.kind kind
       && Option.equal String.equal row.limit_id window.puw_limit_id) trend.rows in
     Some (match row with
+      | None when trend.unreadable_reports > 0 ->
+          Printf.sprintf "Trend %d UTC days · no readable reports · %d omitted"
+            trend.days trend.unreadable_reports
       | None -> Printf.sprintf "Trend %d UTC days · no reports" trend.days
       | Some row -> Printf.sprintf "Trend %d UTC days  %s  %d/%d days"
           trend.days row.marks row.reported_days trend.days)
@@ -521,7 +525,10 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
         match account.Masc.Tui_decode_usage.pua_state with
         | Masc.Tui_decode_usage.Account_reported (first, rest) ->
           List.exists (fun (window:Masc.Tui_decode_usage.provider_usage_window) ->
-            window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
+            (match window.puw_role with
+             | Masc.Tui_decode_usage.Role_gates_model_calls
+             | Masc.Tui_decode_usage.Role_unclassified_limit -> true
+             | Masc.Tui_decode_usage.Role_counts_other_use -> false)
             && at_or_past_full window.puw_utilization) (first :: rest)
         | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
       let blocked = match runtimes with
@@ -531,7 +538,9 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       let trend_as_of = match history with
         | Types.Provider_history_read trend ->
           let day = Unix.gmtime trend.generated_at in
-          Printf.sprintf " · Trend through %02d-%02d UTC" (day.Unix.tm_mon + 1) day.Unix.tm_mday
+          Printf.sprintf " · Trend through %02d-%02d UTC%s" (day.Unix.tm_mon + 1) day.Unix.tm_mday
+            (if trend.unreadable_reports = 0 then "" else
+               Printf.sprintf " · %d unreadable reports omitted" trend.unreadable_reports)
         | Types.Provider_history_unread -> " · Trend not read"
         | Types.Provider_history_error _ -> " · Trend unavailable" in
       let summary =
@@ -545,7 +554,7 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       | [] ->
           Some
             { title = title_text ()
-            ; lines = [ " no usage data" ]
+            ; lines = summary @ [ " no usage data" ] @ notes
             }
       | _ :: _ ->
           Some

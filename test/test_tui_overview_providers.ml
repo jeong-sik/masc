@@ -365,8 +365,9 @@ let test_empty_read_names_missing_usage_data () =
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
-      check (list string) "the missing data is visible" [ " no usage data" ]
-        (List.map plain section.lines)
+      let text = String.concat "\n" (List.map plain section.lines) in
+      List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
+        [ "Accounts 0"; "Reporting 0"; "Trend not read"; "no usage data" ]
   | None -> fail "an empty account list disappeared"
 
 (* Account email metadata never changes meter geometry. Unreported accounts
@@ -515,10 +516,48 @@ let test_plan_history_joins_exact_quota_window () =
   check bool "catalogue absence is not reported as no blocked accounts" true
     (contains ~affix:"Blocked (observed) unknown" text)
 
+let test_plan_preserves_unknown_reports () =
+  let open Masc.Tui_decode_usage in
+  let windows = match decode_provider_usage_windows (resolved "reported") with
+    | Ok value -> value | Error detail -> fail detail in
+  let trend : Masc_tui_usage_trend.t =
+    { days = 7; generated_at = now; unreadable_reports = 2; rows = [] } in
+  let draw windows =
+    match Providers.section ~history:(Types.Provider_history_read trend)
+      ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
+      ~account_emails:Types.Account_emails_unread ~now ~width:100 with
+    | Some section -> String.concat "\n" (List.map plain section.lines)
+    | None -> fail "expected plan summary" in
+  let text = draw windows in
+  check bool "missing rows retain unreadable evidence" true
+    (contains ~affix:"no readable reports · 2 omitted" text);
+  let silent = { windows with puws_accounts = List.map (fun account ->
+    { account with pua_state = Account_not_reported_since_start }) windows.puws_accounts } in
+  let text = draw silent in
+  List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
+    [ "Accounts 4"; "Reporting 0"; "2 unreadable reports omitted" ];
+  let limit role share = { windows with puws_accounts = List.filter_map (fun account ->
+    match account.pua_state with
+    | Account_not_reported_since_start -> None
+    | Account_reported (first, _) -> Some { account with
+        pua_state = Account_reported ({ first with puw_role = role;
+          puw_utilization = Utilization_fraction share }, []) }) windows.puws_accounts } in
+  check bool "full unclassified limits count" true
+    (contains ~affix:"At limit (reported) 2" (draw (limit Role_unclassified_limit 1.0)));
+  check bool "other-use counters do not count" true
+    (contains ~affix:"At limit (reported) 0" (draw (limit Role_counts_other_use 1.0)));
+  List.iter (fun share ->
+    check bool "invalid values do not advertise remaining cells" false
+      (contains ~affix:"░" (String.concat "\n"
+        (String.split_on_char '\n' (draw (limit Role_gates_model_calls share))
+         |> List.filter (fun line -> contains ~affix:meter_open line)))))
+    [ -0.5; Float.nan; Float.neg_infinity ]
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
-      , [ test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
+      , [ test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
+          test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
           test_case "account summary and reported gauges" `Quick test_section_draws_three_line_shapes
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit

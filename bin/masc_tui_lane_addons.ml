@@ -29,6 +29,9 @@ type action_menu = {
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type screen = Overview | Detail of string * string
+type overview_mode = Current_installations | Retained_runs
+type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string
+type overview_selection = Unvisited | No_selection | Selection of overview_anchor
 type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
@@ -46,7 +49,8 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
-  presentation : presentation; screen : screen; help_open : bool;
+  presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
+  current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   snapshot_read_error : string option;
@@ -55,7 +59,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; screen=Overview; help_open=false; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -232,20 +236,50 @@ let selected_declaration view = Option.bind view.snapshot (fun snapshot ->
         List.find_opt (fun (declaration : declaration) ->
           declaration.instance_id = Some item.id
           && Some declaration.source_path = item.source_path) configuration.declarations)))
-let overview_entries snapshot =
-  List.map (fun (instance : instance) -> `Instance instance) snapshot.instances
-  @ (match snapshot.configuration with
-     | None -> []
-     | Some config ->
-         List.mapi (fun index (declaration : declaration) -> index, declaration) config.declarations
-         |> List.filter_map (fun (index, declaration) ->
-              let has_worker = Option.fold ~none:false ~some:(fun id ->
-                List.exists (fun (instance : instance) ->
-                  instance.id=id && instance.source_path=Some declaration.source_path)
-                  snapshot.instances)
-                declaration.instance_id in
-              if has_worker then None else Some (`Declaration (index, declaration))))
-let overview_count snapshot = List.length (overview_entries snapshot)
+let retained (instance : instance) = match instance.phase with
+  | Row.Detached -> true
+  | Row.Attached | Row.Observing | Row.Failed _ | Row.Detaching -> false
+let history_group (instance : instance) = instance.source_path, instance.run_id, instance.addon_id
+let overview_entries ?(mode=Current_installations) snapshot =
+  let instances = match mode with
+    | Current_installations -> List.filter (fun item -> not (retained item)) snapshot.instances
+    | Retained_runs -> List.filter retained snapshot.instances
+        |> List.stable_sort (fun a b -> Stdlib.compare (history_group a) (history_group b)) in
+  List.map (fun (instance : instance) -> `Instance instance) instances
+  @ (match mode with
+     | Retained_runs -> []
+     | Current_installations ->
+       match snapshot.configuration with
+       | None -> []
+       | Some config ->
+           List.mapi (fun index (declaration : declaration) -> index, declaration) config.declarations
+           |> List.filter_map (fun (index, declaration) ->
+                let has_worker = Option.fold ~none:false ~some:(fun id ->
+                  List.exists (fun (instance : instance) ->
+                    instance.id=id && instance.source_path=Some declaration.source_path) instances)
+                  declaration.instance_id in
+                if has_worker then None else Some (`Declaration (index, declaration))))
+let overview_count ?(mode=Current_installations) snapshot = List.length (overview_entries ~mode snapshot)
+let overview_anchor = function
+  | `Instance (instance : instance) -> Worker_anchor (instance.id, instance.incarnation)
+  | `Declaration (_, declaration) -> Declaration_anchor declaration.source_path
+let toggle_history view = match view.screen with
+  | Detail _ -> view
+  | Overview ->
+      let entries mode = Option.fold ~none:[] ~some:(overview_entries ~mode) view.snapshot in
+      let saved = match at_cursor (entries view.overview_mode) view.instance_cursor with
+        | None -> No_selection | Some entry -> Selection (overview_anchor entry) in
+      let overview_mode, current_selection, history_selection, restore = match view.overview_mode with
+        | Current_installations -> Retained_runs, saved, view.history_selection, view.history_selection
+        | Retained_runs -> Current_installations, view.current_selection, saved, view.current_selection in
+      let instance_cursor = match restore with
+        | Unvisited -> if entries overview_mode=[] then -1 else 0
+        | No_selection -> -1
+        | Selection anchor ->
+            List.find_index (fun entry -> overview_anchor entry=anchor) (entries overview_mode)
+            |> Option.value ~default:(-1) in
+      {view with overview_mode;current_selection;history_selection;instance_cursor;scroll=0;selected=[];
+        focus=Instances;presentation=Summary;document_key=None}
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
@@ -291,8 +325,8 @@ let reconcile_snapshot view snapshot =
         then configuration_cursor else -1 in
       (* A vanished identity leaves no selection. Selecting a replacement is
          an explicit navigation action, never a side effect of a refresh. *)
-      let previous_entries = overview_entries previous in
-      let entries = overview_entries snapshot in
+      let previous_entries = overview_entries ~mode:view.overview_mode previous in
+      let entries = overview_entries ~mode:view.overview_mode snapshot in
       let instance_cursor =
         if previous_entries=[] && entries<>[] then 0
         else anchor (function
@@ -308,37 +342,44 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
         String.equal instance.id id && String.equal instance.incarnation incarnation) snapshot.instances
   | Overview ->
       (match view.focus with
-       | Timeline | Rows -> Option.bind (selected_row view) (row_owner snapshot.instances)
-       | Configurations -> Option.bind (selected_declaration view) (fun declaration ->
+       | Configurations when view.presentation=Technical -> Option.bind (selected_declaration view) (fun declaration ->
            Option.bind declaration.instance_id (fun id ->
-             List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
-       | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor))
+             List.find_opt (fun (instance : instance) ->
+               instance.id=id && (match view.overview_mode with
+                 | Current_installations -> not (retained instance)
+                 | Retained_runs -> true)) snapshot.instances))
+       | Timeline | Rows | Configurations | Connections | Instances ->
+           (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
+            | Some (`Instance item) -> Some item | Some (`Declaration _) | None -> None)))
 let ordered_rows view snapshot =
   rows_in_screen view snapshot
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
+let select_initial_result view =
+  match view.snapshot, selected_instance view with
+  | Some snapshot, Some item ->
+      let rows = ordered_rows view snapshot in
+      let declared = List.find_opt (fun (_, (row : Row.row)) ->
+        List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
+          String.equal row.lane_id (item.id ^ "/" ^ reading.lane_id)) item.display.readings) rows in
+      let row_cursor = match declared, rows with
+        | Some (index, _), _ -> index
+        | None, (index, _) :: _ -> index
+        | None, [] -> -1 in
+      {view with row_cursor}
+  | _ -> view
 let open_selected_instance view =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      match at_cursor (overview_entries snapshot) view.instance_cursor with
+      match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
       | Some (`Declaration (index, _)) ->
           {view with focus=Configurations; configuration_cursor=index;
             presentation=Technical; scroll=0; selected=[]; document_key=None}
       | Some (`Instance item) ->
-          let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
-            scroll=0; selected=[]; document_key=None} in
-          let rows = ordered_rows next snapshot in
-          let declared = List.find_opt (fun (_, (row : Row.row)) ->
-            List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
-              String.equal row.lane_id (item.id ^ "/" ^ reading.lane_id))
-              item.display.readings) rows in
-          let row_cursor = match declared, rows with
-            | Some (index, _), _ -> index
-            | None, (index, _) :: _ -> index
-            | None, [] -> -1 in
-          {next with row_cursor}
+          select_initial_result {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
+            scroll=0; selected=[]; document_key=None}
       | None -> view
 let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
@@ -416,7 +457,7 @@ let selected_source_path view =
       let path = match view.focus, view.screen with
         | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
         | Instances, Overview ->
-            (match at_cursor (overview_entries snapshot) view.instance_cursor with
+            (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
              | Some (`Declaration (_, declaration)) -> Some declaration.source_path
              | Some (`Instance _) | None -> instance_path)
         | (Timeline | Connections | Instances | Rows), _ -> instance_path in
@@ -683,7 +724,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | None -> [unread_body_text ~failed_note view]
     | Some snapshot ->
         let selected = match view.screen with
-          | Overview -> at_cursor (overview_entries snapshot) view.instance_cursor
+          | Overview -> at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor
           | Detail _ -> Option.map (fun item -> `Instance item)
               (detail_instance view snapshot) in
         let worker = match selected with
@@ -780,7 +821,7 @@ let overview_hints view =
       ^ "  Colon:palette  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
-      "?:help  Colon:palette  Esc:back  Enter:open  i:install  n:new  S:subs  A:command"
+      "?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
       "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
@@ -886,7 +927,8 @@ let overview_lines ~width view =
           | Row.Failed _ -> active, failed + 1
           | Row.Detaching | Row.Detached -> active, failed)
           (0, 0) snapshot.instances in
-        let count = List.length snapshot.instances in
+        let count = List.length (List.filter (fun item -> not (retained item)) snapshot.instances) in
+        let retained_count = List.length (List.filter retained snapshot.instances) in
         let configuration_summary = match snapshot.configuration with
           | None -> "TOML unknown"
           | Some config ->
@@ -901,30 +943,50 @@ let overview_lines ~width view =
         let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers%s"
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
-        let entries = overview_entries snapshot in
-        let window = max 0 (view.instance_cursor - 1) in
+        let entries = overview_entries ~mode:view.overview_mode snapshot in
+        (* Keep the selected entry first: wrapped history/count context already
+           spends rows before the list in a narrow terminal. *)
+        let window = max 0 view.instance_cursor in
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
-        let empty = match snapshot.configuration with
-          | Some {complete=true;declarations=[];_} when count=0 ->
+        let empty = match view.overview_mode, snapshot.configuration with
+          | Retained_runs, _ when entries=[] -> ["No retained runs in this snapshot. h:current installations"]
+          | Retained_runs, _ -> []
+          | Current_installations, Some {complete=true;declarations=[];_} when count=0 ->
               ["No Add-ons installed. i:install a package  n:new TOML"]
-          | Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
-          | None when entries=[] -> ["TOML installation status unknown · r:refresh"]
-          | Some _ | None -> [] in
-        [heading; ""] @ empty
+          | Current_installations, Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
+          | Current_installations, None when entries=[] -> ["TOML installation status unknown · r:refresh"]
+          | Current_installations, (Some _ | None) -> [] in
+        [heading;
+         (match view.overview_mode with
+          | Current_installations -> Printf.sprintf "Retained history · %d instances · h:open" retained_count
+          | Retained_runs -> Printf.sprintf "Retained history · %d instances · h:current installations" retained_count);
+         ""] @ empty
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
                 let status = if Option.is_none declaration.desired then "configuration issue"
-                  else if declaration.issues<>[] then "needs attention" else "pending" in
+                  else if declaration.issues<>[] then "needs attention"
+                  else if Option.is_some declaration.applied then "no current worker" else "pending" in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "  E:edit" else None) |> Option.value ~default:"" in
                 [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
                  "    Enter:installation" ^ edit]
             | `Instance item ->
+                let group_header = match view.overview_mode with
+                  | Current_installations -> []
+                  | Retained_runs ->
+                      let previous = if index=0 then None else List.nth_opt entries (index-1) in
+                      let same_group = match previous with
+                        | Some (`Instance previous) -> history_group previous=history_group item
+                        | Some (`Declaration _) | None -> false in
+                      if same_group && index<>window then [] else
+                        let name = match item.source_path with
+                          | Some path -> path | None -> "undeclared" in
+                        [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
                 let count_text = if item.observation_seq=0 then "no observations yet"
                   else Printf.sprintf "%d observations" item.observation_seq in
                 let lead = marker ^ item.title ^ " · " ^
@@ -937,18 +999,20 @@ let overview_lines ~width view =
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
                   | _ -> [] in
-                [lead]
+                group_header @ [lead]
+                @ (match view.overview_mode with Current_installations -> []
+                   | Retained_runs -> ["    Instance " ^ item.id])
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else [])
                 @ [controls] @ detail) items
   in
-  List.concat_map wrap ([ overview_hints view; "" ]
-    @ diagnostic_lines view @ content @ action_lines view)
+  List.concat_map wrap (diagnostic_lines view @ content
+    @ [""; overview_hints view] @ action_lines view)
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";
-  "List: j/k select · Enter open · i install · n new TOML";
+  "List: j/k select · Enter open · h history/current · i install · n new TOML";
   "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
   "Actions: o observe/retry · d remove/cleanup · a advertised actions";

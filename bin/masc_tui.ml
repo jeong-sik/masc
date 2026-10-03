@@ -1526,6 +1526,7 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 
+
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
@@ -3935,7 +3936,7 @@ let launch_lane_subscriptions state ~mailbox request =
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
 
-let launch_lane_addons state ~mailbox request =
+let launch_lane_addons ?initial_detail state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
@@ -4033,7 +4034,7 @@ let launch_lane_addons state ~mailbox request =
   in
   launch_workspace_request state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
-    ~deliver:(fun result -> Lane_addons_loaded (generation, result))
+    ~deliver:(fun result -> Lane_addons_loaded (generation, initial_detail, result))
     perform)
 
 let launch_browser_history state ~mailbox ~reload =
@@ -12825,9 +12826,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
-  | Lane_addons_loaded (generation, result) ->
+  | Lane_addons_loaded (generation, initial_detail, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
+        if Option.fold ~none:false ~some:(fun (id, incarnation) ->
+          view.screen <> Masc_tui_lane_addons.Detail (id, incarnation)) initial_detail
+        then {view with loading=false} else
         match result with
         | Error (`Inventory detail) ->
             {view with loading=false;error=None;snapshot_read_error=Some detail}
@@ -12839,6 +12843,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             let view = match reply.lar_snapshot with
               | None -> view
               | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+            let view = match initial_detail, reply.lar_snapshot, reply.lar_diagnostic with
+              | Some _, Some _, None when view.row_cursor < 0 -> Masc_tui_lane_addons.select_initial_result view
+              | _ -> view in
             let snapshot_read_error = match reply.lar_inventory_read with
               | `Unchanged -> view.snapshot_read_error
               | `Read -> None
@@ -19347,7 +19354,19 @@ and is loaded on demand through keeper_skill.
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
-                         update (Addons.open_selected_instance view)
+                         if view.loading then update {view with scroll=0;
+                           error=lane_addons_input_failure "Wait for the current Lane read before opening a worker."}
+                         else (
+                         let next = Addons.open_selected_instance view in
+                         update next;
+                         (match next.screen, Addons.selected_instance next with
+                          | Addons.Detail _, Some item ->
+                              let request = match view.overview_mode with
+                                | Addons.Retained_runs -> Addons.Slice ["run_id",item.run_id]
+                                | Addons.Current_installations -> Addons.Inspect in
+                              launch_lane_addons ~initial_detail:(item.id,item.incarnation)
+                                state ~mailbox:async_messages request
+                          | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -19385,7 +19404,15 @@ and is loaded on demand through keeper_skill.
                               let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=lane_addons_input_failure detail}))
-                     | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "r" ->
+                         let request = match view.screen, view.overview_mode, Addons.selected_instance view with
+                           | Addons.Detail _, Addons.Retained_runs, Some item ->
+                               Addons.Slice ["run_id",item.run_id]
+                           | Addons.Overview, _, _
+                           | Addons.Detail _, Addons.Current_installations, _
+                           | Addons.Detail _, Addons.Retained_runs, None -> Addons.Inspect in
+                         launch_lane_addons state ~mailbox:async_messages request
+                     | "h" when view.screen=Addons.Overview -> update (Addons.toggle_history view)
                      | "S" ->
                          if not view.loading then (
                            let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
@@ -19439,7 +19466,7 @@ and is loaded on demand through keeper_skill.
                                | Some configuration -> update {view with configuration_cursor=max 0
                                    (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
                           | Some snapshot, Addons.Overview, _ ->
-                              let cursor = max 0 (min (Addons.overview_count snapshot - 1)
+                              let cursor = max 0 (min (Addons.overview_count ~mode:view.overview_mode snapshot - 1)
                                 (view.instance_cursor + delta)) in
                               if cursor <> view.instance_cursor then
                                 update {view with instance_cursor=cursor; scroll=0}

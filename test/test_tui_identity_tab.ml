@@ -103,6 +103,26 @@ let identity_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935
     ~refresh_interval:2.0 ()
 
+let test_workspace_withdrawal_retires_identity_consent () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://old-workspace/consent");
+  state.identity_view <- Some ("A", [declared "slack" "Slack"]);
+  state.github_identity_view <- Some ("A", ["old identity"]);
+  let old = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  Masc_tui_types.withdraw_identity_readings state;
+  check (Alcotest.list Alcotest.string) "new workspace does not show old consent"
+    [] (pending_urls state "A");
+  check Alcotest.bool "old provider list withdrawn" true (state.identity_view = None);
+  check Alcotest.bool "old GitHub reading withdrawn" true (state.github_identity_view = None);
+  let successor = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  check Alcotest.bool "same named successor rejects the old queued answer" false
+    (Masc_tui_types.finish_identity_login_request state old);
+  check Alcotest.bool "new workspace request remains current" true
+    (Masc_tui_types.finish_identity_login_request state successor)
+
 let test_oauth_polling_survives_unread_authority () =
   let state = identity_state () in
   let origin : Masc.Tui_decode.server_identity =
@@ -139,6 +159,12 @@ let test_oauth_polling_survives_unread_authority () =
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[unreadable "slack" "temporarily unavailable"];
   check Alcotest.bool "unreadable provider retains intent" true (pending ());
+  (* A provider removed mid-consent can never attach; the poll must not
+     outlive its declaration. *)
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared "github" "GitHub"];
+  check Alcotest.bool "removed provider retires intent" false (pending ());
+  remember ();
   Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
     ~providers:[declared ~tools:[] "slack" "Slack"];
   check Alcotest.bool "other Keeper cannot retire intent" true (pending ());
@@ -656,7 +682,10 @@ let () =
         ] );
       ( "pending consent lifecycle",
         [ Alcotest.test_case "OAuth polling survives authority loss and list fallback"
-            `Quick test_oauth_polling_survives_unread_authority; Alcotest.test_case "switching Keepers retains each consent URL"
+            `Quick test_oauth_polling_survives_unread_authority;
+          Alcotest.test_case "workspace withdrawal retires identity consent"
+            `Quick test_workspace_withdrawal_retires_identity_consent;
+          Alcotest.test_case "switching Keepers retains each consent URL"
             `Quick test_switching_keepers_retains_each_consent_url;
           Alcotest.test_case "multiple providers complete independently"
             `Quick test_multiple_providers_complete_independently;

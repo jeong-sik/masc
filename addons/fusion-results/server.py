@@ -11,6 +11,7 @@ import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from fusion_judge import JudgeFailure, canonical_judge
 from protocol import (InvalidInput, Source, evidence, number, object_value,
                       row, serve, stable_id, string)
 
@@ -133,6 +134,9 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
         producer = string(origin.get("fusion_producer"), "post.origin.fusion_producer")
         if not producer.strip() or producer != run["keeper"]:
             raise InvalidInput("Board post does not identify this exact Fusion producer")
+        judge = canonical_judge(post)
+        if run_state is RunState.COMPLETED and isinstance(judge, JudgeFailure):
+            raise InvalidInput("Completed Fusion run cannot carry a failed canonical judge")
     elif post is not None:
         raise InvalidInput("Unrecorded Fusion evidence must have a null post")
     return run, run_state, evidence_state, post

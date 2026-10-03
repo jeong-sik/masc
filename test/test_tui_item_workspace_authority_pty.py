@@ -354,7 +354,10 @@ def run(binary, captures):
                  and (b"Keeper is not observed in the current roster" in text
                       or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            h.send_and_wait(process, fd, output, b"r" + h.FULL_REDRAW,
+                b"Keeper roster authority is unavailable")
+            assert b"Balance " not in visible() and b"owned" not in visible(), \
+                "explicit Item retry bypassed unavailable roster authority"
             capture("a-revision-unavailable")
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,

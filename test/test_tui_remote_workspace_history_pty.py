@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shlex
 import tempfile
 from pathlib import Path
@@ -1534,15 +1535,22 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: calls.count(("b", "resources/list")) > refreshes,
                     timeout=WAIT_SECONDS), "B resource refresh was not requested"
-                refreshed_name = f"resource-b-read-{refreshes + 1}".encode()
-                h.wait_for_output(process, fd, output, refreshed_name,
-                    start=0, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, h.FULL_REDRAW, refreshed_name)
+                def refreshed_b_visible():
+                    match = re.search(rb"resource-b-read-(\d+)", screen(output))
+                    return match is not None and int(match[1]) > refreshes
+
+                # A later B refresh can overtake this response before Ctrl-L.
+                # Any displayed B revision after the requested refresh is
+                # current; the exact superseded row need not remain visible.
+                assert h.wait_for_fixture_state(process, fd, output,
+                    refreshed_b_visible, timeout=WAIT_SECONDS), "fresh B resource list was not displayed"
+                h.send_and_wait(process, fd, output, h.FULL_REDRAW, b"resource-b-read-")
+                assert refreshed_b_visible(), "redraw restored an older resource reading"
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
-                    assert [(phase, method) for phase, method in calls
-                            if method == "resources/list"] == [("b", "resources/list")] * (refreshes + 1), calls
+                    resource_lists = [phase for phase, method in calls if method == "resources/list"]
+                    assert len(resource_lists) > refreshes and all(phase == "b" for phase in resource_lists), calls
                 os.write(fd, b"q")
             finally:
                 release.set()

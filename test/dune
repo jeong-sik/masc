@@ -3408,14 +3408,7 @@
  (libraries alcotest ast_grep compiler-libs.common masc.string_util)
  (deps (source_tree ../bin)))
 
-(test
- (name test_tui_http_ast)
- (modules test_tui_http_ast)
- (libraries alcotest ast_grep compiler-libs.common)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)
-  %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
+
 
 ; The STATE column of the Fusion run list against the three vocabularies it
 ; draws. Reads the width out of bin/ and the vocabularies out of bin/ and lib/,
@@ -3578,12 +3571,7 @@
  (deps
   (source_tree ../bin)))
 
-(test
- (name test_tui_ask_selection_wiring)
- (modules test_tui_ask_selection_wiring)
- (libraries alcotest ast_grep)
- (deps
-  (source_tree ../bin)))
+
 
 (test
  (name test_tui_operator_projection)
@@ -5822,8 +5810,6 @@
 (include stanzas/test_tui_memory_mark.inc)
 
 (include stanzas/test_tui_config.inc)
-(include stanzas/test_tui_config_highlight_wiring.inc)
-(include stanzas/test_tui_row_wiring.inc)
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)

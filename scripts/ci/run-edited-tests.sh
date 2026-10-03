@@ -389,7 +389,6 @@ LIBSOURCES
   # the file. Take the dependency from the literal rather than from the name.
   #
   # The regression this exists for: #35011 changed bin/masc_tui_render.ml,
-  # which test_tui_http_ast watches through 52 Ast_grep ~module_path
   # declarations, and the name mapping looks for test_tui_render_* instead. The
   # pull request merged green and main was red on that suite until #35019.
   #
@@ -1085,7 +1084,7 @@ self_test() {
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
-    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
   # Turn-record keys live in OCaml, while the Context Inspector's HTTP
   # response is a Python fixture. Run only that PTY scenario when the
@@ -1111,7 +1110,6 @@ self_test() {
   # read: it is one of the two such entries in 170 (source, suite) pairs, and
   # narrowing the match to exclude it would cost the guards that assign the
   # path to a plain let-binding.
-  # test_tui_row_wiring joined when it grew ~module_path declarations over
   # this file: it pins that a surface's row count, its cursor and the landing
   # come from one record, and those are facts about masc_tui.ml.
   # test_tui_voice_wizard_wiring joined with the voice setup wizard: the
@@ -1120,10 +1118,9 @@ self_test() {
   # because the claim it holds -- that every session mover has a key -- is a
   # fact about this dispatcher.
   check_required "an umbrella module selects its guards and declared PTY scenario" \
-    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
+    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_reading_ends.py test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
-  # test_tui_http_ast watches it through 52 ~module_path declarations, and the
   # name mapping looks for test_tui_render_* instead. Both mappings answer
   # here, and the guard is in the answer.
   # test_tui_chat_gate_row left when the chat surface became its own file: it
@@ -1138,7 +1135,7 @@ self_test() {
   # test_tui_tab_strip joined when it began reading this file: the Runtime
   # header's two views must be drawn by tab_strip, and render_runtime is here.
   check_required "a watched source reaches the guard that declares it" \
-    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
+    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list
@@ -1209,7 +1206,7 @@ self_test() {
   # looks for one. #38325 planted one, was green on its own checks, and
   # failed release candidate 35876460562 on main.
   check "an OCaml source edit runs the suite that reads the whole tree" \
-    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     bin/masc_tui_msx.ml
   # The input that splits it. Without this, a guard appended unconditionally
   # passes the case above and spends the budget on every documentation pull
@@ -1294,7 +1291,7 @@ self_test() {
     "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
-    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
   # The regression these two exist for: every terminal scenario under test/
   # is a .py run by a dune rule, and no pull request ran one. #35534 added

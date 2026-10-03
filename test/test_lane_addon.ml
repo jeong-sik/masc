@@ -265,7 +265,7 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
   let cases = List.concat_map (fun (request_id, outcome_first) ->
     List.concat_map (fun terminal_journal ->
       List.map (fun placement -> request_id, outcome_first, terminal_journal, placement, false, false)
-        [`Missing; `Canonical; `Fallback; `Corrupt_canonical]) [true; false])
+        [`Missing; `Canonical; `Fallback; `Corrupt_canonical; `Blocked_canonical]) [true; false])
     ["request-1", false; "request-8", true]
     @ ["request-1", true, true, `Canonical, true, false;
        "request-1", false, false, `Missing, false, true] in
@@ -316,10 +316,10 @@ let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
       let existing = match placement with
         | `Missing -> None
         | `Canonical -> ignore (unwrap (Store.write_blob store bytes)); Some canonical
-        | `Fallback | `Corrupt_canonical ->
+        | `Fallback | `Corrupt_canonical | `Blocked_canonical ->
             Unix.mkdir canonical 0o700;
             ignore (unwrap (Store.write_sampling_blob store bytes));
-            Unix.rmdir canonical;
+            if placement <> `Blocked_canonical then Unix.rmdir canonical;
             if placement = `Corrupt_canonical then write canonical (String.make (String.length bytes) '!');
             Some (Filename.concat (Store.root store) ("sampling-evidence/" ^ hash ^ ".json")) in
       let before = Option.map Unix.stat existing in

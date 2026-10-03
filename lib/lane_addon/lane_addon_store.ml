@@ -560,12 +560,16 @@ let recover_sampling_requests t ~instance_id ~max_reply_bytes =
                      (* A present corrupt primary consumes the query allowance
                         before fallback. Repair it before discarding the journal
                         body, even when the fallback is already intact. *)
-                     if Fs_compat.exact_path_kind (Filename.concat t.root (blob_path hash))
-                         <> Fs_compat.Exact_missing then
-                       write_blob t bytes |> Result.map (fun _ -> ())
-                     else (match verify (recovery_blob_path hash) with
-                       | Ok () -> Ok ()
-                       | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
+                     (match Fs_compat.exact_path_kind (Filename.concat t.root (blob_path hash)) with
+                      | Fs_compat.Exact_kind Unix.S_REG ->
+                          write_blob t bytes |> Result.map (fun _ -> ())
+                      | Fs_compat.Exact_unknown -> Error "cannot inspect primary sampling blob"
+                      | Fs_compat.Exact_missing | Fs_compat.Exact_kind _ ->
+                          (* The reader rejects non-regular paths before charging
+                             bytes, so an intact fallback alone is sufficient. *)
+                          match verify (recovery_blob_path hash) with
+                          | Ok () -> Ok ()
+                          | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
                write t (Filename.concat relative name)
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
       | _ -> Error "invalid sampling recovery state" in

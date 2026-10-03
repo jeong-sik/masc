@@ -264,14 +264,6 @@ let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
   let* before = read () in
   if blob_reference before.content <> expected then Error "sampling outcome blob digest mismatch"
   else protect (fun () ->
-    if t.root_parent_pending then (
-      let parent_fd = Unix.openfile (Filename.dirname t.root)
-        [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
-      Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
-        if (Unix.fstat parent_fd).Unix.st_kind <> Unix.S_DIR then
-          raise (Sys_error "retained evidence root parent is not a directory");
-        sync_parent parent_fd);
-      t.root_parent_pending <- false);
     let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
       let stat = Unix.fstat fd in
@@ -315,6 +307,16 @@ let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_byte
               | name when Filename.check_suffix name ".json" && not (skip name) ->
                   let* bytes = bounded_file_for_sampling ~max_bytes (Filename.concat path name) in
                   let json = Yojson.Safe.from_string bytes in
+                  (* Every record depends on this root, including pending
+                     requests that have no outcome blob to verify. *)
+                  if t.root_parent_pending then (
+                    let parent_fd = Unix.openfile (Filename.dirname t.root)
+                      [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+                    Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+                      if (Unix.fstat parent_fd).Unix.st_kind <> Unix.S_DIR then
+                        raise (Sys_error "retained evidence root parent is not a directory");
+                      sync_parent parent_fd);
+                    t.root_parent_pending <- false);
                   (* The first terminal write includes exact outcome bytes, so a
                      crash before blob publication is recoverable. *)
                   let* () = match json with

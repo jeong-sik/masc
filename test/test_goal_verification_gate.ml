@@ -58,8 +58,12 @@ let with_workspace f =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
+  let previous_delivery = Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
-    ~finally:(fun () -> rm_rf dir)
+    ~finally:(fun () ->
+      ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
+      rm_rf dir)
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
@@ -1673,10 +1677,180 @@ let test_the_step_does_not_run_again_for_a_replayed_verdict () =
   check int "the replay did not" 1 !calls
 ;;
 
+let notification_store config = match Goal_store.load_source config with
+  | Goal_store.Available state -> state
+  | Goal_store.Uninitialized -> fail "Goal store is absent"
+  | Goal_store.Unavailable error -> fail (Goal_store.unavailable_to_string error)
+
+let persist_notification_keeper config name =
+  let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+    | Ok value -> value | Error detail -> fail detail in
+  match Keeper_meta_store.replace_snapshot config meta with
+  | Ok () -> () | Error detail -> fail detail
+
+let notification_rows config keeper request_id =
+  match Keeper_chat_store.load_all_result ~base_dir:config.Workspace.base_path ~keeper_name:keeper with
+  | Error detail -> fail detail
+  | Ok rows -> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+      row.external_message_id = Some request_id) rows
+
+let notification_message_count config request_id =
+  Workspace.get_all_messages_raw config ~since_seq:0
+  |> List.filter (fun (message : Masc_domain.message) -> message.request_id = request_id)
+  |> List.length
+
+let proof_audit_count config goal_id =
+  goal_phase_events config |> List.filter (fun event ->
+    Yojson.Safe.Util.(event |> member "goal_id" |> to_string) = goal_id
+    && Json_util.get_string (Yojson.Safe.Util.member "payload" event) "verification_run_id"
+       = Some "goal-verifier-test-run") |> List.length
+
+let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
+  List.iter (fun (decision, expected_phase) ->
+    List.iter (fun fail_after_append ->
+      with_workspace @@ fun config ->
+      let ctx = workspace_ctx config in
+      let goal_id = create_goal ctx "Persisted @beta proof title" in
+      ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+      List.iter (persist_notification_keeper config) ["alpha"; "beta"];
+      (* These persisted recipients have never entered the live registry. *)
+      let host = Server_bootstrap_loops.For_testing.goal_notification_backend in
+      let fail_beta = ref true in
+      let backend : Goal_delivery.backend = {host with project=(fun ~config ~delivery ~recipient ->
+        if recipient = "beta" && !fail_beta && not fail_after_append then Error "fixture transcript unavailable"
+        else match host.project ~config ~delivery ~recipient with
+          | Error _ as error -> error
+          | Ok () when recipient = "beta" && !fail_beta -> Error "fixture lost acknowledgement after append"
+          | Ok () -> Ok ())} in
+      ignore (Goal_delivery.For_testing.replace_backend (Some backend));
+      let fanouts = ref 0 in
+      let old_handler = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _ -> incr fanouts; Workspace_broadcast.Passive) in
+      Fun.protect ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention old_handler) (fun () ->
+        let audit = Filename.concat (Workspace.masc_dir config) "goal_events.jsonl" in
+        let saved_audit = audit ^ ".fixture-saved" in
+        Unix.rename audit saved_audit;
+        Unix.mkdir audit 0o700;
+        let calls = ref 0 in
+        let commit () = verifier_transition_with_step
+          ~before_proof_commit:(fun _ _ -> incr calls; Ok ()) config goal_id decision "measured @beta evidence" in
+        let first = must_succeed "proof commits despite unavailable audit/recipient" (commit ()) in
+        check string "phase is committed" expected_phase (stored_phase config goal_id);
+        check string "deferred effects are explicit" "deferred" (json_state first ["effect_delivery";"status"]);
+        let pending = notification_store config in
+        check int "audit intent survives failure" 1 (List.length pending.pending_events);
+        let notice = match pending.pending_notifications with [notice] -> notice | _ -> fail "expected one notice" in
+        (match notice.delivery with
+         | Goal_store.Pending_recipients remaining -> check (list string) "only failed recipient remains" ["beta"] remaining
+         | Awaiting_recipients -> fail "snapshot did not commit");
+        check int "healthy recipient is not blocked by failed audit" 1 (List.length (notification_rows config "alpha" notice.notification_id));
+        check int "failure window has expected durable beta rows" (if fail_after_append then 1 else 0)
+          (List.length (notification_rows config "beta" notice.notification_id));
+        check int "workspace message is committed once" 1 (notification_message_count config notice.notification_id);
+        ignore (must_succeed "exact verdict replay" (commit ()));
+        check int "proof precommit is not rerun on effect retry"
+          (match decision with Workspace_goals.Proof_proven -> 1 | Proof_refuted _ -> 0) !calls;
+        check int "literal mentions never enter synchronous fanout/wake" 0 !fanouts;
+        (* Repair audit and model append-before-ack loss using the exact outbox row. *)
+        Unix.rmdir audit; Unix.rename saved_audit audit;
+        (match Goal_store.append_audit_event config (Goal_store.pending_event_to_yojson (List.hd pending.pending_events)) with
+         | Ok () -> () | Error detail -> fail detail);
+        fail_beta := false;
+        (* A restarted host reads the durable remaining set, not a changed roster. *)
+        ignore (Goal_delivery.For_testing.replace_backend (Some {host with
+          snapshot=(fun ~config:_ -> fail "persisted snapshot must not be recaptured")}));
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        check int "audit append before acknowledgement is deduplicated" 1 (proof_audit_count config goal_id);
+        check int "healthy transcript remains exactly once" 1 (List.length (notification_rows config "alpha" notice.notification_id));
+        check int "failed transcript eventually arrives exactly once" 1 (List.length (notification_rows config "beta" notice.notification_id));
+        check int "message remains exactly once" 1 (notification_message_count config notice.notification_id);
+        check int "all notification obligations settled" 0 (List.length (notification_store config).pending_notifications);
+        (* Reintroduce the captured obligation as a crash after delivery but
+           before Goal acknowledgement. The sink's real identity deduplicates. *)
+        let settled = notification_store config in
+        Goal_store.write_state config {settled with pending_notifications=[notice]};
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        check int "lost acknowledgement does not duplicate transcript" 1
+          (List.length (notification_rows config "beta" notice.notification_id))))
+      [false; true])
+    [Workspace_goals.Proof_proven, "awaiting_confirmation";
+     Workspace_goals.Proof_refuted {reason="target not observed"}, "executing"]
+;;
+
+let test_proof_delivery_survives_reconciliation_and_goal_removal () =
+  List.iter (fun recovery -> with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let original_title = "Original @beta proof title" in
+    let goal_id = create_goal ctx original_title in
+    ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+    let request_id, criterion = proof_identity config goal_id in
+    let proof = { (verdict ~request_id ~criterion ~evidence:"original measured evidence" Goal_verification.Proven) with
+      authority=Masc_domain.System_llm_agent {agent_run_id=Standalone_lane.to_id Standalone_lane.Verifier} } in
+    (match Goal_verification.record_proof_verdict config ~goal_id proof with Ok _ -> () | Error detail -> fail detail);
+    ignore (Goal_delivery.For_testing.replace_backend None);
+    (match recovery with
+     | `Scan -> (match Workspace_goals.reconcile_committed_proof config ~goal_id with
+         | Ok (Workspace_goals.Reconciled Goal_phase.Awaiting_confirmation) -> ()
+         | _ -> fail "scan did not reconcile the committed proof")
+     | `Repeat -> ignore (must_succeed "explicit repeat" (transition ctx goal_id "request_complete"))
+     | `Commit_retry -> ignore (must_succeed "exact proof-only commit retry"
+         (verifier_transition_with_step ~before_proof_commit:(fun _ _ -> fail "committed proof must not rerun its precommit")
+           config goal_id Workspace_goals.Proof_proven "original measured evidence")));
+    let notice = match (notification_store config).pending_notifications with
+      | [notice] -> notice | _ -> fail "reconciliation did not persist one notice" in
+    check bool "missing backend is not an empty roster" true (notice.delivery = Goal_store.Awaiting_recipients);
+    check int "no publication before snapshot" 0 (notification_message_count config notice.notification_id);
+    ignore (must_succeed "rename after commit" (dispatch ctx ~name:"masc_goal_upsert"
+      ["id", `String goal_id; "title", `String "Changed title"]));
+    (match Goal_store.delete_goal config ~goal_id with
+     | Ok _ -> () | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+    List.iter (persist_notification_keeper config) ["alpha"; "beta"];
+    ignore (Goal_delivery.For_testing.replace_backend (Some Server_bootstrap_loops.For_testing.goal_notification_backend));
+    (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+    check int "deleted Goal still owes original audit" 1 (proof_audit_count config goal_id);
+    List.iter (fun keeper -> match notification_rows config keeper notice.notification_id with
+      | [row] -> check string "original payload survives rename/delete/restart" notice.content row.content
+      | _ -> fail "expected original notification once") ["alpha"; "beta"];
+    check bool "message is not reconstructed from current Goal" true
+      (String_util.contains_substring notice.content original_title);
+    check int "reconciled notification settles" 0 (List.length (notification_store config).pending_notifications))
+    [`Scan; `Repeat; `Commit_retry]
+;;
+
+let test_roster_read_failure_keeps_the_goal_notification_uncaptured () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Roster failure is not an empty fleet" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let root = Workspace.keepers_runtime_dir config in
+  if Sys.file_exists root then Unix.rmdir root;
+  Fs_compat.save_file root "fixture blocked Keeper directory";
+  ignore (must_succeed "proof commits while roster is unreadable"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "target measured"));
+  let notice = match (notification_store config).pending_notifications with
+    | [notice] -> notice | _ -> fail "roster error discarded the obligation" in
+  check bool "failed roster stays uncaptured" true (notice.delivery=Goal_store.Awaiting_recipients);
+  check int "roster failure did not publish a zero-recipient message" 0 (notification_message_count config notice.notification_id);
+  Sys.remove root;
+  persist_notification_keeper config "alpha";
+  (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+  check int "persisted recipient gets the repaired notification" 1
+    (List.length (notification_rows config "alpha" notice.notification_id));
+  check int "repaired notification settles" 0 (List.length (notification_store config).pending_notifications)
+;;
+
 let () =
   run
     "goal_verification_gate"
-    [ ( "b1 creation requirement"
+    [ ( "durable proof effects"
+      , [ test_case "audit and partial recipient failures recover exactly once" `Quick
+            test_proof_effect_delivery_recovers_audit_and_partial_recipients
+        ; test_case "scan and explicit repeat retain effects across rename/delete" `Quick
+            test_proof_delivery_survives_reconciliation_and_goal_removal
+        ; test_case "roster read failure cannot become an empty audience" `Quick
+            test_roster_read_failure_keeps_the_goal_notification_uncaptured ])
+    ; ( "b1 creation requirement"
       , [ test_case "creation requires a success condition" `Quick
             test_create_requires_a_success_condition
         ; test_case "creation with a success condition succeeds" `Quick

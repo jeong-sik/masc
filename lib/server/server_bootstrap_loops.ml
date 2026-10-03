@@ -398,6 +398,17 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
         ~content:delivery.content (); Ok ()
 
+let goal_notification_backend : Goal_delivery.backend = {
+  snapshot=(fun ~config ->
+    (* Persisted Keepers are the audience even before autoboot fills the live
+       registry. A directory read failure must not become an empty snapshot. *)
+    Eio_unix.run_in_systhread (fun () ->
+      Keeper_meta_store.persisted_keeper_names_read_only_result config));
+  project=(fun ~config ~delivery ~recipient ->
+    append_workspace_message_to_recipient ~base_path:config.Workspace_utils.base_path
+      ~sender_authority:Lane_addon_broadcast_delivery.External_sender delivery ~keeper_name:recipient);
+}
+
 let register_lane_fleet_backend () =
   Lane_addon_runtime.register_fleet_backend {
     snapshot=(fun ~config ~caller ~access ->
@@ -508,6 +519,7 @@ module Projection_for_testing = struct
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
   let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let goal_notification_backend = goal_notification_backend
   let append_workspace_message_to_recipient = append_workspace_message_to_recipient
   let mention_transcript_settled = mention_transcript_settled
 end
@@ -1900,6 +1912,7 @@ let start_keeper_loops_owned
             (Printexc.to_string exn)));
     mention_outcome
   in
+  Goal_delivery.register_backend goal_notification_backend;
   register_lane_fleet_backend ();
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   install_workspace_message_mutation_invalidation

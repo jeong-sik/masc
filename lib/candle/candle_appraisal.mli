@@ -7,7 +7,7 @@ type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }
 type task_relation = { task_id : string; relation : relation; trace : trace }
 type request =
-  | Grade of goal
+  | Grade of { goal : goal; grades : (Candle_grade.t * string) list }
   | Relation of { goal : goal; task_title : string }
   | Weights of { goal : goal; tasks : task list; keepers : string list; weight_max : int }
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation

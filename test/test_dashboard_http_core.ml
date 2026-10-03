@@ -3395,6 +3395,15 @@ let test_warm_dashboard_responses_follow_equipment_authority () =
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000
@@ -3411,9 +3420,9 @@ beanie = 200
      synthetic; the payment/purchase/equipment facts and their replay are real
      isolated-store operations. This does not exercise the model appraisal. *)
   let at = ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
-  let payment = ok Fun.id (Candle_payment.make
+  let payment = ok Fun.id (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
     ~identity:{goal_id="warm-cache-goal";request_id="warm-cache-request";verification_run_id="warm-cache-run"}
-    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:1000
     ~grade_trace:{run_id="grade";slot_id="fixture"}
     ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="fixture"}}]
     ~weights_trace:{run_id="weights";slot_id="fixture"}
@@ -3542,6 +3551,15 @@ let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 1000

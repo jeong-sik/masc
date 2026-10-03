@@ -51,6 +51,15 @@ let payout_config =
 weight_max = 10
 deduction_rate = 0
 deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
 [payout.grades_milli]
 trivial = 1000
 small = 2000
@@ -162,13 +171,13 @@ let append config rows =
 
 let payment_fixture ?(run = "confirmed-verifier") ~goal ~keeper amount =
     ok
-      (Candle_payment.make
+      (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
          ~identity:
            { goal_id = goal
            ; request_id = "confirmed-request"
            ; verification_run_id = run
            }
-         ~grade:Candle_grade.Trivial
+         ~grade:(Option.get (Candle_grade.of_string "trivial"))
          ~total_milli:amount
          ~grade_trace:{ run_id = "grade"; slot_id = "grade-slot" }
          ~relations:
@@ -369,8 +378,10 @@ let test_explicit_prices_and_unpriced_items () =
       ; "\n[shop.prices_milli]\nglasses = 1.5\n"
       ; "\n[shop.prices_milli]\nunknown_item = 100\n"
       ; "\n[shop.prices_milli]\nbare_face = 100\n"
-      ; "\n[shop]\n"
       ];
+    write_config config "\n[shop]\n";
+    rejected "unpriced_item" (buy config "keeper-a" "glasses");
+    check string "empty optional shop leaves the ledger unchanged" original (bytes config);
     write_config config "\n[shop.prices_milli]\nglasses = 0\n";
     ignore (buy config "keeper-a" "glasses" |> succeeded);
     check

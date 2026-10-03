@@ -1,0 +1,86 @@
+{
+  "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+  "admitted_bodies": [],
+  "response_recorded_posts": [
+    [
+      "/mcp",
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    ],
+    [
+      "/mcp",
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    ],
+    [
+      "/mcp",
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    ],
+    [
+      "/mcp",
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    ],
+    [
+      "/mcp",
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.49.0"
+          }
+        }
+      }
+    ]
+  ]
+}

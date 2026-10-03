@@ -2400,10 +2400,10 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
           ~workspace_initialized:(fun () -> false) ~log_mcp_exn:(fun ~label:_ _ -> ()) in
         Masc.Mcp_server_eio_execute.lane_access_for_caller ~config caller in
       Alcotest.(check bool) "verified runtime resolves existing Keeper" true
-        (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Lane_addon_sources.Keeper "alpha");
+        (access ~internal_keeper_runtime:true ~token ~name:"alpha" = Masc.Lane_addon_sources.Keeper "alpha");
       List.iter (fun (internal_keeper_runtime, token, name) ->
         Alcotest.(check bool) "unverified or missing Keeper stays unauthenticated" true
-          (access ~internal_keeper_runtime ~token ~name = Lane_addon_sources.Unauthenticated))
+          (access ~internal_keeper_runtime ~token ~name = Masc.Lane_addon_sources.Unauthenticated))
         [false, token, "alpha"; true, "invalid-token", "alpha"; true, token, "missing"])
 
 let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools

@@ -1,0 +1,40 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Approvals (0, confirm queue unread, held calls unread, Gate queue unread, questions unread)  01:47:51  HTTP [connec…  
+    (data unreliable: workspace identity is unverified; decisions require a fresh matching read)                              
+    (data unreliable: always-allow rules: workspace identity is unverified; decisions require a fresh matching read)          
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    (data unreliable: workspace identity is unverified; decisions require a fresh matching read)                              
+    (data unreliable: workspace identity is unverified; decisions require a fresh matching read)                              
+    (data unreliable: workspace identity is unverified; decisions require a fresh matching read)                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+
+
+
+
+  j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  [ / ]:ask  a:answer a question  r:refresh  Tab:next  | Port: 50344
+ › alpha — chat needs the server workspace for attachments and pasted files                                                   

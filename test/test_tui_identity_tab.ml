@@ -165,7 +165,8 @@ let test_the_recovery_read_retires_only_the_landed_login () =
   hold_expectation state ~keeper:"A" ~provider:"atlassian" ~base_path:"/w/a"
     ~masc_root:"/r";
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
-    ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
+    ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack";
+                declared "atlassian" "Atlassian"];
   check (Alcotest.list Alcotest.string) "the landed login stops being owed"
     [ "atlassian" ] (held_expectations state "A");
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"

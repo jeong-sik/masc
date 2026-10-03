@@ -159,7 +159,7 @@ let native_json ~binary args =
   | Ok _ | Error _ -> Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
 type reasoning_efforts = { supported : string list; default : string }
-type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option }
+type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option; supports_image_input : bool option }
 let client_reasoning_efforts row =
   let effort = function `String value when value<>"" -> Ok value | _ -> Error Unsupported_connection in
   match List.assoc_opt "supported_reasoning_efforts" row,List.assoc_opt "default_reasoning_effort" row with
@@ -191,8 +191,12 @@ let client_models ~catalog json =
       let context=value (if catalog then "max_context" else "context") row in
       let context=positive context in
       let* reasoning_efforts=client_reasoning_efforts row in
+      let* supports_image_input = match List.assoc_opt "supports_image_input" row with
+        | None | Some `Null -> Ok None
+        | Some (`Bool value) -> Ok (Some value)
+        | Some _ -> Error Unsupported_connection in
       let* tail=project (id::seen) tail in
-      Ok ({id;label;context;reasoning_efforts}::tail)
+      Ok ({id;label;context;reasoning_efforts;supports_image_input}::tail)
     | _ -> Error Unsupported_connection in
   project [] models
 let client_models_json ~source models =
@@ -203,7 +207,9 @@ let client_models_json ~source models =
       | Some {supported;default} ->
         ["supported_reasoning_efforts",`List (List.map (fun effort -> `String effort) supported);
          "default_reasoning_effort",`String default] in
-    `Assoc (["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null] @ efforts)) models in
+    let image = match model.supports_image_input with
+      | None -> [] | Some value -> ["supports_image_input", `Bool value] in
+    `Assoc (["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null] @ efforts @ image)) models in
   `Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows]
 let project_client_models ~source ~catalog json =
   let* models=client_models ~catalog json in
@@ -435,7 +441,7 @@ let context ~binary ~net ~base_path request =
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
 let model_spec ~reported_models template request =
-  let* fields=fields ["id";"context";"streaming"] ["id";"context";"streaming"] request in
+  let* fields=fields ["id";"context";"streaming";"supports_image_input"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
@@ -445,8 +451,12 @@ let model_spec ~reported_models template request =
       (match List.find_opt (fun model -> String.equal model.id id) models with
        | Some {context=Some reported;_} when context=`Int reported -> Ok ()
        | Some _ | None -> Error Invalid_request) in
+  let* image = match List.assoc_opt "supports_image_input" fields with
+    | None -> Ok []
+    | Some (`Bool _ as value) -> Ok ["supports_image_input", value]
+    | Some _ -> Error Invalid_request in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
-      "tools",`Bool true;"streaming",streaming])) |> Result.map_error (fun _ -> Invalid_request)
+      "tools",`Bool true;"streaming",streaming] @ image)) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =
   Eio.Switch.run (fun sw ->
     let* body=fields ["revision";"connections";"selection";"default_runtime_id"] ["revision";"connections";"selection"] request in

@@ -250,12 +250,7 @@ let test_esc_hint_follows_the_observed_turn () =
    transcript is already drawing -- one age and one request id, not three --
    and the budget counted it anyway, so with a single message in flight the
    status area reserved a row nobody drew.
-
-   What is asserted here is the shared answer. That the budget uses it is a
-   call-shape fact, pinned in [test_tui_http_ast]: the budget is a sum of
-   several areas, so asserting its total here would pin those areas too and
-   this test would fail for reasons that have nothing to do with in-flight
-   rows. *)
+ *)
 let test_only_the_uncovered_in_flight_rows_are_drawn () =
   let state = state () in
   ignore (live state (Some Live.Running));
@@ -423,7 +418,6 @@ let test_foreign_stop_command_remains_complete () =
       [40; 60; 80; 120; 242])
     ["beta"; "keeper-with-a-long-family-name-and-a-distinct-tail";
      "아주긴키퍼이름으로행동안내가가려지면안되는키퍼"]
-
 
 let test_priority_control_receipt_ordering () =
   let setup () =

@@ -510,6 +510,8 @@ let test_provider_refusal ~status ~rejected () =
        check bool "refusal parks until an explicit event" true rejected
      | Error (A.Transport_unavailable _) ->
        check bool "availability remains pulse retryable" false rejected
+     | Error (A.Execution_rejected _) ->
+       fail "an HTTP refusal cannot be a local execution rejection"
      | Ok _ -> fail "provider refusal produced an appraisal");
     check int "one HTTP request was dispatched" 1 (F.post_count server);
     check (list string) "no undeclared CLI dispatch" [] !calls;

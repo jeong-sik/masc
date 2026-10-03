@@ -161,6 +161,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[ROSTER_PATH] = roster
+    fixtures["/api/v1/gate/keepers"] = h.HeadersHttpResponse(lambda _headers: roster())
     requests: h.HttpRequests = []
     boot_path = f"/api/v1/keepers/{keeper}/boot"
     held_boot = h.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)

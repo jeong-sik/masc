@@ -289,8 +289,19 @@ let install_script () = read_file (Filename.concat (source_root ()) "scripts/ins
 
 let quickstart_script () = read_file (Filename.concat (source_root ()) "quickstart.sh")
 
-let release_build_workflow () =
-  read_file (Filename.concat (source_root ()) ".github/workflows/release-build.yml")
+(* Publication consumes the exact successful RC distribution; binary builds
+   and checksum production belong to its reusable installation workflow. *)
+let release_workflow () =
+  let require label text needle = check bool label true (string_contains text needle) in
+  let root = source_root () in
+  let publication = read_file (Filename.concat root ".github/workflows/release.yml") in
+  let candidate = read_file (Filename.concat root ".github/workflows/release-candidate.yml") in
+  require "publication stages the verified RC distribution" publication
+    "scripts/ci/prepare-release-publication.py";
+  require "publication rechecks assets before publishing" publication "--recheck";
+  require "RC installation uses the release build workflow" candidate
+    "uses: ./.github/workflows/release-build.yml";
+  read_file (Filename.concat root ".github/workflows/release-build.yml")
 ;;
 
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
@@ -704,7 +715,7 @@ let test_presets_carry_their_own_instructions () =
 ;;
 
 let test_release_requires_advertised_binary_assets () =
-  let workflow = release_build_workflow () in
+  let workflow = release_workflow () in
   assert_contains
     "release checks advertised asset list"
     workflow
@@ -1768,7 +1779,7 @@ wizard-default = true
 ;;
 
 let test_release_checksums_include_runtime_config_seed () =
-  let workflow = release_build_workflow () in
+  let workflow = release_workflow () in
   assert_contains
     "release checksum includes runtime config seeds"
     workflow
@@ -1787,7 +1798,7 @@ let test_team_flag_and_seed_exist () =
 ;;
 
 let test_release_checksums_include_team_presets () =
-  let workflow = release_build_workflow () in
+  let workflow = release_workflow () in
   assert_contains
     "release checksum walks every team preset manifest"
     workflow

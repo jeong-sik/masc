@@ -1169,6 +1169,19 @@ let enter_setup_required ~reason () =
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
+let preserve_candidate previous (runtime : t) =
+    match List.find_opt (fun (old : t) ->
+      String.equal old.id runtime.id
+      && Runtime_schema.equal_provider old.provider runtime.provider
+      && Runtime_schema.equal_model_spec old.model runtime.model
+      && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_candidate_backpressure.same_candidate_binding
+           old.candidate_backpressure runtime.candidate_backpressure) previous with
+    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
+    | None -> runtime
+
+;;
+
 let set_loaded
     ?startup_degradation
     ?declared_media_failover
@@ -1187,17 +1200,7 @@ let set_loaded
      credentials/catalog facts after a reload. Removed/rebound rows retain no
      global registry entry; in-flight snapshots alone keep their old cells. *)
   let previous = (Atomic.get loaded_state_ref).runtimes in
-  let preserve_candidate (runtime : t) =
-    match List.find_opt (fun (old : t) ->
-      String.equal old.id runtime.id
-      && Runtime_schema.equal_provider old.provider runtime.provider
-      && Runtime_schema.equal_model_spec old.model runtime.model
-      && Runtime_schema.equal_binding old.binding runtime.binding
-      && Runtime_candidate_backpressure.same_candidate_binding
-           old.candidate_backpressure runtime.candidate_backpressure) previous with
-    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
-    | None -> runtime
-  in
+  let preserve_candidate = preserve_candidate previous in
   let runtimes = List.map preserve_candidate runtimes in
   let rt = preserve_candidate rt in
   let declared_media_failover =
@@ -1356,9 +1359,25 @@ let load_exact_output_resolver_snapshot catalog =
     ()
 ;;
 
-let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
+let exact_output_runtime_observations ~origin runtimes =
+  match origin with
+  | Replacement_catalog_targets _ -> []
+  | Runtime_binding_targets ->
+    let previous = (Atomic.get loaded_state_ref).runtimes in
+    List.filter_map (fun (runtime : t) ->
+      let runtime = preserve_candidate previous runtime in
+      match runtime.execution with
+      | Runtime_execution.Agent_core _ ->
+        Some (runtime.id, Runtime_exact_output_registry.{
+          candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope })
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None) runtimes
+;;
+
+let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
+      ?runtime_observations
       ?required_lane_ids
       ?excused_lane_ids
       ~lanes
@@ -2711,6 +2730,7 @@ type exact_output_commit_plan =
 let prepare_exact_output_replacement ~runtimes ~lanes =
   let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
   Runtime_exact_output_registry.prepare_replacement
+    ~runtime_observations:(exact_output_runtime_observations ~origin:catalog.catalog_origin runtimes)
     ~lanes
     ~excused_lane_ids:catalog.catalog_exact_slots.emptied_lane_ids
     ~load_resolver_snapshot:(fun () ->
@@ -3947,6 +3967,7 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
 type exact_slot_move =
   | Move_slot_up
   | Move_slot_down
+  | Move_slot_first
 
 (* Both edits below read the declaration under the write lock for the reason
    the append does: the standalone-lane projection shows the slots the
@@ -4020,15 +4041,17 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
   let* edit =
     with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
       let count = List.length slots in
-      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
+      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 | Move_slot_first -> 0 in
       if target < 0 || target >= count
       then
         Error
           (Printf.sprintf
              "%s is already %s in %s"
              slot
-             (match move with Move_slot_up -> "first" | Move_slot_down -> "last")
+             (match move with Move_slot_up | Move_slot_first -> "first" | Move_slot_down -> "last")
              lane_id)
+      else if move = Move_slot_first then
+        Ok (slot :: List.filteri (fun index _ -> index <> position) slots)
       else
         let at_position = List.nth slots position
         and at_target = List.nth slots target in
@@ -4043,4 +4066,26 @@ let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
              slots))
   in
   edit_runtime_lanes ?runtime_config_path edit
+;;
+
+let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
+  let slot = String.trim slot in
+  let replacement = String.trim replacement in
+  if String.equal replacement "" || contains_newline replacement
+  then Error "replacement must be a non-empty runtime id without newlines"
+  else
+    let* edit = with_declared_exact_slots ~lane ~slot
+      (fun ~lane_id:_ ~slot:_ ~slots ~other ~position ->
+        if List.mem replacement (slots @ other)
+        then Error (replacement ^ " is already declared in this lane")
+        else Ok (List.mapi (fun index current ->
+          if index = position then replacement else current) slots)) in
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let current = Option.bind (exact_lane_decl config lane) (fun decl ->
+        if List.mem slot decl.slot_ids then Some Catalog_slots
+        else if List.mem slot decl.cli_slot_ids then Some Cli_slots else None) in
+      match current, exact_slot_list_of_new_slot config replacement with
+      | Some current, Some next when current = next -> edit ~content config
+      | _, None -> Error (no_output_schema_channel_refusal ~slot:replacement ~lane_id:(Standalone_lane.to_id lane))
+      | _ -> Error "Replace a candidate within its HTTP or CLI group; add a candidate to change groups")
 ;;

@@ -6,23 +6,7 @@ import time
 
 import test_tui_keyboard_input as keyboard
 
-SOURCE_MODULES = (
-    "bin/masc_tui_board_requests.ml",
-    "bin/masc_tui_board_requests.mli",
-    "bin/masc_tui_board_updates.ml",
-    "bin/masc_tui_board_updates.mli",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_input_reader.ml",
-    "bin/masc_tui_input_reader.mli",
-    "bin/masc_tui_markdown.ml",
-    "bin/masc_tui_input_decoder.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render_schedule.ml",
-)
+
 
 
 def vote_hint_at_narrow_width(executable: str) -> None:

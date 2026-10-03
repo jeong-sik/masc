@@ -225,18 +225,31 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
      same atoms: their messages, the tool calls in them, and the counterpart
      observations of the turn they finish (none for a unit that stops inside
      its turn; the unit that finishes it carries the turn's). *)
+  let source_input ~include_observations (base : Keeper_librarian.input) unit =
+    let module H = Keeper_librarian_task_context in
+    let _, _, messages, observations, contexts = List.fold_left
+      (fun (message_count, tool_count, messages, observations, contexts) (scope, slice) ->
+        let tools = if include_observations then
+          Keeper_librarian_durable_consumer.tool_observations slice else [] in
+        let after_message = message_count + List.length slice in
+        let after_tool_observation = tool_count + List.length tools in
+        let context : H.t = {scope;first_message=message_count;after_message;
+          first_tool_observation=tool_count;after_tool_observation} in
+        after_message, after_tool_observation, List.rev_append slice messages,
+        List.rev_append tools observations, context :: contexts)
+      (0, 0, [], [], []) (P.source_spans unit) in
+    {base with messages=List.rev messages; tool_observations=List.rev observations;
+      historical_task_contexts=List.rev contexts} in
   let memory_input (base : Keeper_librarian.input) unit =
     let ( let* ) = Result.bind in
-    let messages = P.messages unit in
+    let input = source_input ~include_observations:true base unit in
     let* counterpart_observations = match P.turn_window unit with
       | None -> Ok []
       | Some { P.after; through } ->
         Keeper_librarian_input_sources.counterpart_observations_between
           ~base_dir:base_path ~keeper_name ~after ~before:through
         |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
-    Ok { base with messages;
-         tool_observations = Keeper_librarian_durable_consumer.tool_observations messages;
-         counterpart_observations } in
+    Ok { input with counterpart_observations } in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -304,7 +317,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let ( let* ) = Result.bind in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
-        { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+        { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
           keeper_id;
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
@@ -330,7 +343,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
          carries what the durable pass would have. A pass whose Memory is
          already saved needs neither observation. *)
       let* input =
-        if memory_committed then Ok {input with messages = P.messages selected}
+        if memory_committed then Ok (source_input ~include_observations:false input selected)
         else memory_input input selected in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
@@ -517,15 +530,16 @@ let context_pass_needed ~keepers_dir ~keeper_name
 
 (* The queue pass organizes the inputs pending now, with no turn range, so
    the Keeper's current task is the task these inputs belong to. The durable
-   and continuity passes read turns that may predate that task, and a turn
-   boundary does not record its task, so they stay [No_task]. *)
+   and continuity passes read turns that may predate that task, so their
+   current Goal context stays [No_task]. Historical durable context is separate;
+   continuity admission provenance is not yet transported. *)
 let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
     ~working_context : Keeper_librarian.input =
   { keeper_id
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
-  ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
   ; current

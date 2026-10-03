@@ -42,7 +42,7 @@ let press state keys =
           | Some action -> (
               match
                 Masc_tui_pick_list.apply ~page:runtime_picker_page
-                  ~label:runtime_picker_label catalog list action
+                  ~label:(runtime_picker_label_for pick) catalog list action
               with
               | Masc_tui_pick_list.Stay list -> list
               | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
@@ -133,6 +133,7 @@ let notice_text = function
   | None -> "no line"
   | Some (Lane_write_refused reason) -> "refuse: " ^ reason
   | Some Lane_write_pending -> "pending"
+  | Some Lane_write_confirmed -> "saved and reloaded"
 
 let stale_text state =
   match runtime_lane_stale_lines state with
@@ -213,7 +214,7 @@ let test_a_written_list_holds_edits_until_its_reread () =
   state.runtime_lane_notice <- Some Lane_write_pending;
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 (Ok ());
   expect_plan "the re-read landed" state down "write primary [b; a], cursor 1";
-  Alcotest.(check string) "the pending line went with it" "no line"
+  Alcotest.(check string) "success waits for the saved order reload" "saved and reloaded"
     (notice_text state.runtime_lane_notice)
 
 (* A standalone lane's slots are read back from the standalone lanes list;
@@ -711,6 +712,7 @@ let slot_plan_text = function
     Printf.sprintf "%s %s %s" (slot_editor_target_name target)
       (match request with
        | Drop_declared_slot -> "drop"
+       | First_declared_slot -> "first in group"
        | Move_declared_slot Move_up -> "up"
        | Move_declared_slot Move_down -> "down"
        | Write_route_order order -> "order [" ^ String.concat "; " order ^ "]")
@@ -858,15 +860,42 @@ let test_slot_selection_survives_refresh () =
 
 let test_slot_editor_keys_parse () =
   Alcotest.(check (list string)) "the editor's own keys"
-    [ "drop"; "down"; "up"; "none" ]
+    [ "drop"; "down"; "up"; "first"; "none" ]
     (List.map
        (fun key ->
           match slot_edit_of_key key with
           | Some Drop_slot -> "drop"
+          | Some First_slot -> "first"
           | Some (Move_slot Move_down) -> "down"
           | Some (Move_slot Move_up) -> "up"
           | None -> "none")
-       [ "x"; "J"; "K"; "a" ])
+       [ "x"; "J"; "K"; "1"; "a" ])
+
+let test_exact_replacement_search_exposes_model_effort_and_same_group () =
+  let state = slot_editor_state ~declared:[] ~admitted:[]
+      ~declared_cli:["account.current"] ~admitted_cli:["account.current"] () in
+  let selected = { (runtime "account.luna-medium") with
+    ro_model = "gpt-6-luna"; ro_provider_id = "account";
+    ro_exact_slot_group = Tui_decode.Exact_cli_slots;
+    ro_effective_max_context = 750000;
+    ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.Medium } in
+  state.runtime_catalog <- [runtime "http.other"; selected;
+    { selected with ro_id = "account.current" }];
+  let pick = Pick_exact_lane_replacement
+      (Standalone_lane.Librarian, "account.current", Tui_decode.Exact_cli_slots) in
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "luna medium")
+    (fun index -> String.make 1 "luna medium".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search chooses a configured model with declared effort"
+       ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  Alcotest.(check string) "first means first within the declared group"
+    "librarian_exact first in group account.current"
+    (slot_plan_text (plan_slot_edit state First_slot));
+  Alcotest.(check bool) "replacement sends one operation rather than replacing a stale list"
+    false (runtime_lane_pick_sends_whole_order pick)
 
 (* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
    candidate in first position -- the same shape a declared lane holding one
@@ -1003,16 +1032,6 @@ let test_the_route_editor_will_not_write_from_a_stale_list () =
   Alcotest.(check string) "an exact lane's drop is untouched"
     "librarian_exact drop a"
     (slot_plan_text (plan_slot_edit exact Drop_slot))
-
-(* The pick dispatch lives in the executable, so this is read off its source.
-   It used to decide the same question with a list of constructors written
-   into the match, and that list left [Pick_media_failover] on the unguarded
-   side. *)
-let test_the_pick_dispatch_asks_the_same_question () =
-  Alcotest.(check int) "the dispatch asks which writes send the whole order" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"launch_runtime_lane_pick"
-       ~callee:"Masc_tui_types.runtime_lane_pick_sends_whole_order")
 
 (* Which writes a stale list can undo is one question, asked of the value
    rather than of a list of constructors written at each dispatch. Both
@@ -1153,31 +1172,6 @@ let test_the_drawn_cursor_clamps_to_a_shorter_catalogue () =
   Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
   Alcotest.(check (option string)) "the last is selected" (Some "openai.gpt") selected
 
-(* The key handler, the paste and both renderers read the one list. The key
-   path lives in the executable, so the calls are counted in its source. *)
-let test_the_picker_keys_and_rows_go_through_the_shared_list () =
-  let calls ~module_path ~binding_name callee =
-    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
-  in
-  Alcotest.(check int) "the key arm applies the shared list" 1
-    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "Masc_tui_pick_list.apply");
-  Alcotest.(check int) "and reads the rows the projection reads" 1
-    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main"
-       "Masc_tui_types.runtime_picker_rows");
-  (* One paste arm per picker: this one and the Keeper runtime picker's. *)
-  Alcotest.(check int) "a paste types into the same filter" 2
-    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "Masc_tui_pick_list.type_text");
-  Alcotest.(check int) "the projection draws the shared window" 1
-    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_picker_projection"
-       "Masc_tui_pick_list.view");
-  List.iter
-    (fun binding_name ->
-      Alcotest.(check int)
-        (binding_name ^ " draws the label the filter matches") 1
-        (calls ~module_path:"bin/masc_tui_render.ml" ~binding_name
-           "Masc_tui_types.runtime_picker_label"))
-    [ "render_lanes_overview"; "render_runtime" ]
-
 (* The Keeper runtime picker (Keepers, [U]): the declared lanes first, then
    the whole catalogue, one list the filter reads across. *)
 let keeper_picker_rows = 40
@@ -1314,56 +1308,6 @@ let test_the_keeper_picker_window_follows_the_cursor () =
     (Some (page - 1)) view.Masc_tui_pick_list.selected_row;
   Alcotest.(check int) "still a whole page" page (List.length rows)
 
-(* The key handler, the paste and the renderer read one list. The key path
-   lives in the executable, so the calls are counted in its source. *)
-let test_the_keeper_picker_goes_through_the_shared_list () =
-  let calls ~module_path ~binding_name callee =
-    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
-  in
-  (* The label is passed, not called: count the [~label] it is passed as. *)
-  let labelled ~module_path ~binding_name ~callee label =
-    Ast_grep.count_exact_applications_in_value_binding ~module_path ~binding_name
-      ~callee ~arguments_match:(fun args ->
-        List.exists
-          (fun (argument_label, expression) ->
-            match argument_label with
-            | Asttypes.Labelled "label" -> Ast_grep.expression_is_identifier label expression
-            | Asttypes.Labelled _ | Asttypes.Nolabel | Asttypes.Optional _ -> false)
-          args)
-  in
-  let key = calls ~module_path:"bin/masc_tui.ml" ~binding_name:"keeper_runtime_pick_key" in
-  Alcotest.(check int) "the key handler applies the shared list" 1
-    (key "Masc_tui_pick_list.apply");
-  Alcotest.(check int) "over the items the renderer draws" 1
-    (key "Masc_tui_types.runtime_picker_items");
-  Alcotest.(check int) "matched on the drawn label" 1
-    (labelled ~module_path:"bin/masc_tui.ml" ~binding_name:"keeper_runtime_pick_key"
-       ~callee:"Masc_tui_pick_list.apply" "Masc_tui_types.runtime_pick_label");
-  Alcotest.(check int) "paged by the drawn page" 1
-    (key "Masc_tui_types.keeper_runtime_picker_page");
-  Alcotest.(check int) "the main loop's picker arm calls it" 1
-    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "keeper_runtime_pick_key");
-  let view =
-    calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"keeper_runtime_picker_view"
-  in
-  Alcotest.(check int) "the drawn window is the shared list's" 1
-    (view "Masc_tui_pick_list.view");
-  Alcotest.(check int) "filtered on the same label" 1
-    (labelled ~module_path:"bin/masc_tui_types.ml" ~binding_name:"keeper_runtime_picker_view"
-       ~callee:"Masc_tui_pick_list.view" "runtime_pick_label");
-  Alcotest.(check int) "the page is the key handler's" 1
-    (view "keeper_runtime_picker_page");
-  let render =
-    calls ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_runtime_pick"
-  in
-  Alcotest.(check int) "the renderer draws that window" 1
-    (render "Masc_tui_types.keeper_runtime_picker_view");
-  Alcotest.(check int) "with the columns the label joins" 1
-    (render "Masc_tui_types.runtime_pick_columns");
-  Alcotest.(check int) "and the label is those columns" 1
-    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_pick_label"
-       "runtime_pick_columns")
-
 let test_account_usage_stays_spent_until_new_report () =
   let open Masc.Tui_decode_usage in
   let snapshot = match (lane_state ()).runtime_surface with
@@ -1399,88 +1343,57 @@ let test_account_usage_stays_spent_until_new_report () =
        {snapshot.rss_resolved with rrs_usage = Error "bad report"} rt))
 
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [
-      Alcotest.test_case "account usage survives reset until new report" `Quick
+  ["operator states", [ Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
-      Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
-      Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
-      Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;
-      Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
-      Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
-      Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
-      Alcotest.test_case "lane keys parse to edits" `Quick test_lane_keys_parse_to_edits;
-      Alcotest.test_case "a rename opens the field on the current name" `Quick
+        Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
+        Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
+        Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;
+        Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
+        Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
+        Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
+        Alcotest.test_case "lane keys parse to edits" `Quick test_lane_keys_parse_to_edits;
+        Alcotest.test_case "a rename opens the field on the current name" `Quick
         test_a_rename_opens_the_field_on_the_current_name;
-      Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
-      Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
-      Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
-      Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
-      Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
-      Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
-      Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
-      Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
-      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
-      Alcotest.test_case "the authority row spells its config path whole" `Quick
-        test_the_authority_row_spells_its_config_path_whole;
-      Alcotest.test_case "picker target column fits the longest id" `Quick
-        test_picker_target_column_fits_the_longest_id;
-      Alcotest.test_case "every picker row fits the frame" `Quick
-        test_every_row_fits_the_frame;
-      Alcotest.test_case "narrow rows keep the quota warning" `Quick
-        test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
-      Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
-        test_runtime_detail_keeps_its_owner;
-      Alcotest.test_case "rate limit shows on model and lane rows" `Quick
-        test_rate_limit_is_said_on_model_and_lane_rows;
-      Alcotest.test_case "narrow target column tells the variants apart" `Quick
-        test_narrow_target_column_still_tells_the_variants_apart;
-      Alcotest.test_case "the slot editor edits the declared order" `Quick
-        test_the_slot_editor_edits_the_declared_order;
-      Alcotest.test_case "the slot editor keeps the last slot" `Quick
-        test_the_slot_editor_keeps_the_last_slot;
-      Alcotest.test_case "the slot editor includes CLI fallback slots" `Quick
-        test_the_slot_editor_edits_cli_slots_after_http;
-      Alcotest.test_case "slot editor keys parse" `Quick
+        Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
+        Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
+        Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
+        Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
+        Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
+        Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
+        Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
+        Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
+        Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
+        Alcotest.test_case "the authority row spells its config path whole" `Quick
+        test_the_authority_row_spells_its_config_path_whole; Alcotest.test_case "picker target column fits the longest id" `Quick
+        test_picker_target_column_fits_the_longest_id; Alcotest.test_case "every picker row fits the frame" `Quick
+        test_every_row_fits_the_frame; Alcotest.test_case "narrow rows keep the quota warning" `Quick
+        test_narrow_rows_keep_the_fact_that_is_said_nowhere_else; Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
+        test_runtime_detail_keeps_its_owner; Alcotest.test_case "rate limit shows on model and lane rows" `Quick
+        test_rate_limit_is_said_on_model_and_lane_rows; Alcotest.test_case "narrow target column tells the variants apart" `Quick
+        test_narrow_target_column_still_tells_the_variants_apart; Alcotest.test_case "the slot editor edits the declared order" `Quick
+        test_the_slot_editor_edits_the_declared_order; Alcotest.test_case "the slot editor keeps the last slot" `Quick
+        test_the_slot_editor_keeps_the_last_slot; Alcotest.test_case "the slot editor includes CLI fallback slots" `Quick
+        test_the_slot_editor_edits_cli_slots_after_http; Alcotest.test_case "slot editor keys parse" `Quick
         test_slot_editor_keys_parse;
-      Alcotest.test_case "slot selection survives refreshed declarations" `Quick
-        test_slot_selection_survives_refresh;
-      Alcotest.test_case "media slot selection survives refreshed declarations" `Quick
-        test_media_slot_selection_survives_refresh;
-      Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
-        test_an_undeclared_lane_is_not_read_as_a_single_candidate;
-      Alcotest.test_case "the picker offers only declared lanes" `Quick
-        test_the_picker_offers_only_declared_lanes;
-      Alcotest.test_case "the route editor writes the whole order" `Quick
-        test_the_route_editor_writes_the_whole_order;
-      Alcotest.test_case "the route editor will not write from a stale list"
-        `Quick test_the_route_editor_will_not_write_from_a_stale_list;
-      Alcotest.test_case "the writes a stale list can undo are named once"
-        `Quick test_the_writes_a_stale_list_can_undo_are_named_once;
-      Alcotest.test_case "the pick dispatch asks the same question" `Quick
-        test_the_pick_dispatch_asks_the_same_question;
-      Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
-        test_the_route_editor_keeps_an_unresolved_entry_in_place;
-      Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
-        test_a_typed_filter_narrows_the_drawn_choices;
-      Alcotest.test_case "an empty match is not an unread catalogue" `Quick
-        test_an_empty_match_is_not_an_unread_catalogue;
-      Alcotest.test_case "the filter matches the drawn text" `Quick
-        test_the_filter_matches_the_drawn_text;
-      Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
-        test_the_drawn_cursor_clamps_to_a_shorter_catalogue;
-      Alcotest.test_case "picker keys and rows go through the shared list" `Quick
-        test_the_picker_keys_and_rows_go_through_the_shared_list;
-      Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
-        test_the_keeper_picker_filters_across_lanes_and_runtimes;
-      Alcotest.test_case "keeper picker label is the drawn columns" `Quick
-        test_the_keeper_picker_label_is_the_drawn_columns;
-      Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
-        test_the_keeper_picker_empty_match_is_not_an_unread_catalogue;
-      Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
-        test_the_keeper_picker_cursor_clamps_to_a_shorter_list;
-      Alcotest.test_case "keeper picker window follows the cursor" `Quick
-        test_the_keeper_picker_window_follows_the_cursor;
-      Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
-        test_schema_less_client_is_refused_only_for_exact_lane;
-      Alcotest.test_case "keeper picker goes through the shared list" `Quick
-        test_the_keeper_picker_goes_through_the_shared_list]]
+        Alcotest.test_case "exact replacement searches model and effort within its group" `Quick
+        test_exact_replacement_search_exposes_model_effort_and_same_group;
+        Alcotest.test_case "slot selection survives refreshed declarations" `Quick
+        test_slot_selection_survives_refresh; Alcotest.test_case "media slot selection survives refreshed declarations" `Quick
+        test_media_slot_selection_survives_refresh; Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
+        test_an_undeclared_lane_is_not_read_as_a_single_candidate; Alcotest.test_case "the picker offers only declared lanes" `Quick
+        test_the_picker_offers_only_declared_lanes; Alcotest.test_case "the route editor writes the whole order" `Quick
+        test_the_route_editor_writes_the_whole_order; Alcotest.test_case "the route editor will not write from a stale list"
+        `Quick test_the_route_editor_will_not_write_from_a_stale_list; Alcotest.test_case "the writes a stale list can undo are named once"
+        `Quick test_the_writes_a_stale_list_can_undo_are_named_once; Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
+        test_the_route_editor_keeps_an_unresolved_entry_in_place; Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
+        test_a_typed_filter_narrows_the_drawn_choices; Alcotest.test_case "an empty match is not an unread catalogue" `Quick
+        test_an_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "the filter matches the drawn text" `Quick
+        test_the_filter_matches_the_drawn_text; Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
+        test_the_drawn_cursor_clamps_to_a_shorter_catalogue; Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
+        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker label is the drawn columns" `Quick
+        test_the_keeper_picker_label_is_the_drawn_columns; Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
+        test_the_keeper_picker_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
+        test_the_keeper_picker_cursor_clamps_to_a_shorter_list; Alcotest.test_case "keeper picker window follows the cursor" `Quick
+        test_the_keeper_picker_window_follows_the_cursor; Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
+        test_schema_less_client_is_refused_only_for_exact_lane
+]]

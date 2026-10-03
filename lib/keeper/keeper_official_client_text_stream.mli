@@ -20,7 +20,8 @@
 
     The break belongs to no message, and a turn's recorded text does not
     contain it. {!remainder} therefore compares the recorded text with the
-    whole stream and then with the last message alone. *)
+    raw provider text (without presentation separators) and then with the last
+    message alone. *)
 
 type 'message t
 
@@ -55,8 +56,14 @@ val complete_message : 'message t -> message:'message -> text:string -> string o
 val remainder : 'message t -> final_text:string -> string option
 (** The part of the turn's recorded text the stream has not shown, to forward
     after the last text when the turn ends. [Some suffix] when everything
-    forwarded so far, or else the last message's text alone, is a strict
+    raw provider text forwarded so far, or else the last message's text alone, is a strict
     prefix of [final_text]: Codex and Claude Code record one message as the
     turn's text, the last one. [None] when nothing is missing, or when the
     recorded text does not continue what streamed; sending it then could
     repeat text the viewer already has. *)
+
+val finish_response : 'message t -> final_text:string -> string option
+(** Reconcile an authoritative terminal response. A raw/current prefix contributes
+    only its missing suffix. A response already shown as an earlier message is
+    not repeated; a different response starts its own paragraph. Used when the
+    client's terminal response may differ from its narrated response steps. *)

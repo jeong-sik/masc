@@ -1112,9 +1112,9 @@ let shade c =
   let f v k = int_of_float (Float.round (float_of_int v *. k)) in
   rgb (f c.red kr) (f c.green kg) (f c.blue kb)
 
-let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size) =
+let render_with ?frame ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size) =
   let g = geometry_posed ~cull b e p in
-  let frame = frame_for b g frame_of n in
+  let frame = match frame with Some frame -> frame | None -> frame_for b g frame_of n in
   let supersample = supersample_for n in
   let line_reach = line_reach_for supersample in
   let grid = n * supersample in
@@ -1203,6 +1203,13 @@ let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size)
 
 let render_posed b e p n = render_with ~cull:true ~frame_of:e b e p n
 let render b e n = render_posed b e still n
+
+let render_icon b e n =
+  let g = geometry b in
+  (* Fit the wax width and facial features, with the renderer's existing
+     clearance. Peripheral outfit pieces belong to the full preview. *)
+  let frame = { half = g.w +. neighbour_margin; middle_y = g.fy } in
+  render_with ~frame ~cull:true ~frame_of:e b e still n
 
 (* The mosaic has only 24 samples across a Keeper's band. Sampling the full
    portrait at that size spends most of them on its round backdrop. Draw the

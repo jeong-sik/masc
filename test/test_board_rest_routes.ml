@@ -545,6 +545,46 @@ let with_board_store ~base_path f =
   f ()
 ;;
 
+let test_board_write_routes_reject_foreign_workspace () =
+  with_authenticated_activity_router
+    ~prefix:"board-write-workspace-" ~agent_name:"workspace-writer"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path @@ fun () ->
+  let expected root = `Assoc
+      [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
+      ; "masc_root", `String root ] in
+  let current = expected (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
+  let post path workspace fields =
+    dispatch_json ~router ~token ~path ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc (("expected_workspace", workspace) :: fields))) () in
+  let status, _ = post "/api/v1/tools/masc_board_post" current
+      [ "title", `String "workspace seed"; "body", `String "seed" ] in
+  check int "matching workspace creates post" 201 status;
+  let seed = match board_post_by_title "workspace seed" with
+    | Some post -> post | None -> fail "seed post missing" in
+  let post_id = Masc.Board.Post_id.to_string seed.id in
+  let writes =
+    [ "/api/v1/tools/masc_board_post", 201,
+      [ "title", `String "workspace guarded write"; "body", `String "new post" ]
+    ; "/api/v1/tools/masc_board_comment", 201,
+      [ "post_id", `String post_id; "content", `String "guarded comment" ]
+    ; "/api/v1/tools/masc_board_vote", 200,
+      [ "post_id", `String post_id; "direction", `String "up" ] ] in
+  List.iter (fun (path, _, fields) ->
+    List.iter (fun workspace ->
+      let status, _ = post path workspace fields in
+      check int (path ^ " rejects unbound workspace") 400 status)
+      [expected (base_path ^ "/foreign-root"); `Null]) writes;
+  check bool "refused post has no effect" true
+    (Option.is_none (board_post_by_title "workspace guarded write"));
+  (match Masc.Board_dispatch.get_comments ~post_id with
+   | Ok comments -> check int "refused comment has no effect" 0 (List.length comments)
+   | Error error -> fail (Masc.Board.show_board_error error));
+  List.iter (fun (path, status, fields) ->
+    let actual, _ = post path current fields in
+    check int (path ^ " accepts matching workspace") status actual) writes
+;;
+
 let test_board_write_routes_use_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"board-write-http-actor-"
@@ -1509,6 +1549,8 @@ let () =
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
+        ; test_case "Board writes bind the receiving workspace" `Quick
+            test_board_write_routes_reject_foreign_workspace
         ; test_case "the Board list route and projection share the kept page" `Quick
             test_board_list_route_and_projection_share_the_kept_page
         ; test_case "a Board timeout cannot become a conditional 304" `Quick

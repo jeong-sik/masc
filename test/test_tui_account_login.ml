@@ -267,7 +267,7 @@ let usage_limited_save () =
       "a verified receipt with an unmeasured list is unreadable",
         `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* A save that left selected runtimes uncalled is neither verified nor
-   usage-limited. The screen names each one on its own row, and a receipt that
+   usage-limited. The screen summarizes retained connections, and a receipt that
    claims verified beside a not_rechecked list is unreadable rather than shown
    as a full verification. *)
 let partly_checked_save () =
@@ -279,16 +279,41 @@ let partly_checked_save () =
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
   let rows () = List.map Login.row_text (Login.lines t) in
-  check bool "the kept connection has its own row" true
-    (List.mem ("  " ^ kept ^ " (다시 확인하지 않음)") (rows ()));
+  check bool "retained runtime is explicitly not rechecked" true
+    (List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") (rows ()));
   check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
-  check bool "the notice says the kept connection was not checked again" true (contains t.notice "다시 확인하지 않았습니다");
+  check bool "the notice says existing connections were retained" true (contains t.notice "기존 연결은 그대로 유지했습니다");
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
   let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
   ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
-  check bool "an unmeasured runtime is listed after the kept ones" true
+  check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
-     List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (다시 확인하지 않음)") r);
+     List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
+  let visible () = Login.visible_lines ~height:2 ~width:32 t2 |> List.map Login.row_text in
+  let initial = visible () in
+  check bool "small result starts with its save notice" true
+    (List.exists (fun row -> contains row "저장했습니다") initial);
+  let expected = List.concat_map
+      (Masc_tui_message_layout.wrap_words ~max_cells:32)
+      [ "  " ^ added ^ " (quota_exhausted)";
+        "  " ^ kept ^ " (이번 저장에서 재검증하지 않음)" ] in
+  let seen = ref initial in
+  List.iter (fun _ -> ignore (Login.key t2 "j"); seen := visible () @ !seen)
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
+      (List.mem row !seen)) expected;
+  let bottom = visible () in
+  ignore (Login.key t2 "j"); ignore (Login.key t2 "j");
+  ignore (Login.key t2 "k");
+  check bool "coalesced down down up moves from the bottom" true (visible () <> bottom);
+  ignore (Login.key t2 "j"); ignore (visible ());
+  List.iter (fun _ -> ignore (Login.key t2 "j"); ignore (visible ())) expected;
+  ignore (Login.key t2 "k");
+  check bool "one up key moves after repeated down keys at the bottom" true
+    (visible () <> bottom);
+  List.iter (fun _ -> ignore (Login.key t2 "k"))
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  check (list string) "scroll can return to the initial result" initial (visible ());
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
     [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();
@@ -678,14 +703,24 @@ let already_bound_model_is_not_offered () =
       `Assoc ["id",`String "second";"context",`Int 32768;"tools",`Bool true;"bound",`Bool true];
       `Assoc ["id",`String "third";"context",`Int 32768;"tools",`Bool true;"bound",`Bool false]]] in
     ok (Login.models t catalog);
-    check (list string) ("both bound models stay hidden from " ^ selected_provider.id)
-      ["third"] (List.map (fun (m:Login.model) -> m.id) t.models);
-    check (list string) "only the new model is selected" ["third"] t.selected_models)
+    check (list string) ("bound models remain visible for " ^ selected_provider.id)
+      ["third"; "first"; "second"] (List.map (fun (m:Login.model) -> m.id) t.models);
+    check (list string) "only the new model is selected" ["third"] t.selected_models;
+    check bool "connected model is labelled" true
+      (List.exists (fun row -> contains (Login.row_text row) "[연결됨] first") (Login.lines t));
+    ignore (Login.key t "j"); ignore (Login.key t " ");
+    check (list string) "connected model cannot be selected" ["third"] t.selected_models;
+    ignore (Login.key t "a"); ignore (Login.key t "a");
+    check (list string) "select all excludes connected models" ["third"] t.selected_models;
+    check (list string) "save submits only the new model" ["third"]
+      (match Login.key t "enter" with
+       | Login.Save models -> List.map (fun (m:Login.model) -> m.id) models
+       | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
 let () = run "TUI account login" ["workflow",[
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
-  test_case "reopening excludes a bound model" `Quick already_bound_model_is_not_offered;
+  test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
   test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;
@@ -693,7 +728,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
-  test_case "a partly checked save names what was not checked again" `Quick partly_checked_save;
+  test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;

@@ -44,8 +44,11 @@ val image :
 (** The Keeper's still portrait at that edge, from the cache when it is
     there, rendered and kept when it is not. [compact] uses the mosaic drawing
     for the bare body and its dish. Face, neck, head and hand equipment uses
-    the full drawing so those accessories remain visible. Placed pixel
-    portraits always use the full drawing. *)
+    the full drawing so those accessories remain visible. This [image] API keeps the full drawing for placed portraits; Info/chat
+    identity thumbnails use [icon_image]. *)
+
+val icon_image : cache -> name:string -> equipment:Keeper_portrait_look.equipment -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
+(** Cached face thumbnail, independent of outfit preview pixels. *)
 
 type band = private {
   display : Masc_tui_portrait_view.display;

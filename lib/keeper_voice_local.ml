@@ -7,14 +7,16 @@
     @since 2.95.0 *)
 
 let resolved_base_path_opt () =
-  match (Host_config.from_env ()).base_path with
-  | Some path -> Some path
-  | None -> Workspace_utils_backend_setup.find_git_root (Sys.getcwd ())
+  match Workspace_root.resolve_current ~flag:None with
+  | Ok { root; _ } -> Some root
+  | Error _ -> None
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Workspace_utils.masc_dir_from_base_path ~base_path
-  | None -> Common.masc_dirname
+  | None ->
+    invalid_arg
+      "MASC workspace is unresolved; pass --base-path or set MASC_BASE_PATH"
 
 (** Singleton session manager, lazily initialized. Creation and restore may
     perform filesystem effects, so one cooperative cross-context lock owns the

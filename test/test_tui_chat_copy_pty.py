@@ -11,12 +11,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_keeper_chat_history.ml",
-    "bin/masc_tui_link.ml",
-)
+
 
 LONG_REPLY = (
     "The first line is longer than the chat viewport: "

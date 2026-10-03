@@ -88,12 +88,15 @@ let open_bound ~operation ~parameter ~clock = function
     |> Result.map Deadline_window.open_
 ;;
 
+type model_identity = Reported_model | Configured_model_fallback
+
 let complete_prepared_sync
       ~sw
       ~net
       ?clock
       ?(transport : Llm_transport.t option)
       ~(prepared : Prepared_completion_request.t)
+      ?(model_identity = Configured_model_fallback)
       ?(cache : Cache.t option)
       ?(connection_cache : Http_client.cache option)
       ?(metrics : Metrics.t option)
@@ -104,6 +107,7 @@ let complete_prepared_sync
       ?admitted_body
       ()
   =
+  let cache = match model_identity with Reported_model -> None | Configured_model_fallback -> cache in
   let request = Prepared_completion_request.request prepared in
   let request =
     match request_wire_observer with
@@ -298,7 +302,11 @@ let complete_prepared_sync
           let resp =
             Pricing.annotate_response_cost ?provider_id:config.provider_id resp
           in
+          let reported_model = resp.Types.model in
           let resp = patch_telemetry resp ~config latency_ms in
+          let resp = match model_identity with
+            | Reported_model -> {resp with model=reported_model}
+            | Configured_model_fallback -> resp in
           m.on_request_end ~model_id ~latency_ms;
           emit_tool_call_metrics
             m
@@ -360,6 +368,7 @@ let complete
       ~(messages : Types.message list)
       ?(tools = [])
       ?(trace_context = [])
+      ?model_identity
       ?cache
       ?connection_cache
       ?metrics
@@ -376,6 +385,7 @@ let complete
     ?clock
     ?transport
     ~prepared
+    ?model_identity
     ?cache
     ?connection_cache
     ?metrics

@@ -156,6 +156,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
+;;
+
 (* Retained input belongs to the complete observed server workspace. Local
    match/mismatch is a permission classification, not a durable input key. *)
 let workspace_input_identity_of_server = function
@@ -3370,28 +3385,48 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"
@@ -6324,6 +6359,15 @@ let identity_logins_for_keeper (state : state) keeper_name =
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
 
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun expectation ->
+       String.equal expectation.ile_keeper keeper_name
+       && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
+       state.identity_login_expectations
+
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
 let start_identity_login_request (state : state) ~keeper_name ~provider_id =
@@ -6375,33 +6419,25 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       remember_identity_login_expectation state
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_expectations <- List.filter
+    (fun expectation ->
+      not (String.equal expectation.ile_keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+    state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
         not (String.equal login.ils_keeper keeper_name
              && identity_login_landed ~providers ~login))
       state.identity_logins
-
-(* A provider whose service now reports tools has finished its login, so the
-   held expectation retires with the consent it stood for. An unreadable or
-   no-tools reading is not evidence of completion and retires nothing. *)
-let forget_identity_login_expectations (state : state) ~keeper_name ~providers =
-  let landed expectation =
-    identity_login_landed ~providers
-      ~login:
-        { ils_keeper = expectation.ile_keeper;
-          ils_provider = expectation.ile_provider;
-          ils_label = "";
-          ils_url = "" }
-  in
-  state.identity_login_expectations <-
-    List.filter
-      (fun expectation ->
-        not (String.equal expectation.ile_keeper keeper_name && landed expectation))
-      state.identity_login_expectations
 
 (* A workspace rework rerun keeps the workspace but ends every login it had
    admitted, so every expectation retires with it. Nothing here runs for a
@@ -7518,11 +7554,8 @@ let pending_detail_read (state : state) ~tab ~keeper =
    the same workspace confirms the waiting Keeper's login. The expectation
    carries no consent URL or authorization; it only keeps the read alive. *)
 let identity_login_recovery_poll_ready (state : state) keeper_name =
-  Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
-  && List.exists
-       (fun expectation ->
-         identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
-       (identity_expectations_for_keeper state keeper_name)
+  identity_login_pending_for_keeper state keeper_name
+  && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
 
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
@@ -7575,7 +7608,8 @@ let selected_keeper (state : state) =
 let remember_keeper_detail_focus state =
   match state.detail_focus_recovery, state.view, state.workspace_identity,
         state.server_identity, selected_keeper state with
-  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper ->
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
       state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
   | _ -> ()
 

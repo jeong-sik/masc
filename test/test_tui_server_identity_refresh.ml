@@ -68,11 +68,27 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+let test_broadcast_retry_scope_follows_verified_workspace () =
+  let scope reading = Masc_tui_types.broadcast_workspace_scope
+    ~local_base_path:"/workspace/local" reading in
+  let original = identity "/workspace/local" in
+  let restarted = { original with Tui_decode.sid_binary_commit = "after-restart";
+    sid_uptime = Some "new process" } in
+  Alcotest.(check (option string)) "port-independent workspace retry scope"
+    (scope (Some original)) (scope (Some restarted));
+  Alcotest.(check bool) "another MASC store has another scope" true
+    (scope (Some original) <> scope (Some { restarted with sid_masc_root = "/workspace/other/.masc" }));
+  Alcotest.(check (option string)) "foreign workspace refuses admission" None
+    (scope (Some (identity "/workspace/foreign")));
+  Alcotest.(check (option string)) "unread server refuses admission" None (scope None);
+  Alcotest.(check (option string)) "booting server refuses admission" None
+    (scope (Some { original with sid_state_ready = Some false }))
+
 let test_detail_intents_wait_for_comparable_identity () =
   let state = Masc_tui_types.create_state ~workspace:"a"
     ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
   let origin = identity "/workspace/a" in
-  state.pending_detail_focus <- Some (origin, "same-keeper", Masc_tui_types.Detail_instructions);
+  state.detail_focus_recovery <- Some (origin, "same-keeper", Masc_tui_types.Detail_instructions);
   state.connector_unbind_offer_pending <- ["same-keeper"];
   state.connector_unbind_offer_origin <- Some origin;
   state.keeper_sandbox_logs_requested <- Some "same-keeper";
@@ -80,7 +96,7 @@ let test_detail_intents_wait_for_comparable_identity () =
   let apply = Masc_tui_types.reconcile_detail_intent_origins state in
   let retained label =
     Alcotest.(check bool) (label ^ " source-bound detail focus") true
-      (state.pending_detail_focus = Some (origin, "same-keeper", Masc_tui_types.Detail_instructions));
+      (state.detail_focus_recovery = Some (origin, "same-keeper", Masc_tui_types.Detail_instructions));
     Alcotest.(check (list string)) (label ^ " connector intent")
       ["same-keeper"] state.connector_unbind_offer_pending;
     Alcotest.(check (option string)) (label ^ " Sandbox intent")
@@ -99,7 +115,7 @@ let test_detail_intents_wait_for_comparable_identity () =
      request or post-action offer may become an action in that new store. *)
   apply (Ok { origin with sid_masc_root = "/workspace/a/another-masc-root" });
   Alcotest.(check bool) "foreign root retires detail focus" true
-    (state.pending_detail_focus = None);
+    (state.detail_focus_recovery = None);
   Alcotest.(check (list string)) "foreign root clears connector intent"
     [] state.connector_unbind_offer_pending;
   Alcotest.(check (option string)) "foreign root clears Sandbox intent"
@@ -108,7 +124,7 @@ let test_detail_intents_wait_for_comparable_identity () =
     (state.connector_unbind_offer_origin = None && state.keeper_sandbox_logs_origin = None);
   apply (Ok origin);
   Alcotest.(check bool) "return to A does not recreate detail focus" true
-    (state.pending_detail_focus = None);
+    (state.detail_focus_recovery = None);
   Alcotest.(check (option string)) "return to A does not recreate Sandbox intent"
     None state.keeper_sandbox_logs_requested
 
@@ -241,6 +257,8 @@ let () =
             test_workspace_identity_matches_canonical_paths
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
+        ; Alcotest.test_case "Broadcast retry uses verified workspace store" `Quick
+            test_broadcast_retry_scope_follows_verified_workspace
         ; Alcotest.test_case "detail intents wait for comparable identity" `Quick
             test_detail_intents_wait_for_comparable_identity
         ; Alcotest.test_case "local rows are unread until read" `Quick

@@ -1,0 +1,210 @@
+{
+  "scope": "Production dashboard bundle served by isolated native CI server; authenticated real API and synthetic paused Keeper with real free purchase/equipment ledger; no provider/model decision or rollout",
+  "source_sha": "9acf84d67685af7e958fa08903c6ac722feae228",
+  "keeper": "item-runtime-probe",
+  "owned_item": "glasses",
+  "browser_version": "149.0.7827.55",
+  "entry_paths": [
+    "desktop-overflow-detail-items",
+    "retained-detail-360px",
+    "fresh-document-mobile-menu-detail-items-360px"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/gate",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-probe",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/project-snapshot",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/briefing",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/tool-approvals",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/providers",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/transitions",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/composite",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/runtime-trace",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/chat/history",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/waiting-inventory",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/config",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/tool-calls",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/portrait.png",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/waiting-inventory",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/fusion-runs",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/items",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/portrait.png",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/gate",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/project-snapshot",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-probe",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/briefing",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/tool-approvals",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/composite",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/transitions",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/runtime-trace",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/chat/history",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/waiting-inventory",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/config",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/tool-calls",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/portrait.png",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/waiting-inventory",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/dashboard/fusion-runs",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/items",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/keepers/item-runtime-probe/portrait.png",
+      "status": 200
+    }
+  ],
+  "captures": [
+    {
+      "name": "item-server-desktop",
+      "sha256": "250b0af6fbd3acaa71b294e36bad68dbac765693c06cb6b288290412da87f9a1"
+    },
+    {
+      "name": "item-server-mobile",
+      "sha256": "34dda1aa93e6a16c945ce62184c9782a33e65e5b56130583eb340d82d76f204e"
+    },
+    {
+      "name": "item-server-mobile-entry",
+      "sha256": "03a2a5c75ab1ab7bd325919a2ef4e387164264ad39febf9274f2ffbad21a96d2"
+    }
+  ],
+  "page_errors": [],
+  "passed": true
+}

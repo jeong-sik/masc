@@ -1,0 +1,299 @@
+{
+  "provenance": "MCP stdio fixture with host-shaped namespaces",
+  "production": false,
+  "capture": {
+    "generated_at": "2026-09-30T00:00:00Z",
+    "run": {
+      "run_id": "fusion-request-1",
+      "keeper": "example",
+      "preset": "default",
+      "roster": {},
+      "topology": "refine",
+      "started_at": 100.0,
+      "finished_at": 110.0,
+      "status": "completed",
+      "stage": "completed",
+      "progress": null,
+      "decision": "bounded preview",
+      "summary": "summary"
+    },
+    "evidence": {
+      "status": "recorded",
+      "post": {
+        "id": "p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "body": "검증용 운영 보고서\n\n에이전트가 활용할 결과\n• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.\n• 분석 실패와 근거 누락을 구분할 수 있습니다.\n• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.\n\n다음 연결\n보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.",
+        "origin": {
+          "source": "fusion",
+          "fusion_run_id": "fusion-request-1",
+          "fusion_producer": "example"
+        }
+      }
+    }
+  },
+  "report_input": {
+    "source_id": "fusion-output",
+    "incarnation": "projection-1",
+    "cursor": "1",
+    "complete": true,
+    "detail": null,
+    "observations": [
+      {
+        "id": "projection-1/output/1",
+        "kind": "lane_output",
+        "observed_at": 130,
+        "actor": null,
+        "evidence": [
+          {
+            "uri": "lane-evidence:5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218",
+            "sha256": "5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218"
+          }
+        ],
+        "producer": {
+          "installation_id": "fusion-results",
+          "instance_id": "projection-1",
+          "run_id": "fusion-report",
+          "configuration_revision": "config-1",
+          "package_revision": "0.1.1",
+          "observation_seq": 1,
+          "output_id": null,
+          "output_selection": {
+            "all_lanes": true
+          },
+          "coverage_scope": "whole_producer"
+        },
+        "producer_status": {
+          "source_id": "projection-1",
+          "incarnation": "projection-1",
+          "cursor": "1",
+          "complete": true,
+          "detail": null
+        },
+        "output": {
+          "rows": [
+            {
+              "id": "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30",
+              "lane_id": "projection-1/fusion/status",
+              "kind": "event",
+              "title": "Fusion completed: fusion-request-1",
+              "observed_at": 120.0,
+              "subject_id": "fusion-request-1",
+              "clock": null,
+              "actor": null,
+              "fields": {
+                "source_id": "fusion",
+                "incarnation": "fusion-request-1",
+                "source_event_id": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                "fusion_run": {
+                  "run_id": "fusion-request-1",
+                  "keeper": "example",
+                  "preset": "default",
+                  "roster": {},
+                  "topology": "refine",
+                  "started_at": 100.0,
+                  "finished_at": 110.0,
+                  "status": "completed",
+                  "stage": "completed",
+                  "progress": null,
+                  "decision": "bounded preview",
+                  "summary": "summary"
+                },
+                "evidence_status": "recorded",
+                "board_post_id": "p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "input_complete": true,
+                "scope": "captured_fusion_detail"
+              },
+              "evidence": [
+                {
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
+                }
+              ],
+              "related_ids": []
+            },
+            {
+              "id": "projection-1/1/f389c2544ed0e00df5baf9d2f42269a171a1054124aa99d8b39b26834963ffbc",
+              "lane_id": "projection-1/fusion/result",
+              "kind": "value",
+              "title": "Retained Fusion evidence: fusion-request-1",
+              "observed_at": 120.0,
+              "subject_id": "fusion-request-1",
+              "clock": null,
+              "actor": null,
+              "fields": {
+                "source_id": "fusion",
+                "incarnation": "fusion-request-1",
+                "source_event_id": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                "fusion_run_id": "fusion-request-1",
+                "topology": "refine",
+                "run_status": "completed",
+                "board_post": {
+                  "id": "p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "body": "검증용 운영 보고서\n\n에이전트가 활용할 결과\n• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.\n• 분석 실패와 근거 누락을 구분할 수 있습니다.\n• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.\n\n다음 연결\n보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.",
+                  "origin": {
+                    "source": "fusion",
+                    "fusion_run_id": "fusion-request-1",
+                    "fusion_producer": "example"
+                  }
+                },
+                "decision_preview": "bounded preview",
+                "summary": "summary",
+                "scope": "captured_board_evidence",
+                "input_complete": true
+              },
+              "evidence": [
+                {
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
+                }
+              ],
+              "related_ids": [
+                "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30"
+              ]
+            }
+          ],
+          "coverage": [
+            {
+              "source_id": "fusion",
+              "incarnation": "fusion-request-1",
+              "cursor": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+              "complete": true,
+              "detail": "Synthetic exact-run capture for stdio composition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "report_output": {
+    "rows": [
+      {
+        "id": "d97a39a5f6e61d17699adb016e9f88c4daeeba82323c20c9d5034176ba5689e6",
+        "lane_id": "fusion/report-context",
+        "kind": "value",
+        "title": "Fusion report input provenance",
+        "observed_at": 130.0,
+        "subject_id": "projection-1",
+        "clock": null,
+        "actor": null,
+        "fields": {
+          "source_id": "fusion-output",
+          "incarnation": "projection-1",
+          "source_event_id": "projection-1/output/1",
+          "producer": {
+            "installation_id": "fusion-results",
+            "instance_id": "projection-1",
+            "run_id": "fusion-report",
+            "configuration_revision": "config-1",
+            "package_revision": "0.1.1",
+            "observation_seq": 1,
+            "output_id": null,
+            "output_selection": {
+              "all_lanes": true
+            },
+            "coverage_scope": "whole_producer"
+          },
+          "producer_status": {
+            "source_id": "projection-1",
+            "incarnation": "projection-1",
+            "cursor": "1",
+            "complete": true,
+            "detail": null
+          },
+          "upstream_coverage": [
+            {
+              "source_id": "fusion",
+              "incarnation": "fusion-request-1",
+              "cursor": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+              "complete": true,
+              "detail": "Synthetic exact-run capture for stdio composition"
+            }
+          ],
+          "upstream_rows": [
+            {
+              "id": "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30",
+              "lane_id": "projection-1/fusion/status",
+              "kind": "event",
+              "subject_id": "fusion-request-1",
+              "observed_at": 120.0,
+              "clock": null,
+              "actor": null,
+              "evidence": [
+                {
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
+                }
+              ],
+              "related_ids": []
+            },
+            {
+              "id": "projection-1/1/f389c2544ed0e00df5baf9d2f42269a171a1054124aa99d8b39b26834963ffbc",
+              "lane_id": "projection-1/fusion/result",
+              "kind": "value",
+              "subject_id": "fusion-request-1",
+              "observed_at": 120.0,
+              "clock": null,
+              "actor": null,
+              "evidence": [
+                {
+                  "uri": "lane-evidence:45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e",
+                  "sha256": "45fd49f1acbda9e776ee145b00dd3045a0ad742a7d788e39719e13b391a5814e"
+                }
+              ],
+              "related_ids": [
+                "projection-1/1/268b7a6d45af6fba66351e8dc84519f4faf43566c8cfcad5326fc1e3d716bf30"
+              ]
+            }
+          ],
+          "skipped_lanes": [],
+          "input_complete": true,
+          "scope": "supplied_fusion_output"
+        },
+        "evidence": [
+          {
+            "uri": "lane-evidence:5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218",
+            "sha256": "5a155ff6ddb9611183d32282e82922a131a2b7a3f011486952e708afe74e8218"
+          }
+        ],
+        "related_ids": []
+      },
+      {
+        "id": "19f6bcb644c7373b67d94537c095e44493506180767f9a79d278703f0a8ceb30",
+        "lane_id": "fusion/report",
+        "kind": "value",
+        "title": "Fusion 보고서 · 분석 완료",
+        "observed_at": 130.0,
+        "subject_id": "fusion-request-1",
+        "clock": null,
+        "actor": null,
+        "fields": {
+          "source_id": "fusion-output",
+          "incarnation": "projection-1",
+          "source_event_id": "projection-1/output/1",
+          "format": "markdown",
+          "fusion_run_id": "fusion-request-1",
+          "run_status": "completed",
+          "input_complete": true,
+          "board_post_id": "p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "scope": "supplied_fusion_output",
+          "content_trust": "untrusted_source_text",
+          "delivery_status": "not_attempted",
+          "delivery_label": "아직 전달하지 않음",
+          "body": "# Fusion 보고서 · 분석 완료\n\n실행: fusion-request-1\n\n입력 범위: 기록된 실행 결과\n\n## 보존된 분석 내용\n\n검증용 운영 보고서\n\n에이전트가 활용할 결과\n• 입력된 Fusion 분석의 본문을 보고서로 읽을 수 있습니다.\n• 분석 실패와 근거 누락을 구분할 수 있습니다.\n• 보고서에서 원본 실행과 보존된 입력으로 돌아갈 수 있습니다.\n\n다음 연결\n보고서 → 내 에이전트의 Evidence 입력. 이 fixture에서는 전달을 실행하지 않았습니다.\n\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n"
+        },
+        "evidence": [],
+        "related_ids": [
+          "d97a39a5f6e61d17699adb016e9f88c4daeeba82323c20c9d5034176ba5689e6"
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "source_id": "fusion-output",
+        "incarnation": "projection-1",
+        "cursor": "1",
+        "complete": true,
+        "detail": null
+      }
+    ]
+  }
+}

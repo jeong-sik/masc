@@ -249,10 +249,6 @@ test/test_deployment_store_directories.ml"
   # 35847452251), against the CI and release-candidate cycles the three
   # misses above cost.
   #
-  # The name is plural on purpose. test_provider_prefix_boundary walks lib/
-  # the same way (repo_root () with source_path root "lib") and belongs here
-  # once an actual miss is measured for it; listing it on suspicion would
-  # spend budget on every OCaml pull request for a fault never seen.
   ocaml_sources_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^(bin|lib|packages|test)/.*\.mli?$' || [ $? -eq 1 ]; } | head -1)
   tree_reading_guards="test/test_keeper_toml.ml"

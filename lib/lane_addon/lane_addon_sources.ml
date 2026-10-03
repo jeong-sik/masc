@@ -505,8 +505,11 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
     "output_id", Option.fold ~none:`Null ~some:(fun name -> `String name) output_id;
     "output_selection", Lane_addon_types.output_selection_to_json selection;
     "coverage_scope", `String "whole_producer"] in
+  let* sampling_receipts = Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_sampling.retained_receipts ~store ~instance_id:captured.instance_id ~max_bytes selected) in
+  let sampling_receipts = `List sampling_receipts in
   let output = Lane_addon_types.output_to_json selected in
-  let bytes = Yojson.Safe.to_string (`Assoc ["producer", producer; "output", output]) in
+  let bytes = Yojson.Safe.to_string (`Assoc ["producer", producer; "output", output; "sampling_receipts",sampling_receipts]) in
   if String.length bytes > max_bytes then Error "upstream output exceeds the remaining ingress envelope"
   else
     let* reference = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
@@ -515,7 +518,7 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
     let detail = if complete then None else Some "latest completed output has incomplete source or worker coverage" in
     let observation = `Assoc ["id", `String (captured.instance_id ^ "/output/" ^ string_of_int captured.observation_seq);
       "kind", `String "lane_output"; "observed_at", `Float (Time_compat.now ());
-      "actor", `Null; "producer", producer; "output", output;
+      "actor", `Null; "producer", producer; "output", output; "sampling_receipts",sampling_receipts;
       "producer_status", Lane_addon_types.coverage_to_json captured.status;
       "evidence", `List [evidence_json reference]] in
     Ok (envelope ~id ~incarnation:captured.instance_id

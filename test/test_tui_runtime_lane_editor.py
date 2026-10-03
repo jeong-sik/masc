@@ -1160,6 +1160,24 @@ def run_replace_and_promote(executable: str) -> None:
                           needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        # Prime the model catalogue, then hold a fresh read while the same
+        # runtime ID is still cached. Actions must be labelled by slot ID.
+        h.send_and_wait(process, fd, output, b"s", b"gpt-6-sol high")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Librarian")
+        hold_catalog.set()
+        h.send_and_wait(process, fd, output, b"s", b"runtime catalogue loading")
+        try:
+            if not h.wait_for_fixture_event(process, fd, output, catalog_arrived, timeout=5.0):
+                raise AssertionError("editor catalogue did not start loading")
+            h.send_and_wait(process, fd, output, h.FULL_REDRAW, b"account.backup")
+            if b"gpt-6-sol high" in h.screen_text(bytes(output)):
+                raise AssertionError("editable candidate kept its cached model label")
+        finally:
+            release_catalog.set()
+        h.wait_for_output(process, fd, output, b"gpt-6-sol high", start=len(output), timeout=5.0)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Librarian")
+        catalog_arrived.clear()
+        release_catalog.clear()
         arrived, release = store.hold_next_standalone_read()
         try:
             os.write(fd, b"r")

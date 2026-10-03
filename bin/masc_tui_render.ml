@@ -3476,6 +3476,18 @@ let render_exact_lane_provider_editor (state : state) editor =
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
    | None ->
+     let catalog = match state.runtime_catalog_reading with
+       | Runtime_catalog_read -> state.runtime_catalog
+       | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
+     (match state.runtime_catalog_reading with
+      | Runtime_catalog_read -> ()
+      | Runtime_catalog_unread ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue unread · showing slot IDs"
+      | Runtime_catalog_loading ->
+          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue loading · showing slot IDs"
+      | Runtime_catalog_failed detail ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            ("  runtime catalogue read failed: " ^ Terminal_text.single_line detail ^ " · showing slot IDs"));
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
@@ -3517,7 +3529,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                   (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) state.runtime_catalog with
+                     String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog with
                    | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
                    | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
@@ -3534,7 +3546,7 @@ let render_exact_lane_provider_editor (state : state) editor =
       | Some row ->
         let identity = Terminal_text.single_line row.Masc_tui_types.sr_slot in
         (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
-           String.equal runtime.ro_id row.sr_slot) state.runtime_catalog with
+           String.equal runtime.ro_id row.sr_slot) catalog with
          | Some runtime ->
            box_line_styled buf cols ~style:(Theme.info ())
              (Printf.sprintf "  Account %s · %s context"

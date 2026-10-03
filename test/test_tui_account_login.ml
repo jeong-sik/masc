@@ -725,7 +725,7 @@ let long_result_rows_are_reachable () =
     "runtime_ids", `List (List.map (fun id -> `String id) ids);
     "unverified", `List (List.map (fun id -> `Assoc ["runtime_id", `String id;
       "code", `String "quota_exhausted"]) ids)] in
-  ignore (ok (Login.saved t receipt));
+  let saved = ok (Login.saved t receipt) in
   let drawn () = List.map Login.row_text (Login.visible_lines ~height:5 ~width:40 t) in
   let first = drawn () in
   check bool "result starts with saved summary" true (contains (List.hd first) "저장했습니다");
@@ -742,13 +742,22 @@ let long_result_rows_are_reachable () =
   let bottom = t.result_scroll in
   ignore (Login.key t "j"); ignore (drawn ());
   check int "scroll clamps at the last result row" bottom t.result_scroll;
+  List.iter (fun result ->
+    Login.refresh_saved t saved result;
+    check int "every refreshed result starts at its summary" 0 t.result_scroll;
+    check bool "refreshed summary is visible" true
+      (contains (List.hd (drawn ())) "저장했습니다");
+    for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done)
+    [ Error "network unavailable"; Ok inventory ];
   for _ = 1 to 80 do ignore (Login.key t "k"); ignore (drawn ()) done;
   check int "scroll returns to the summary" 0 t.result_scroll;
   Login.save_failed t (String.concat " " (List.init 30 (fun _ -> "verification detail")) ^ " reason-at-end");
   let failed = ref [] in
   for _ = 1 to 80 do failed := !failed @ drawn (); ignore (Login.key t "down") done;
   check bool "a long failure's diagnostic end is reachable" true
-    (contains (String.concat "" !failed) "reason-at-end")
+    (contains (String.concat "" !failed) "reason-at-end");
+  Login.refresh_retry t (Error "still offline");
+  check int "a refreshed failure starts at its diagnostic" 0 t.result_scroll
 
 let () = run "TUI account login" ["workflow",[
   test_case "long result and failure rows are reachable" `Quick long_result_rows_are_reachable;

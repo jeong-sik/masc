@@ -803,6 +803,38 @@ let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
   | Error detail -> Error detail
 ;;
 
+let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
+  let unavailable reason =
+    `Assoc [ "status", `String "unavailable"; "reason", `String reason ]
+  in
+  match Ids.Turn_ref.of_string outcome_ref with
+  | None -> unavailable "invalid_outcome_ref"
+  | Some turn_ref ->
+    (match Keeper_chat_store.load_all_result ~base_dir ~keeper_name with
+     | Error _ -> unavailable "chat_store_unavailable"
+     | Ok messages ->
+       let transcript = Keeper_chat_store.transcript_of_messages messages ~turn_ref in
+       let replies =
+         List.filter_map
+           (fun (message : Keeper_chat_store.chat_message) ->
+             match message.kind, message.delivery_provenance with
+             | Keeper_chat_store.Row_kind.Utterance,
+               Some { Keeper_chat_delivery_identity.transcript_slot =
+                        Keeper_chat_delivery_identity.Terminal_assistant; delivery_key = observed_key }
+               when Keeper_chat_delivery_identity.delivery_key_equal delivery_key observed_key ->
+               Some (`Assoc [ "message_id", `String message.id
+                            ; "text", `String message.content ])
+             | _ -> None)
+           transcript.assistant
+       in
+       match replies with
+       | [] -> unavailable "reply_not_found"
+       | _ ->
+         `Assoc [ "status", `String "available"
+                ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+                ; "replies", `List replies ])
+;;
+
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
   match operation_reference_arg args with
   | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json
@@ -835,7 +867,30 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
                ; "message", `String "Keeper chat operation was not found"
                ])
         | Ok true ->
-          tool_result_ok_data (Keeper_owner.Chat_operation.to_json operation)))
+          let operation_json = Keeper_owner.Chat_operation.to_json operation in
+          let data =
+            match operation.state, operation_json with
+            | Keeper_owner.Chat_operation.Succeeded { outcome_ref; _ }, `Assoc fields ->
+              let execution_id =
+                match operation.batch_membership with
+                | Some membership -> membership.execution_id
+                | None -> operation.operation_id
+              in
+              let reply =
+                match Keeper_chat_delivery_identity.Request_id.of_string
+                  (Keeper_owner.Chat_operation.Operation_id.to_string execution_id) with
+                | Error _ ->
+                  `Assoc [ "status", `String "unavailable"
+                         ; "reason", `String "invalid_delivery_identity" ]
+                | Ok request_id ->
+                  let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
+                  completed_delegate_reply ~base_dir:config.base_path
+                    ~keeper_name ~delivery_key ~outcome_ref
+              in
+              `Assoc (fields @ [ "completed_reply", reply ])
+            | _ -> operation_json
+          in
+          tool_result_ok_data data))
 ;;
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =

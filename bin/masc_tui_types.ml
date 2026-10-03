@@ -9993,8 +9993,8 @@ let runtime_picker_label_for pick choice =
       runtime_model_picker_label runtime
   | _ -> runtime_picker_label choice
 
-(* The picker opens on the first row with no filter, and closing it drops
-   both. *)
+(* The picker opens on the first row. Exact lanes start typing a filter
+   immediately; the other pickers wait for [/]. Closing drops both. *)
 let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->

@@ -5,9 +5,7 @@ import sys
 import unicodedata
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ('bin/masc_tui_render_tools.ml', 'bin/masc_tui_render.ml',
-                  'bin/masc_tui_render_prim.ml', 'bin/masc_tui_frame.ml',
-                  'bin/masc_tui_message_layout.ml', 'bin/masc_tui.ml')
+
 PATH = '.masc/skills/' + '한글-root-' * 35 + 'PATHEND'
 REVISION = 'revision-' + 'r' * 85 + '-REVEND'
 REJECT_REVISION = 'rejected-' + 'j' * 85 + '-REJECTREVEND'

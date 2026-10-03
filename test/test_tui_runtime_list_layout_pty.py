@@ -4,7 +4,7 @@ import sys
 import unicodedata
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 

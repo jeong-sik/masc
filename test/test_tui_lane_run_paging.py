@@ -15,14 +15,7 @@ from typing import Any, cast
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render.mli",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_scroll.ml",
-    "bin/masc_tui_scroll.mli",
-)
+
 
 PAYLOAD_ROWS = tuple(f"payload-row-{index:03d}" for index in range(1, 97))
 PAYLOAD_ROW_RE = re.compile(rb"payload-row-(\d+)")

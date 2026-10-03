@@ -95,8 +95,12 @@ let run () =
     let bytes = In_channel.with_open_bin input_path In_channel.input_all in
     let+ cases = parse_dataset (Yojson.Safe.from_string bytes) in bytes, cases
     with Sys_error detail | Yojson.Json_error detail -> Error detail in
-  let* config_observation = Runtime.load_config_observation
-    ~runtime_config_path:(Config_dir_resolver.absolute_path !config) () in
+  let* config_observation =
+    try
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
+      Runtime.load_config_observation
+        ~runtime_config_path:(Config_dir_resolver.absolute_path !config) ()
+    with Env_config_core.Config_error detail -> Error detail in
   let* _ = Runtime.init_default_degraded_observation config_observation
     |> Result.map_error Runtime.strict_init_error_to_string in
   Prompt_registry.set_markdown_dir (Config_dir_resolver.absolute_path !prompts);
@@ -108,7 +112,10 @@ let run () =
         {turn_ref=Ids.Turn_ref.make ~trace_id:case.id ~absolute_turn:1;
          keeper_id=keeper_identity; keeper_instructions="Preserve explicit constraints, corrections, preferences and unfinished obligations.";
          current=Some {Keeper_librarian.facts=case.current};
-         working_context=Keeper_librarian_context.empty; messages=List.map Agent_core.Types.user_msg case.messages;
+         working_context=Keeper_librarian_context.empty;
+         messages=List.map (fun text -> Agent_core.Types.make_message
+           ~metadata:(Keeper_input_speaker.metadata (Keeper_input_speaker.Person Keeper_input_speaker.Owner))
+           ~role:Agent_core.Types.User [Agent_core.Types.Text text]) case.messages;
          historical_task_contexts=[]; goal_context=Keeper_librarian.No_task;
          tool_observations=[]; counterpart_observations=[]} in
       let* variables = Keeper_librarian_runtime.librarian_prompt_variables inp in

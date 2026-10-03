@@ -1616,7 +1616,8 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
         writes = []
         def health():
             reply = wire.health()
-            if armed.is_set(): probes.set()
+            if armed.is_set():
+                probes.set()
             return reply
         def post(path, body):
             writes.append((path, body))
@@ -1636,7 +1637,8 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
                 h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
                 h.send_and_wait(process, fd, output, b"private-A-message", h.composer_showing(b"private-A-message"))
             armed.set()
-            if operation != "boot-recovery": wire.publish("b")
+            if operation != "boot-recovery":
+                wire.publish("b")
             os.write(fd, b"\r" if operation == "chat" else b"p")
             assert h.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
             assert h.wait_for_fixture_state(process, fd, output,
@@ -1644,9 +1646,15 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
             h.drain_until_quiet(process, fd, output)
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
-            # The refused chat retains composer focus. A letter is a draft
-            # character there, so end this read-only scenario with Ctrl-C.
-            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
+            if operation == "chat":
+                # A refused dispatch preserves the composer and its draft;
+                # q there is text, not the global exit key. Leave through Esc
+                # and verify the roster destination before requesting exit.
+                assert b"private-A-message" in screen(output), "refused chat lost its draft"
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                assert "▸ chat".encode() not in screen(output), screen(output)
+                assert writes == [], "leaving the refused draft dispatched chat"
+            os.write(fd, b"q")
         h.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,

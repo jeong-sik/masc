@@ -9962,6 +9962,9 @@ let revoke_detail_readings state =
   Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. *)
+  state.schedule_form_refusal <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
 
 let same_currency_workspace source current =
@@ -10246,6 +10249,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_config_view_error <- None;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. *)
+  state.schedule_form_refusal <- None;
   state.keeper_usage <- Keeper_usage_unread;
   Masc_tui_types.withdraw_identity_readings state;
   state.github_token_input <- None;
@@ -10546,6 +10552,16 @@ let apply_http_surfaces state ~mailbox results =
          Masc_tui_resources_requests.launch_list state ~host:server_peer_host
            ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
            ~check:(capture_workspace_check state ~mailbox)
+     (* Code and Changes reads settle through the workspace queue, so a pane
+        opened before the identity reading failed as unverified; the
+        cadence reload only the surfaces it owns, not these. *)
+     | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
+         ~deliver:(workspace_enqueue state mailbox)
+     | Changes ->
+         (* The pane holds its chosen scope; replay whatever it was showing. *)
+         state.repository_changes_scope
+         |> Option.iter (fun scope ->
+                launch_repository_changes_load state ~mailbox ~scope)
      | _ -> ());
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -13891,9 +13907,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && item_authority_ready state
+         (* The same reading the dispatch guard makes: a partial roster's
+            silence is not absence, so a read this TUI legitimately launched
+            for an Unobserved Keeper is accepted here too. A complete
+            roster's Absent and this Keeper's own decode failure still
+            refuse their answers. *)
          && (match Keeper_control.liveness_of_roster state.keeper_roster request.drr_keeper with
-             | Present _ -> true
-             | Unobserved | Invalid _ | Absent -> false) then
+             | Present _ | Unobserved -> true
+             | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

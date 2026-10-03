@@ -730,7 +730,10 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: held.calls > calls_before_refresh, timeout=10.0)
             phase[0] = "unread"
-            await_frame(process, fd, output, b"MASC Keepers")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: "unread" in health_reads and any(b"No keeper selected." in row
+                    for row in last_frame_rows(output).values()), timeout=10.0), \
+                "unread authority did not withdraw the selected Item detail"
             assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
                            for row in last_frame_rows(output).values()), "unread health retained account authority"
             calls_after_withdrawal = held.calls

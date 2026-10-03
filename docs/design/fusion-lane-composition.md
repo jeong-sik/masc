@@ -134,3 +134,27 @@ and receipts with `python3 scripts/fusion-report-preview-browser.py` (requires
 Playwright and its Chromium browser). Browser receipts in
 `docs/evidence/fusion-report-20260930/preview-checks.json` identify the exact HTML
 and composition hashes, delivery label, lineage interaction and screenshots.
+
+## Composition verification boundary
+
+The integration branch joins the report packages, native `fusion_run` source,
+and declared-layer TUI. `test_lane_addon_composition` now includes a native
+Fusion registry and exact-origin Board fixture feeding both shipped packages
+over MCP stdio through real declaration reconciliation and source acquisition.
+It asserts exact upstream identity, preserved report body, a deferred delivery
+receipt, and reads the published evidence using `Keeper_artifact_read` after
+both installations detach and the Lane evidence store is removed.
+
+Container lifecycle and the delivery recipient are fixture callbacks. Artifact
+reads exercise the real reader; they do not demonstrate a model understanding
+or using the report. No Docker isolation, credential separation, Broadcast
+publication, or production Keeper action is established by this scenario.
+Run the native composition test and the Python MCP package suites against the
+composed head; historical receipts do not establish execution of a later merge.
+
+The original preview HTML, composition, browser receipts and screenshots are
+retained from historical integration commit
+`125600b0e5909ac44b05e2f06da6bd09c9fe418e`. Their hashes remain linked by
+`preview-checks.json`; they are not screenshots or browser execution of this
+merged revision. The parent preview bundle is separately archived as described
+in `docs/evidence/fusion-report-20260930/README.md`.

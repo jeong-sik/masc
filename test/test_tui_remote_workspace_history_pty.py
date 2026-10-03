@@ -309,9 +309,16 @@ def scoped_roster_authority(binary: str) -> None:
             self.hold_roster = False
             self.roster_started = threading.Event()
             self.roster_release = threading.Event()
+        def prepare(self, base):
+            super().prepare(base)
+            keeper_path = Path(base, ".masc", "keepers", "alpha.json")
+            metadata = json.loads(keeper_path.read_text())
+            metadata["name"] = "c-only"
+            Path(base, ".masc", "keepers", "c-only.json").write_text(json.dumps(metadata))
+            keeper_path.unlink()
         def health(self):
             with self.lock:
-                base = "/fixture-workspace-b" if self.phase == "b" else "/fixture-workspace-c"
+                base = "/fixture-workspace-b" if self.phase == "b" else self.local_base
             _, payload = h.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
@@ -330,40 +337,34 @@ def scoped_roster_authority(binary: str) -> None:
                 self.roster_started.set()
                 assert self.roster_release.wait(timeout=30), "scoped B roster was not released"
             return 200, payload
-        def board(self):
-            with self.lock:
-                title = "workspace-b-board" if self.phase == "b" else "workspace-c-board"
-            return 200, {"posts": [h.board_selection_post("scope", title, "authority fixture")]}
     wire = ScopedWire()
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-                     "/health?full=1": wire.health,
-                     "/api/v1/board?sort_by=hot": wire.board})
+                     "/health?full=1": wire.health})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            # At 80 columns the Activity pane is not drawn. Board does not
+            # At 80 columns the Activity pane is not drawn. Activity does not
             # need the roster, so entering Keepers dispatches a scoped GET.
             h.resize_and_wait(process, fd, output,
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             with wire.lock:
                 wire.hold_roster = True
             h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             assert h.wait_for_fixture_event(process, fd, output, wire.roster_started,
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             wire.publish("b-after-late")
             h.resize_and_wait(process, fd, output, rows=32, columns=300,
-                             needle=b"MASC Board", controls=(h.FULL_REDRAW,))
+                             needle=b"MASC Activity", controls=(h.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
             # /health. Its exact Base footer is the applied identity barrier;
             # the wider frame keeps both workspace paths visible.
-            await_screen(lambda text: b"Base: /fixture-workspace-c" in text,
+            await_screen(lambda text: b"Base: " + _base.encode() in text and b"MISMATCH" not in text,
                          "full C identity reading did not become current")
             c_boundary = len(output)
             h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -586,14 +587,14 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
         h.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
         h.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         assert cancel_requests == [], "A's first press authorized a POST on B"
         os.write(fd, b"x")
         assert h.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
         h.tab_until(process, fd, output, b"MASC Keepers")
         await_screen(lambda text: b"b.current" in text, "B roster was not applied")
         h.select_keeper_row(process, fd, output, b"alpha")

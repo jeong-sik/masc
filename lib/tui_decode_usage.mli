@@ -92,7 +92,7 @@ val decode_provider_usage_windows :
 
 type keeper_usage_coverage =
   | Keeper_usage_complete
-  | Keeper_usage_partial of int
+  | Keeper_usage_partial of { malformed_rows : int; unread_turn_rows : int }
   | Keeper_usage_failed of string
 
 type keeper_usage_row = {

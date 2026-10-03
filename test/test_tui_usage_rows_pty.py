@@ -7,7 +7,7 @@ import test_tui_keyboard_input as h
 
 
 def run(executable):
-    fixtures = {
+    fixtures: h.HttpFixtures = {
         "/api/v1/dashboard/keeper-costs?window=1440": (200, {
             "cache": {"state": "fresh"}, "generated_at": 1,
             "window_minutes": 1440, "keepers": [{
@@ -16,7 +16,7 @@ def run(executable):
                 "tokens_reported_samples": 9, "tokens_unreported_samples": 2,
                 "tokens_unread_samples": 1, "cost_reported_samples": 8,
                 "cost_unreported_samples": 3, "cost_unread_samples": 1,
-                "metrics_read": {"state": "read", "malformed_rows": 7},
+                "metrics_read": {"state": "read", "malformed_rows": 7, "unread_turn_rows": 0},
             }],
         }),
     }

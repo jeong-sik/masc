@@ -113,6 +113,15 @@ def goals(value: Json) -> None:
 def goal_context(value: Json) -> None:
     context = obj(value, "goal_context")
     status = context.get("status")
+    fields = {
+        "no_task": {"status"},
+        "available": {"status", "task_id", "goals"},
+        "unavailable": {"status", "task_id", "detail"},
+    }
+    if not isinstance(status, str) or status not in fields:
+        raise ValueError("unknown goal context status")
+    if context.keys() != fields[status]:
+        raise ValueError("goal context fields do not match status")
     if status == "no_task":
         return
     text(context.get("task_id"), "task_id")
@@ -120,8 +129,6 @@ def goal_context(value: Json) -> None:
         goals(context.get("goals"))
     elif status == "unavailable":
         string(context.get("detail"), "goal context detail")
-    else:
-        raise ValueError("unknown goal context status")
 
 
 def goal_source_error(value: Json) -> None:
@@ -194,7 +201,7 @@ def task_context(value: Json) -> None:
         raise ValueError("unknown historical goals observation")
 
 
-def input_payload(value: Json) -> None:
+def input_payload(value: Json, actor: str) -> None:
     # SSOT: Keeper_librarian_runtime.exact_input_payload, prompt_material_payload
     # and Keeper_librarian.prompt_variables (eligible Memory-only preflight).
     payload = obj(value, "input payload")
@@ -242,6 +249,16 @@ def input_payload(value: Json) -> None:
         string(required(variables, key), "rendered variable " + key)
     for key, variable in variables.items():
         string(variable, "rendered variable " + key)
+    if variables["keeper_id"] != actor:
+        raise ValueError("run actor must match the frozen keeper_id")
+    continuity = json.loads(string(variables["continuity"], "continuity"), object_pairs_hook=unique_object)
+    if continuity is not None:
+        raise ValueError("evaluated preflight requires null frozen continuity")
+    context = json.loads(string(variables["working_context"], "working_context"), object_pairs_hook=unique_object)
+    # Keeper_librarian_context.prompt_json empty. This is the recorded
+    # projection, not proof of unexported fields in the runtime input record.
+    if context != {"sources": [], "previous": None, "unavailable": []}:
+        raise ValueError("evaluated preflight requires empty frozen working_context")
 
 
 def unique_object(pairs: list[tuple[str, Json]]) -> dict[str, Json]:
@@ -361,6 +378,8 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if run["status"] == "failed":
         text(run.get("code"), "failed run code")
         text(run.get("detail"), "failed run detail")
+    elif "code" in run or "detail" in run:
+        raise ValueError("nonfailed run must not record code or detail")
     elapsed = number(run.get("elapsed_s"), "run elapsed_s")
     if elapsed < 0:
         raise ValueError("elapsed_s must be finite and nonnegative")
@@ -368,7 +387,7 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if source_input.get("kind") != "exact":
         raise ValueError("Librarian input must use the exact payload envelope")
     payload = source_input.get("payload")
-    input_payload(payload)
+    input_payload(payload, text(run.get("actor"), "run actor"))
     return run, payload, output, elapsed
 
 
@@ -419,6 +438,8 @@ def compare(manifest: Json) -> dict[str, Json]:
         ):
             raise ValueError("baseline must record disabled preflight and no skip")
         validate_observation(baseline_jev)
+        if "preflight_domain_rejection" not in baseline_output or baseline_output["preflight_domain_rejection"] is not None:
+            raise ValueError("baseline must explicitly record null domain rejection")
         observation = obj(
             preflight_output.get("jev_preflight"), "preflight observation"
         )

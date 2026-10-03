@@ -28,3 +28,8 @@ val create_handler :
   package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
   (Lane_addon_sampling.t, string) result
 (** Assemble the same worker-bound production handler installed by [register]. *)
+
+module For_testing : sig
+  val response_content : Llm_provider.Types.api_response ->
+    (Mcp_protocol.Sampling.sampling_content, string) result
+end

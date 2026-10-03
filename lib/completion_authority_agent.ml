@@ -1040,24 +1040,10 @@ let schedule_retry_scope (runtime : runtime) ~delay_sec scope =
 
 (* Retry when any candidate that actually reported a transient failure can
    serve again. The last diagnostic may name a different, long-resting slot. *)
-let retry_delay_of_paths ~retry_interval_sec ~now paths =
-  let delay = function
-    | Keeper_turn_driver.Path_serving -> retry_interval_sec
-    | Keeper_turn_driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
-      Float.max retry_interval_sec (release_at -. now)
-  in
-  match paths with
-  | [] -> retry_interval_sec
-  | first :: rest -> List.fold_left (fun soonest path -> Float.min soonest (delay path)) (delay first) rest
-;;
-
 let retry_delay_sec (runtime : runtime) = function
   | Not_reviewed { retryable_runtimes; _ } ->
     let now = Eio.Time.now runtime.clock in
-    retry_delay_of_paths
-      ~retry_interval_sec:runtime.retry_interval_sec
-      ~now
-      (List.map (Keeper_turn_driver.path_rest ~now) retryable_runtimes)
+    Verification_retry.delay ~retry_interval_sec:runtime.retry_interval_sec ~now retryable_runtimes
   | Infrastructure_unavailable _ | Commit_failed _ | Raised _ ->
     runtime.retry_interval_sec
 ;;
@@ -1312,7 +1298,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 
 module For_testing = struct
   let authority_actor = authority_actor
-  let retry_delay_of_paths = retry_delay_of_paths
+  let retry_delay_of_paths = Verification_retry.delay_of_paths
   let evidence_refs_of_output = evidence_refs_of_output
   let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review

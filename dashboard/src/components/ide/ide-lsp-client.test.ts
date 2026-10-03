@@ -591,6 +591,86 @@ function readyLanguage(socket: MockWebSocket) {
 const sourceDiagnostic = { range: { start: { line: 0, character: 4 }, end: { line: 0, character: 11 } },
   message: 'Unbound value missing', severity: 1 }
 
+describe('inlay hints in the editor', () => {
+  async function withHints(hints: unknown, verify: (view: EditorView, socket: MockWebSocket) => Promise<void>) {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({ parent, state: EditorState.create({
+      doc: 'let x = add 1 2\nlet y = 3', extensions: [lspExtension({ filePath: 'current.ml' })],
+    }) })
+    try {
+      const socket = mockSockets[0]!
+      await completeHandshake(socket)
+      readyLanguage(socket)
+      await replyHints(socket, hints)
+      await verify(view, socket)
+    } finally { view.destroy(); parent.remove() }
+  }
+
+  async function replyHints(socket: MockWebSocket, hints: unknown) {
+    await vi.advanceTimersByTimeAsync(300)
+    for (const request of socket.sent.map(value => JSON.parse(value)).filter(value => value.id && value.method !== 'initialize')) {
+      socket.message({ id: request.id, result: request.method === 'textDocument/inlayHint' ? hints
+        : request.method === 'textDocument/diagnostic' ? { kind: 'full', items: [] } : [] })
+    }
+    await vi.advanceTimersByTimeAsync(0)
+  }
+
+  it('places unsorted same-line hints at their own offsets and keeps ties in response order', async () => {
+    await withHints([
+      { position: { line: 0, character: 12 }, label: 'later' },
+      { position: { line: 0, character: 3 }, label: 'first' },
+      { position: { line: 0, character: 3 }, label: 'second' },
+      { position: { line: 1, character: 999 }, label: 'line end' },
+    ], async view => {
+      const hints = [...view.dom.querySelectorAll('.cm-inlayHint')]
+      expect(hints.map(hint => hint.textContent)).toEqual(['first', 'second', 'later', 'line end'])
+      expect(hints.map(hint => view.posAtDOM(hint))).toEqual([3, 3, 12, view.state.doc.length])
+    })
+  })
+
+  it('renders composite labels and safely displays whole-hint and per-part markup tooltips', async () => {
+    const hints = [{ position: { line: 0, character: 5 },
+      label: [{ value: ': ' }, { value: '<int>', tooltip: { kind: 'markdown', value: '**integer**' } }],
+      tooltip: { kind: 'plaintext', value: 'inferred type' },
+    }]
+    await withHints(hints, async (view, socket) => {
+      const hint = view.dom.querySelector('.cm-inlayHint')!
+      expect(hint.textContent).toBe(': <int>')
+      expect(hint.getAttribute('title')).toBe('inferred type')
+      expect(hint.querySelector('int')).toBeNull()
+      expect(hint.querySelector('[title]')?.getAttribute('title')).toBe('**integer**')
+      hints[0]!.label[1]!.tooltip = { kind: 'plaintext', value: 'updated part tooltip' }
+      // The label text stays identical. Widget equality must include part tooltips.
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } })
+      await replyHints(socket, hints)
+      expect(view.dom.querySelector('.cm-inlayHint [title]')?.getAttribute('title')).toBe('updated part tooltip')
+    })
+  })
+
+  it.each([
+    { position: { line: 0, character: -1 }, label: 'invalid offset' },
+    { position: { line: 0, character: 1.5 }, label: 'fractional offset' },
+    { position: { line: 0, character: 3 }, label: { value: 'not an array' } },
+    { position: { line: 0, character: 3 }, label: [{ value: '' }] },
+    { position: { line: 0, character: 3 }, label: 'type', tooltip: { kind: 'html', value: '<b>bad</b>' } },
+  ])('rejects malformed inlay data before producing decorations: %j', async malformed => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.syncDocument('current.ml', 'let x = 1')
+    conn.connect()
+    const socket = mockSockets[0]!
+    try {
+      await completeHandshake(socket)
+      const pending = conn.requestInlayHints('current.ml', 1)
+      socket.message({ id: wire(socket, 'textDocument/inlayHint').at(-1).id, result: [malformed] })
+      expect((await pending).size).toBe(0)
+    } finally { conn.dispose() }
+  })
+})
+
 describe('selected document LSP continuity', () => {
   it('sends actual source on open and monotonic full changes on store updates', async () => {
     installWebSocketMock()

@@ -259,6 +259,10 @@ def input_payload(value: Json, actor: str) -> None:
         string(variable, "rendered variable " + key)
     if variables["keeper_id"] != actor:
         raise ValueError("run actor must match the frozen keeper_id")
+    # Keeper_librarian.format_keeper_instructions_for_prompt uses OCaml String.trim.
+    instructions = string(actual["keeper_instructions"], "keeper_instructions").strip(" \t\n\r\f")
+    if variables["keeper_instructions"] != (instructions or "[no keeper instructions]"):
+        raise ValueError("rendered keeper instructions disagree with frozen typed instructions")
     rendered_history = json.loads(string(variables["historical_task_contexts"], "rendered historical_task_contexts"), object_pairs_hook=unique_object)
     if digest(rendered_history) != digest(actual["historical_task_contexts"]):
         raise ValueError("rendered historical task context disagrees with frozen typed context")

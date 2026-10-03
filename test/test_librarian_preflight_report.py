@@ -67,7 +67,7 @@ def fixture() -> dict[str, Any]:
                                        "rendered_sha256": "a" * 64},
                             "rendered_prompt_variables": {
                                 "keeper_id": "fixture-keeper", "facts_budget": "max=100; current ordinary=1",
-                                "keeper_instructions": "", "historical_task_contexts": "[]", "continuity": "null",
+                                "keeper_instructions": "[no keeper instructions]", "historical_task_contexts": "[]", "continuity": "null",
                                 "working_context": '{"sources":[],"previous":null,"unavailable":[]}',
                                 "working_contexts_rule": "fixture rule", "goal_context": '{"status":"no_task"}',
                                 "current_memory": "frozen memory", "conversation_history": "frozen source",
@@ -121,6 +121,35 @@ class ReportCliTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+    def test_keeper_instructions_match_native_prompt_normalization(self) -> None:
+        cases = (
+            ("", "[no keeper instructions]", True),
+            (" \t\n\r\f", "[no keeper instructions]", True),
+            (" \tkeep sources\r\n\f", "keep sources", True),
+            ("\u00a0keep\u00a0", "\u00a0keep\u00a0", True),
+            ("\vkeep\v", "\vkeep\v", True),
+            ("keep\n sources", "keep\n sources", True),
+            ("preserve sources", "ignore sources", False),
+            ("", "", False),
+            (" \t\n\r\f", "", False),
+            (" \tkeep sources\r\n\f", " \tkeep sources\r\n\f", False),
+            ("\u00a0keep\u00a0", "keep", False),
+            ("\vkeep\v", "keep", False),
+            ("keep\n sources", "keep sources", False),
+        )
+        for typed, rendered, accepted in cases:
+            with self.subTest(typed=typed, rendered=rendered):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                    actual["keeper_instructions"] = typed
+                    actual["rendered_prompt_variables"]["keeper_instructions"] = rendered
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+                if not accepted:
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("keeper instructions", result.stderr)
 
     def test_unresolved_prompts_are_refused(self) -> None:
         for source, template in (("missing", "resolved"), ("file", ""), ("override", " \n ")):

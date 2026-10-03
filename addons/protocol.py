@@ -22,37 +22,6 @@ class UnknownMethod(ValueError):
     pass
 
 
-def validate_json(value: Any) -> None:
-    """Refuse values that cannot be encoded as finite UTF-8 JSON."""
-    pending = [(value, False)]
-    active = set()
-    while pending:
-        item, leaving = pending.pop()
-        if leaving:
-            active.remove(id(item))
-            continue
-        if isinstance(item, float) and not math.isfinite(item):
-            raise InvalidInput("JSON data must contain only finite numbers")
-        if isinstance(item, str):
-            try:
-                item.encode("utf-8")
-            except UnicodeEncodeError as error:
-                raise InvalidInput("JSON strings must be valid UTF-8") from error
-        elif isinstance(item, dict):
-            if id(item) in active:
-                raise InvalidInput("JSON data must not contain reference cycles")
-            active.add(id(item))
-            pending.append((item, True))
-            for key, child in item.items():
-                pending.extend(((key, False), (child, False)))
-        elif isinstance(item, (list, tuple)):
-            if id(item) in active:
-                raise InvalidInput("JSON data must not contain reference cycles")
-            active.add(id(item))
-            pending.append((item, True))
-            pending.extend((child, False) for child in item)
-
-
 def object_value(value: Any, field: str) -> dict:
     if not isinstance(value, dict):
         raise InvalidInput(f"{field} must be an object")
@@ -70,15 +39,22 @@ def optional_string(value: Any, field: str) -> str | None:
 
 
 def number(value: Any, field: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise InvalidInput(f"{field} must be a finite number")
-    try:
-        converted = float(value)
-    except OverflowError as error:
-        raise InvalidInput(f"{field} must be a finite number") from error
-    if not math.isfinite(converted):
-        raise InvalidInput(f"{field} must be a finite number")
-    return converted
+    return float(value)
+
+
+def finite_json(value: Any, field: str) -> None:
+    """Validate retained JSON without copying or normalizing its payload."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, float) and not math.isfinite(item):
+            raise InvalidInput(f"{field} must contain only finite JSON numbers")
+        if isinstance(item, dict):
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
 
 
 def boolean(value: Any, field: str) -> bool:
@@ -189,30 +165,91 @@ INPUT_SCHEMA = {
                                                                             "items": {"type": "object"}}}}
 
 
+class SamplingFailure(Exception):
+    """The host returned an actual JSON-RPC sampling error."""
+
+    def __init__(self, error: dict):
+        self.error = error
+        super().__init__(str(error.get("message", "Sampling failed")))
+
+
+class SamplingClient:
+    """Synchronous MCP sampling on this worker's existing stdio connection.
+
+    Each installed worker has its own connection. This client never recursively
+    invokes a tool and never selects credentials or a host runtime.
+    """
+
+    def __init__(self, *, max_request_bytes: int):
+        if type(max_request_bytes) is not int or max_request_bytes <= 0:
+            raise InvalidInput("max_request_bytes must be a positive integer")
+        self.max_request_bytes = max_request_bytes
+        self.supported = False
+        self.sequence = 0
+
+    def initialize(self, params: dict) -> None:
+        capabilities = object_value(params.get("capabilities", {}), "client capabilities")
+        self.supported = isinstance(capabilities.get("sampling"), dict)
+
+    def create_message(self, params: dict) -> dict:
+        if not self.supported:
+            raise InvalidInput("Host did not advertise MCP sampling")
+        self.sequence += 1
+        request_id = f"lane-sampling-{self.sequence}"
+        encoded = json.dumps({"jsonrpc": "2.0", "id": request_id,
+                          "method": "sampling/createMessage", "params": params},
+                         ensure_ascii=False, allow_nan=False)
+        if len((encoded + "\n").encode("utf-8")) > self.max_request_bytes:
+            raise InvalidInput("Sampling request exceeds the declared message envelope; no model call was attempted")
+        print(encoded, flush=True)
+        while True:
+            # The manifest's envelope is a byte boundary, including newline.
+            # Share the binary buffer with serve so neither text wrapper can
+            # read ahead and hide a duplex response or a following request.
+            line = sys.stdin.buffer.readline(self.max_request_bytes + 1)
+            if len(line) > self.max_request_bytes:
+                while line and not line.endswith(b"\n"):
+                    line = sys.stdin.buffer.readline(self.max_request_bytes + 1)
+                raise InvalidInput("Host sampling response exceeds the declared message envelope; "
+                                   "no response was accepted and the model-call outcome is unconfirmed")
+            if not line:
+                raise InvalidInput("Host closed stdio before answering sampling")
+            try:
+                response = object_value(json.loads(line.decode("utf-8")), "sampling response")
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise InvalidInput("Malformed host sampling response") from error
+            finite_json(response, "Host sampling response")
+            if response.get("jsonrpc") != "2.0":
+                raise InvalidInput("Expected JSON-RPC sampling response")
+            if "method" in response:
+                if "id" not in response:
+                    continue
+                if response["method"] == "ping":
+                    reply = {"result": {}}
+                else:
+                    reply = {"error": {"code": -32000,
+                                       "message": "Worker is awaiting host sampling"}}
+                print(json.dumps({"jsonrpc": "2.0", "id": response["id"], **reply}), flush=True)
+                continue
+            if response.get("id") != request_id:
+                raise InvalidInput("Sampling response ID does not match the request")
+            if "error" in response:
+                raise SamplingFailure(object_value(response["error"], "sampling error"))
+            return object_value(response.get("result"), "sampling result")
+
+
 def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
-          *, version: str = "0.1.0", text_summary: Callable[[dict], str] | None = None,
-          max_reply_bytes: int | None = None) -> None:
+          *, version: str = "0.1.0", sampling_client: SamplingClient | None = None,
+          text_summary: Callable[[dict], str] | None = None, max_reply_bytes: int | None = None) -> None:
     """One synchronous package worker. Host owns isolation and cancellation."""
     if max_reply_bytes is not None and (isinstance(max_reply_bytes, bool)
             or not isinstance(max_reply_bytes, int) or max_reply_bytes <= 0):
         raise InvalidInput("max_reply_bytes must be a positive integer")
-    for line in sys.stdin:
+    for line in sys.stdin.buffer:
         request_id = None
         method = None
         try:
-            try:
-                decoded = json.loads(line)
-            except json.JSONDecodeError:
-                raise
-            except ValueError as error:
-                raise InvalidInput("JSON value exceeds the decoder limits") from error
-            request = object_value(decoded, "request")
-            # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
-            supplied_id = request.get("id")
-            if not (supplied_id is None or isinstance(supplied_id, (str, int, float))
-                    and not isinstance(supplied_id, bool)):
-                raise InvalidInput("JSON-RPC id must be a string, number or null")
-            validate_json(supplied_id)
+            request = object_value(json.loads(line.decode("utf-8")), "request")
             request_id = request.get("id")
             method = request.get("method")
             if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
@@ -221,55 +258,47 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                 continue
             params = object_value(request.get("params", {}), "params")
             if method == "initialize":
+                if sampling_client is not None:
+                    sampling_client.initialize(params)
                 result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
                           "serverInfo": {"name": name, "version": version}}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
                 result = {"tools": [{"name": "lane_observe",
-                           "description": "Read supplied source snapshots and derive Lane rows; no external actions.",
+                           "description": ("Read supplied source snapshots and derive Lane rows; no external actions."
+                                           if sampling_client is None else
+                                           "Analyze supplied retained inputs through host MCP sampling; no publication."),
                            "inputSchema": INPUT_SCHEMA, "outputSchema": OUTPUT_SCHEMA,
-                           "annotations": {"readOnlyHint": True, "destructiveHint": False,
-                                           "idempotentHint": True, "openWorldHint": False}}]}
+                           "annotations": {"readOnlyHint": sampling_client is None, "destructiveHint": False,
+                                           "idempotentHint": sampling_client is None,
+                                           "openWorldHint": sampling_client is not None}}]}
             elif method == "tools/call":
                 if params.get("name") != "lane_observe":
                     raise InvalidInput("unknown tool")
                 arguments = object_value(params.get("arguments"), "arguments")
                 try:
-                    validate_json(arguments)
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
-                    validate_json(output)
                     encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
                                if text_summary is None else string(text_summary(output), "output summary"))
-                    validate_json(encoded)
                     result = {"content": [{"type": "text", "text": encoded}],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:
                     result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
-                except RecursionError:
-                    result = {"content": [{"type": "text", "text": "JSON nesting exceeds the encoder limit"}], "isError": True}
             else:
                 raise UnknownMethod
             response = {"jsonrpc": "2.0", "id": request_id, "result": result}
         except UnknownMethod:
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32601, "message": "Method not found"}}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             response = {"jsonrpc": "2.0", "id": None,
                         "error": {"code": -32700, "message": "Parse error"}}
         except InvalidInput as error:
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32602, "message": str(error)}}
-        except RecursionError:
-            response = {"jsonrpc": "2.0", "id": request_id,
-                        "error": {"code": -32602, "message": "JSON nesting exceeds the decoder limit"}}
-        try:
-            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
-        except RecursionError:
-            response = {"jsonrpc": "2.0", "id": request_id,
-                        "error": {"code": -32602, "message": "JSON nesting exceeds the encoder limit"}}
-            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
         if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
             if method == "tools/call":
                 response = {"jsonrpc": "2.0", "id": request_id, "result": {

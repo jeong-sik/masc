@@ -11,7 +11,7 @@ import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tempfile
 import threading
@@ -77,14 +77,9 @@ class ProtocolCase(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
                 "name": "lane_observe", "arguments": {"binding": binding, "sources": sources}}}]
-        # The input is a prepared batch, so avoid pipe writes racing the
-        # worker's output-schema reply before it consumes the remaining input.
-        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as wire:
-            wire.write("".join(json.dumps(r) + "\n" for r in requests))
-            wire.seek(0)
-            proc = subprocess.run([sys.executable, str(ADDONS / package / "server.py")],
-                                  stdin=wire, text=True, capture_output=True,
-                                  check=True, timeout=10, cwd=cwd)
+        proc = run_stdio([sys.executable, str(ADDONS / package / "server.py")],
+                              input="".join(json.dumps(r) + "\n" for r in requests),
+                              text=True, capture_output=True, check=True, timeout=10, cwd=cwd)
         self.assertEqual(proc.stderr, "")
         responses = [json.loads(line) for line in proc.stdout.splitlines()]
         self.assertEqual([r["id"] for r in responses], [1, 2, 3])

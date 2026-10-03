@@ -345,9 +345,22 @@ let model_access_is_explicit_and_revisioned () = with_directory (fun _root packa
     write manifest (package () ^ "\n[interface]\nmodel_access = " ^ value ^ "\n");
     check_error "unknown or untyped model access is rejected" path) ["\"auto\"";"true"])
 
+let assembled_fusion_declarations () =
+  List.iter (fun name ->
+    let loaded = unwrap (Config.load_file ~path:(repo_file
+      ("docs/examples/lane-addons/fusion-compute/" ^ name ^ ".toml"))) in
+    check string "assembled workers belong to one host run" "assembled-fusion" loaded.run_id;
+    let expected = if name="report" then Lane_addon_types.Model_disabled
+      else Lane_addon_types.Host_sampling in
+    check bool "computation has explicit model access; reporting has none" true
+      (loaded.package.model_access=expected);
+    check bool "the shipped installation has an enforceable binding schema" true
+      (Option.is_some loaded.package.binding_schema)) ["panel-a";"panel-b";"judge";"report"]
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
+    [test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
+     test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;

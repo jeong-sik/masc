@@ -8,7 +8,21 @@ val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
-val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
+val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
+(** [max_bytes] rejects a retained file before allocating its complete body. *)
+type read_budget
+type bounded_read_error = Read_limit_exceeded | Read_failed of string
+val read_budget : max_bytes:int -> read_budget
+val read_blob_bounded : budget:read_budget -> t -> Lane_addon_types.evidence ->
+  (string, bounded_read_error) result
+(** One shared byte allowance, charged before reads including corrupt blobs.
+    Use one budget for an entire projection, not one per reference. *)
+val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:string ->
+  request_id:string -> (Yojson.Safe.t option, bounded_read_error) result
+(** Prefer the independently retained terminal link; otherwise read the pending
+    request index. Both use the caller's shared aggregate read allowance and
+    verify the exact file and parent durability before accepting a receipt.
+    Failed verification consumes the bytes read and never falls back to pending. *)
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
 val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a list ->
   encode:('a -> string) -> (jsonl_snapshot, string) result
@@ -32,6 +46,23 @@ val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t
     bytes and both path identities again. A visible rename alone is not durable
     confirmation. Sync/read/identity failures return [Error] without replay or
     changing the result. Reads keep the existing full-receipt allocation policy. *)
+val save_sampling_request : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+(** Independently retain the terminal request/outcome link before replacing the
+    primary request index. Terminal records include exact [outcome_bytes] before
+    blob publication; recovery verifies the digest and restores a missing blob. *)
+val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
+  f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
+(** Stream recovery records with bounded per-record reads and constant directory
+    memory. Terminal recovery links are visited first, then unresolved requests.
+    The callback can stop immediately with [Error]; directory and decoding errors
+    are explicit. Call from a system thread. No ordering is guaranteed. *)
+val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Retain the exact published evidence before sending its idempotent Broadcast.
+    Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
@@ -68,6 +99,9 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
     or unreadable observations; source coverage is not a chronological ledger. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
+(** The receipt includes [instance_id] and the exact validated [row_ids] from
+    the frozen bundle, alongside its reference and row count. Publication keeps
+    those selection coordinates; neither receipt implies delivery or reading. *)
 val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 (** Publishes a frozen bundle, its selected records and their retained source
@@ -79,6 +113,11 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
+  val load_sampling_request_bounded :
+    sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
+    budget:read_budget -> t -> instance_id:string -> request_id:string ->
+    (Yojson.Safe.t option, bounded_read_error) result
   val save_action : sync_parent:(string -> unit) -> t -> instance_id:string ->
     request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

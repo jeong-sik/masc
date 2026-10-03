@@ -179,6 +179,11 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+let memory_alert_is_history = function
+  | Librarian_failures | Librarian_starvation -> true
+  | Snapshot_read_error | Source_snapshot_read_error | Librarian_stopped
+  | Vision_ingest_errors -> false
+
 let memory_alert_severity = function
   | Snapshot_read_error
   | Source_snapshot_read_error

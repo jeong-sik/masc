@@ -1100,6 +1100,68 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   | _ -> Alcotest.fail "cancellation must leave one incomplete snapshot and no Complete"
 ;;
 
+let test_cancellation_during_terminal_callback_settles_registry () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let module Runs = Masc.Exact_lane_run_registry in
+  let server = F.start_server ~sw ~net ~clock (F.Reply
+      {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":0.9}}}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  let directory = Filename.temp_dir "absorb-terminal-cancel-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+  let path = Filename.concat directory Runs.storage_filename in
+  let registry = Runs.create ~path () in
+  let run_id = "terminal-cancel-evaluation" in
+  let events = ref [] in
+  let callback_started, start_callback = Eio.Promise.create () in
+  let callback_finished, finish_callback = Eio.Promise.create () in
+  let raised = ref false in
+  let source = fact (List.hd sources) in
+  (try Eio.Cancel.sub (fun cancellation ->
+     ignore (Gate.run ~clock ~keeper_id:"terminal-cancel-fixture" ~superseding:[]
+       ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+       ~before_evaluate:(fun ~direction ~destinations ~state ~questions ->
+         Runs.register_running registry ~run_id ~lane:Runs.Librarian
+           ~actor:"terminal-cancel-fixture" ~started_at:(Time_compat.now ())
+           ~input:(Runs.Exact_input (Gate.evaluation_request_to_yojson
+             ~direction ~destinations ~state ~questions));
+         run_id)
+       ~after_evaluate:(fun ~evaluation_id evaluation ->
+         (match evaluation.Gate.result with
+          | Ok _ -> () | Error failure -> Alcotest.fail (Masc.Typesafeai_client.failure_to_string failure));
+         Eio.Promise.resolve start_callback ();
+         events := "before completion" :: !events;
+         Eio.Cancel.cancel cancellation Cancel_gate_fixture;
+         (* A pending cancellation must not interrupt the terminal payload's
+            cooperative boundary before the registry receives its outcome. *)
+         Eio.Fiber.yield ();
+         (match Runs.mark_completed registry ~run_id:evaluation_id ~outcome:Runs.Succeeded
+             ~elapsed_s:0. ~selected_slot:None
+             ~output:(Gate.observation_to_yojson (Gate.Incomplete [evaluation])) with
+          | Ok () -> () | Error error -> Alcotest.fail (Runs.completion_error_to_string error));
+         events := "after completion" :: !events;
+         Eio.Promise.resolve finish_callback ())
+       ~on_evaluation_aborted:(fun ~evaluation_id:_ _ ->
+         Alcotest.fail "completed provider response must settle through its finish callback")
+       ~observe:(fun _ -> Eio.Fiber.yield ()) ());
+     Alcotest.fail "Gate.run returned despite terminal cancellation")
+   with Eio.Cancel.Cancelled Cancel_gate_fixture -> raised := true);
+  Alcotest.(check bool) "original cancellation propagates" true !raised;
+  F.await_within_fixture_budget ~clock ~failure:"terminal callback never started" callback_started;
+  F.await_within_fixture_budget ~clock ~failure:"terminal callback did not finish" callback_finished;
+  Alcotest.(check (list string)) "entire terminal callback settled"
+    ["before completion"; "after completion"] (List.rev !events);
+  List.iter (fun (label, registry) ->
+    match Runs.get registry ~run_id with
+    | Some {status=Runs.Completed {outcome=Runs.Succeeded; _};
+            output_availability=Some Runs.Available; _} -> ()
+    | _ -> Alcotest.fail (label ^ " retained a Running evaluation or unavailable terminal payload"))
+    ["live", registry; "replayed", Runs.replay path]
+;;
+
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
   let run = Gate.run ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
@@ -2061,6 +2123,8 @@ let () =
             test_cancelled_next_request_keeps_the_completed_observation
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick
             test_skipped_run_publishes_its_completed_observation
+        ; Alcotest.test_case "terminal callback settles before cancellation propagates" `Quick
+            test_cancellation_during_terminal_callback_settles_registry
         ; Alcotest.test_case "an excluded keeper is applied as answered without a request" `Quick
             test_an_excluded_keeper_is_applied_as_answered_without_a_request
         ; Alcotest.test_case "a gate declared on without a lane keeps the sources current" `Quick

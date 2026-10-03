@@ -95,6 +95,16 @@ let test_claude_cli_snap_admits_minimal_as_low () =
     (label (Option.map snap after_catalog));
   Alcotest.(check string) "minimal snaps to low" "low"
     (Effort.to_string (snap Effort.Minimal));
+  let uncatalogued_ultra = Map.clamp_reasoning_effort_to_catalog
+    ~model_id:(Some "masc-test-no-such-model") ~requested:(Some Effort.Ultra) in
+  Alcotest.(check string) "uncatalogued Claude ultra snaps to max" "max"
+    (label (Option.map snap uncatalogued_ultra));
+  (match Runtime_claude_code.command ~system_prompt_file:None
+      (Runtime_claude_code.default_config ~cwd:"/tmp") ~dynamic_tools:[]
+      ~reasoning_effort:(Some Effort.Ultra) ~session_mode:Start ~session_id:"fixture" with
+   | Error (Invalid_config _) -> ()
+   | Error error -> Alcotest.fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> Alcotest.fail "raw ultra reached Claude argv");
   List.iter
     (fun effort ->
        Alcotest.(check string)

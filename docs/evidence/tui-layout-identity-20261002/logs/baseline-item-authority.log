@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keeper_portrait_pty.py", line 848, in item_account_withdraws_unread_authority
+    h.run_terminal_scenario(binary, description=f"Item balances and pending reads lose unread {boundary} authority",
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            refresh=0.2)
+                            ^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keyboard_input.py", line 2389, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keeper_portrait_pty.py", line 807, in interact
+    frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keeper_portrait_pty.py", line 786, in frame
+    assert h.wait_for_fixture_state(process, fd, output,
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+        lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

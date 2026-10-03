@@ -1,10 +1,12 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
-  revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
-  source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  revision : string; phase : Row.phase; runtime_presence : runtime_presence;
+  observation_seq : int; rows_count : int;
+  installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration_origin = Parsed_declaration | Issue_only
@@ -29,13 +31,16 @@ type action_menu = {
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type screen = Overview | Detail of string * string
+type overview_mode = Current_installations | Retained_runs
+type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string
+type overview_selection = Unvisited | No_selection | Selection of overview_anchor
 type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
   | Input_failure of string
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
-  keepers : string list; choice : int;
+  keepers : string list; choice : int; broadcast_request_id : string;
 }
 (** Marked rows about to be frozen under [owner_title]. [choice] 0 preserves
     only; [choice] n sends the reference to the n-th Keeper of [keepers]. *)
@@ -43,7 +48,9 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
-  presentation : presentation; screen : screen; help_open : bool;
+  pending_broadcasts : (Yojson.Safe.t * string) list;
+  presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
+  current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   snapshot_read_error : string option;
@@ -81,13 +88,18 @@ val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val toggle_flow : t -> t
 (** Toggle Flow and Summary, keeping overview navigation on visible instances. *)
+val select_initial_result : t -> t
+(** Choose the declared reading, or first record, for the pinned detail after
+    its first scoped read. Refreshes preserve the existing row identity. *)
 val open_selected_instance : t -> t
 (** Enter the selected worker or unresolved installation. A worker pins its
     incarnation; an installation opens its existing TOML detail section. *)
-val overview_count : snapshot -> int
-(** Number of selectable workers and unresolved installations in the list. *)
+val overview_count : ?mode:overview_mode -> snapshot -> int
+(** Selectable current workers/declarations, or retained runs in history mode. *)
+val toggle_history : t -> t
+(** Explicitly switch the overview list. Detail keeps its pinned incarnation. *)
 val move_instance : t -> int -> t
-(** Move among visible overview entries; Flow shows only installed workers. *)
+(** Move among visible entries in the current overview mode and presentation. *)
 val move_record : t -> int -> t
 (** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option
@@ -115,16 +127,20 @@ val overview_hints : t -> string
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t
 val evidence_request : t -> (request, string) result
-val open_evidence : keepers:string list -> t -> (t, string) result
+val open_evidence : request_id:string -> keepers:string list -> t -> (t, string) result
 (** Open the export choice for the marked rows. Fails like [evidence_request]
     when the rows span owners or left the view. *)
 val move_evidence : t -> int -> t
+val acknowledge_broadcast : t -> Yojson.Safe.t -> t
+(** A committed response ends this send. Unanswered requests retain their ID
+    across reopening the same selected evidence; a later acknowledged send gets
+    a new ID from [open_evidence]. *)
 val submit_evidence : t -> (t * request, string) result
 (** Close the choice and build the exact request: the frozen bundle alone, or
-    with [keeper_name] when a Keeper was chosen. *)
+    with [keeper_name] for one Keeper or [broadcast=true] for workspace sharing. *)
 val evidence_receipt_lines : Yojson.Safe.t -> string list
 (** What an evidence receipt says in one or two readable lines: rows frozen
-    and, separately, whether the optional Keeper delivery succeeded. Empty for
+    and, separately, whether optional Keeper delivery or Broadcast committed. Empty for
     receipts of other operations. *)
 
 val status_text : t -> string

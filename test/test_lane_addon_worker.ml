@@ -944,6 +944,42 @@ let test_sampling_recovery_reports_unreadable_pending_index () = with_fixture (f
   let rows = match sampling_requests store ~instance_id with Ok rows -> rows | Error detail -> fail detail in
   check int "restored primary includes pending and finished" 2 (List.length rows))
 
+let test_pending_sampling_recovery_syncs_reopened_root () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "pending-root-recovery") in
+  let instance_id = "pending-only" in
+  List.iter (fun request_id ->
+    require (Store.save_sampling_request store ~instance_id ~request_id
+      (`Assoc ["state", `String "pending"; "request_id", `String request_id])))
+    ["first"; "second"];
+  let reopened = Store.create ~root:(Store.root store) in
+  let root_parent = Unix.stat (Filename.dirname (Store.root store)) in
+  let syncs = ref 0 and delivered = ref [] in
+  let recover ~fail_sync =
+    Store.For_testing.iter_sampling_requests reopened ~instance_id ~max_bytes:65536
+      ~sync_file:(fun _ -> fail "pending requests must not require a terminal blob")
+      ~sync_parent:(fun fd ->
+        let actual = Unix.fstat fd in
+        check bool "syncs the store root's parent" true
+          (actual.Unix.st_dev = root_parent.Unix.st_dev && actual.Unix.st_ino = root_parent.Unix.st_ino);
+        incr syncs;
+        if fail_sync then raise (Unix.Unix_error (Unix.EIO, "fsync", "pending root parent"));
+        Unix.fsync fd)
+      ~f:(fun row ->
+        check string "pending state survives recovery" "pending"
+          Yojson.Safe.Util.(row |> member "state" |> to_string);
+        delivered := Yojson.Safe.Util.(row |> member "request_id" |> to_string) :: !delivered;
+        Ok ()) in
+  check bool "failed root sync refuses pending recovery" true (Result.is_error (recover ~fail_sync:true));
+  check int "no pending request delivered before root durability" 0 (List.length !delivered);
+  require (recover ~fail_sync:false);
+  check (list string) "same handle retry delivers both pending requests" ["first"; "second"]
+    (List.sort String.compare !delivered);
+  require (recover ~fail_sync:false);
+  check int "later recovery still delivers both requests" 4 (List.length !delivered);
+  check int "one failed and one successful root sync, no duplicate obligation" 2 !syncs)
+
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
@@ -1269,6 +1305,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling recovery reports unreadable pending index" `Quick test_sampling_recovery_reports_unreadable_pending_index;
+  test_case "pending sampling recovery syncs reopened root" `Quick test_pending_sampling_recovery_syncs_reopened_root;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;

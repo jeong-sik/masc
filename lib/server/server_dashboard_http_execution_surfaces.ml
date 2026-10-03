@@ -1359,7 +1359,8 @@ type execution_parameters =
   }
 
 let execution_parameters ~(config : Workspace.config) request =
-  let fixture = query_param request "fixture" in
+  let fixture = Dashboard_execution_helpers.execution_fixture_name
+    ?fixture:(query_param request "fixture") () in
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
   let force = bool_query_param request "force" ~default:false in
@@ -1689,7 +1690,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          exception both places: its Candle, portraits and balances are
          synthetic by contract, and the wrapper skips its gate for fixture
          requests -- so the fill leaves them alone too. *)
-      |> (match fixture with
+      |> (match Dashboard_execution_helpers.execution_fixture_name ?fixture () with
           | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
           | Some _ -> fun json -> json)
       |> with_execution_publication_generation ~generation
@@ -1714,7 +1715,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
 
 let dashboard_execution_http_response ~sw ~clock context =
   let response = cached_dashboard_execution_http_response ~sw ~clock context in
-  match context.parameters.fixture with
+  match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
   | Some _ -> response
   | None ->
     let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in

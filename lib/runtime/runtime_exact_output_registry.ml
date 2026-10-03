@@ -173,7 +173,7 @@ let lane_publication registry lane_id =
       | None -> []
       | Some lane -> List.map (fun (slot : admitted_slot) ->
           let binding = List.assoc_opt slot.slot_id registry.runtime_observations
-            |> Option.map (fun observation -> observation.candidate) in
+            |> Option.map (fun (observation : runtime_observation) -> observation.candidate) in
           slot.slot_id,
           (Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
            |> Result.map (fun candidate ->

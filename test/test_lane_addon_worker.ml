@@ -822,7 +822,7 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       let result = Store.iter_sampling_requests recovered ~instance_id ~max_bytes:65536
         ~f:(fun row -> found := Yojson.Safe.Util.member "state" row = `String "finished"; Ok ()) in
       check bool "journal recovery visits the known outcome despite broken primary" true !found;
-      check bool "readable journal provides successful recovery" true (Result.is_ok result);
+      check bool "unreadable primary prevents complete recovery claim" true (Result.is_error result);
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory);
     let request_record = match sampling_requests store ~instance_id with

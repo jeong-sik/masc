@@ -18,6 +18,7 @@ import math
 import re
 import statistics
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypeAlias, cast
 
@@ -43,12 +44,39 @@ def sha(value: Json, name: str, length: int = 64) -> str:
     return result
 
 
+def canonical_chunks(value: Json) -> Iterator[bytes]:
+    # Preserve json.dumps(sort_keys=True, separators=(",", ":"), allow_nan=False)
+    # bytes without materializing the whole document or an escaped large string.
+    if isinstance(value, str):
+        yield b'"'
+        for start in range(0, len(value), 64 * 1024):
+            yield json.dumps(value[start:start + 64 * 1024])[1:-1].encode("ascii")
+        yield b'"'
+    elif isinstance(value, list):
+        yield b"["
+        for index, item in enumerate(value):
+            if index:
+                yield b","
+            yield from canonical_chunks(item)
+        yield b"]"
+    elif isinstance(value, dict):
+        yield b"{"
+        for index, key in enumerate(sorted(value)):
+            if index:
+                yield b","
+            yield from canonical_chunks(key)
+            yield b":"
+            yield from canonical_chunks(value[key])
+        yield b"}"
+    else:
+        yield json.dumps(value, allow_nan=False).encode("ascii")
+
+
 def digest(value: Json) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    ).hexdigest()
+    result = hashlib.sha256()
+    for chunk in canonical_chunks(value):
+        result.update(chunk)
+    return result.hexdigest()
 
 
 def number(value: Json, name: str) -> float:
@@ -141,8 +169,26 @@ def goal_source_error(value: Json) -> None:
     def unix_error(value: Json) -> None:
         error = obj(value, "unix error")
         kind = text(error.get("kind"), "unix error kind")
-        if kind == "eunknownerr" and type(error.get("code")) is not int:
-            raise ValueError("unknown Unix error requires its integer code")
+        # Goal_store_unavailable.unix_error_of_name, independent of host errno.
+        named = {
+            "e2big", "eacces", "eagain", "ebadf", "ebusy", "echild", "edeadlk",
+            "edom", "eexist", "efault", "efbig", "eintr", "einval", "eio", "eisdir",
+            "emfile", "emlink", "enametoolong", "enfile", "enodev", "enoent",
+            "enoexec", "enolck", "enomem", "enospc", "enosys", "enotdir",
+            "enotempty", "enotty", "enxio", "eperm", "epipe", "erange", "erofs",
+            "espipe", "esrch", "exdev", "ewouldblock", "einprogress", "ealready",
+            "enotsock", "edestaddrreq", "emsgsize", "eprototype", "enoprotoopt",
+            "eprotonosupport", "esocktnosupport", "eopnotsupp", "epfnosupport",
+            "eafnosupport", "eaddrinuse", "eaddrnotavail", "enetdown", "enetunreach",
+            "enetreset", "econnaborted", "econnreset", "enobufs", "eisconn",
+            "enotconn", "eshutdown", "etoomanyrefs", "etimedout", "econnrefused",
+            "ehostdown", "ehostunreach", "eloop", "eoverflow",
+        }
+        if kind == "eunknownerr":
+            if error.keys() != {"kind", "code"} or type(error.get("code")) is not int:
+                raise ValueError("unknown Unix error requires exactly kind and integer code")
+        elif kind not in named or error.keys() != {"kind"}:
+            raise ValueError("Unix error must use a known variant and its exact fields")
 
     def reason(value: Json) -> None:
         error = obj(value, "goal source reason")
@@ -398,8 +444,107 @@ def validate_observation(observation: dict[str, Json]) -> None:
         raise ValueError("preflight decision must have a highest probability")
 
 
+def completed_memory_output(output: dict[str, Json]) -> None:
+    # Keeper_librarian_runtime.completed_output is flattened into the run output.
+    # Check its receipt structure, not the semantic truth of the model's claims.
+    exact = obj(output.get("exact_output"), "completed exact_output")
+    for item in array(exact.get("new_claims"), "completed new_claims"):
+        claim = obj(item, "completed claim")
+        text(claim.get("claim"), "claim")
+        text(claim.get("category"), "claim category")
+    for item in array(exact.get("dropped"), "completed dropped"):
+        dropped = obj(item, "dropped statement")
+        text(dropped.get("memory_id"), "dropped memory_id")
+        text(dropped.get("reason"), "dropped reason")
+    before = obj(output.get("before"), "completed before")
+    if before.get("present") is not True and before.get("present") is not False:
+        raise ValueError("completed before.present must be boolean")
+    count(before.get("fact_count"), "before fact_count")
+    after = obj(output.get("after"), "completed after")
+    if after.get("commit") not in ("rewritten", "unchanged"):
+        raise ValueError("unknown completed Memory commit")
+    for key in ("revision", "fact_count"):
+        count(after.get(key), "after " + key)
+    number(after.get("updated_at"), "after updated_at")
+    change = obj(after.get("change"), "completed change")
+    for key in ("added_count", "removed_count", "retained"):
+        count(change.get(key), "completed change " + key)
+    if after["commit"] == "unchanged" and (change["added_count"] != 0 or change["removed_count"] != 0):
+        raise ValueError("unchanged Memory cannot record additions or removals")
+    for identity in array(output.get("claims_not_applied"), "claims_not_applied"):
+        text(identity, "unapplied claim identity")
+
+    def absorptions(value: Json, source_key: str) -> None:
+        for item in array(value, "absorptions"):
+            entry = obj(item, "absorption")
+            text(entry.get(source_key), "absorption source")
+            text(entry.get("into"), "absorption target")
+
+    absorption = obj(output.get("absorption"), "completed absorption")
+    for key in ("applied", "not_applied"):
+        absorptions(absorption.get(key), "memory_id")
+    gate = obj(output.get("absorb_gate"), "completed absorb_gate")
+    absorptions(gate.get("applied_absorptions"), "absorbed")
+    status = gate.get("status")
+    if status == "skipped":
+        text(gate.get("reason"), "skipped absorb gate reason")
+    elif status in ("judged", "failed"):
+        number(gate.get("conveyed_boundary"), "conveyed_boundary")
+        if status == "judged":
+            count(gate.get("requests"), "absorb gate requests")
+        else:
+            text(gate.get("reason"), "absorb gate failure")
+        for key in ("unjudged", "unjudgeable"):
+            absorptions(gate.get(key), "absorbed")
+        for key in ("left", "conveyed"):
+            for item in array(gate.get(key), "source verdicts"):
+                verdict = obj(item, "source verdict")
+                for field in ("memory_id", "into"):
+                    text(verdict.get(field), field)
+                for field in ("statements", "not_conveyed"):
+                    count(verdict.get(field), field)
+        for item in array(gate.get("copy_checks"), "copy_checks"):
+            check = obj(item, "copy check")
+            text(check.get("claim_id"), "copy claim_id")
+            count(check.get("requests"), "copy requests")
+            for source in array(check.get("sources"), "copy sources"):
+                text(source, "copy source")
+            if check.get("verdict") == "copy":
+                for statement in array(check.get("conveyed_statements"), "conveyed statements"):
+                    string(statement, "conveyed statement")
+            elif check.get("verdict") == "carries_new_statement":
+                count(check.get("statements"), "copy statements")
+                count(check.get("not_conveyed"), "copy not_conveyed")
+            elif check.get("verdict") == "not_judged":
+                text(check.get("reason"), "copy not_judged reason")
+            else:
+                raise ValueError("unknown copy-check verdict")
+        for item in array(gate.get("evaluations"), "absorb evaluations"):
+            evaluation = obj(item, "absorb evaluation")
+            text(evaluation.get("direction"), "evaluation direction")
+            request = obj(evaluation.get("request"), "evaluation request")
+            array(request.get("destinations"), "evaluation destinations")
+            required(request, "state")
+            obj(request.get("questions"), "evaluation questions")
+            if evaluation.get("status") == "answered":
+                text(evaluation.get("model"), "evaluation model")
+                obj(evaluation.get("answers"), "evaluation answers")
+            elif evaluation.get("status") in ("failed", "invalid_answer"):
+                text(evaluation.get("reason"), "evaluation reason")
+            else:
+                raise ValueError("unknown absorb evaluation status")
+    else:
+        raise ValueError("completed Memory requires a terminal absorb gate result")
+
+
 def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], float]:
-    run = obj(obj(detail, "detail").get("run"), "run")
+    envelope = obj(detail, "detail")
+    text(envelope.get("generated_at"), "generated_at")
+    run = obj(envelope.get("run"), "run")
+    if run.get("run_kind") != "exact_output":
+        raise ValueError("Librarian detail must record exact_output run_kind")
+    if obj(run.get("skill_evidence"), "skill_evidence") != {"state": "no_keeper_skills"}:
+        raise ValueError("Librarian detail must record no_keeper_skills provenance")
     if run.get("lane") != "librarian_exact":
         raise ValueError("both arms must be Librarian runs")
     availability = obj(run.get("payload_availability"), "payload_availability")
@@ -416,6 +561,8 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if selected_slot is not None:
         text(selected_slot, "selected_slot")
     output = obj(run.get("output"), "output")
+    if run["status"] == "succeeded":
+        completed_memory_output(output)
     if run["status"] == "succeeded" and output.get("generation_path") == "full_lane":
         text(selected_slot, "successful full-lane selected_slot")
     if run["status"] == "failed":
@@ -467,7 +614,8 @@ def compare(manifest: Json) -> dict[str, Json]:
             if run_id in run_ids:
                 raise ValueError("run reused across pairs or arms")
             run_ids.add(run_id)
-        if digest(before) != digest(after):
+        input_hash = digest(before)
+        if input_hash != digest(after):
             raise ValueError(
                 f"{sample_id}: input payloads differ; freeze the same input"
             )
@@ -546,11 +694,14 @@ def compare(manifest: Json) -> dict[str, Json]:
         records.append(
             {
                 "sample_id": sample_id,
-                "input_sha256": digest(before),
+                "input_sha256": input_hash,
                 "baseline_run_id": baseline["run_id"],
                 "preflight_run_id": preflight["run_id"],
                 "baseline_status": baseline["status"],
                 "preflight_status": preflight["status"],
+                "baseline_selected_slot": baseline["selected_slot"],
+                "preflight_selected_slot": preflight["selected_slot"],
+                "preflight_domain_rejection": rejection,
                 "baseline_failure": {key: baseline[key] for key in ("code", "detail")}
                     if baseline["status"] == "failed" else None,
                 "preflight_failure": {key: preflight[key] for key in ("code", "detail")}

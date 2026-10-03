@@ -44,7 +44,10 @@ def observation(status: str = "judged", decision: str = "keep_current") -> dict[
 def fixture() -> dict[str, Any]:
     def run(run_id: str, enabled: bool, elapsed: float) -> dict[str, Any]:
         return {
+            "generated_at": "2026-10-04T00:00:00Z",
             "run": {
+                "run_kind": "exact_output",
+                "skill_evidence": {"state": "no_keeper_skills"},
                 "run_id": run_id,
                 "lane": "librarian_exact",
                 "actor": "fixture-keeper",
@@ -80,6 +83,16 @@ def fixture() -> dict[str, Any]:
                     }
                 },
                 "output": {
+                    "absorb_gate": {"status": "skipped", "reason": "no_absorptions",
+                                    "applied_absorptions": []},
+                    "absorption": {"applied": [], "not_applied": []},
+                    "claims_not_applied": [],
+                    "exact_output": {"new_claims": [], "dropped": [],
+                                     "working_contexts": [], "working_state": None},
+                    "before": {"present": True, "fact_count": 1},
+                    "after": {"commit": "unchanged", "revision": 1, "updated_at": 1.0,
+                              "fact_count": 1, "change": {"added_count": 0, "removed_count": 0,
+                                                        "retained": 1}},
                     "jev_preflight": observation()
                     if enabled
                     else {
@@ -122,6 +135,136 @@ class ReportCliTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+    def test_chunked_hash_matches_canonical_json(self) -> None:
+        manifest = fixture()
+        # Cross chunk boundaries with escaped, Unicode and surrogate code points.
+        value = ('"\\\\\n\t한글🙂\ud800' * 10000)
+        for arm in ("baseline", "preflight"):
+            actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+            actual["rendered_prompt_variables"]["unused"] = value
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        self.assertEqual(report["manifest_sha256"], hashlib.sha256(canonical).hexdigest())
+        payload = manifest["pairs"][0]["baseline"]["run"]["input"]["payload"]
+        expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(report["pairs"][0]["input_sha256"], expected)
+
+    def test_endpoint_envelope_and_provenance_are_required(self) -> None:
+        for path in (("generated_at",), ("run", "run_kind"),
+                     ("run", "skill_evidence"), ("run", "skill_evidence", "state")):
+            for replacement in ("missing", None, "invented"):
+                if path == ("generated_at",) and replacement == "invented":
+                    continue
+                with self.subTest(path=path, replacement=replacement):
+                    manifest = fixture()
+                    for arm in ("baseline", "preflight"):
+                        record = manifest["pairs"][0][arm]
+                        for key in path[:-1]:
+                            record = record[key]
+                        if replacement == "missing":
+                            del record[path[-1]]
+                        else:
+                            record[path[-1]] = replacement
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
+
+    def test_success_requires_completion_structures(self) -> None:
+        output = fixture()["pairs"][0]["baseline"]["run"]["output"]
+        fields = ("absorb_gate", "absorption", "claims_not_applied", "exact_output", "before", "after")
+        paths = [(key,) for key in fields]
+        paths += [(key, member) for key in ("absorb_gate", "absorption", "before", "after")
+                  for member in output[key]]
+        paths += [("exact_output", key) for key in ("new_claims", "dropped")]
+        paths += [("after", "change", key) for key in output["after"]["change"]]
+        for path in paths:
+            with self.subTest(path=path):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    record = manifest["pairs"][0][arm]["run"]["output"]
+                    for key in path[:-1]:
+                        record = record[key]
+                    del record[path[-1]]
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+        for status in ("failed", "cancelled"):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                run = manifest["pairs"][0][arm]["run"]
+                run["status"] = status
+                if status == "failed":
+                    run.update(code="fixture_failed", detail="before commit")
+                for key in fields:
+                    del run["output"][key]
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_success_completion_variants_and_types(self) -> None:
+        manifest = fixture()
+        output = manifest["pairs"][0]["baseline"]["run"]["output"]
+        output["after"].update(commit="rewritten", revision=2)
+        output["absorb_gate"] = {
+            "status": "judged", "applied_absorptions": [], "left": [], "conveyed": [],
+            "unjudged": [], "unjudgeable": [], "requests": 0, "conveyed_boundary": 0.5,
+            "copy_checks": [], "evaluations": [],
+        }
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for field, bad in (("before", {"present": "yes", "fact_count": 1}),
+                           ("exact_output", {}), ("claims_not_applied", [False]),
+                           ("absorption", {"applied": [{}], "not_applied": []}),
+                           ("absorb_gate", {"status": "invented"})):
+            with self.subTest(field=field):
+                invalid = copy.deepcopy(manifest)
+                invalid["pairs"][0]["baseline"]["run"]["output"][field] = bad
+                self.assertEqual(self.execute(invalid).returncode, 1)
+
+    def test_slots_and_domain_fallback_remain_visible(self) -> None:
+        manifest = fixture()
+        run = manifest["pairs"][0]["preflight"]["run"]
+        run["selected_slot"] = "different-provider-slot"
+        run["output"].update(generation_path="full_lane", full_llm_skipped=False,
+                             preflight_domain_rejection="no-change domain rejected")
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pair = json.loads(result.stdout)["pairs"][0]
+        self.assertEqual(pair["baseline_selected_slot"], "fixture-cli")
+        self.assertEqual(pair["preflight_selected_slot"], "different-provider-slot")
+        self.assertEqual(pair["preflight_domain_rejection"], "no-change domain rejected")
+
+    def test_unix_errors_use_closed_variants_and_exact_fields(self) -> None:
+        for error, accepted in (
+            ({"kind": "eacces"}, True), ({"kind": "eopnotsupp"}, True),
+            ({"kind": "eunknownerr", "code": -123}, True),
+            ({"kind": "invented_errno"}, False), ({"kind": "eacces", "code": 1}, False),
+            ({"kind": "eunknownerr"}, False), ({"kind": "eunknownerr", "code": True}, False),
+            ({"kind": "eunknownerr", "code": 1, "extra": 0}, False),
+        ):
+            for location in ("reason", "mirror"):
+                with self.subTest(error=error, location=location):
+                    manifest = fixture()
+                    source = {"file": "goals.json", "reason": {"kind": "missing_after_init"},
+                              "mirror": {"kind": "mirror_absent"}, "reset_step": {"kind": "reset_goal_store"}}
+                    source[location] = {"kind": "unreadable" if location == "reason" else "mirror_unreadable",
+                                        "error": error}
+                    history = [{"source": {"kind": "boundary_only"},
+                                "attribution": {"kind": "observed", "turn_ref": "fixture-trace#1",
+                                                "task_context": {"kind": "task", "task_id": "task-1",
+                                                                 "goals": {"kind": "unavailable", "error": {
+                                                                     "kind": "goal_source_unavailable",
+                                                                     "error": source}}}},
+                                "first_message": 0, "after_message": 1,
+                                "first_tool_observation": 0, "after_tool_observation": 0}]
+                    for arm in ("baseline", "preflight"):
+                        actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                        actual["historical_task_contexts"] = history
+                        actual["rendered_prompt_variables"]["historical_task_contexts"] = json.dumps(history)
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
 
     def test_rendered_prompt_matches_producer_substitution(self) -> None:
         cases = (

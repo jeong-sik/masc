@@ -36,6 +36,9 @@ The server exports each retained detail at
 
 Each response has the shape `{"generated_at": "...", "run": {...}}`. Assign
 that entire object directly to the arm; do not wrap it in another `run` object.
+The envelope must include `generated_at`; the run must declare
+`run_kind=exact_output` and `skill_evidence={"state":"no_keeper_skills"}`.
+These structural checks cannot authenticate that an endpoint produced the file.
 Replace the placeholders with the actual full objects. The input payloads,
 including the rendered prompt SHA, must match exactly. Each run and sample ID
 may occur only once. Missing/unavailable payloads, missing timings and
@@ -54,6 +57,16 @@ before normalization, including within these two JSON variables; the manifest
 digest describes canonical JSON, not the original file's whitespace or key order.
 Keep all selected sample IDs in the manifest to avoid selection bias.
 
+Canonical hashing processes string fragments incrementally, retaining the same
+canonical JSON digest without a whole-document serialization or UTF-8 byte copy.
+The CLI still loads the entire manifest, and prompt rendering also materializes
+one rendered prompt. This is not a streaming run-export reader. A synthetic
+one-pair Linux CLI measurement with 136,600,000 ASCII history bytes per arm
+(273,204,700-byte manifest) reduced peak RSS from 817,728 to 550,908 KiB; both
+runs exited zero with identical manifest hashes. This does not establish an OOM
+threshold or bound arbitrary multi-pair inputs. Full incremental input processing
+remains unresolved; no input-size cap or skipped samples hide this limitation.
+
 ```sh
 python3 scripts/librarian/compare-preflight.py frozen-manifest.json > report.json
 python3 test/test_librarian_preflight_report.py -v
@@ -69,6 +82,16 @@ and preflight failure evidence can include provider response bodies.
 Each pair retains `preflight_observation`, including its own `status`, decision
 or failure, independently of `preflight_status` (the whole Librarian run).
 A successful fallback can therefore still show a failed JEV evaluation.
+`baseline_selected_slot`, `preflight_selected_slot` and
+`preflight_domain_rejection` preserve the full-lane choices and fallback cause.
+Different selected slots are permitted and visible; their timing delta may be
+confounded by that routing difference.
+
+Successful Memory runs require the flattened completion receipt: `exact_output`,
+`before`, `after`, `absorption`, `claims_not_applied` and terminal `absorb_gate`
+structures. A skipped absorb gate is valid. Failed and cancelled runs do not
+require these success fields. The receipt checks do not rerun the native domain
+validator, verify semantic claims or attest persistence from an external export.
 Failed runs require their code and detail; other terminal statuses must omit
 both fields. Goal contexts require exactly the fields emitted for their recorded
 status, so stale fields from another variant are refused. `baseline_failure` and

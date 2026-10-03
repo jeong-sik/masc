@@ -8,13 +8,7 @@ from pathlib import Path
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_frame_timing.ml",
-    "bin/masc_tui_frame_timing.mli",
-    "bin/masc_tui_frame_presenter.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def run(executable: str) -> None:

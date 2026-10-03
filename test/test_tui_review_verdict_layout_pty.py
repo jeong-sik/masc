@@ -8,13 +8,7 @@ import unicodedata
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render_prim.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-)
+
 TASK = 'task-' + 't' * 90 + '-TASKEND'
 REQUEST = 'request-' + 'r' * 95 + '-REQUESTEND'
 TITLE = 'TITLEHEAD `literal` **/*.ml ' + '한글 task evidence ' * 35 + 'TITLEEND'

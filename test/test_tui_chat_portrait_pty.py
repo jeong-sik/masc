@@ -24,24 +24,7 @@ from pathlib import Path
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_answering.ml",
-    "bin/masc_tui_keeper_chat_transcript.ml",
-    "bin/masc_tui_chat_portrait.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_frame_presenter.ml",
-    "bin/masc_tui_graphics.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_roster_pane.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
-)
+
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
 TALL_ROWS = 30

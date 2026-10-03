@@ -7,18 +7,7 @@ import threading
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
-)
+
 
 CAUSE = b"synthetic board read unavailable"
 

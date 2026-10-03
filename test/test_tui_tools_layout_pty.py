@@ -6,16 +6,7 @@ import unicodedata
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_tools as _keyboard_tools
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_tools.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_frame.ml",
-    "bin/masc_tui_message_layout.ml",
-    "bin/masc_tui.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_tools.py",
-)
+
 PATH = '.masc/skills/' + '한글-root-' * 35 + 'PATHEND'
 REVISION = 'revision-' + 'r' * 85 + '-REVEND'
 REJECT_REVISION = 'rejected-' + 'j' * 85 + '-REJECTREVEND'

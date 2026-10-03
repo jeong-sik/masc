@@ -8,19 +8,7 @@ import test_tui_home_journey_pty as home
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-    "bin/masc_tui_approvals_model.ml",
-    "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-)
+
 
 
 def capture(process, fd, output, *, name, rows, columns, needle):

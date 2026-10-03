@@ -9,20 +9,7 @@ import tui_keyboard_clients as _keyboard_clients
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_table.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keys.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_clients.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_tools.py",
-)
+
 FUTURE = "2099-01-01T00:00:00Z"
 MALFORMED = "unparseable-clock-reading"
 LONG_STAMP = "unreadable-" + "longclock" * 30 + "-STAMPEND"

@@ -10,18 +10,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_observer as _keyboard_observer
 import tui_keyboard_workspace as _keyboard_workspace
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_chat_log.ml",
-    "bin/masc_tui_observer.ml",
-    "bin/masc_tui_sse_lines.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_gate_text.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_workspace.py",
-)
+
 
 
 def run(executable: str) -> None:

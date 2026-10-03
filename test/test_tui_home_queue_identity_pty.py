@@ -13,12 +13,7 @@ import tui_keyboard_harness as h
 import tui_keyboard_chat as chat
 import tui_keyboard_keepers as keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_chat.ml",
-)
+
 
 
 def queue_identity_journey(executable):

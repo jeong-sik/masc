@@ -16,17 +16,7 @@ from typing import Any, cast
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render.mli",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_scroll.ml",
-    "bin/masc_tui_scroll.mli",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 PAYLOAD_ROWS = tuple(f"payload-row-{index:03d}" for index in range(1, 97))
 PAYLOAD_ROW_RE = re.compile(rb"payload-row-(\d+)")

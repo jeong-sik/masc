@@ -5,19 +5,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without this
-# a change to the closed-state drawing below reaches main with no scenario
-# run. Both the list row and the detail lines are built in masc_tui_render_board.ml;
-# the wire field is decoded in masc_tui_loader.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_types.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 LOCK = b"\xf0\x9f\x94\x92"  # U+1F512 LOCK, the closed-post marker.
 

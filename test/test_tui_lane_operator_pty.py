@@ -15,23 +15,7 @@ import tomllib
 import tui_keyboard_harness as terminal
 from test_tui_lane_visual_pty import snapshot
 
-# The sources this walk stands over. scripts/ci/run-edited-tests.sh reads the
-# paths a suite names and runs it when a pull request changes one of them, so
-# a change to the Lane workspace, the guided installer or the schema form is
-# told what it did to the operator's path through them. Without the
-# declaration the only job that ran this file was lane-addon-native.yml,
-# which is not the pull-request gate: #36120 and #36155 each changed drawn
-# text with no PTY scenario running, and main sat red until someone ran the
-# suite by hand.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_lane_addons.ml",
-    "bin/masc_tui_lane_installer.ml",
-    "bin/masc_tui_schema_form.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def main(executable: str, captures: Path | None) -> None:

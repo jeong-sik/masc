@@ -17,13 +17,7 @@ import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml", "bin/masc_tui_http.ml",
-    "bin/masc_tui_mcp.ml", "lib/task/tool_task.ml",
-    "bin/masc_tui_render_chat.ml", "lib/operator_task_attention.ml",
-)
+
 STAMP = "2026-09-29T00:00:00Z"
 TASK_A = "task-home-orphan-a"
 TASK_B = "task-home-orphan-b"

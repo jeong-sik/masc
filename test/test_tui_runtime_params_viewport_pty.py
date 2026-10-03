@@ -6,11 +6,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "test/tui_keyboard_harness.py",
-    "bin/masc_tui_render.ml", "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_prim.ml", "bin/masc_tui.ml", "bin/masc_tui_keys.ml",
-)
+
 TEXT_KEY = "00." + "segment." * 10 + "KEYEND"
 BOOL_KEY = "01.enabled"
 ZERO_KEY = "02.count"

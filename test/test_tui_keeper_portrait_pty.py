@@ -21,28 +21,7 @@ import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_startup as _keyboard_startup
 
-# scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
-# path named here.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_graphics.ml",
-    "bin/masc_tui_image_mosaic.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "lib/keeper_portrait/keeper_portrait_draw.ml",
-    "lib/keeper_portrait/keeper_portrait_look.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
-    "test/tui_keyboard_startup.py",
-    "test/tui_keyboard_terminal.py",
-)
+
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
 HALF_BLOCK = "▀▄"

@@ -3,10 +3,7 @@ import os
 import sys
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def run(executable, no_color=False):

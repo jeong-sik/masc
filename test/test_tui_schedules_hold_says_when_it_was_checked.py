@@ -15,17 +15,7 @@ import threading
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_schedule as _keyboard_schedule
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names. The hold is decoded
-# in tui_decode.ml, which also decides current against checked-at; both lines
-# are drawn in masc_tui_render.ml with the words in masc_tui_render_schedule.ml.
-SOURCE_MODULES = (
-    "lib/tui_decode.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_schedule.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_schedule.py",
-)
+
 
 IDENTITY = b"schedule-proof-701 \xc2\xb7 status:"
 HELD_ID = b"occurrence-proof-702"

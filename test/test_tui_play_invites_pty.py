@@ -6,16 +6,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_play_card.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 LINK = "https://play.example.test/play#fixture-secret"
 CHAT = "Keepers ▸ alpha ▸ chat".encode()

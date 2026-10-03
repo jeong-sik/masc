@@ -6,20 +6,7 @@ import sys
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_harness as _keyboard_harness
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The reader's own words ("Questions waiting on you", the empty note) come
-# from masc_tui_render_approvals.ml; the composer row's ("Press Enter again to send",
-# "wrote: ") from masc_tui_render_prim.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def fixtures():

@@ -6,18 +6,7 @@ import sys
 from tui_keyboard_harness import ScenarioFamily, main
 from tui_keyboard_resources import run_resources_regression
 
-SOURCE_MODULES = (
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_resources.py",
-    "bin/masc_tui_render_resources.ml",
-    "bin/masc_tui_render_resources.mli",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_prim.mli",
-    "bin/masc_tui_resources_requests.ml",
-    "bin/masc_tui_resources_requests.mli",
-    "bin/masc_tui_resources_updates.ml",
-    "bin/masc_tui_resources_updates.mli",
-)
+
 
 if __name__ == "__main__":
     family = ScenarioFamily("resources", "MCP resource reading regression", (run_resources_regression,))

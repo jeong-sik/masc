@@ -14,18 +14,7 @@ from pathlib import Path
 
 import tui_keyboard_harness as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The lane's drawn words ("Reading browser text and controls",
-# "Enter:read region") are masc_tui_render.ml's; the palette row this types
-# ("go Browser Lane") is masc_tui_types.ml's.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def run(binary):

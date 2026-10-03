@@ -9,14 +9,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_repositories as _keyboard_repositories
 import tui_keyboard_workspace as _keyboard_workspace
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_repositories.py",
-    "test/tui_keyboard_workspace.py",
-)
+
 FILE_PATH = "lib/" + "long-한글-" * 35 + "Z.ml"
 TITLE = "TITLEHEAD " + "한글 task evidence " * 45 + "TITLEEND"
 EXECUTION = "exec-" + "e" * 110 + "EXECTAIL"

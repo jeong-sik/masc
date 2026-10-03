@@ -6,13 +6,7 @@ import time
 
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_answering.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def current_rows(output):

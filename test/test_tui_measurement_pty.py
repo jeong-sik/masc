@@ -18,28 +18,7 @@ import tui_keyboard_keepers as _keyboard_keepers
 import tui_keyboard_repositories as _keyboard_repositories
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "lib/librarian_continuity_report.ml",
-    "lib/tui_decode.ml",
-    "lib/tui_decode.mli",
-    "lib/masc_http_client/pool.ml",
-    "lib/masc_http_client/pool.mli",
-    "lib/masc_http_client/masc_http_client.ml",
-    "lib/masc_http_client/masc_http_client.mli",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_repositories.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_tools.py",
-    "test/tui_keyboard_workspace.py",
-)
+
 
 
 def generation(text: str) -> dict[str, Any]:

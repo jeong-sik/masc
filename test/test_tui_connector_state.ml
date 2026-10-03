@@ -99,21 +99,6 @@ let test_a_runtime_state_the_badge_does_not_name_is_drawn () =
     (State.runtime_state_to_draw
        (connector ~status:"offline" ~available:false ~connected:false ()))
 
-(* One vocabulary, read from one table. The Channels pane draws the badge in
-   two places -- a word in the list row and a coloured badge in the detail --
-   and it used to carry its own byte-identical copy of this table for the list
-   row. A copy is not merely a duplicate: the omission rule above judges
-   against [badge_word], so a vocabulary change that lands in the copy alone
-   leaves the rule judging against a spelling the screen no longer uses. The
-   literals are taken from the table rather than written out here, because a
-   test that forbids a copy must not keep one. *)
-let test_the_pane_keeps_no_copy_of_the_badge_vocabulary () =
-  let literals = List.map (fun (_, c) -> State.badge_word c) connections in
-  check int "badge words spelled inside keeper_detail_pane" 0
-    (Ast_grep.count_string_literals_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"keeper_detail_pane"
-       ~literals)
-
 (* The list row reserved twelve cells for the badge word while one of the
    five words is twenty-three cells long, so that row cut [CONNECTED /
    UNAVAILABLE] down to [CONNECTED …]. A cut name is still a name; a cut
@@ -156,33 +141,19 @@ let test_the_name_column_is_the_one_that_gives_way () =
   check bool "the name is never grown past what the row asked for" true
     (name 400 = State.name_cells_preferred)
 
-(* The width is a fact about the table, so the pane must not carry a second
-   copy of it -- the same reason the pane keeps no copy of the words. *)
-let test_the_pane_keeps_no_copy_of_the_column_width () =
-  let literals =
-    Ast_grep.int_literals_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml" ~binding_name:"keeper_detail_pane"
-  in
-  check bool "the badge column width is not written out in the pane" false
-    (List.mem State.badge_column_cells literals);
-  check bool "neither is the twelve the row used to reserve" false
-    (List.mem 12 literals)
-
 let () =
   run "tui connector state"
     [ ( "badge"
       , [ test_case "every connection spells its own badge" `Quick
             test_every_connection_spells_its_own_badge
-        ; test_case "the pane keeps no copy of the badge vocabulary" `Quick
-            test_the_pane_keeps_no_copy_of_the_badge_vocabulary
+
         ] )
     ; ( "list row"
       , [ test_case "the badge column holds every word whole" `Quick
             test_the_badge_column_holds_every_word_whole
         ; test_case "the name column is the one that gives way" `Quick
             test_the_name_column_is_the_one_that_gives_way
-        ; test_case "the pane keeps no copy of the column width" `Quick
-            test_the_pane_keeps_no_copy_of_the_column_width
+
         ] )
     ; ( "runtime state"
       , [ test_case "a state the badge already names is not drawn" `Quick

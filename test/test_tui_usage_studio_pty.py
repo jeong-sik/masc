@@ -9,15 +9,7 @@ import time
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_runtime as _keyboard_runtime
 
-SOURCE_MODULES = (
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_runtime.py",
-    "bin/masc_tui_overview_providers.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keys.ml",
-)
+
 
 
 def fixtures():

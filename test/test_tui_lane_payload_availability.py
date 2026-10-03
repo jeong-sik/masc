@@ -16,18 +16,7 @@ from typing import Any, cast
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The two section headings it reads ("INPUT · RUN INPUT",
-# "OUTPUT · RUN RESULT") are masc_tui_render.ml's.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_markdown.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 
 def run(executable: str, scenario: str) -> None:

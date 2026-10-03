@@ -7,42 +7,7 @@ import time
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_walk as _keyboard_walk
 
-SOURCE_MODULES = (
-    "bin/masc_tui_board_requests.ml",
-    "bin/masc_tui_board_requests.mli",
-    "bin/masc_tui_board_updates.ml",
-    "bin/masc_tui_board_updates.mli",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_input_reader.ml",
-    "bin/masc_tui_input_reader.mli",
-    "bin/masc_tui_markdown.ml",
-    "bin/masc_tui_input_decoder.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render_schedule.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_board.py",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_clients.py",
-    "test/tui_keyboard_context.py",
-    "test/tui_keyboard_dashboard.py",
-    "test/tui_keyboard_fusion.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_memory.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_planning.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_schedule.py",
-    "test/tui_keyboard_startup.py",
-    "test/tui_keyboard_terminal.py",
-    "test/tui_keyboard_tools.py",
-    "test/tui_keyboard_walk.py",
-    "test/tui_keyboard_workspace.py",
-)
+
 
 
 def vote_hint_at_narrow_width(executable: str) -> None:

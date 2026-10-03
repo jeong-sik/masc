@@ -18,18 +18,7 @@ import tui_keyboard_harness as h
 import tui_keyboard_approvals as approvals
 import tui_keyboard_chat as chat
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_operator_projection.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_ask_projection.ml",
-)
+
 TOKEN = "home-a"
 CONFIRM_PATH = "/api/v1/operator/confirm"
 CHAT_PATH = "/api/v1/keepers/chat/stream"

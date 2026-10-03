@@ -6,13 +6,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_runtime as _keyboard_runtime
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 KEY = "prompt-__identity__-`raw`-" + "k" * 95 + "-KEYTAIL"
 FILE = "config/" + "경로-__raw__-" * 22 + "FILETAIL.md"
 VARIABLE = "variable_`raw`_" + "v" * 95 + "_VARTAIL"

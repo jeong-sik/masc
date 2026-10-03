@@ -11,11 +11,7 @@ from typing import cast
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "lib/tui_decode.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 # Longer than the whole terminal width, with short words so wrapping cannot

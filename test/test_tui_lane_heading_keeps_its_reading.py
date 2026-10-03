@@ -5,19 +5,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 import tui_keyboard_runtime as _keyboard_runtime
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names, so without this a
-# change to the drawn text below reaches main with no scenario run. The
-# heading is built in masc_tui_render.ml; the words it used to repeat are the
-# key table's, in masc_tui_keys.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_lane_addons.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 HEADING = "Lanes · observed ".encode()
 # The row's own reading: when the standalone snapshot was read. Nothing else

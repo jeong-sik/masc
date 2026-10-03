@@ -9,22 +9,7 @@ import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_harness as _keyboard_harness
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_approvals_model.ml",
-    "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui_render_chat.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def select_destination(process, fd, output, label, *, destinations=12):

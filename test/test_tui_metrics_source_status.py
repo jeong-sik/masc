@@ -15,17 +15,7 @@ from pathlib import Path
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_harness as _keyboard_harness
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The surface title is masc_tui_render.ml's; the section it reads
-# ("Gate Governance") masc_tui_render_metrics.ml's.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_metrics.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def run(executable: str) -> None:

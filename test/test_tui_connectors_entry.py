@@ -17,16 +17,7 @@ import sys
 
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_palette.ml",
-    "bin/masc_tui_palette.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "lib/tui_decode_connectors.ml",
-    "lib/tui_decode_connectors.mli",
-    "test/tui_keyboard_harness.py",
-)
+
 CONNECTORS = "/api/v1/gate/connectors"
 TITLE = b"MASC Connectors"
 LOADED_TITLE = _keyboard_harness.screen_header(TITLE, b" (0 of 0 available)")

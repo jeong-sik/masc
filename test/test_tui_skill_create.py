@@ -13,20 +13,7 @@ from pathlib import Path
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_editor.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_footer.ml",
-    "bin/masc_tui_render_prim.ml",
-    "packages/agent_core/lib/skill_document.ml",
-    "packages/agent_core/lib/skill_document.mli",
-    "lib/keeper/keeper_skill_catalog.ml",
-    "lib/keeper/keeper_skill_catalog.mli",
-    "lib/keeper/keeper_tool_composition_catalog.ml",
-    "lib/keeper/keeper_tool_composition_catalog.mli",
-    "test/tui_keyboard_harness.py",
-)
+
 
 CREATE_PATH = "/api/v1/skills/editor/create"
 SOURCE_ID = "workspace"

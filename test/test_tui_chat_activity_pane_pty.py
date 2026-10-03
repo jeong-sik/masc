@@ -7,20 +7,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 import tui_keyboard_chat as _keyboard_chat
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_answering.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_tools.py",
-)
+
 
 def board_interaction(process, fd, _slave, output, _base):
     _keyboard_harness.palette_go(process, fd, output, b"go board", b"MASC Board")

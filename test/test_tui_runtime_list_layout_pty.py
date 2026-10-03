@@ -5,11 +5,7 @@ import unicodedata
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_runtime as _keyboard_runtime
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 

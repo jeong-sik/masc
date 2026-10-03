@@ -15,41 +15,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_walk as _keyboard_walk
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_config.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_overview_tasks.ml",
-    "bin/masc_tui_overview_goals.ml",
-    "bin/masc_tui_overview_providers.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_render_schedule.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_board.py",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_clients.py",
-    "test/tui_keyboard_context.py",
-    "test/tui_keyboard_dashboard.py",
-    "test/tui_keyboard_fusion.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_memory.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_planning.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_schedule.py",
-    "test/tui_keyboard_startup.py",
-    "test/tui_keyboard_terminal.py",
-    "test/tui_keyboard_tools.py",
-    "test/tui_keyboard_walk.py",
-    "test/tui_keyboard_workspace.py",
-    "lib/tui_decode_usage.ml",
-    "lib/tui_decode_usage.mli",
-)
+
 
 
 def operator_menu_from_dashboard(executable: str) -> None:

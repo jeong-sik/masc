@@ -17,18 +17,7 @@ from typing import Any, cast
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "lib/keeper/keeper_librarian_absorb_gate.ml",
-    "lib/keeper/keeper_librarian_absorb_gate.mli",
-    "lib/keeper/keeper_librarian_runtime.ml",
-    "lib/typesafeai/typesafeai_config.ml",
-    "lib/typesafeai/typesafeai_config.mli",
-    "lib/typesafeai/typesafeai_types.ml",
-    "lib/typesafeai/typesafeai_types.mli",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 
 PANE_BORDER = "\u2502".encode()

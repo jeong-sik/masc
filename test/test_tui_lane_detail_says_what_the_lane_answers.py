@@ -5,21 +5,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names, so without this a
-# change to the drawn text below reaches main with no scenario run. The pane
-# is masc_tui_render.ml's and the sheet row is masc_tui_keys.ml's -- the move
-# this proves takes words from one to the other, so both are named. The
-# lane's two answer lines are written by Tui_decode.standalone_lane_answer, so
-# tui_decode.ml is named too.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "lib/tui_decode.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 # Two sentences that read the same under every lane. They belong with the key
 # that acts on them, not on a pane that has a lane selected.

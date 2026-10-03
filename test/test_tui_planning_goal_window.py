@@ -6,12 +6,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-# The surface this reads ("MASC Work") is drawn here, and the source
-# selector runs a suite when a pull request changes a path the suite names.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 # [Masc_tui_scroll.window_text] inside the reading this scenario is about.
 WINDOW = re.compile(rb"\[goals (\d+)-(\d+)/(\d+)\]")

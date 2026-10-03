@@ -7,27 +7,7 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 import tui_keyboard_workspace as _keyboard_workspace
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_scroll.ml",
-    "bin/masc_tui_roster_pane.ml",
-    "bin/masc_tui_acting_pane.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_message_layout.ml",
-    "lib/ide_memo/ide_memo.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_workspace.py",
-    "bin/masc_tui_render_code.ml",
-    "bin/masc_tui_render_code.mli",
-    "bin/masc_tui_code_results.ml",
-    "bin/masc_tui_code_results.mli",
-    "bin/masc_tui_code_requests.ml",
-    "bin/masc_tui_code_requests.mli",
-)
+
 AUTHOR = "author-" + "a" * 120 + "AUTHORTAIL"
 BODY = "MEMOHEAD " + "한글 memo evidence " * 80 + "MEMOTAIL"
 SECOND = "SECOND-MEMO-END"

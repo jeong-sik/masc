@@ -8,11 +8,7 @@ from pathlib import Path
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_browser.ml",
-    "bin/masc_tui_browser.mli",
-    "test/tui_keyboard_harness.py",
-)
+
 
 
 def run(binary, *, quit_from_history=False, disconnected=False):

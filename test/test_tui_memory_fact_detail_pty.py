@@ -20,15 +20,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_memory as _keyboard_memory
 
-SOURCE_MODULES = ("lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_types.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_memory.py",
-)
+
 
 DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 

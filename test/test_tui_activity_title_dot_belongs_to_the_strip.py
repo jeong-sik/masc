@@ -6,13 +6,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_observer as _keyboard_observer
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-)
+
 
 TITLE = b"MASC Activity"
 # A dot with nothing on its left: the row ran out of width, the strip drew

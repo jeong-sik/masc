@@ -16,17 +16,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_memory as _keyboard_memory
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names, so without
-# this a change to the drawn text below reaches main with no scenario run.
-# The five screen titles this walks between -- "MASC Board", "MASC Keepers",
-# "MASC Memory", "MASC Git Changes", "MASC Cheat Sheet" -- are spelled in
-# masc_tui_render.ml and nowhere else in bin/.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_memory.py",
-)
+
 
 # "/" opens a query only over rows the surface holds; on a Board that has not
 # read its list yet it does nothing, and the query typed after it goes

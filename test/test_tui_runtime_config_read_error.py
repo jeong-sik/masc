@@ -6,16 +6,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_runtime as _keyboard_runtime
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_async_read.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_runtime_config_view.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 ERROR_PREFIX = b"runtime config load failed: fetch:"
 ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"

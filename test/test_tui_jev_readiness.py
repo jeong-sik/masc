@@ -11,14 +11,7 @@ from typing import Any, cast
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
-SOURCE_MODULES = (
-    "lib/server/server_standalone_lane_projection.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_runtime.py",
-)
+
 
 
 def run(executable: str, captures: Path | None) -> None:

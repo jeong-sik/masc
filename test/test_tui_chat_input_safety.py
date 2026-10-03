@@ -15,22 +15,7 @@ from pathlib import Path
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_command.mli",
-    "bin/masc_tui_keeper_chat_transcript.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_footer.ml",
-    "bin/masc_tui_composer.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_chat.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
-)
+
 CHAT = "/api/v1/keepers/chat/stream"
 APPROVAL = "/api/v1/keepers/tool-approval"
 

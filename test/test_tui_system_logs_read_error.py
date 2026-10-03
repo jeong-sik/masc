@@ -5,10 +5,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 ERROR = b"system logs load failed: HTTP 503: fixture logs unavailable"
 LOGS_PATH = "/api/v1/dashboard/logs?limit=300"

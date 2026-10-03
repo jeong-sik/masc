@@ -6,24 +6,7 @@ import sys
 
 import tui_keyboard_harness as h
 
-# The queue and questions are separate readings. With Approvals off the main
-# ring, the palette reaches their shared surface and the title still counts
-# the open question. See PR #37060 for the original badge regression.
-SOURCE_MODULES = (
-    "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_approvals_model.ml",
-    "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_surface_navigation.ml",
-    "bin/masc_tui_surface_navigation.mli",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "test/tui_keyboard_harness.py",
-)
+
 
 def open_ask_snapshot() -> dict[str, object]:
     """One open question, no approvals anywhere.

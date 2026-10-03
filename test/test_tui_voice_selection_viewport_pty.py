@@ -7,7 +7,7 @@ from pathlib import Path
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_voice as _keyboard_voice
 
-SOURCE_MODULES = ("test/tui_keyboard_harness.py", "test/tui_keyboard_voice.py", "bin/masc_tui_render.ml", "bin/masc_tui.ml")
+
 CARET = "▏".encode()
 
 

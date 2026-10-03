@@ -11,19 +11,6 @@ from pathlib import Path
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
-SOURCE_MODULES = (
-    "bin/masc_tui_account_login.ml",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_sgr_text.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
-)
 LOGIN = "/api/v1/setup/accounts/login"
 SESSION = "a" * 64
 ACCOUNT = "b" * 64

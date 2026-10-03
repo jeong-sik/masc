@@ -448,6 +448,14 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
+(* Empty text starts a block; whitespace-only token pieces are content. *)
+let text_value stage fields =
+  let* value = required_member stage "text" fields in
+  match value with
+  | `String text -> Ok text
+  | _ -> protocol_error stage "text must be a string"
+;;
+
 (* Deferred MCP loading is part of how masc drives this client, not an
    operator preference: every posture names [ToolSearch] in [--tools]
    ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
@@ -1011,7 +1019,7 @@ let assistant_blocks ~stage ~mcp_tool_names content =
         let* type_ = required_string stage "type" fields in
         (match type_ with
          | "text" ->
-           let* text = required_string stage "text" fields in
+           let* text = text_value stage fields in
            loop (Assistant_text text :: parsed) rest
          | "tool_use" ->
            let* call_id = optional_string stage "id" fields in
@@ -1316,11 +1324,121 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
   else Ok (turn_id, result, usage)
 ;;
 
+(* Partial SDK frames precede the complete assistant block. Keep the current
+   text block so its later complete envelope contributes only missing bytes.
+   Complete blocks remain the source for terminal text and usage accounting. *)
+type partial_stream =
+  { mutable message_id : string option
+  ; mutable text_blocks : (string * int * Buffer.t) list
+  }
+
+let partial_block_index stage fields =
+  let* index = optional_int stage "index" fields in
+  match index with
+  | Some index when index >= 0 -> Ok index
+  | Some _ | None -> protocol_error stage "index must be a nonnegative integer"
+;;
+
+let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+    ~on_stream_event partial fields =
+  let stage = "partial stream event" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id then
+    protocol_error stage "session_id does not match the active Claude session"
+  else
+    let* event = required_member stage "event" fields in
+    let* event = assoc_at stage event in
+    let* event_type = required_string stage "type" event in
+    match event_type with
+    | "message_start" ->
+        let* message = required_member stage "message" event in
+        let* message = assoc_at stage message in
+        let* id = required_string stage "id" message in
+        let* model = required_string stage "model" message in
+        partial.message_id <- Some id;
+        if not !stream_started then begin
+          stream_started := true;
+          emit_stream_event on_stream_event (Turn_started {turn_id=id; model})
+        end;
+        Ok ()
+    | "content_block_start" ->
+        let* index = partial_block_index stage event in
+        let* block = required_member stage "content_block" event in
+        let* block = assoc_at stage block in
+        let* kind = required_string stage "type" block in
+        (match kind with
+         | "text" ->
+             let* text = text_value stage block in
+             let buffer = Buffer.create 256 in
+             Buffer.add_string buffer text;
+             let* message_id = match partial.message_id with
+               | Some id -> Ok id
+               | None -> protocol_error stage "text block has no message start" in
+             if List.exists (fun (id, held_index, _) -> id = message_id && held_index = index)
+                 partial.text_blocks then
+               protocol_error stage "text block index already started"
+             else begin
+               partial.text_blocks <- partial.text_blocks @ [message_id, index, buffer];
+               if text <> "" then begin
+                 response_emitted := true;
+                 emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
+               end;
+               Ok ()
+             end
+         | "tool_use" | "thinking" | "redacted_thinking" -> Ok ()
+         | other -> protocol_error stage ("unsupported content block type " ^ other))
+    | "content_block_delta" ->
+        let* index = partial_block_index stage event in
+        let* delta = required_member stage "delta" event in
+        let* delta = assoc_at stage delta in
+        let* kind = required_string stage "type" delta in
+        (match kind with
+         | "text_delta" ->
+             let* text = text_value stage delta in
+             let held = List.find_opt (fun (id, held_index, _) ->
+               Some id = partial.message_id && held_index = index) partial.text_blocks in
+             (match held with
+              | Some (_, _, buffer) ->
+                  Buffer.add_string buffer text;
+                  if text <> "" then begin
+                    response_emitted := true;
+                    emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
+                  end;
+                  Ok ()
+              | _ -> protocol_error stage "text delta has no matching message/text block")
+         | "input_json_delta" | "thinking_delta" | "signature_delta" | "citations_delta" -> Ok ()
+         | other -> protocol_error stage ("unsupported content delta type " ^ other))
+    | "content_block_stop" ->
+        let* index = partial_block_index stage event in
+        (* Empty blocks have no complete assistant envelope. Retain nonempty
+           stopped blocks until their per-block or aggregate envelope lands. *)
+        partial.text_blocks <- List.filter (fun (id, held_index, buffer) ->
+          not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
+          partial.text_blocks;
+        Ok ()
+    | "message_delta" | "message_stop" | "ping" -> Ok ()
+    | other -> protocol_error stage ("unsupported partial event type " ^ other)
+;;
+
+let complete_partial_text partial ~message_id text =
+  if String.equal text "" then Ok text
+  else match List.find_opt (fun (id, _, buffer) ->
+      Some id = message_id && Buffer.length buffer > 0) partial.text_blocks with
+  | Some (id, index, buffer) ->
+      let prefix = Buffer.contents buffer in
+      if String.starts_with ~prefix text then begin
+        partial.text_blocks <- List.filter (fun (held_id, held_index, _) ->
+          held_id <> id || held_index <> index) partial.text_blocks;
+        Ok (String.sub text (String.length prefix) (String.length text - String.length prefix))
+      end else protocol_error "assistant text" "complete block conflicts with streamed text"
+  | None -> Ok text
+;;
+
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~stream_started ~response_emitted =
+    ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -1340,10 +1458,17 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
       ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
+  | "stream_event" ->
+    let* () = partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+        ~on_stream_event partial_stream fields in
+    await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
+      ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
+      ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
+      ~on_stream_event ~partial_stream ~stream_started ~response_emitted
   | "assistant" ->
     let* origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
@@ -1360,21 +1485,24 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         Some model
     in
     let texts_rev = ref [] in
-    List.iter
-      (function
-        | Assistant_text text ->
+    let* () = List.fold_left (fun result block ->
+      let* () = result in
+      match block with
+      | Assistant_text text ->
           (match origin with
-           | Api_error_diagnostic -> ()
+           | Api_error_diagnostic -> Ok ()
            | Model_response ->
-             texts_rev := text :: !texts_rev;
-             emit_stream_event on_stream_event (Text_delta { message_id; text }))
-        | Assistant_native_tool observation ->
+               texts_rev := text :: !texts_rev;
+               let* remaining = complete_partial_text partial_stream ~message_id text in
+               if remaining <> "" then emit_stream_event on_stream_event
+                 (Text_delta {message_id; text=remaining});
+               Ok ())
+      | Assistant_native_tool observation ->
           native_tool_attempted := true;
-          Option.iter
-            (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
+          Option.iter (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
             (Runtime_native_tools.call_id observation);
-          emit_stream_event on_stream_event (Native_tool_started observation))
-      blocks;
+          emit_stream_event on_stream_event (Native_tool_started observation);
+          Ok ()) (Ok ()) blocks in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
     await_terminal
@@ -1383,7 +1511,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted
+      ~partial_stream ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
@@ -1401,7 +1529,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted
+      ~partial_stream ~stream_started ~response_emitted
   | "result" ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
@@ -1500,7 +1628,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
-      ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
+      ~native_tool_attempted ~on_turn_started ~on_stream_event ~partial_stream ~stream_started
       ~response_emitted
   | "system" ->
     (* [compact_boundary] is the client's own record that it summarised the
@@ -1514,7 +1642,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
       ~response_emitted
   | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
@@ -1527,7 +1655,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
       ~response_emitted
   | other ->
     protocol_error
@@ -1598,7 +1726,7 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     | Some _, Some _ -> Error (Invalid_config "system_prompt_file must not be empty")
   in
   let args =
-    [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
+    [ config.cli_path; "--output-format"; "stream-json"; "--verbose"; "--include-partial-messages" ]
     (* System context is prepared before spawn; no prompt bytes enter argv. *)
     @ system_prompt_args
     (* Pinned rather than left to the client's default: a Resume omits the
@@ -1768,6 +1896,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
+    ~partial_stream:{message_id=None; text_blocks=[]}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
 ;;

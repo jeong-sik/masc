@@ -1,0 +1,158 @@
+diff --git a/bin/masc_tui_chat_portrait.ml b/bin/masc_tui_chat_portrait.ml
+index c82a8d704d..6b6346bc6c 100644
+--- a/bin/masc_tui_chat_portrait.ml
++++ b/bin/masc_tui_chat_portrait.ml
+@@ -25,7 +25,7 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
+         |> Option.map (fun box ->
+           let roster_rows = rows - box.View.rows - 2 in
+           let padding = (inner - box.cols) / 2 in
+-          let image = Portrait.image cache ~name ~equipment box.size in
++          let image = Portrait.icon_image cache ~name ~equipment box.size in
+           let picture_lines =
+             View.lines ~project display box image
+             |> List.map (fun line -> String.make padding ' ' ^ line) in
+diff --git a/bin/masc_tui_keeper_portrait.ml b/bin/masc_tui_keeper_portrait.ml
+index 9adfd9a686..e9692e00a0 100644
+--- a/bin/masc_tui_keeper_portrait.ml
++++ b/bin/masc_tui_keeper_portrait.ml
+@@ -17,9 +17,8 @@ let band_size = function
+       Some { rows; cols = (rows * cell_height + cell_width - 1) / cell_width }
+   | View.Pixels _ -> None
+   | View.Mosaic ->
+-      (* At sixteen cells, observed glasses quantize into the face colour.
+-         Twenty-four is the smallest mosaic retaining equipped features. *)
+-      Some { rows = 12; cols = 24 }
++      let cols = Draw.min_size in
++      Some { rows = cols / 2; cols }
+   | View.No_picture -> None
+ 
+ (* Leave room for operational diagnostics below the identity/work/context header. *)
+@@ -40,7 +39,9 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
+    cache is about 3 MB -- and holds a roster walked end to end. *)
+ let cache_capacity = 32
+ 
+-type entry = { name : string; equipment_key : string; edge : int; compact : bool; picture : Draw.image }
++type drawing = Full | Compact | Icon
++
++type entry = { name : string; equipment_key : string; edge : int; drawing : drawing; picture : Draw.image }
+ 
+ (* Newest first. *)
+ type cache = { mutable entries : entry list }
+@@ -48,12 +49,12 @@ type cache = { mutable entries : entry list }
+ let cache () = { entries = [] }
+ let cached c = List.length c.entries
+ 
+-let image ?(compact = false) c ~name ~equipment size =
++let cached_image drawing c ~name ~equipment size =
+   let equipment_key = Keeper_portrait_equipment.key equipment in
+   let edge = Draw.int_of_size size in
+   let same entry =
+     String.equal entry.name name && String.equal entry.equipment_key equipment_key
+-    && entry.edge = edge && Bool.equal entry.compact compact
++    && entry.edge = edge && entry.drawing = drawing
+   in
+   let rest = List.filter (fun entry -> not (same entry)) c.entries in
+   let entry =
+@@ -65,17 +66,24 @@ let image ?(compact = false) c ~name ~equipment size =
+           (* The compact silhouette draws only the body and its dish. Keep
+              that geometry where it is complete; other slots need the full
+              drawing rather than silently losing their observed equipment. *)
+-          match compact, equipment.Look.face, equipment.Look.neck,
++          match drawing, equipment.Look.face, equipment.Look.neck,
+                 equipment.Look.head, equipment.Look.hand with
+-          | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
++          | Compact, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
+               Draw.render_compact_posed body equipment Draw.still size
+-          | _ -> Draw.render body equipment size
++          | Icon, _, _, _, _ -> Draw.render_icon body equipment size
++          | Full, _, _, _, _ | Compact, _, _, _, _ -> Draw.render body equipment size
+         in
+-        { name; equipment_key; edge; compact; picture }
++        { name; equipment_key; edge; drawing; picture }
+   in
+   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
+   entry.picture
+ 
++let image ?(compact = false) c ~name ~equipment size =
++  cached_image (if compact then Compact else Full) c ~name ~equipment size
++
++let icon_image c ~name ~equipment size =
++  cached_image Icon c ~name ~equipment size
++
+ type band = {
+   display : View.display;
+   box : View.box;
+@@ -91,10 +99,7 @@ let band c ~display ~project ~name ~equipment ~content_rows ~content_cols =
+   | Some size ->
+       View.fit display ~max_cols:size.cols ~max_rows:size.rows
+       |> Option.map (fun box ->
+-             let compact =
+-               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
+-             in
+-             let image = image ~compact c ~name ~equipment box.View.size in
++             let image = icon_image c ~name ~equipment box.View.size in
+              { display; box; image; lines = View.lines ~project display box image })
+ 
+ let beside band facts =
+diff --git a/bin/masc_tui_keeper_portrait.mli b/bin/masc_tui_keeper_portrait.mli
+index 6a975d6c50..8fb7327307 100644
+--- a/bin/masc_tui_keeper_portrait.mli
++++ b/bin/masc_tui_keeper_portrait.mli
+@@ -44,8 +44,11 @@ val image :
+ (** The Keeper's still portrait at that edge, from the cache when it is
+     there, rendered and kept when it is not. [compact] uses the mosaic drawing
+     for the bare body and its dish. Face, neck, head and hand equipment uses
+-    the full drawing so those accessories remain visible. Placed pixel
+-    portraits always use the full drawing. *)
++    the full drawing so those accessories remain visible. This [image] API keeps the full drawing for placed portraits; Info/chat
++    identity thumbnails use [icon_image]. *)
++
++val icon_image : cache -> name:string -> equipment:Keeper_portrait_look.equipment -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
++(** Cached face thumbnail, independent of outfit preview pixels. *)
+ 
+ type band = private {
+   display : Masc_tui_portrait_view.display;
+diff --git a/lib/keeper_portrait/keeper_portrait_draw.ml b/lib/keeper_portrait/keeper_portrait_draw.ml
+index c98d8cc9d5..b17a39f73a 100644
+--- a/lib/keeper_portrait/keeper_portrait_draw.ml
++++ b/lib/keeper_portrait/keeper_portrait_draw.ml
+@@ -1112,9 +1112,9 @@ let shade c =
+   let f v k = int_of_float (Float.round (float_of_int v *. k)) in
+   rgb (f c.red kr) (f c.green kg) (f c.blue kb)
+ 
+-let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size) =
++let render_with ?frame ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size) =
+   let g = geometry_posed ~cull b e p in
+-  let frame = frame_for b g frame_of n in
++  let frame = match frame with Some frame -> frame | None -> frame_for b g frame_of n in
+   let supersample = supersample_for n in
+   let line_reach = line_reach_for supersample in
+   let grid = n * supersample in
+@@ -1204,6 +1204,13 @@ let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size)
+ let render_posed b e p n = render_with ~cull:true ~frame_of:e b e p n
+ let render b e n = render_posed b e still n
+ 
++let render_icon b e n =
++  let g = geometry b in
++  (* Fit the wax width and facial features, with the renderer's existing
++     clearance. Peripheral outfit pieces belong to the full preview. *)
++  let frame = { half = g.w +. neighbour_margin; middle_y = g.fy } in
++  render_with ~frame ~cull:true ~frame_of:e b e still n
++
+ (* The mosaic has only 24 samples across a Keeper's band. Sampling the full
+    portrait at that size spends most of them on its round backdrop. Draw the
+    candle on a 24-unit grid instead: the eyes and mouth each own whole cells,
+diff --git a/lib/keeper_portrait/keeper_portrait_draw.mli b/lib/keeper_portrait/keeper_portrait_draw.mli
+index d653dab150..4547d1ecb8 100644
+--- a/lib/keeper_portrait/keeper_portrait_draw.mli
++++ b/lib/keeper_portrait/keeper_portrait_draw.mli
+@@ -40,6 +40,9 @@ val render : Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> size
+ (** The portrait: {!render_posed} with {!still}. Deterministic: the same
+     arguments always give the same bytes. *)
+ 
++val render_icon : Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> size -> image
++(** Face-centred identity thumbnail. Full outfit inspection uses [render]. *)
++
+ (** {2 Motion}
+ 
+     For animated uses such as the /about candle. There is no clock in here: the

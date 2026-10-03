@@ -1,3 +1,10 @@
+val lane_access_for_caller :
+  config:Workspace_utils_backend_setup.config ->
+  Mcp_server_eio_caller_identity.t -> Lane_addon_sources.access
+(** Resolve Lane authority from the verified runtime boundary or bearer role.
+    Internal runtime names must resolve to an existing Keeper; an unverified
+    runtime flag, caller name, or session binding never grants Keeper access. *)
+
 (** Mcp_server_eio_execute — inner [tools/call] dispatcher.
 
     Only a small set of entries reach callers:

@@ -74,7 +74,8 @@ def run(executable):
     served = fixtures()
     gate_read = threading.Event()
     gate_response = served["/api/v1/dashboard/gate/keeper-settings"]
-    def gate_settings():
+    assert isinstance(gate_response, tuple)
+    def gate_settings() -> h.HttpResponse:
         gate_read.set()
         return gate_response
     served["/api/v1/dashboard/gate/keeper-settings"] = gate_settings

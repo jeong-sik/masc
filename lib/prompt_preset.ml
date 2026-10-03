@@ -618,6 +618,9 @@ let list ~base_path =
 let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
 
 let restore_prompt_overrides ~base_path (entries : Override.entry list) =
+  let before = List.map (fun key -> key, (Prompt_registry.resolve_prompt key).effective)
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
   let wanted key =
     List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
   in
@@ -640,7 +643,7 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
   (* Each entry keeps the binding it was captured with, so a restored
      override reads as "written against an older default" when that is what
      it is, instead of looking freshly authored against today's text. *)
-  List.fold_left
+  let result = List.fold_left
     (fun acc (e : Override.entry) ->
       match Prompt_registry.restore_persisted_entry ~base_path e with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
@@ -649,7 +652,11 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
         { acc with skipped = (e.Override.key, message) :: acc.skipped })
     cleared
     entries
-  |> finish
+  |> finish in
+  if List.exists (fun (key, effective) ->
+    effective <> (Prompt_registry.resolve_prompt key).effective) before
+  then Candle_payout_worker.wake ();
+  result
 ;;
 
 let restore_instructions ~base_path instructions =

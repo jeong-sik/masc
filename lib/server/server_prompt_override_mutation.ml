@@ -6,6 +6,10 @@ type applied =
 
 let apply ~base_path request =
   let key = Server_prompt_override_request.key request in
+  let appraisal_prompt = List.mem key
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
+  let before = if appraisal_prompt then Some (Prompt_registry.resolve_prompt key).effective else None in
   let persisted = match request with
     | Server_prompt_override_request.Clear _ ->
       Prompt_registry.clear_prompt_override_persisted ~base_path key
@@ -18,11 +22,10 @@ let apply ~base_path request =
         | Prompt_registry.Validation_error message -> Validation message
         | Prompt_registry.Persistence_error message -> Persistence message) in
   Result.map (fun message ->
-    if List.mem key
-         [ Prompt_names.candle_appraiser_grade
-         ; Prompt_names.candle_appraiser_relation
-         ; Prompt_names.candle_appraiser_weights ]
-    then Candle_payout_worker.wake ();
+    (match before with
+     | Some effective when effective <> (Prompt_registry.resolve_prompt key).effective ->
+         Candle_payout_worker.wake ()
+     | Some _ | None -> ());
     let curator_refresh =
       if String.equal key Prompt_names.workspace_memory_curator
       then Some (Server_workspace_memory_curator.request ~base_path)

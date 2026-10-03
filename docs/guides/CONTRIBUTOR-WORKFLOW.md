@@ -214,6 +214,12 @@ for an appropriate run. Continue useful work instead of watching or polling CI.
 At a work boundary, read actual results and distinguish failures in the diff,
 base or environment. Keep unrelated repairs in their own stack.
 
+Choose focused checks by tracing changed files through the changed interface and
+its direct consumers. Record `file → changed interface → direct consumer → actual
+verification target → command and result`. A passing check that does not exercise
+that consumer is not a substitute. This helps risk-based check selection; it does
+not add a Core build or full CI admission requirement to every ordinary PR.
+
 ## 5. Review and integrate
 
 Review the contract and current-head diff from independent function, logic and
@@ -234,8 +240,30 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE; its
-`--check` mode checks review eligibility. Publishing an approval requires
-`--body` with the verdict and evidence. An author or a session that pushed the PR cannot independently
+`--check` mode checks review eligibility.
+
+Capture the base SHA and complete diff identity **before source review** and
+keep them with the reviewed head and evidence. Run these commands from the repository
+checkout with authenticated `gh`, Git, Python 3 and `jq` available. The diff helper
+fetches missing exact objects using `gh` credentials without interactive prompts.
+
+```bash
+# Set repo and pr to the pull request being reviewed.
+snapshot=$(gh api "repos/$repo/pulls/$pr")
+head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
+review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
+review_diff=$(python3 scripts/review/review-diff.py \
+  --repo "$repo" --base "$review_base" --head "$head")
+# Read the complete diff and its source context, then write review-body.md.
+scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
+  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+```
+
+Publishing requires `--body`, `--review-base` and `--review-diff`. The guard rejects
+scope changes during admission. If the change differs, review it again and capture
+new evidence; do not refresh the digest merely to approve unreviewed changes.
+
+An author or a session that pushed the PR cannot independently
 approve it. Release verdicts additionally cite `run: <full-CI-run-id>` for
 completed full verification of the same head. These are formats, not decisions;
 replace placeholders and alternatives with actual values.
@@ -252,6 +280,11 @@ build success or runtime behavior.
 Verify the merged commit and PR state before cleanup. Remove only the finished
 worktree and branch after confirming they contain no unsubmitted work. Never push
 a follow-up to a branch whose PR has merged; use a new branch and PR.
+
+Reuse review only within its recorded head, base, complete diff identity and scope.
+Unchanged source files do not establish unchanged behavior when the base's
+interfaces or consumers have changed. Keep ordinary and Release assessments under
+the existing policy and do not extend execution evidence to unobserved scope.
 
 ## 6. Submit evidence and resume later
 
@@ -271,6 +304,20 @@ A handoff records the Goal/Task/Issue/PR IDs, branch/worktree, current SHA, chec
 already run, unresolved findings, blockers and next action. On resume, reread live
 state before repeating mutations. Interrupted commands may already have applied.
 Restore progress from saved records instead of changing runtime-owned files by hand.
+
+When a contract conflicts with current policy, record the original contract,
+policy clause, prior verdict and authorized change decision together before
+deciding to retain, amend or retire it. Until that decision, do not submit evidence
+for the new policy as satisfaction of the old contract.
+
+Record execution completion, receipt acknowledgement and the current ledger
+summary update separately, with timestamps and original evidence references.
+Mark absent records unverified. Keep historical failures and decisions, but list
+only remaining work as current pending state. On resume, read the actual Task, PR
+and run before relying on a schedule or handoff. Measure ready-to-review,
+fix-to-re-review, candidate-freeze-to-verification and completion-to-ledger-update
+separately; before/after comparisons use the same definitions, sample scope and
+count of unfinished samples.
 
 ## Maintaining these instructions
 

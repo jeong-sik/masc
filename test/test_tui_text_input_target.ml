@@ -160,9 +160,9 @@ let test_the_identity_form_claims_before_its_filter () =
     (resolved state);
   state.Tui_types.identity_app_form <-
     Some
-      { Tui_types.iaf_provider = "github"
+      { Masc_tui_identity_model.iaf_provider = "github"
       ; iaf_label = "GitHub"
-      ; iaf_field = Tui_types.App_client_id
+      ; iaf_field = Masc_tui_identity_model.App_client_id
       ; iaf_client_id = ""
       ; iaf_client_secret = ""
       ; iaf_scopes = ""
@@ -322,8 +322,8 @@ let test_browser_reader_chrome_scope () =
     check bool "reader owns its context row" true
       (Option.is_some (Tui_types.browser_lane_on_screen state));
     check int "reader highlights its Runtime family"
-      (Tui_types.visible_surface_ring_index state Tui_types.Runtime)
-      (Tui_types.visible_surface_ring_index state state.Tui_types.view);
+      (Masc_tui_surface_navigation.visible_surface_ring_index state Tui_types.Runtime)
+      (Masc_tui_surface_navigation.visible_surface_ring_index state state.Tui_types.view);
     state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
     check bool "retained browser does not hide Keeper chrome" true
       (Option.is_none (Tui_types.browser_lane_on_screen state)))
@@ -333,8 +333,8 @@ let test_browser_reader_chrome_scope () =
   check bool "connector routing retains Keeper context" true
     (Option.is_none (Tui_types.browser_lane_on_screen state));
   check int "connector routing keeps its existing navigation family"
-    (Tui_types.visible_surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
-    (Tui_types.visible_surface_ring_index state Tui_types.Connectors)
+    (Masc_tui_surface_navigation.visible_surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
+    (Masc_tui_surface_navigation.visible_surface_ring_index state Tui_types.Connectors)
 ;;
 
 let test_reader_discards_active_and_queued_voice () =
@@ -358,19 +358,55 @@ let test_reader_discards_active_and_queued_voice () =
      already queued before the reader was opened. *)
   Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
   check bool "late transcript is discarded" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
-     = Some Masc.Voice_bridge.Discard);
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some Tui_types.Voice_withdrawn);
   check (option string) "completion releases microphone" None state.Tui_types.voice_capture;
   check bool "duplicate completion has no owner" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst" = None);
+    (Tui_types.settle_voice_capture state ~keeper:"analyst" = None);
   check string "existing draft survives reader entry" "reviewed draft"
     (Buffer.contents state.Tui_types.msg_input);
   (* A fresh capture explicitly started after returning remains usable. *)
   state.Tui_types.voice_capture <- Some "analyst";
   state.Tui_types.voice_stop_requested <- None;
   check bool "fresh capture delivers" true
-    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
-     = Some Masc.Voice_bridge.Keep_what_was_heard)
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Keep_what_was_heard));
+  state.Tui_types.voice_capture <- Some "analyst";
+  Tui_types.request_voice_stop state Masc.Voice_bridge.Discard;
+  check bool "operator discard remains a current capture" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Discard))
+;;
+
+let test_workspace_withdrawal_discards_queued_voice () =
+  List.iter (fun return_to_local ->
+    let state = fresh_state () in
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    state.Tui_types.voice_capture <- Some "analyst";
+    state.Tui_types.voice_continuous <- Some "analyst";
+    state.Tui_types.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+    Tui_types.withdraw_voice_capture state;
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_unread;
+    if return_to_local then
+      state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    check (option string) "withdrawal keeps microphone occupied"
+      (Some "analyst") state.Tui_types.voice_capture;
+    check (option string) "withdrawal stops automatic rearm"
+      None state.Tui_types.voice_continuous;
+    (* A second authority change or a later keep request cannot revive A's
+       completion, even after A becomes the local workspace again. *)
+    Tui_types.withdraw_voice_capture state;
+    Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+    check bool "queued transcript remains discarded" true
+      (Tui_types.settle_voice_capture state ~keeper:"analyst"
+       = Some Tui_types.Voice_withdrawn);
+    check (option string) "completion releases microphone"
+      None state.Tui_types.voice_capture;
+    check (option string) "completion cannot restart continuous mode"
+      None state.Tui_types.voice_continuous;
+    check string "withdrawn draft stays empty" ""
+      (Buffer.contents state.Tui_types.msg_input))
+    [false; true]
 ;;
 
 let test_ask_answer_input_ownership () =
@@ -515,6 +551,7 @@ let () =
     [ ( "which field takes text",
         [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
+          test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
           test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
           test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;

@@ -314,6 +314,7 @@ end
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Reasoning_effort_admission_failed of { model : string; detail : string }
   | Turn_input_write_failed of string
       (* The client and thread were initialized, but complete turn-input
          transmission is unconfirmed. Partial delivery must not be replayed
@@ -421,6 +422,8 @@ let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
   | Spawn_failed detail -> "failed to start Codex app-server: " ^ detail
   | Turn_input_write_failed detail -> "Codex turn/start input write failed: " ^ detail
+  | Reasoning_effort_admission_failed { model; detail } ->
+    Printf.sprintf "Codex reasoning effort admission failed for %s: %s" model detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Codex app-server protocol error during %s: %s" stage detail
   | Rpc_error { method_; code; message; _ } ->
@@ -485,6 +488,7 @@ let refused_for_spent_usage = function
   | Turn_failed { codex_error_info = None; detail = _ }
   | Invalid_config _
   | Spawn_failed _
+  | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _
   | Protocol_error _
   | Rpc_error _
@@ -501,6 +505,7 @@ let refused_for_spent_usage = function
 let error_kind = function
   | Invalid_config _ -> "invalid_config"
   | Spawn_failed _ -> "spawn_failed"
+  | Reasoning_effort_admission_failed _ -> "reasoning_effort_admission_failed"
   | Turn_input_write_failed _ -> "turn_input_write_failed"
   | Protocol_error _ -> "protocol_error"
   | Rpc_error _ -> "rpc_error"
@@ -847,22 +852,39 @@ let probe_protocol io =
   Ok { subscription; user_agent }
 ;;
 
-type listed_model = { id : string; model : string; display_name : string; is_default : bool }
+type listed_model = {
+  id : string; model : string; display_name : string; is_default : bool;
+  supported_reasoning_efforts : string list;
+  default_reasoning_effort : string;
+}
 
-let model_list_protocol io =
-  let* _ = probe_protocol io in
+let read_model_pages io ~include_hidden ~request_id =
   let stage = "model/list" in
   let parse_model json =
     let* fields = assoc_at stage json in
     let* id = required_string stage "id" fields in
     let* model = required_string stage "model" fields in
     let* display_name = required_string stage "displayName" fields in
+    let* default_reasoning_effort = required_string stage "defaultReasoningEffort" fields in
+    let* supported_reasoning_efforts =
+      match List.assoc_opt "supportedReasoningEfforts" fields with
+      | Some (`List items) ->
+        let* reversed = List.fold_left (fun acc item ->
+          let* efforts = acc in
+          let* fields = assoc_at stage item in
+          let* effort = required_string stage "reasoningEffort" fields in
+          if List.mem effort efforts then protocol_error stage "duplicate reasoning effort"
+          else Ok (effort :: efforts)) (Ok []) items in
+        Ok (List.rev reversed)
+      | _ -> protocol_error stage "missing or invalid reasoning efforts"
+    in
     match List.assoc_opt "isDefault" fields with
-    | Some (`Bool is_default) -> Ok {id; model; display_name; is_default}
+    | Some (`Bool is_default) ->
+      Ok {id; model; display_name; is_default; supported_reasoning_efforts; default_reasoning_effort}
     | _ -> protocol_error stage "invalid default marker"
   in
   let rec page request_id cursor seen rows =
-    let params = ["includeHidden", `Bool false] @
+    let params = ["includeHidden", `Bool include_hidden] @
       (match cursor with None -> [] | Some value -> ["cursor", `String value]) in
     send_request io ~id:request_id ~method_:stage ~params:(`Assoc params);
     let* response = await_response io ~id:request_id ~method_:stage in
@@ -874,12 +896,47 @@ let model_list_protocol io =
       if List.exists (fun existing -> existing.id = row.id || existing.model = row.model) rows
       then protocol_error stage "duplicate model identity" else Ok (row :: rows)) (Ok rows) items in
     match List.assoc_opt "nextCursor" fields with
-    | None | Some `Null -> Ok (List.rev rows)
+    | None | Some `Null -> Ok (List.rev rows, request_id + 1)
     | Some (`String next) when next <> "" && not (List.mem next seen) ->
       page (request_id + 1) (Some next) (next :: seen) rows
     | _ -> protocol_error stage "invalid or repeated model cursor"
   in
-  page 3 None [] []
+  page request_id None [] []
+;;
+
+let model_list_protocol io =
+  let* _ = probe_protocol io in
+  let* rows, _ = read_model_pages io ~include_hidden:false ~request_id:3 in
+  Ok rows
+;;
+
+let resolve_reasoning_effort row effort =
+  let accepted = List.filter_map (fun wire ->
+    match Llm_provider.Reasoning_effort.of_string wire with
+    | Some effort when String.equal wire (Llm_provider.Reasoning_effort.to_string effort) -> Some effort
+    | Some _ | None -> None) row.supported_reasoning_efforts in
+  match accepted with
+  | [] -> protocol_error "model/list" "selected model advertises no known reasoning effort"
+  | first :: rest ->
+    let compare = Llm_provider.Reasoning_effort.compare in
+    let below = List.filter (fun candidate -> compare candidate effort <= 0) accepted in
+    let minimum a b = if compare a b <= 0 then a else b in
+    let maximum a b = if compare a b >= 0 then a else b in
+    Ok (match below with
+      | [] -> List.fold_left minimum first rest
+      | first :: rest -> List.fold_left maximum first rest)
+;;
+
+let admit_reasoning_effort io ~model ~requested ~request_id =
+  match requested with
+  | None -> Ok (None, request_id)
+  | Some effort ->
+    let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id in
+    let* row = match List.find_opt (fun row -> String.equal row.model model) rows with
+      | Some row -> Ok row
+      | None -> protocol_error "model/list" "selected model has no advertised reasoning metadata" in
+    let* effective = resolve_reasoning_effort row effort in
+    Ok (Some effective, next_request_id)
 ;;
 
 (* [account/rateLimits/read] after account admission: the account's usage
@@ -918,7 +975,7 @@ let parse_turn_start result =
   required_string stage "id" turn_fields
 ;;
 
-let agent_message_of_item ~stage item =
+let agent_message_content_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
   | Some (`String "agentMessage") ->
@@ -928,10 +985,17 @@ let agent_message_of_item ~stage item =
        item is valid protocol but is not a visible assistant-message candidate. *)
     let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
-    if String.trim text = "" then Ok None else Ok (Some (phase, text))
+    Ok (Some (phase, text))
   | Some (`String _) -> Ok None
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
+;;
+
+let agent_message_of_item ~stage item =
+  let* message = agent_message_content_of_item ~stage item in
+  match message with
+  | Some (_, text) when String.trim text = "" -> Ok None
+  | _ -> Ok message
 ;;
 
 (* Model items and host-owned dynamic calls do not prove a native effect.
@@ -1402,11 +1466,16 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
       run { io with receive })
 ;;
 
+type streamed_texts =
+  { buffers : (string option, Buffer.t) Hashtbl.t
+  ; mutable current_item : string option
+  }
+
 let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
-    ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
+    ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event =
   let continue () = await_turn_terminal io ~handoff ~terminal_tools_closed ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id
-      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event in
+      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event in
   let* message = io.receive () in
   match message with
   | Response { id = 6; result } when !handoff = Handoff_pending ->
@@ -1453,19 +1522,31 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
-      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    emit_stream_event
-      on_stream_event
-      (Text_delta { item_id = agent_message_item_id params; delta });
+    let item_id = agent_message_item_id params in
+    let key = match item_id with
+      | Some _ -> item_id
+      | None -> streamed_texts.current_item in
+    let buffer = match Hashtbl.find_opt streamed_texts.buffers key with
+      | Some buffer -> buffer
+      | None ->
+          let buffer = match key, Hashtbl.find_opt streamed_texts.buffers None with
+            | Some _, Some unnamed ->
+                Hashtbl.remove streamed_texts.buffers None; unnamed
+            | _ -> Buffer.create 256 in
+          Hashtbl.add streamed_texts.buffers key buffer; buffer in
+    streamed_texts.current_item <- key;
+    Buffer.add_string buffer delta;
+    emit_stream_event on_stream_event (Text_delta {item_id; delta});
     let seen_fallback =
       match seen_fallback with
       | None -> Some delta
@@ -1485,7 +1566,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids:[]
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/plan/delta" as method_; params } ->
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     io.set_receive_phase Model_turn;
@@ -1500,7 +1581,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids:[]
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification
       { method_ =
           (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
@@ -1520,7 +1601,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -1547,7 +1628,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     in
     await_turn_terminal
       io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
-      ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -1576,7 +1657,40 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
          | _ :: _ -> ());
         still_open
     in
-    let* message = agent_message_of_item ~stage item in
+    (* Blank messages still close their stream identity, even though they
+       cannot become the turn's final/fallback answer. *)
+    let* message = agent_message_content_of_item ~stage item in
+    let* () = match message with
+      | None -> Ok ()
+      | Some (_, text) ->
+          let* item_fields = assoc_at stage item in
+          let* item_id = optional_string stage "id" item_fields in
+          let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
+          let prefix = match Hashtbl.find_opt streamed_texts.buffers key with
+            | Some buffer -> Buffer.contents buffer
+            | None ->
+                (* A wire delta may omit itemId; the completed item supplies
+                   it. Consume that unnamed prefix once at this boundary. *)
+                (match Hashtbl.find_opt streamed_texts.buffers None with
+                 | Some buffer -> Hashtbl.remove streamed_texts.buffers None; Buffer.contents buffer
+                 | None -> "") in
+          if String.starts_with ~prefix text then begin
+            let delta = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            if delta <> "" then emit_stream_event on_stream_event (Text_delta {item_id; delta});
+            if streamed_texts.current_item = key then streamed_texts.current_item <- None;
+            (match key with
+             | None -> Hashtbl.remove streamed_texts.buffers None
+             | Some _ ->
+                 let buffer = Buffer.create (String.length text) in
+                 Buffer.add_string buffer text;
+                 Hashtbl.replace streamed_texts.buffers key buffer);
+            Ok ()
+          end else protocol_error stage "completed agent message conflicts with streamed text"
+    in
+    let message = match message with
+      | Some (_, text) when String.trim text = "" -> None
+      | _ -> message in
     let seen_final, seen_fallback =
       match message with
       | Some (Some "final_answer", text) -> Some text, seen_fallback
@@ -1594,7 +1708,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
        upstream, so the turn is alive. Counting these and failing the turn at a
@@ -1619,7 +1733,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         ~seen_fallback
         ~seen_usage
         ~open_tool_call_ids
-        ~on_stream_event
+        ~streamed_texts ~on_stream_event
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -1684,7 +1798,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   (* Account-wide usage windows, for the operator projection only. An update
      this client cannot read is logged and does not fail the turn. *)
   | Notification { method_ = "account/rateLimits/updated"; params } ->
@@ -1706,7 +1820,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
   (* App-server progress and account notifications are observational. Protocol
      evolution must not turn them into a computation failure; each valid wire
      message resets the stream-idle liveness boundary. *)
@@ -1722,7 +1836,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_fallback
       ~seen_usage
       ~open_tool_call_ids
-      ~on_stream_event
+      ~streamed_texts ~on_stream_event
 ;;
 
 (* Media types the app-server image item accepts, mirroring the closed set the
@@ -1796,7 +1910,7 @@ let history_item (message : history_message) =
 
 let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tools ~reasoning_effort
     ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
-    ~on_turn_started ~on_stream_event =
+    ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -1816,6 +1930,31 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
   let* permissions_profile = permissions_profile_of_posture config.native in
+  let requested = reasoning_effort in
+  let admission ~model f =
+    (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
+    |> Result.map_error (function
+      | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
+      | error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+  (* New persistent threads are created only after explicit effort is admitted.
+     Pin the advertised default when no model was configured, so thread/start
+     and the admitted account metadata name the same model. Resume creates no
+     new thread and still admits against the model returned by thread/resume. *)
+  let* start_admission = match thread_mode, requested with
+    | Start, Some effort ->
+        admission ~model:(Option.value ~default:"<account default>" config.model) (fun () ->
+          let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id:4 in
+          let selected = List.filter (fun row -> match config.model with
+            | Some model -> String.equal row.model model || String.equal row.id model
+            | None -> row.is_default) rows in
+          let* row = match selected with
+            | [row] -> Ok row
+            | [] | _::_ -> protocol_error "model/list" "selected model has no unique advertised reasoning metadata" in
+          let* effective = resolve_reasoning_effort row effort in
+          Ok (Some (row.model, effective, next_request_id)))
+    | Start, None | Resume _, _ -> Ok None in
+  let selected_model = match start_admission with
+    | Some (model,_,_) -> Some model | None -> config.model in
   let thread_method, thread_fields, resumed =
     match thread_mode with
     | Start ->
@@ -1825,7 +1964,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
          ; "permissions", `String permissions_profile
          ; "ephemeral", `Bool thread_is_ephemeral
          ]
-         @ optional_field "model" config.model
+         @ optional_field "model" selected_model
          @ optional_field "developerInstructions" config.developer_instructions
          @
          match dynamic_tools with
@@ -1846,7 +1985,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
         ; "permissions", `String permissions_profile
         ; "excludeTurns", `Bool true
         ]
-        @ optional_field "model" config.model
+        @ optional_field "model" selected_model
         @ optional_field "developerInstructions" config.developer_instructions
         @
         (match dynamic_tools with
@@ -1869,28 +2008,39 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
            expected
            thread_id)
   in
+  (* Record the returned thread before checking server adherence to the
+     admitted model or injecting history. Unexpected post-create failures
+     must leave a thread identity for protocol recovery. *)
+  let* () =
+    invoke_state_callback ~stage:"thread ready callback" (fun () ->
+      on_thread_ready ~thread_id)
+  in
+  let* reasoning_effort, next_request_id = match start_admission with
+    | Some (admitted_model,effective,next_request_id) when String.equal admitted_model model ->
+        Ok (Some effective,next_request_id)
+    | Some _ -> protocol_error thread_method "created thread model differs from admitted account model"
+    | None -> admission ~model (fun () -> admit_reasoning_effort io ~model ~requested ~request_id:4) in
+  let* () = invoke_state_callback ~stage:"reasoning effort callback" (fun () ->
+    on_reasoning_effort_resolved ~model ~requested ~effective:reasoning_effort;
+    Ok ()) in
   let messages_to_inject =
     (match thread_mode with Start -> history | Resume _ -> [])
     @ List.map (fun text -> { role = Developer; text }) developer_context
   in
   let turn_request_id =
     match messages_to_inject with
-    | [] -> Ok 4
+    | [] -> Ok next_request_id
     | messages ->
-      send_request io ~id:4 ~method_:"thread/inject_items"
+      send_request io ~id:next_request_id ~method_:"thread/inject_items"
         ~params:
           (`Assoc
              [ "threadId", `String thread_id
              ; "items", `List (List.map history_item messages)
              ]);
-      let* _ = await_response io ~id:4 ~method_:"thread/inject_items" in
-      Ok 5
+      let* _ = await_response io ~id:next_request_id ~method_:"thread/inject_items" in
+      Ok (next_request_id + 1)
   in
   let* turn_request_id = turn_request_id in
-  let* () =
-    invoke_state_callback ~stage:"thread ready callback" (fun () ->
-      on_thread_ready ~thread_id)
-  in
   let* () =
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~thread_id)
@@ -1966,6 +2116,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
+      ~streamed_texts:{buffers=Hashtbl.create 8; current_item=None}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });
@@ -2289,7 +2440,8 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
-    ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
+    ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
+    ~on_reasoning_effort_resolved =
   with_spawned_client
     ~mgr
     ~clock
@@ -2306,6 +2458,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_to
       ~protocol_cwd
       ~dynamic_tools
       ~reasoning_effort
+      ~on_reasoning_effort_resolved
       ~thread_mode
       ~history
       ~developer_context
@@ -2455,6 +2608,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
     ?(history = [])
     ?(developer_context = [])
     ?(on_prompt_sent = fun () -> ())
+    ?(on_reasoning_effort_resolved = fun ~model:_ ~requested:_ ~effective:_ -> ())
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
@@ -2496,6 +2650,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
               ~await_handoff
               ~dynamic_tools
               ~reasoning_effort
+              ~on_reasoning_effort_resolved
               ~thread_mode
               ~history
               ~developer_context

@@ -136,13 +136,17 @@ let dispatch
        | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
        | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
        | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
-       | Some _ | None -> Tool_misc.dispatch
-        { Tool_misc.config
-        ; agent_name
-        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
-        }
-        ~name
-        ~args)
+       | Some _ | None ->
+         let run () = Tool_misc.dispatch
+           ~lane_access:(Lane_addon_sources.Keeper keeper_name)
+           { Tool_misc.config
+           ; agent_name
+           ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+           }
+           ~name ~args in
+         (match Keeper_dos_controller.execute ~config ~who:agent_name ~name ~args ~run with
+          | Ok result -> result
+          | Error refusal -> Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
     | Mod_library ->
       Tool_library.dispatch
         { Tool_library.base_path = config.base_path; agent_name }

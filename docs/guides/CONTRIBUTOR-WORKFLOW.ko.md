@@ -199,6 +199,12 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 있습니다. CI를 기다리거나 반복 조회하지 않고 다음 작업을 진행합니다. 작업 경계에서 실제
 결과를 확인하고 diff, base와 환경 실패를 구분하세요. 무관한 수정은 별도 스택에서 처리합니다.
 
+필요한 focused 검사는 변경 파일에서 바뀐 인터페이스와 직접 소비자를 따라 선정합니다.
+기록에는 `파일 → 변경 인터페이스 → 직접 소비자 → 실제 검증 타깃 → 명령과 결과`를
+연결합니다. 해당 소비자를 검사하지 않은 초록 결과로 대신하지 않습니다. 이 기록은
+위험별 검사 선택을 돕는 것이며 모든 일반 PR에 Core 빌드나 전체 CI를 추가하는 승인
+조건이 아닙니다.
+
 ## 5. 리뷰하고 통합하기
 
 리뷰어는 계약과 현재 head의 diff를 기능·논리·코드 청결도 관점에서 독립적으로 검토합니다.
@@ -218,8 +224,30 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
-`--check`는 리뷰 가능 여부를 검사합니다. 실제 승인을 게시할 때는 판정과 증거가 담긴
-`--body`가 필요합니다. 작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
+`--check`는 리뷰 가능 여부를 검사합니다.
+
+소스 리뷰를 시작하기 **전에** base SHA와 전체 diff 식별자를 캡처하고, 리뷰한 head와
+증거에 함께 보관하세요. 인증된 `gh`, Git, Python 3, `jq`가 있는 저장소 checkout에서
+아래 명령을 실행합니다. diff 도구는 없는 객체를 `gh` 인증으로 가져오며 대화형 입력을
+요구하지 않습니다.
+
+```bash
+# Set repo and pr to the pull request being reviewed.
+snapshot=$(gh api "repos/$repo/pulls/$pr")
+head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
+review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
+review_diff=$(python3 scripts/review/review-diff.py \
+  --repo "$repo" --base "$review_base" --head "$head")
+# Read the complete diff and its source context, then write review-body.md.
+scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
+  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+```
+
+게시에는 `--body`, `--review-base`, `--review-diff`가 모두 필요합니다. guard는 검사 중
+변경된 범위를 거부합니다. 변경 내용이 달라지면 다시 리뷰하고 증거를 캡처하세요.
+읽지 않은 변경을 승인하기 위해 digest만 갱신하지 마세요.
+
+작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
 검증을 가리키는 `run: <full-CI-run-id>`를 추가합니다. 위는 형식이며 판정이 아닙니다.
 선택지와 placeholder를 실제 값으로 바꾸세요.
 
@@ -232,6 +260,10 @@ Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 mainta
 
 정리 전에 병합된 커밋과 PR 상태를 확인합니다. 제출하지 않은 작업이 없는지 확인한 뒤
 끝난 worktree와 브랜치만 정리합니다. 병합된 PR 브랜치에는 다시 push하지 않고 새 PR을 엽니다.
+
+리뷰 재사용은 검토한 head·base·전체 diff identity와 변경 범위에 묶습니다. 코드 파일이
+같더라도 base의 인터페이스나 소비자가 달라졌으면 그 영향을 다시 확인합니다. 판정은
+기존 일반/Release 정책을 따르며 새 실행 결과를 읽지 않은 범위의 성공으로 확대하지 않습니다.
 
 ## 6. 증거 제출과 재개
 
@@ -248,6 +280,16 @@ Goal의 측정 출처는 완료 판정자가 읽을 수 있어야 하며 목표�
 인계에는 Goal·Task·Issue·PR ID, 브랜치와 worktree, 현재 SHA, 실행한 검사, 미해결 리뷰,
 막힌 조건과 다음 행동을 적습니다. 재개하면 변경을 반복하기 전에 현재 상태부터 읽으세요.
 중단된 명령이 이미 적용됐을 수 있습니다. 저장된 기록에서 이어가고 런타임 소유 파일을 직접 바꾸지 않습니다.
+
+계약과 현 정책이 충돌하면 원계약·정책 조항·과거 판정·권한 있는 변경 결정의 좌표를
+함께 남기고 유지/개정/종결을 결정합니다. 결정 전에는 새 정책의 증거를 옛 계약 충족으로
+제출하지 않습니다.
+
+상태 전이 기록은 실행 종료, 결과 수신 확인, 원장 현재 요약 갱신을 구분합니다. 각 시각과
+원문 좌표를 남기고 기록이 없으면 미확인으로 표시합니다. 이전 실패·결정은 역사로 보존하며
+현재 대기 목록에는 남은 항목만 둡니다. 재개 시 예약·인계 문구보다 대상의 현재 Task·PR·run
+상태를 먼저 읽습니다. ready→리뷰, 수정→재심, 후보고정→검증, 종료→원장반영은 서로 다른
+구간으로 측정하고, 전후 비교에는 같은 정의·표본 범위·미완료 표본 수를 사용합니다.
 
 ## 절차 문서 유지하기
 

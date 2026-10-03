@@ -1575,7 +1575,11 @@ let portrait_read_output_schema =
       ; "preview_item", `Assoc
           [ "type", `List [ `String "string"; `String "null" ] ]
       ; "starting_equipment", equipment
-      ; "current_equipment", equipment
+      ; "current_equipment", `Assoc ["anyOf", `List [equipment; `Assoc ["type", `String "null"]]]
+      ; "equipment_observation", object_output_schema
+          ~properties:["status", `Assoc ["enum", `List [`String "available"; `String "unavailable"]];
+            "detail", `Assoc ["type", `List [`String "string"; `String "null"]]]
+          ~required:["status"; "detail"]
       ; "equipment", equipment
       ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
       ; "artifact", `Assoc [ "type", `String "string" ]
@@ -1584,7 +1588,7 @@ let portrait_read_output_schema =
       ; "height", `Assoc [ "type", `String "integer" ]
       ; "bytes", `Assoc [ "type", `String "integer" ]
       ]
-    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment"
+    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment_observation"; "equipment"
               ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
@@ -1694,9 +1698,9 @@ let tasks_list_task_item_schema =
    ([matching_count]/[returned_count]/[truncated]) are absent on the
    [unchanged] variant: it carries no rows, so row statistics would
    contradict it. [new_tasks]/[new_tasks_count] name the newest visible
-   rows the claim-order page does not already carry, so a task that sorts
-   behind the page is still reported and no row travels twice; they are
-   likewise absent on [unchanged]. *)
+   rows the first claim-order page does not already carry, so a task that
+   sorts behind it is still reported. Continuation pages carry an empty
+   newest window; both fields are absent on [unchanged]. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
@@ -3000,7 +3004,7 @@ let internal_descriptors : t list =
   ; (masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "portrait_read" "keeper_portrait_read" ~readonly:true
        |> with_composable_output (Json_output { schema = portrait_read_output_schema }))
-  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_balance" "keeper_candle_balance" ~readonly:true
+  ; masc_misc_descriptor "candle_balance" "keeper_candle_balance" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false

@@ -16,7 +16,7 @@ let contains needle text =
   n = 0 || seek 0
 
 let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
-  Masc_tui_types.Identity_declared
+  Masc_tui_identity_model.Identity_declared
     { idp_id = id
     ; idp_label = label
     ; idp_tools = tools
@@ -26,10 +26,10 @@ let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
     }
 
 let unreadable id problem =
-  Masc_tui_types.Identity_unreadable { idp_id = id; idp_problem = problem }
+  Masc_tui_identity_model.Identity_unreadable { idp_id = id; idp_problem = problem }
 
 let ids providers =
-  List.map fst (Masc_tui_types.identity_connectable providers)
+  List.map fst (Masc_tui_identity_model.identity_connectable providers)
 
 let test_a_broken_declaration_does_not_take_a_number () =
   (* It is still shown -- an operator has to see why the provider they came
@@ -56,7 +56,7 @@ let test_nothing_connectable_is_not_an_error () =
 
 let login ~provider =
   {
-    Masc_tui_types.ils_keeper = "attaching-fixture";
+    Masc_tui_identity_model.ils_keeper = "attaching-fixture";
     ils_provider = provider;
     ils_label = "Whatever The Screen Calls It";
     ils_url = "https://auth.example.com/authorize?x=1";
@@ -65,7 +65,7 @@ let login ~provider =
 let test_a_login_lands_when_its_service_reports_tools () =
   let providers = [ declared ~tools:[ "getJiraIssue" ] "atlassian" "Atlassian" ] in
   check Alcotest.bool "landed" true
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_attached_with_no_tools_still_counts_as_landed () =
@@ -73,13 +73,13 @@ let test_attached_with_no_tools_still_counts_as_landed () =
      a tick that kept asking would ask forever. *)
   let providers = [ declared ~tools:[] "atlassian" "Atlassian" ] in
   check Alcotest.bool "landed" true
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_not_attached_has_not_landed () =
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.bool "still waiting" false
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
 let test_another_service_landing_does_not_end_this_login () =
@@ -89,8 +89,192 @@ let test_another_service_landing_does_not_end_this_login () =
     [ declared ~tools:[ "sendMessage" ] "slack" "Whatever The Screen Calls It" ]
   in
   check Alcotest.bool "this login is still outstanding" false
-    (Masc_tui_types.identity_login_landed ~providers
+    (Masc_tui_identity_model.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
+
+let pending_login ~keeper ~provider ~url =
+  { (login ~provider) with ils_keeper = keeper; ils_url = url }
+
+let pending_urls state keeper =
+  Masc_tui_types.identity_logins_for_keeper state keeper
+  |> List.map (fun login -> login.Masc_tui_identity_model.ils_url)
+
+let identity_state () =
+  Masc_tui_types.create_state ~workspace:"test" ~port:8935
+    ~refresh_interval:2.0 ()
+
+let test_workspace_withdrawal_retires_identity_consent () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://old-workspace/consent");
+  state.identity_view <- Some ("A", [declared "slack" "Slack"]);
+  state.github_identity_view <- Some ("A", ["old identity"]);
+  let old = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  Masc_tui_types.withdraw_identity_readings state;
+  check (Alcotest.list Alcotest.string) "new workspace does not show old consent"
+    [] (pending_urls state "A");
+  check Alcotest.bool "old provider list withdrawn" true (state.identity_view = None);
+  check Alcotest.bool "old GitHub reading withdrawn" true (state.github_identity_view = None);
+  let successor = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  check Alcotest.bool "same named successor rejects the old queued answer" false
+    (Masc_tui_types.finish_identity_login_request state old);
+  check Alcotest.bool "new workspace request remains current" true
+    (Masc_tui_types.finish_identity_login_request state successor)
+
+let test_oauth_polling_survives_unread_authority () =
+  let state = identity_state () in
+  let origin : Masc.Tui_decode.server_identity =
+    { sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_base_path = "/workspace/a";
+      sid_masc_root = "/workspace/a/.masc"; sid_executable_in_worktree = None;
+      sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
+      sid_gc = None; sid_scheduler = None } in
+  let remember () = Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://consent") in
+  let pending () = Masc_tui_types.identity_login_pending_for_keeper state "A" in
+  state.server_identity <- Some origin;
+  remember ();
+  check Alcotest.bool "accepted login participates in cadence" true (pending ());
+  Masc_tui_types.withdraw_identity_readings state;
+  state.server_identity <- None;
+  check Alcotest.bool "unread authority cannot poll" false (pending ());
+  check (Alcotest.list Alcotest.string) "withdrawal removes consent URL" [] (pending_urls state "A");
+  Masc_tui_types.reconcile_detail_intent_origins state (Error "unread");
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok { origin with sid_masc_root = "" });
+  state.server_identity <- Some origin;
+  Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
+  (* The first successful recovery GET still says consent has not landed.
+     There is no URL left to drive the old cadence, but waiting must continue. *)
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared "slack" "Slack"];
+  check Alcotest.bool "pending recovery reading keeps polling" true (pending ());
+  check (Alcotest.list Alcotest.string) "recovery cannot resurrect URL" [] (pending_urls state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "slack" "temporarily unavailable"];
+  check Alcotest.bool "unreadable provider retains intent" true (pending ());
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
+    ~providers:[declared ~tools:[] "slack" "Slack"];
+  check Alcotest.bool "other Keeper cannot retire intent" true (pending ());
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared ~tools:[] "slack" "Slack"];
+  check Alcotest.bool "attached provider ends cadence" false (pending ());
+  remember ();
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A" ~provider_id:"slack";
+  check Alcotest.bool "explicit abandonment ends cadence" false (pending ());
+  remember ();
+  Masc_tui_types.withdraw_identity_readings state;
+  Masc_tui_types.reconcile_detail_intent_origins state
+    (Ok { origin with sid_masc_root = "/workspace/b/.masc" });
+  Masc_tui_types.reconcile_detail_intent_origins state (Ok origin);
+  check Alcotest.bool "foreign root then A cannot resurrect intent" false (pending ())
+
+let test_switching_keepers_retains_each_consent_url () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/A");
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"B" ~provider:"atlassian" ~url:"https://auth/B");
+  check (Alcotest.list Alcotest.string) "A can reopen its consent URL"
+    ["https://auth/A"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B has its own consent URL"
+    ["https://auth/B"] (pending_urls state "B");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
+    ~providers:[declared ~tools:[] "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string) "B's completion preserves A's URL"
+    ["https://auth/A"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B's completed login stops polling"
+    [] (pending_urls state "B")
+
+let test_multiple_providers_complete_independently () =
+  let state = identity_state () in
+  List.iter (Masc_tui_types.remember_identity_login state)
+    [pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/A/atlas";
+     pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack";
+     pending_login ~keeper:"B" ~provider:"slack" ~url:"https://auth/B/slack"];
+  check (Alcotest.list Alcotest.string) "both provider URLs remain available"
+    ["https://auth/A/atlas"; "https://auth/A/slack"] (pending_urls state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared ~tools:["sendMessage"] "slack" "Slack";
+                declared "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string) "unfinished provider stays pending"
+    ["https://auth/A/atlas"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "another keeper's Slack stays pending"
+    ["https://auth/B/slack"] (pending_urls state "B")
+
+let test_restarting_and_forgetting_only_change_the_matching_login () =
+  let state = identity_state () in
+  List.iter (Masc_tui_types.remember_identity_login state)
+    [pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/old";
+     pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack";
+     pending_login ~keeper:"B" ~provider:"atlassian" ~url:"https://auth/B/atlas"];
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/new");
+  check (Alcotest.list Alcotest.string) "restart replaces only that consent URL"
+    ["https://auth/A/slack"; "https://auth/new"] (pending_urls state "A");
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A"
+    ~provider_id:"atlassian";
+  check (Alcotest.list Alcotest.string) "A's other provider remains"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B's same provider remains"
+    ["https://auth/B/atlas"] (pending_urls state "B");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "slack" "read failed"];
+  check (Alcotest.list Alcotest.string) "a failed read keeps consent evidence"
+    ["https://auth/A/slack"] (pending_urls state "A")
+
+let test_inverse_retry_responses_keep_the_newest_consent () =
+  let state = identity_state () in
+  let start keeper =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:keeper
+      ~provider_id:"atlassian"
+  in
+  let older = start "A" in
+  let other_keeper = start "B" in
+  let newer = start "A" in
+  let arrive request url =
+    let current = Masc_tui_types.finish_identity_login_request state request in
+    if current then
+      Masc_tui_types.remember_identity_login state
+        (pending_login ~keeper:request.Masc_tui_types.ilr_keeper
+           ~provider:request.ilr_provider ~url);
+    current
+  in
+  check Alcotest.bool "new retry arrives first" true
+    (arrive newer "https://auth/A/new");
+  check Alcotest.bool "old response is rejected" false
+    (arrive older "https://auth/A/old");
+  check Alcotest.bool "duplicate response is rejected" false
+    (arrive newer "https://auth/A/duplicate");
+  check (Alcotest.list Alcotest.string) "new consent remains actionable"
+    ["https://auth/A/new"] (pending_urls state "A");
+  check Alcotest.bool "B's request was not superseded by A" true
+    (arrive other_keeper "https://auth/B");
+  check (Alcotest.list Alcotest.string) "B's consent remains separate"
+    ["https://auth/B"] (pending_urls state "B")
+
+let test_failed_restart_preserves_the_existing_consent () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack");
+  let restart =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:"A"
+      ~provider_id:"slack"
+  in
+  let other_provider =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:"A"
+      ~provider_id:"atlassian"
+  in
+  check (Alcotest.list Alcotest.string) "URL stays visible while retry runs"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check Alcotest.bool "failed retry consumes its request" true
+    (Masc_tui_types.finish_identity_login_request state restart);
+  check (Alcotest.list Alcotest.string) "failed retry preserves consent URL"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check Alcotest.bool "other provider's request remains current" true
+    (Masc_tui_types.finish_identity_login_request state other_provider)
 
 (* ── the cursor, once the list outgrew the digits ───────────────────── *)
 
@@ -106,25 +290,25 @@ let test_the_cursor_names_a_provider () =
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "the second connectable one"
     (Some ("slack", "Slack"))
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 1)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 1)
 
 let test_a_cursor_past_the_end_names_the_last_row () =
   (* A list that shrank under a cursor -- a declaration stopped reading, say
      -- answers from a row that is there rather than from none at all. *)
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.int "clamped" 0
-    (Masc_tui_types.identity_cursor_clamped ~query:"" ~providers 7);
+    (Masc_tui_identity_model.identity_cursor_clamped ~query:"" ~providers 7);
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "still names something" (Some ("atlassian", "Atlassian"))
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 7)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 7)
 
 let test_nothing_connectable_names_nothing () =
   let providers = [ unreadable "jira" "unreadable" ] in
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "no row to start" None
-    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 0)
+    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 0)
 
 (* The pane lists every declared service alphabetically, and a live Keeper
    declares over a hundred. The question it opens with -- what does this
@@ -141,17 +325,17 @@ let test_the_tally_counts_what_the_rows_say () =
   check Alcotest.string "the tally reads the rows"
     "  5 services · 1 attached · 1 switched off · 1 attached with no tools · 1 \
      with an unreadable switch"
-    (Masc_tui_types.identity_summary ~providers ~query:"");
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"");
   check Alcotest.string "a filtered pane says how much of the set it draws"
     "  1 of 5 services · 1 attached"
-    (Masc_tui_types.identity_summary ~providers ~query:"atlas")
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"atlas")
 
 (* A Keeper that holds nothing has nothing to tally: every row already says
    "not attached", and repeating that above them adds no reading. *)
 let test_a_keeper_that_holds_nothing_tallies_nothing () =
   let providers = [ declared "atlassian" "Atlassian"; declared "box" "Box" ] in
   check Alcotest.string "the count of services, and no more" "  2 services"
-    (Masc_tui_types.identity_summary ~providers ~query:"")
+    (Masc_tui_identity_model.identity_summary ~providers ~query:"")
 
 (* The row and the tally are one reading. *)
 let test_a_row_state_is_what_the_tally_counts () =
@@ -163,31 +347,31 @@ let test_a_row_state_is_what_the_tally_counts () =
     ; declared "calendly" "Calendly"
     ]
   in
-  let state id = Masc_tui_types.identity_row_state ~providers ~id in
-  check Alcotest.bool "two tools" true (state "atlassian" = Masc_tui_types.Identity_attached 2);
-  check Alcotest.bool "switched off" true (state "airtable" = Masc_tui_types.Identity_switched_off);
+  let state id = Masc_tui_identity_model.identity_row_state ~providers ~id in
+  check Alcotest.bool "two tools" true (state "atlassian" = Masc_tui_identity_model.Identity_attached 2);
+  check Alcotest.bool "switched off" true (state "airtable" = Masc_tui_identity_model.Identity_switched_off);
   check Alcotest.bool "attached with nothing to offer" true
-    (state "asana" = Masc_tui_types.Identity_attached_without_tools);
+    (state "asana" = Masc_tui_identity_model.Identity_attached_without_tools);
   check Alcotest.bool "an unreadable switch is not an off switch" true
-    (state "box" = Masc_tui_types.Identity_switch_unreadable);
+    (state "box" = Masc_tui_identity_model.Identity_switch_unreadable);
   check Alcotest.bool "never attached" true
-    (state "calendly" = Masc_tui_types.Identity_not_attached);
+    (state "calendly" = Masc_tui_identity_model.Identity_not_attached);
   check Alcotest.bool "a service the list does not declare" true
-    (state "unknown" = Masc_tui_types.Identity_not_attached)
+    (state "unknown" = Masc_tui_identity_model.Identity_not_attached)
 
 let test_the_provider_row_sits_below_the_preamble () =
   (* The key handler scrolls the pane to the line a provider is drawn on.
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
   let preamble =
-    List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
+    List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
        ~notice:[])
   in
   check Alcotest.int "first provider" preamble
-    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:0);
   check Alcotest.int "fourth provider" (preamble + 3)
-    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:3)
 
 let test_a_notice_pushes_the_list_down () =
@@ -196,9 +380,9 @@ let test_a_notice_pushes_the_list_down () =
      it or the cursor lands on the wrong line by however tall the message
      is -- and the messages worth showing are the long ones. *)
   let notice = [ "first line"; "second line" ] in
-  let bare = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+  let bare = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
        ~index:0 in
-  let with_notice = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice
+  let with_notice = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice
        ~index:0 in
   check Alcotest.bool "the list starts lower" true (with_notice > bare);
   check Alcotest.int "by exactly the notice it was given"
@@ -212,7 +396,7 @@ let test_no_notice_reserves_no_room () =
      The tally is what stands above the list: what this Keeper holds, before
      the list that spells it service by service. *)
   check Alcotest.int "the tally and one blank, and that is all" 2
-    (List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
+    (List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
        ~notice:[]));
   (* And no key of its own. The footer draws the tab's keys, the way every
      other surface does; a sentence here would be a second copy of the key
@@ -221,7 +405,7 @@ let test_no_notice_reserves_no_room () =
     (List.exists
        (fun line -> List.exists (fun word -> contains word line)
            [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_types.identity_preamble ~summary:"  2 services" ~notice:[]));
+       (Masc_tui_identity_model.identity_preamble ~summary:"  2 services" ~notice:[]));
   (* The footer is where they are. Not the hint string alone: the row the
      operator reads is what the fitter left of it, so the widths are measured
      through the fitter. At 120 every key survives; at 80 the fitter gives up
@@ -259,7 +443,7 @@ let sample =
     unreadable "broken" "unreadable" ]
 
 let matched query =
-  List.map fst (Masc_tui_types.identity_connectable ~query sample)
+  List.map fst (Masc_tui_identity_model.identity_connectable ~query sample)
 
 let test_a_query_narrows_to_what_it_names () =
   check (Alcotest.list Alcotest.string) "both Google rows"
@@ -291,7 +475,7 @@ let test_the_cursor_indexes_what_is_left () =
      second overall. *)
   let at ~query index =
     Option.map fst
-      (Masc_tui_types.identity_cursor_provider ~query ~providers:sample index)
+      (Masc_tui_identity_model.identity_cursor_provider ~query ~providers:sample index)
   in
   (* Row three is Linear with no filter, and does not exist under "g" -- so
      the same index has to answer differently, and the filtered one clamps
@@ -303,7 +487,7 @@ let test_the_cursor_indexes_what_is_left () =
 
 let test_the_filter_rows_say_how_much_is_left () =
   match
-    Masc_tui_types.identity_filter_rows ~providers:sample (Some "g")
+    Masc_tui_identity_model.identity_filter_rows ~providers:sample (Some "g")
   with
   | [ line; "" ] ->
     let contains needle =
@@ -317,7 +501,7 @@ let test_the_filter_rows_say_how_much_is_left () =
 
 let test_no_filter_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_types.identity_filter_rows ~providers:sample None))
+    (List.length (Masc_tui_identity_model.identity_filter_rows ~providers:sample None))
 
 (* ── which other Keepers hold a service ─────────────────────────────── *)
 
@@ -332,10 +516,10 @@ let test_coverage_is_carried_per_provider () =
   let coverage id =
     List.find_map
       (function
-        | Masc_tui_types.Identity_declared { idp_id; idp_also_on; _ }
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_also_on; _ }
           when String.equal idp_id id -> Some idp_also_on
-        | Masc_tui_types.Identity_declared _
-        | Masc_tui_types.Identity_unreadable _ -> None)
+        | Masc_tui_identity_model.Identity_declared _
+        | Masc_tui_identity_model.Identity_unreadable _ -> None)
       providers
   in
   check
@@ -350,7 +534,7 @@ let test_coverage_is_carried_per_provider () =
 (* ── the app form ───────────────────────────────────────────────────── *)
 
 let form field secret =
-  { Masc_tui_types.iaf_provider = "slack"
+  { Masc_tui_identity_model.iaf_provider = "slack"
   ; iaf_label = "Slack"
   ; iaf_field = field
   ; iaf_client_id = "an-app"
@@ -362,8 +546,8 @@ let test_the_secret_is_never_drawn () =
   (* A terminal scrolls back. A credential on screen is a credential in the
      scrollback, and in whatever recorded the session. *)
   let rows =
-    Masc_tui_types.identity_app_form_rows
-      (Some (form Masc_tui_types.App_client_secret "hunter2"))
+    Masc_tui_identity_model.identity_app_form_rows
+      (Some (form Masc_tui_identity_model.App_client_secret "hunter2"))
   in
   let joined = String.concat "\n" rows in
   check Alcotest.bool "the value is nowhere" false
@@ -373,18 +557,18 @@ let test_the_secret_is_never_drawn () =
 
 let test_the_marker_is_on_the_field_taking_keys () =
   let marked field =
-    Masc_tui_types.identity_app_form_rows (Some (form field ""))
+    Masc_tui_identity_model.identity_app_form_rows (Some (form field ""))
     |> List.filter (fun row -> String.length row > 2 && row.[2] = '>')
     |> List.length
   in
   check Alcotest.int "exactly one row is marked" 1
-    (marked Masc_tui_types.App_client_id);
+    (marked Masc_tui_identity_model.App_client_id);
   check Alcotest.int "and only one, whichever it is" 1
-    (marked Masc_tui_types.App_scopes)
+    (marked Masc_tui_identity_model.App_scopes)
 
 let test_a_closed_form_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_types.identity_app_form_rows None))
+    (List.length (Masc_tui_identity_model.identity_app_form_rows None))
 
 (* ── what a paste carries into a field ──────────────────────────────── *)
 
@@ -395,17 +579,17 @@ let test_a_pasted_list_loses_its_newlines () =
      inside a scope name, and came back as "Invalid permissions requested". *)
   check Alcotest.string "one line, single spaces"
     "chat:write files:read users:read"
-    (Masc_tui_types.identity_field_paste
+    (Masc_tui_identity_model.identity_field_paste
        "chat:write\nfiles:read\r\n  users:read\n")
 
 let test_a_pasted_secret_loses_its_trailing_newline () =
   check Alcotest.string "nothing around it" "xoxp-abc123"
-    (Masc_tui_types.identity_field_paste "  xoxp-abc123\n")
+    (Masc_tui_identity_model.identity_field_paste "  xoxp-abc123\n")
 
 let test_a_paste_keeps_what_is_not_a_control_character () =
   (* Bytes at or above 0x80 are UTF-8, not control characters. *)
   check Alcotest.string "unharmed" "\xed\x95\x9c\xea\xb8\x80"
-    (Masc_tui_types.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
+    (Masc_tui_identity_model.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
 
 let () =
   Alcotest.run "tui_identity_tab"
@@ -484,5 +668,21 @@ let () =
             test_not_attached_has_not_landed;
           Alcotest.test_case "another service landing does not end this login"
             `Quick test_another_service_landing_does_not_end_this_login;
+        ] );
+      ( "pending consent lifecycle",
+        [ Alcotest.test_case "OAuth polling survives unread authority"
+            `Quick test_oauth_polling_survives_unread_authority;
+          Alcotest.test_case "workspace withdrawal retires identity consent"
+            `Quick test_workspace_withdrawal_retires_identity_consent;
+          Alcotest.test_case "switching Keepers retains each consent URL"
+            `Quick test_switching_keepers_retains_each_consent_url;
+          Alcotest.test_case "multiple providers complete independently"
+            `Quick test_multiple_providers_complete_independently;
+          Alcotest.test_case "restart and forget change only the matching login"
+            `Quick test_restarting_and_forgetting_only_change_the_matching_login;
+          Alcotest.test_case "inverse retry responses keep newest consent"
+            `Quick test_inverse_retry_responses_keep_the_newest_consent;
+          Alcotest.test_case "failed restart preserves existing consent"
+            `Quick test_failed_restart_preserves_the_existing_consent;
         ] );
     ]

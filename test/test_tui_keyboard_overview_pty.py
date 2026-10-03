@@ -11,6 +11,8 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_config.ml",
     "bin/masc_tui_types.ml",
@@ -18,6 +20,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_overview_goals.ml",
     "bin/masc_tui_overview_providers.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_render_schedule.ml",
     "lib/tui_decode_usage.ml",
     "lib/tui_decode_usage.mli",
@@ -168,7 +172,7 @@ def first_use_frames(executable: str) -> None:
             # differs from the harness and the checks below to force a redraw.
             capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
-                unread = capture("UNREAD", columns, b"Approvals and questions: confirm queue not fully read")
+                unread = capture("UNREAD", columns, b"Approvals and questions: not fully read")
                 if b"Create a Keeper" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
                 if b"No decision is waiting on you." in unread:

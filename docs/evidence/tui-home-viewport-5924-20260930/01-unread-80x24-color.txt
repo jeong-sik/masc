@@ -1,0 +1,24 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  03:4…  
+ ────────────────────────────────────────────────────────────────────────────── 
+   Health: ok                                                                   
+   Work: 0 currently done in the last 24h · details in Work                     
+                                                                                
+   Needs your decision                                                          
+    Approvals and questions: held calls not fully read; Gate queue not fully …  
+                                                                                
+   Continue                                                                     
+    Choose a Keeper  · start a conversation                                     
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose                                      

@@ -325,20 +325,22 @@ let handle_keeper_task_tool_with_outcome
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
     let projection_and_revision =
-      match task_projection_of_args args, Snapshot_protocol.if_revision args with
-      | Error message, _ | _, Error message -> Error message
-      | Ok projection, Ok if_revision -> Ok (projection, if_revision)
+      match task_projection_of_args args, Snapshot_protocol.if_revision args,
+            Keeper_tasks_list_query.of_args args with
+      | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message
+      | Ok projection, Ok if_revision, Ok selection -> Ok (projection, if_revision, selection)
     in
     (match projection_and_revision with
      | Error message ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
-     | Ok (projection, if_revision) ->
+     | Ok (projection, if_revision, selection) ->
        let call_filter =
          { Keeper_tasks_list_cursor.status = status_filter
          ; include_done
          ; projection = task_projection_to_string projection
+         ; selection
          }
        in
        (* A cursor names the row the previous page ended on and the filter it
@@ -361,8 +363,16 @@ let handle_keeper_task_tool_with_outcome
             ~message:(Yojson.Safe.to_string data)
             data
         | Ok cursor ->
-       match Workspace.read_backlog_observation_with_source_r config with
-     | Error message ->
+       let goal_task_ids =
+         match selection.goal_id with
+         | None -> Ok None
+         | Some goal_id ->
+           Workspace_goal_index.read_goal_task_links_authoritative_r config
+           |> Result.map (fun links ->
+             Some (Option.value ~default:[] (List.assoc_opt goal_id links)))
+       in
+       match goal_task_ids, Workspace.read_backlog_observation_with_source_r config with
+     | Error message, _ | _, Error message ->
        let data =
          `Assoc
            [ "ok", `Bool false
@@ -377,7 +387,7 @@ let handle_keeper_task_tool_with_outcome
          ~class_:Tool_result.Runtime_failure
          ~message:(Yojson.Safe.to_string data)
          data
-     | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
+     | Ok goal_task_ids, Ok { Workspace.observed_backlog = backlog; recovered_from } ->
        let visible (task : Masc_domain.task) =
          match status_filter with
          | Some status ->
@@ -404,6 +414,7 @@ let handle_keeper_task_tool_with_outcome
        let matching =
          backlog.tasks
          |> List.filter visible
+         |> List.filter (Keeper_tasks_list_query.matches selection ~goal_task_ids)
          |> List.sort (fun (left : Masc_domain.task) right ->
            Keeper_tasks_list_cursor.compare_key (page_key left) (page_key right))
        in
@@ -426,9 +437,12 @@ let handle_keeper_task_tool_with_outcome
          | order -> order
        in
        let newest =
-         matching
-         |> List.sort newest_first
-         |> List.filteri (fun index _ -> index < new_task_window)
+         match cursor with
+         | Some _ -> []
+         | None ->
+           matching
+           |> List.sort newest_first
+           |> List.filteri (fun index _ -> index < new_task_window)
        in
        (* The order is total -- priority, then created_at, then id -- so a page
           is "the first [limit] rows after the cursor's key" and the same row
@@ -455,9 +469,11 @@ let handle_keeper_task_tool_with_outcome
          | true, [] | false, _ -> None
        in
        let tasks_json = `List (List.map row_to_yojson tasks) in
-       (* A newest row that is already on this page is named once, by the
-          page. The section keeps only the newest rows the page does not
-          carry, matched by task id. *)
+       (* Discovery belongs to the first page. Repeating the newest window
+          on every continuation made a 530-row walk carry 100 extra rows
+          for the same ten tasks. Continuations retain the complete ordered
+          page stream; a fresh first-page read discovers later arrivals.
+          Within the first page, do not repeat a row in both sections. *)
        let new_tasks =
          let module Ids = Set.Make (String) in
          let on_page =
@@ -481,6 +497,7 @@ let handle_keeper_task_tool_with_outcome
              ; "include_done", `Bool include_done
              ; "limit", `Int limit
              ; "projection", `String (task_projection_to_string projection)
+             ; "selection", Keeper_tasks_list_query.to_yojson selection
                (* The backlog size is part of the answer, not only the page:
                   matching_count travels in every snapshot and truncated is
                   derived from it. Without it in the hash, tasks appearing or

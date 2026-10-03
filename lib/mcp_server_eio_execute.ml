@@ -19,6 +19,30 @@ let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_
   && check_join agent_name
 ;;
 
+let lane_access_for_caller ~config
+    (caller : Mcp_server_eio_caller_identity.t) =
+  if caller.verified_internal_keeper_runtime then
+    match Keeper_meta_store.read_meta_resolved config caller.agent_name with
+    | Ok (Some (keeper_name, _)) -> Lane_addon_sources.Keeper keeper_name
+    | Ok None | Error _ -> Lane_addon_sources.Unauthenticated
+  else
+    let token = caller.token in
+    let owner_keeper_identity = caller.owner_keeper_identity in
+    match token with
+    | None -> Lane_addon_sources.Unauthenticated
+    | Some raw ->
+      (match Auth.find_credential_by_token config.base_path ~token:raw with
+       | Ok { Masc_domain.role = Masc_domain.Admin; _ } ->
+         Lane_addon_sources.Operator_configuration
+       | Ok { Masc_domain.role = Masc_domain.Worker; _ } ->
+         (match owner_keeper_identity with
+          | Some (keeper_name, _) -> Lane_addon_sources.Keeper keeper_name
+          | None -> Lane_addon_sources.Unauthenticated)
+       | Ok { Masc_domain.role = Masc_domain.Player; _ } | Error _ ->
+         Lane_addon_sources.Unauthenticated)
+
+;;
+
 let execute_tool_eio
       ~sw
       ~clock
@@ -417,6 +441,7 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->
+                   let lane_access = lane_access_for_caller ~config caller_identity in
                    let candle operation =
                      match owner_keeper_identity with
                      | Some (keeper_name, _) ->
@@ -428,6 +453,7 @@ let execute_tool_eio
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
                    let dispatch () =
                      Tool_misc.dispatch
+                       ~lane_access
                        { Tool_misc.config
                        ; agent_name
                        ; help_schemas = Config.raw_all_tool_schemas
@@ -436,8 +462,8 @@ let execute_tool_eio
                        ~args:coerced_args
                    in
                    (* Identity, profile membership and tool authorization have
-                      passed above. The gate a Keeper's call and the play
-                      page's routes run comes next. *)
+                      passed above. The controller execution boundary shared
+                      by Keeper calls and the play routes comes next. *)
                    (match Tool_schemas_misc.misc_operation_of_tool_name name with
                     | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
                     | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
@@ -461,10 +487,10 @@ let execute_tool_eio
                               name))
                     | Some _ | None ->
                       (match
-                         Keeper_dos_controller.before_call ~config ~who:agent_name ~name
-                           ~args:coerced_args
+                         Keeper_dos_controller.execute ~config ~who:agent_name ~name
+                           ~args:coerced_args ~run:dispatch
                        with
-                       | Ok () -> dispatch ()
+                       | Ok result -> result
                        | Error refusal ->
                          Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
                  | Mod_library ->

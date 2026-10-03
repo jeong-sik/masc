@@ -9,6 +9,7 @@ type account = {
 }
 type t = Off | Disabled of string | Ready of account
 
-val decode : keeper_name:string -> Yojson.Safe.t -> (t, string) result
+val decode : keeper_name:string -> Yojson.Safe.t -> (string option * t, string) result
 (** Refuses a response for another Keeper, unknown or duplicate items,
-    incomplete catalogs, and malformed balances or prices. *)
+    incomplete catalogs, malformed balances or prices, and missing or malformed
+    account revisions. Returns that revision with the account, as one authenticated reading. Off requires null; ready/disabled require canonical SHA-256. *)

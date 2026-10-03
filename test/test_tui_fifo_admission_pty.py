@@ -8,7 +8,11 @@ import threading
 import test_tui_keyboard_input as h
 
 
-SOURCE_MODULES = ("bin/masc_tui.ml",)
+SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
+)
 
 
 def run(executable: str) -> None:
@@ -169,7 +173,7 @@ def run(executable: str) -> None:
             os.write(master_fd, b"\r")
             h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 3)
             h.wait_for_output(
-                process, master_fd, output, b"3 messages in the keeper's queue",
+                process, master_fd, output, "내 메시지 3건 대기".encode(),
                 start=third_start, timeout=5,
             )
             third = priority_fixture.submitted[2]
@@ -181,7 +185,7 @@ def run(executable: str) -> None:
             os.write(master_fd, b"\r")
             h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 4)
             h.wait_for_output(
-                process, master_fd, output, b"4 messages in the keeper's queue",
+                process, master_fd, output, "내 메시지 4건 대기".encode(),
                 start=fourth_start, timeout=5,
             )
             fourth = priority_fixture.submitted[3]

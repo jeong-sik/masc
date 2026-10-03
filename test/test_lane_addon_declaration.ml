@@ -4,8 +4,18 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let fixture_access caller access = Option.value access ~default:(match caller with
+    | None -> Lane_addon_sources.Operator_configuration
+    | Some keeper -> Lane_addon_sources.Keeper keeper)
+  let read_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
+  let save_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Editor = Lane_addon_declaration
@@ -43,8 +53,8 @@ let request ?revision ~mode ~file_name source_text =
   `Assoc (["mode",`String mode;"file_name",`String file_name;"source_text",`String source_text]
     @ Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)
 let read config directory name =
-  Runtime.read_declaration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
-let save config args = Runtime.save_declaration ~config args |> unwrap
+  Runtime.read_declaration ~access:Lane_addon_sources.Operator_configuration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
+let save config args = Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args |> unwrap
 let inspect config = Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []) |> runtime_result
 let reconcile config directory = Runtime.reconcile_configuration ~config ~directory |> runtime_result
 let live config = inspect config |> list "instances" |> List.filter (fun item -> text "kind" (member "phase" item) <> "detached")
@@ -60,7 +70,7 @@ let keeper_call config name args =
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in
   let context : Tool_misc.context = {config;agent_name="editor-keeper";help_schemas=[]} in
-  match Tool_misc.dispatch context ~name:descriptor.internal_name ~args:translated with
+  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper") context ~name:descriptor.internal_name ~args:translated with
   | Some value -> value | None -> fail "Keeper descriptor has no executable declaration route"
 
 let with_fixture f =
@@ -81,14 +91,14 @@ let with_fixture f =
                 Runtime.For_testing.reset ();
                 let started = ref [] in
                 let backend : Runtime.For_testing.backend = {
-                  start=(fun ~sw:_ ~instance_id ~package:_ ~on_created ->
+                  start=(fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
                     started := instance_id :: !started;
                     let connection : Runtime.For_testing.connection = {
                       observe=(fun ~binding:_ ~sources:_ -> Ok output);
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
                       stop=(fun () -> Ok ());container_id=instance_id} in on_created connection;Ok connection);
                   image_ready=(fun ~package:_ -> Ok ());
-                  acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
                   recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend backend (fun () ->
@@ -133,6 +143,155 @@ let test_keeper_create_operator_read_and_edit () = with_fixture (fun clock confi
   await clock (fun () -> List.length !started=2);
   check bool "reconcile owns actual replacement" true (original_id <> (one_live config |> text "instance_id")))
 
+let test_keeper_declaration_cannot_capture_another_fusion_owner () =
+  with_fixture (fun _clock config directory _root started ->
+    let run_id = "editor-fusion-ownership" in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"another-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let source id = Printf.sprintf {|id=%S
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
+|} id run_id in
+    let bytes = source "foreign-fusion" in
+    let result = keeper_call config "masc_lane_declaration_save"
+      (request ~mode:"create" ~file_name:"foreign.toml" bytes) in
+    check bool "Keeper save rejects foreign Fusion capture" false (Tool_result.is_success result);
+    check bool "rejected configuration cannot be reconciled as operator-owned" false
+      (Sys.file_exists (Filename.concat directory "foreign.toml"));
+    check int "rejection starts no worker" 0 (List.length !started);
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let own = keeper_call config "masc_lane_declaration_save"
+      (request ~mode:"create" ~file_name:"own.toml" bytes) in
+    check bool "Keeper can save its own source without granting shared read authority" true
+      (Tool_result.is_success own);
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config
+      (request ~mode:"create" ~file_name:"operator.toml" (source "operator-fusion")) with
+    | Ok _ -> ()
+    | Error error -> failf "operator declaration writer remains available: %s" error.Editor.message)
+
+let test_operator_reassignment_revokes_old_document_owner () =
+  with_fixture (fun _clock config directory _root _started ->
+    let registry = Fusion_run_registry.global () in
+    List.iter (fun (run_id, keeper) ->
+      Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"default"
+        ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.)
+      ["editor-owner-a", "editor-keeper"; "editor-owner-b", "next-keeper"];
+    let bytes ?(manifest_path="../../package.toml") run_id = Printf.sprintf {|id="private-transfer"
+run_id="editor-world"
+manifest_path=%S
+[binding]
+sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
+|} manifest_path run_id in
+    ignore (unwrap (Runtime.save_declaration ~caller:"editor-keeper" ~config
+      (request ~mode:"create" ~file_name:"transfer.toml" (bytes "editor-owner-a"))));
+    ignore (reconcile config directory);
+    let path = Filename.concat directory "transfer.toml" in
+    let read_as caller = Runtime.read_declaration ~caller ~config
+      (`Assoc ["source_path", `String path]) in
+    let declaration_denial name = match Runtime.read_declaration ~caller:"foreign-keeper" ~config
+        (`Assoc ["source_path", `String (Filename.concat directory name)]) with
+      | Error error -> error.Editor.code, error.message, error.current
+      | Ok _ -> fail "foreign declaration read unexpectedly succeeded" in
+    check bool "private and absent declarations expose the same complete error" true
+      (declaration_denial "transfer.toml" = declaration_denial "absent.toml");
+    write path (bytes "editor-owner-b");
+    check bool "old owner cannot read reassigned bytes before reconciliation" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path ((bytes "editor-owner-b") ^ "\n[unrelated]\nvalue = [");
+    check bool "malformed replacement cannot reuse stale owner authority" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path (bytes ~manifest_path:"../../missing-package.toml" "editor-owner-b");
+    check bool "private replacement with missing package cannot disclose its source" true
+      (Result.is_error (read_as "editor-keeper"));
+    write path (bytes "editor-owner-b");
+    ignore (reconcile config directory);
+    check bool "old owner remains denied after journal reassignment" true
+      (Result.is_error (read_as "editor-keeper"));
+    check bool "new verified owner can read the reassigned document" true
+      (Result.is_ok (read_as "next-keeper"));
+    let upstream_denial installation_id = Runtime.dispatch ~caller:"foreign-keeper" ~config
+        ~operation:Runtime.Attach (`Assoc [
+          "manifest_path", `String (Filename.concat _root ".masc/package.toml");
+          "run_id", `String "editor-world";
+          "binding", `Assoc ["sources", `List [`Assoc [
+            "source_id", `String "upstream"; "kind", `String "lane_output";
+            "installation_id", `String installation_id;
+            "selection", `String "latest_completed"]]]]) in
+    let private_denial = upstream_denial "private-transfer" in
+    check (result string string) "private upstream reaches the ownership denial"
+      (Error "upstream installation is unavailable to this caller")
+      (Result.map Yojson.Safe.to_string private_denial);
+    check bool "private and absent upstreams expose one denial" true
+      (private_denial = upstream_denial "absent-installation");
+    write path (declaration ~id:"private-transfer" ());
+    ignore (reconcile config directory);
+    check bool "private-to-shared reconciliation revokes exclusive Keeper authority" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    check bool "shared declaration remains readable by other Keepers" true
+      (Result.is_ok (read_as "another-keeper")))
+
+let test_shared_saves_do_not_claim_keeper_ownership () =
+  with_fixture (fun _clock config directory _root _started ->
+    let bytes = declaration ~id:"shared-editor" () in
+    ignore (save config (request ~mode:"create" ~file_name:"shared.toml" bytes));
+    let path = Filename.concat directory "shared.toml" in
+    let read_as keeper = Runtime.read_declaration ~caller:keeper ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    let edit = read_as "first-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"first-keeper" ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (read_as "other-keeper");
+    check bool "shared save leaves no exclusive Keeper ownership" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    let edit = read_as "other-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~mode:"create" ~file_name:"local.toml" (declaration ~id:"local-editor" ())))))
+
+let test_unconfirmed_shared_save_withdraws_private_owner () =
+  with_fixture (fun _clock config directory _root _started ->
+    let run_id = "unconfirmed-private-source" in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let private_bytes = Printf.sprintf {|id="private-save"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
+|} run_id in
+    let receipt = unwrap (Runtime.save_declaration ~caller:"editor-keeper" ~config
+      (request ~mode:"create" ~file_name:"private.toml" private_bytes)) in
+    let revision = text "source_revision" (member "document" receipt) in
+    let shared = declaration ~id:"private-save" () in
+    let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory))) path source in
+    let writer ~directory request = Editor.For_testing.write ~replace_file ~directory request in
+    let saved = Runtime.For_testing.with_declaration_writer writer (fun () ->
+      Runtime.save_declaration ~caller:"editor-keeper" ~config
+        (request ~revision ~mode:"save" ~file_name:"private.toml" shared)) |> unwrap in
+    check string "visible shared save returns its durability receipt" "unconfirmed"
+      (member "write" saved |> text "durability");
+    let path = Filename.concat directory "private.toml" in
+    let observed = Runtime.read_declaration ~caller:"another-keeper" ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    check string "shared bytes remain readable after private ownership withdrawal" shared
+      (text "source_text" observed);
+    check bool "another Keeper can edit the now shared declaration" true
+      (Result.is_ok (Runtime.save_declaration ~caller:"another-keeper" ~config
+        (request ~revision:(text "source_revision" observed) ~mode:"save" ~file_name:"private.toml"
+          (declaration ~id:"private-save" ~value:"second-owner" ())))))
+
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in
   let created = save config (request ~mode:"create" ~file_name:"observer.toml" original) in
@@ -146,10 +305,11 @@ let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun
   check bool "Keeper gets a real failed outcome" false (Tool_result.is_success conflict);
   let details = Tool_result.data conflict in
   check string "typed conflict survives tool boundary" "revision_conflict" (text "code" details);
-  check string "current raw document accompanies conflict" edited (member "current" details |> text "source_text");
+  check bool "Keeper conflict does not disclose a racing document" true
+    (member "current" details = `Null);
   let current = read config directory "observer.toml" in
   List.iter (fun args ->
-    match Runtime.save_declaration ~config args with
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args with
     | Error error -> check bool "invalid candidate is a typed rejection" true (error.code=Editor.Invalid_declaration)
     | Ok _ -> fail "invalid candidate was written")
     [request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"observer.toml" "id = [";
@@ -199,7 +359,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   Fun.protect ~finally:(fun () -> Unix.rmdir unreadable) (fun () ->
     check bool "an unreadable declaration makes inventory incomplete" false
       (Lane_addon_config.load ~directory).complete;
-    match Runtime.save_declaration ~config (request ~revision:(text "source_revision" repaired)
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~revision:(text "source_revision" repaired)
       ~mode:"save" ~file_name:"broken.toml" ("# cannot inventory peers\n" ^ repaired_source)) with
     | Error error -> check bool "unreadable inventory still blocks publication" true (error.code=Editor.Io_error)
     | Ok _ -> fail "saved without a readable declaration inventory");
@@ -209,20 +369,20 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
 let test_request_paths_and_create_are_exact () = with_fixture (fun _clock config directory root _started ->
   let bytes = declaration () in
   List.iter (fun args -> check bool "invalid mode/revision combination refused" true
-    (Result.is_error (Runtime.save_declaration ~config args)))
+    (Result.is_error (Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args)))
     [request ~mode:"save" ~file_name:"a.toml" bytes;
      request ~revision:(String.make 64 'a') ~mode:"create" ~file_name:"a.toml" bytes;
      request ~mode:"create" ~file_name:"../outside.toml" bytes;
      request ~mode:"create" ~file_name:"nested/a.toml" bytes];
   ignore (save config (request ~mode:"create" ~file_name:"a.toml" bytes));
-  (match Runtime.save_declaration ~config (request ~mode:"create" ~file_name:"a.toml" bytes) with
+  (match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~mode:"create" ~file_name:"a.toml" bytes) with
    | Error error -> check bool "create never overwrites" true (error.code=Editor.Revision_conflict)
    | Ok _ -> fail "create replaced an existing declaration");
   let outside = Filename.concat root "outside.toml" in write outside bytes;
   Unix.symlink outside (Filename.concat directory "link.toml");
   List.iter (fun source_path ->
     check bool "read has no arbitrary filesystem path escape" true
-      (Result.is_error (Runtime.read_declaration ~config (`Assoc ["source_path",`String source_path]))))
+      (Result.is_error (Runtime.read_declaration ~access:Lane_addon_sources.Operator_configuration ~config (`Assoc ["source_path",`String source_path]))))
     [outside;Filename.concat directory "link.toml"])
 
 let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock config directory _root _started ->
@@ -230,8 +390,8 @@ let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock confi
   let first = save config (request ~mode:"create" ~file_name:"a.toml" bytes) in
   let revision = member "document" first |> text "source_revision" in
   let args value = request ~revision ~mode:"save" ~file_name:"a.toml" (declaration ~value ()) in
-  let a,b = Eio.Fiber.pair (fun () -> Runtime.save_declaration ~config (args "a"))
-    (fun () -> Runtime.save_declaration ~config (args "b")) in
+  let a,b = Eio.Fiber.pair (fun () -> Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (args "a"))
+    (fun () -> Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (args "b")) in
   check int "one writer owns the observed source revision" 1 (List.length (List.filter Result.is_ok [a;b]));
   check int "the other writer observes the committed conflict" 1 (List.length (List.filter Result.is_error [a;b]));
   let current = read config directory "a.toml" in
@@ -265,7 +425,14 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
 let () = run "Lane declaration editing" ["shared TOML owner",[
-  test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
+  test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
+  test_case "Keeper cannot save another owner's Fusion capture" `Quick
+      test_keeper_declaration_cannot_capture_another_fusion_owner;
+  test_case "unconfirmed shared save withdraws private ownership" `Quick
+      test_unconfirmed_shared_save_withdraws_private_owner;
+  test_case "operator reassignment replaces private document authority" `Quick
+      test_operator_reassignment_revokes_old_document_owner;
+    test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
   test_case "conflict and invalid candidate preserve active installation" `Quick test_conflicts_and_invalid_candidates_preserve_active;
   test_case "invalid source and missing package remain repairable" `Quick test_invalid_existing_source_can_be_repaired;
   test_case "mode, create-only and direct-child path boundaries" `Quick test_request_paths_and_create_are_exact;

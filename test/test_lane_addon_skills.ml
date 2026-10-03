@@ -64,7 +64,7 @@ type fixture = {
 }
 
 let backend stops : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~instance_id ~package:_ ~on_created ->
+  start = (fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
     let stopped = ref false in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;
@@ -76,7 +76,7 @@ let backend stops : Lane.For_testing.backend = {
     on_created connection;
     Ok connection);
   image_ready = (fun ~package:_ -> Ok ());
-  acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ());
 }
 

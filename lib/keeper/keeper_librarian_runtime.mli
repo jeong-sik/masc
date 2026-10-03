@@ -119,8 +119,10 @@ val run_best_effort
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
   -> ?on_cli_input_limit:(Keeper_lane_cli_oneshot.input_capacity -> unit)
-       (** The character limit a CLI slot reported while refusing, for
-           {!fit_continuity}. An API slot's refusal reports none. *)
+       (** The largest typed character limit reported by any refusing CLI slot,
+           with that slot's runtime ID, for {!fit_continuity}. Keeping the
+           most permissive observed boundary lets at least one measured CLI
+           take the fitted input. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
   -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
        (** [served_by] is the slot whose answer committed. *)

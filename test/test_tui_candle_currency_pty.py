@@ -20,6 +20,8 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render_schedule.ml",
@@ -62,7 +64,48 @@ def await_screen(process, fd, output, predicate, description):
 
 
 def balance_contains(text: bytes, value: bytes) -> bool:
-    return any(b"Candle balance:" in line and value in line for line in text.splitlines())
+    # Long values occupy rows below the label. Read only this field's
+    # contiguous right-pane rows, not the separate Candle details section.
+    rows = text.decode("utf-8", "replace").splitlines()
+    label = "Candle balance:"
+    for index, row in enumerate(rows):
+        if label not in row:
+            continue
+        column = row.index(label)
+        parts = [row[column + len(label):].strip()]
+        for continuation in rows[index + 1:]:
+            part = continuation[column:].strip()
+            if not part:
+                break
+            parts.append(part)
+        return " ".join(" ".join(part.split()) for part in parts if part) == value.decode("ascii")
+    return False
+
+
+def name_contains(text: bytes, name: bytes) -> bool:
+    return any(line.split(b"Name:", 1)[1].strip() == name
+               for line in text.splitlines() if b"Name:" in line)
+
+
+def help_candle_diagnostic(text: bytes, expected: str) -> bool:
+    # Help has two columns. Read the diagnostic's consecutive left-column
+    # rows, excluding Dashboard help on the right of the column boundary.
+    rows = text.decode("utf-8", "replace").splitlines()
+    boundary = next((row.index("◆ Dashboard") for row in rows
+                     if "◆ Dashboard" in row), None)
+    if boundary is None:
+        return False
+    left = [row[:boundary].strip(" │") for row in rows]
+    for index, row in enumerate(left):
+        if row != "Candle details":
+            continue
+        parts = []
+        for continuation in left[index + 1:]:
+            if not continuation:
+                break
+            parts.append(continuation)
+        return " ".join(" ".join(part.split()) for part in parts) == expected
+    return False
 
 
 class CurrencyRoster:
@@ -77,6 +120,7 @@ class CurrencyRoster:
         payload["candle"] = dict(READY)
         for row in payload["keepers"]:
             row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+            row["candle_account_revision"] = "a" * 64
         if phase == "disabled":
             payload["candle"] = {"status": "disabled", "reason": "ledger deliberately unavailable"}
             for row in payload["keepers"]:
@@ -89,6 +133,7 @@ class CurrencyRoster:
             payload["candle"] = {"status": "off"}
             for row in payload["keepers"]:
                 row["candle_balance_milli"] = None
+                row["candle_account_revision"] = None
         elif phase != "ready":
             raise AssertionError(f"unknown fixture phase {phase}")
         with self.lock:
@@ -120,6 +165,8 @@ def run(binary: str, phase: str, captures: Path | None):
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
             h.resize_and_wait(process, fd, output, rows=38, columns=120,
                               needle=SUMMARY[0], final_cursor=b"\x1b[?25l")
+            for line in SUMMARY:
+                assert screen(output).count(line) == 1, "Home duplicated a Candle summary row"
             capture(output, "ready-overview")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
@@ -144,12 +191,18 @@ def run(binary: str, phase: str, captures: Path | None):
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
-            balance_status = b"disabled:" if phase == "disabled" else b"unavailable:"
+            balance_status = {
+                "disabled": b"disabled: ledger deliberately unavailable",
+                "malformed-supply": (b"unavailable: Candle observation.issued_milli: "
+                                     b"Candle amount must be a canonical nonnegative decimal string"),
+                "malformed-balance": (b"unavailable: keepers[0]: "
+                                      b"Candle amount must be a canonical nonnegative decimal string"),
+            }
             await_screen(process, fd, output,
-                lambda text: b"Name:" in text and b"alpha" in text and b"Paused:" in text
+                lambda text: name_contains(text, b"alpha") and b"Paused:" in text
                 and BALANCE not in text
                 and (b"Candle balance:" not in text if phase == "off"
-                     else balance_contains(text, balance_status)),
+                     else balance_contains(text, balance_status[phase])),
                 "retain Keeper identity and truthful balance after " + phase)
             capture(output, "changed-info")
 
@@ -228,6 +281,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         for row in payload["keepers"]:
             row["candle_balance_milli"] = (
                 BALANCE_MILLI if phase == "a-ready" else amount) if row["name"] == "alpha" else "0"
+            row["candle_account_revision"] = "a" * 64
         if held:
             held_started.set()
             if not release_held.wait(timeout=30):
@@ -269,7 +323,15 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         os.write(fd, b"r")
         seen("identity-error", lambda text: b"MASC Dashboard" in text and no_currency(text))
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        help_frame = screen(output)
+        if captures is not None:
+            (captures / "authority-identity-error-help.txt").write_bytes(help_frame)
+            (captures / "authority-identity-error-help.pty").write_bytes(output)
+        # Unavailable retains its diagnostic in Help without restoring amounts.
+        assert no_currency(help_frame), help_frame
+        assert help_candle_diagnostic(help_frame,
+            "Candle unavailable: live keeper status unreadable: "
+            "Server workspace identity is unavailable"), help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")
@@ -277,7 +339,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         publish("a-ready")
         os.write(fd, b"r")
         seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
-        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
         # Activity asks for no roster. Entering Dashboard therefore launches
         # a scoped roster request; its A response is frozen before the switch.
         with lock:
@@ -302,7 +364,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             publish("a-ready")
             os.write(fd, b"r")
             seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
-            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             held_started.clear()
             release_held.clear()
             with lock:
@@ -376,6 +438,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             roster_payload["candle"] = dict(READY)
             for row in roster_payload["keepers"]:
                 row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+                row["candle_account_revision"] = "a" * 64
         if phase != "error":
             fixtures[ROSTER_PATH] = (200, roster_payload)
 
@@ -435,6 +498,41 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
 
 
+def currency_is_scoped_to_workspace_usage(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixture = fixtures[ROSTER_PATH]
+    assert isinstance(fixture, tuple)
+    status, roster = fixture
+    assert status == 200 and isinstance(roster, dict)
+    roster["candle"] = dict(READY)
+    for keeper in roster["keepers"]:
+        keeper["candle_balance_milli"] = BALANCE_MILLI
+        keeper["candle_account_revision"] = "a" * 64
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+        await_screen(process, fd, output,
+                     lambda text: balance_contains(text, BALANCE), "personal balance in Info")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Timestamps")
+        assert not any(line in screen(output) for line in SUMMARY), "workspace supply leaked into personal Info"
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b":go Usage\r", b"MASC Usage")
+        h.send_and_wait(process, fd, output, b"v", b"Trend")
+        h.send_and_wait(process, fd, output, b"v", "Candle · workspace supply".encode())
+        await_screen(process, fd, output,
+                     lambda text: all(line in text for line in SUMMARY), "workspace supply in Usage")
+        assert b"Transport \xc2\xb7 queue pressure" not in screen(output), "transport telemetry leaked into keeper usage"
+        h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Queue pressure:")
+        assert b"Queue pressure: steady" in screen(output), "transport telemetry lost its reading"
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary, description="personal balances and workspace supply have separate screens",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=24)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -448,6 +546,7 @@ if __name__ == "__main__":
         }, indent=2) + "\n")
     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
         run(binary, phase, captures)
+    currency_is_scoped_to_workspace_usage(binary)
     currency_follows_workspace_authority(binary, captures)
     short_overview_keeps_its_baseline(binary)
-    print("Candle currency TUI: PASS (9 real PTY scenarios)")
+    print("Candle currency TUI: PASS (10 real PTY scenarios)")

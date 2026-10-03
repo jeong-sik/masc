@@ -4,24 +4,24 @@ module Look = Keeper_portrait_look
 
 type band_size = { rows : int; cols : int }
 
-(* The smallest box each display shows a portrait's face in, judged by
-   rendering Keepers at 16, 24, 32 and 48 px. Placed pixels are scaled by
-   the terminal, and eight rows is a 160 px picture on a 20 px cell. A
-   mosaic draws a pixel per cell across and two per row: at 16 px a candle
-   is its colours alone, and its eyes, mouth and glasses show from 24 px,
-   twelve rows by 24 cells. *)
-let pixel_band = { rows = 8; cols = 16 }
-let mosaic_band = { rows = 12; cols = 24 }
-
-let band_size = function
-  | View.Pixels _ -> Some pixel_band
-  | View.Mosaic -> Some mosaic_band
+(* Info and conversation headers use an icon. Only Items, where the outfit
+   is the subject being inspected, uses the larger preview band. *)
+let preview_band_size = function
+  | View.Pixels _ -> Some { rows = 8; cols = 16 }
+  | View.Mosaic -> Some { rows = 12; cols = 24 }
   | View.No_picture -> None
 
-(* Rows the facts keep below the portrait. In the PTY harness the detail has
-   23 content rows on a 30-row terminal and 17 on a 24-row one, so a mosaic
-   portrait (20) shows on the first and gives every row to facts on the
-   second; placed pixels (16) show on both. *)
+let band_size = function
+  | View.Pixels { cell_width; cell_height } when cell_width > 0 && cell_height > 0 ->
+      let rows = View.min_pixel_rows in
+      Some { rows; cols = (rows * cell_height + cell_width - 1) / cell_width }
+  | View.Pixels _ -> None
+  | View.Mosaic ->
+      let cols = Draw.min_size in
+      Some { rows = cols / 2; cols }
+  | View.No_picture -> None
+
+(* Leave room for operational diagnostics below the identity/work/context header. *)
 let rows_kept_for_facts = 8
 let min_content_rows size = size.rows + rows_kept_for_facts
 
@@ -39,7 +39,9 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
    cache is about 3 MB -- and holds a roster walked end to end. *)
 let cache_capacity = 32
 
-type entry = { name : string; equipment_key : string; edge : int; compact : bool; picture : Draw.image }
+type drawing = Full | Compact | Icon
+
+type entry = { name : string; equipment_key : string; edge : int; drawing : drawing; picture : Draw.image }
 
 (* Newest first. *)
 type cache = { mutable entries : entry list }
@@ -47,12 +49,12 @@ type cache = { mutable entries : entry list }
 let cache () = { entries = [] }
 let cached c = List.length c.entries
 
-let image ?(compact = false) c ~name ~equipment size =
+let cached_image drawing c ~name ~equipment size =
   let equipment_key = Keeper_portrait_equipment.key equipment in
   let edge = Draw.int_of_size size in
   let same entry =
     String.equal entry.name name && String.equal entry.equipment_key equipment_key
-    && entry.edge = edge && Bool.equal entry.compact compact
+    && entry.edge = edge && entry.drawing = drawing
   in
   let rest = List.filter (fun entry -> not (same entry)) c.entries in
   let entry =
@@ -64,16 +66,23 @@ let image ?(compact = false) c ~name ~equipment size =
           (* The compact silhouette draws only the body and its dish. Keep
              that geometry where it is complete; other slots need the full
              drawing rather than silently losing their observed equipment. *)
-          match compact, equipment.Look.face, equipment.Look.neck,
+          match drawing, equipment.Look.face, equipment.Look.neck,
                 equipment.Look.head, equipment.Look.hand with
-          | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
+          | Compact, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
               Draw.render_compact_posed body equipment Draw.still size
-          | _ -> Draw.render body equipment size
+          | Icon, _, _, _, _ -> Draw.render_icon body equipment size
+          | Full, _, _, _, _ | Compact, _, _, _, _ -> Draw.render body equipment size
         in
-        { name; equipment_key; edge; compact; picture }
+        { name; equipment_key; edge; drawing; picture }
   in
   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
   entry.picture
+
+let image ?(compact = false) c ~name ~equipment size =
+  cached_image (if compact then Compact else Full) c ~name ~equipment size
+
+let icon_image c ~name ~equipment size =
+  cached_image Icon c ~name ~equipment size
 
 type band = {
   display : View.display;
@@ -90,10 +99,7 @@ let band c ~display ~project ~name ~equipment ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let compact =
-               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
-             in
-             let image = image ~compact c ~name ~equipment box.View.size in
+             let image = icon_image c ~name ~equipment box.View.size in
              { display; box; image; lines = View.lines ~project display box image })
 
 let beside band facts =
@@ -128,13 +134,16 @@ let shown ~name ~equipment ~content_rows ~content_cols =
 
 let preview ~name ~equipment ~content_rows ~content_cols =
   let display = View.current_display () in
-  match band_size display with
+  match preview_band_size display with
   | None -> None
   | Some size when content_rows < size.rows + 2 || content_cols < String.length indent + size.cols + 2 ->
       None
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let picture = image session_cache ~name ~equipment box.View.size in
+             let compact =
+               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
+             in
+             let picture = image ~compact session_cache ~name ~equipment box.View.size in
              { display; box; image = picture
              ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

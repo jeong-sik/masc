@@ -6,14 +6,43 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
-val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
+val register_sampling_factory :
+  (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
+    package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
+    (Lane_addon_sampling.t, string) result) -> unit
+(** Server-owned model boundary, registered before configuration maintenance.
+    Construction must perform no I/O, credential resolution, provider call or
+    store write: it validates the exact instance, package, binding and host route
+    and returns a closure. It is called before the entry is persisted with the
+    root switch; that validation closure is discarded. Worker startup constructs
+    its actual callback again with the worker lifetime switch. Disabled packages
+    do not request a callback. Construction refuses stores outside the registered
+    workspace. Invocation must retain model requests before invoking a provider. *)
+type fleet_backend = {
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access ->
+    (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config ->
+    sender_authority:Lane_addon_broadcast_delivery.sender_authority ->
+    delivery:Workspace_broadcast.broadcast_delivery -> recipient:string -> (unit,string) result;
+}
+val register_fleet_backend : fleet_backend -> unit
+val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
+val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+val dispatch : ?caller:string -> ?access:Lane_addon_sources.access ->
+  config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-(** No I/O and no package callback. Runs on the root-switch owner domain: a
-    caller on another domain (the HTTP serving domain, a pool worker) is
-    carried there and waits until the hint is recorded. Only sources
-    interested in the typed activity receive a capture hint. Repeated hints
-    coalesce; explicit observations take precedence over refresh hints. *)
+(** [caller] is provenance. An omitted [access] is [Unauthenticated]. *)
 val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.activity -> unit
+val notify_fusion_run : run_id:string -> unit
+(** Capture hints for exact-run bindings against the process-wide Fusion registry.
+    No I/O or package callback; work is carried to the owner domain. *)
+val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
+(** Pure read authorization against one authoritative full binding snapshot.
+    Explicit durable visibility remains required for current records. The exact
+    published v0.48.0 envelope is readable only after its complete retained
+    producer graph proves shared visibility. Cycles, absent or ambiguous
+    incarnations and private dependencies fail closed. The supplied access is
+    host-owned; no request field can set it. No stored bytes are changed. *)
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {
@@ -35,10 +64,12 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
-val read_declaration : config:Workspace.config -> Yojson.Safe.t ->
+val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
-val save_declaration : config:Workspace.config -> Yojson.Safe.t ->
+val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
+(** Declaration reads and writes use the same explicit authority boundary as
+    [dispatch]; an omitted [access] grants no private authority. *)
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
     its receipt never claims that a worker has already applied the change. *)
@@ -57,9 +88,9 @@ module For_testing : sig
     container_id : string;
   }
   type backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
+    start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
-    acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+    acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
@@ -72,5 +103,14 @@ module For_testing : sig
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Fiber-local persistence replacement captured before filesystem offload.
       Allows the existing strict writer to inject a real post-rename failure. *)
+  val with_declaration_writer :
+    (directory:string -> Lane_addon_declaration.write_request ->
+      (Lane_addon_declaration.receipt, Lane_addon_declaration.error) result) ->
+    (unit -> 'a) -> 'a
+  val with_observation_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> seq:int ->
+      sources:Yojson.Safe.t -> Lane_addon_types.output ->
+      (unit, Lane_addon_store.observation_write_error) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local staged publication injection captured before offload. *)
   val reset : unit -> unit
 end

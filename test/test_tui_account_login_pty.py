@@ -195,7 +195,7 @@ def reopen_existing_without_login(binary):
     fixtures["/api/v1/setup/models"] = h.RequestHttpResponse(models)
 
     def interact(process, fd, _slave, output, _base_path):
-        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         account_frame = h.send_and_wait(
@@ -204,7 +204,7 @@ def reopen_existing_without_login(binary):
         h.send_and_wait(process, fd, output, b"j", b"> Codex account A")
         frame = h.send_and_wait(process, fd, output, b"\r", b"New account model")
         plain = h.unwrapped(h.screen_text(frame))
-        assert b"Bound model A" not in plain and b"Bound model B" not in plain, "a bound model was offered again"
+        assert "[연결됨] Bound model A".encode() in plain and "[연결됨] Bound model B".encode() in plain, "connected models were hidden"
         assert b"[x] New account model" in plain, "the remaining model was not preselected"
         assert not any(path == LOGIN for path, _ in requests), "opening an existing account started login"
         leave_login_and_arm_quit(process, fd, output)

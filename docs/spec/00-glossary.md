@@ -1392,6 +1392,9 @@ status: reference
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
   최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
+  대기 작업이 있으면 durable 이력 처리와 continuity 따라잡기는 커밋한 단위 뒤에서
+  반복을 멈춰 다음 단계와 대기 작업에 실행 기회를 준다. 읽은 위치는 저장되어 다음
+  작업이 이어 읽는다. `yielded_to_waiting_unit`은 처리 완료나 실패를 뜻하지 않는다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
 
 **Composition**
@@ -1408,7 +1411,7 @@ status: reference
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 **Identity Row State (Identity 행 상태)**
-: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_types.identity_row_state`).
+: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_identity_model.identity_row_state`).
   `Identity_not_attached`(선언이 없거나 도구 목록이 `None` — 한 번도 붙지 않음)·
   `Identity_attached_without_tools`(붙었으나 제공하는 도구가 빈 목록)·
   `Identity_switch_unreadable`(스위치 저장소를 읽지 못함)·`Identity_switched_off`(운영자가
@@ -1431,7 +1434,7 @@ status: reference
 
 **Connector Connection (커넥터 연결)**
 : Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
-  (`Masc.Tui_decode.connector_connection`) — `Connector_connected`·
+  (`Masc.Tui_decode_connectors.connector_connection`) — `Connector_connected`·
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
   `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
   `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
@@ -1444,7 +1447,7 @@ status: reference
   `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
   번만 그린다.
   → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
-  [Tui_decode.connector_connection](../../lib/tui_decode.mli)
+  [Tui_decode_connectors.connector_connection](../../lib/tui_decode_connectors.mli)
 
 ## Collaboration State
 
@@ -1569,7 +1572,7 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 8종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    기록되는 사건은 9종(`HalfLifeSet`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
     잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
@@ -1581,15 +1584,16 @@ status: reference
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
   - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
-    필수 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
-    빈 파일이나 `[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
+    필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
+    빈 파일이나 `half_life`·`[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매 사실을 재생한 값이며 시간 감쇠를 적용하지 않고,
-    반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
-    원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
-    유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
+    잔액(`Candle_balance.of_events`)은 기록된 `HalfLifeSet` 경계를 따라 정수 연산으로
+    지수 감쇠한다. `"off"`는 감쇠를 끄며, 새 설정은 권한 있는 변경 경로가 정책 사건을
+    덧붙인 시점부터 적용된다. 읽기 전용 관측은 정책을 발행하지 않는다.
+    감쇠량과 구매 차감은 소각량에 반영하고 발행·소각·유통량을 투영한다.
+    원장의 과거 사실과 아이템 소유권은 지워지지 않으며 Task·Goal·Board 상태도 만료시키지 않는다.
   → [Candle_event](../../lib/candle/candle_event.mli) ·
   [Candle_balance](../../lib/candle/candle_balance.mli) ·
   [Candle_config](../../lib/candle_config/candle_config.mli) ·

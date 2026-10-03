@@ -49,15 +49,16 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
 ;;
 
 let goal_ids events =
-  List.map
+  List.filter_map
     (fun (event : E.t) ->
        match event.body with
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
        | E.Unattributed { goal_id; _ }
-       | E.Payout_failed { goal_id; _ } -> goal_id
-       | E.Paid p -> p.identity.goal_id
+       | E.Payout_failed { goal_id; _ } -> Some goal_id
+       | E.Paid p -> Some p.identity.goal_id
+       | E.Half_life_set _ -> None
        | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
@@ -130,19 +131,53 @@ let payment_of_event (row : E.t) =
   match row.body with
   | E.Paid payment -> payment
   | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-  | E.Payout_failed _ | E.Purchased _ | E.Equipped _ ->
+  | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ ->
     Alcotest.fail "expected a Paid receipt"
 ;;
 
 let balance_of_view view =
-  match Candle_balance.of_events (Candle_ledger.events view) with
+  match Candle_balance.of_events ~at:(at "2026-09-30T00:00:00Z") (Candle_ledger.events view) with
   | Ok balance -> balance
   | Error error -> Alcotest.fail (Candle_balance.error_to_string error)
 ;;
 
+(* A receipt remains tied to the frozen contributing tasks, even when its
+   historical arithmetic differs from the current append formula. *)
+let payment_prerequisites (row : E.t) =
+  let payment = payment_of_event row in
+  let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
+  let task_keepers = List.map2
+    (fun (relation : Candle_appraisal.task_relation) (allocation : Candle_payment.allocation) ->
+      relation.task_id, allocation.keeper) payment.relations payment.allocations in
+  let ids = List.map fst task_keepers in
+  [ { E.at = row.at; body = E.Snapshot {
+        goal_id; request_id; verification_run_id; criterion_revision = "receipt-fixture";
+        passed_at = row.at; goal_created_at = at "2026-09-28T00:00:00Z";
+        due_date = None; title = "Recorded payout"; metric = None; target_value = None;
+        linked_task_ids = ids } }
+  ; { E.at = row.at; body = E.Payout_owed {
+        goal_id; request_id; verification_run_id; passed_at = row.at; confirmed_at = row.at } }
+  ; { E.at = row.at; body = E.Candidates {
+        goal_id; request_id; verification_run_id;
+        tasks = List.map (fun (id, keeper) -> id, E.Found {
+          title = id; assignee = Some keeper; status = E.Done {completed_at = row.at} }) task_keepers;
+        candidate_task_ids = ids; candidate_keepers = List.map snd task_keepers;
+        candidate_task_keepers = List.map (fun (id, keeper) -> id, Some keeper) task_keepers } }
+  ]
+;;
+
+let event_lines rows =
+  String.concat "" (List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") rows)
+;;
+
 let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   with_base_path @@ fun base_path ->
-  let bytes = stored_rounded_payment ^ "\n" ^ stored_tied_payment ^ "\n" in
+  let receipts = List.map (fun line -> ok_or_fail (E.of_line line))
+      [stored_rounded_payment; stored_tied_payment] in
+  let policy : E.t = {at = at "2026-09-29T06:00:00Z"; body = E.Half_life_set Candle_decay.Off} in
+  let bytes = event_lines [policy] ^ String.concat "" (List.map2
+    (fun row line -> event_lines (payment_prerequisites row) ^ line ^ "\n")
+    receipts [stored_rounded_payment; stored_tied_payment]) in
   append_raw base_path bytes;
   let view = read_ok base_path in
   let stored = Candle_ledger.events view in
@@ -173,8 +208,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
        | Ok () -> Alcotest.fail "old arithmetic was accepted for a new payment");
       Alcotest.(check string) "read and refused append never rewrite history"
         bytes (file_text base_path))
-    stored;
-  let rounded = payment_of_event (List.hd stored) in
+    receipts;
+  let rounded = payment_of_event (List.hd receipts) in
   let current =
     Candle_payment.make
       ~identity:{ rounded.identity with goal_id = "new-current" }
@@ -189,7 +224,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   in
   Alcotest.(check (list int)) "new payment still uses today's floor rule"
     [1400] (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) current.allocations);
-  update_ok base_path (fun _ -> Ok ([{ E.at = at "2026-09-30T00:00:00Z"; body = E.Paid current }], ()));
+  let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
+  update_ok base_path (fun _ -> Ok (payment_prerequisites current_row @ [current_row], ()));
   Alcotest.(check bool) "valid new payment appends after unchanged history" true
     (String.starts_with ~prefix:bytes (file_text base_path));
   let after = balance_of_view (read_ok base_path) in
@@ -485,11 +521,82 @@ let test_a_lock_taken_between_the_read_and_the_append_is_reported () =
   Alcotest.(check string) "the file is untouched" before (file_text base_path)
 ;;
 
+(* The exact Item HTTP seed must replay through the production ledger and
+   wallet, not merely decode as JSON. It represents synthetic spending credit. *)
+let test_item_http_seed_replays_current_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture policy is absent"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  let bytes = fixture "restart-credit.jsonl" ^ fixture "paid-credit.jsonl" in
+  append_raw base_path bytes;
+  let view = read_ok base_path in
+  let events = Candle_ledger.events view in
+  let balance = balance_of_view view in
+  Alcotest.(check int) "free-purchase fixture retains 100 milli" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  Alcotest.(check int) "paid-purchase fixture retains 700 milli" 700
+    (Candle_balance.balance balance ~keeper:"item-paid-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+      Alcotest.(check int) "synthetic payout amount matches fixture policy"
+        (Candle_config.grade_amount_milli policy.payout payment.grade) payment.total_milli
+    | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> ()) events;
+  (match Candle_ledger.recover_at_start ~base_path with
+   | Ok recovered -> Alcotest.(check bool) "restart retains synthetic provenance"
+       true (Candle_ledger.events recovered = events)
+   | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error));
+  Alcotest.(check string) "replay leaves seed byte-identical" bytes (file_text base_path)
+;;
+
+let test_item_acceptance_seed_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture must enable Candle"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  Alcotest.(check bool) "fixture balances do not decay" true
+    (policy.half_life = Candle_decay.Off);
+  let seed = fixture "restart-credit.jsonl" in
+  append_raw base_path seed;
+  let events = Candle_ledger.events (read_ok base_path) in
+  let balance = Candle_balance.of_events ~at:(at "2026-10-01T00:00:00Z") events
+      |> Result.map_error Candle_balance.error_to_string |> ok_or_fail in
+  Alcotest.(check int) "free-purchase Keeper seed" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+        Alcotest.(check int) "synthetic payout matches the fixture policy"
+          (Candle_config.grade_amount_milli policy.payout payment.grade)
+          payment.total_milli
+    | _ -> ()) events;
+  (* Seed receipts alone must not bypass the same production admission rules. *)
+  let incomplete_base = Filename.concat base_path "incomplete" in
+  Unix.mkdir incomplete_base 0o700;
+  let payments = String.split_on_char '\n' seed |> List.filter (fun line ->
+      line <> "" && Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "kind") = `String "paid") in
+  append_raw incomplete_base (String.concat "\n" payments ^ "\n");
+  match Candle_ledger.read ~base_path:incomplete_base with
+  | Error (Candle_ledger.Row_rejected _) -> ()
+  | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error)
+  | Ok _ -> Alcotest.fail "synthetic Paid rows were accepted without payout provenance"
+;;
+
 let () =
   Alcotest.run
     "candle_ledger"
     [ ( "read"
-      , [ Alcotest.test_case "a missing file is an empty ledger" `Quick
+      , [ Alcotest.test_case "Item HTTP seed replays current payout and policy contract" `Quick
+            test_item_http_seed_replays_current_contract
+        ; Alcotest.test_case "Item acceptance seeds satisfy current Candle contract" `Quick
+            test_item_acceptance_seed_contract
+        ; Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger
         ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick
             test_stored_payments_replay_but_new_appends_require_current_arithmetic

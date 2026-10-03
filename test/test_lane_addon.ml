@@ -4,8 +4,11 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -25,6 +28,7 @@ let rec remove_tree path =
   end else Sys.remove path
 
 type fake = {
+  bindings : (string, Yojson.Safe.t) Hashtbl.t;
   calls : (string, int) Hashtbl.t;
   stops : (string, int) Hashtbl.t;
   modes : (string, string) Hashtbl.t;
@@ -40,13 +44,14 @@ let fake_output : Types.output = {
 }
 
 let make_backend ?observe_step () =
-  let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
+  let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
+      Hashtbl.add state.bindings instance_id binding;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
         action_schema = (fun () -> None);
@@ -76,7 +81,7 @@ let make_backend ?observe_step () =
         else Ok connection
       end);
     image_ready = (fun ~package:_ -> Ok ());
-    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       match container_id with
@@ -127,6 +132,8 @@ let with_fixture ?acquire ?observe_step f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.External_sender,[]));
+                project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
@@ -184,6 +191,9 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       |> text "id" in
     let args = ["instance_id", `String id; "row_ids", `List [`String selected]] in
     let frozen = unwrap (dispatch config Runtime.Evidence args) in
+    check string "preservation receipt identifies its worker" id (text "instance_id" frozen);
+    check bool "preservation receipt identifies its exact row selection" true
+      (member "row_ids" frozen = `List [`String selected]);
     let evidence = member "evidence" frozen in
     let bytes = In_channel.with_open_bin (text "path" evidence) In_channel.input_all in
     check string "frozen bytes match evidence digest" (text "sha256" evidence) (Store.digest bytes);
@@ -199,6 +209,8 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       (`Assoc (("keeper_name", `String "keeper") :: args))) in
     check string "unavailable delivery stays explicit" "failed"
       (unavailable |> member "delivery" |> text "status");
+    check string "failed delivery still identifies the requested Keeper" "keeper"
+      (unavailable |> member "delivery" |> text "keeper_name");
     check bool "failed delivery retains evidence" true
       (Sys.file_exists (unavailable |> member "evidence" |> text "path"));
     let delivered = ref [] in
@@ -208,6 +220,11 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     let accepted = unwrap (Runtime.dispatch ~caller:"operator" ~config ~operation:Runtime.Evidence
       (`Assoc (("keeper_name", `String "keeper") :: args))) in
     check Alcotest.int "one explicitly requested delivery" 1 (List.length !delivered);
+    check string "accepted delivery identifies its actual destination" "keeper"
+      (accepted |> member "delivery" |> text "keeper_name");
+    check bool "published acceptance preserves the selected row coordinates" true
+      (member "instance_id" accepted = member "instance_id" frozen
+       && member "row_ids" accepted = member "row_ids" frozen);
     check string "acceptance keeps deferred receipt" "deferred"
       (accepted |> member "delivery" |> member "receipt" |> text "status");
     let sender, keeper, prompt = List.hd !delivered in
@@ -246,7 +263,8 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
 
 let test_request_refusals_preserve_runtime_failure_distinction () =
   with_fixture (fun _env _sw config dir _state ->
-    let dispatch operation fields = Lane_addon_runtime.dispatch ~config ~operation (`Assoc fields) in
+    let dispatch operation fields = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields) in
     let rejected label = function
       | Error (Lane_addon_runtime.Request_rejected _) -> ()
       | Error (Runtime_failed detail) -> failf "%s became runtime failure: %s" label detail
@@ -265,6 +283,7 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
       "expected_incarnation", `String "absent"; "request_id", `String "request";
       "action", `Assoc []] in
     rejected "missing action target" (Lane_addon_runtime.dispatch ~caller:"fixture-caller"
+      ~access:(Lane_addon_sources.Keeper "fixture-caller")
       ~config ~operation:Runtime.Act (`Assoc action_fields));
     rejected "invalid slice timestamp" (dispatch Runtime.Slice ["since", `String "bad"]);
     rejected "reversed slice range" (dispatch Runtime.Slice ["since", `Int 2; "until", `Int 1]);
@@ -278,6 +297,57 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
     runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
     runtime_failed (dispatch Runtime.Slice []))
 
+let test_invalid_retained_visibility_is_isolated () = with_fixture (fun env _ config dir _ ->
+  let id = attach config dir "good" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let current = instance config id |> Yojson.Safe.Util.to_assoc in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  List.iteri (fun index visibility ->
+    let retained_id = "unreadable-" ^ string_of_int index in
+    let fields = ("instance_id",`String retained_id) ::
+      List.remove_assoc "instance_id" (List.remove_assoc "visibility" current) in
+    let fields = match visibility with None -> fields | Some value -> ("visibility",value)::fields in
+    let fields = ("configuration",`Assoc ["id",`String ("invalid-producer-" ^ string_of_int index);
+      "source_path",`String (Filename.concat dir "invalid.toml");"revision",`String "fixture"])
+      :: List.remove_assoc "configuration" fields in
+    unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields)))
+    [None; Some (`Assoc ["kind",`String "unknown"])];
+  let consumer_id = "released-invalid-consumer" in
+  let consumer = current
+    |> List.filter (fun (key, _) -> not (List.mem key
+      ["runtime_presence";"visibility";"source_access";"instance_id";"incarnation";"binding"]))
+    |> List.map (function
+      | "package", `Assoc fields -> "package", `Assoc (List.remove_assoc "model_access" fields)
+      | field -> field) in
+  let consumer = `Assoc (("instance_id",`String consumer_id)::("incarnation",`String consumer_id)::
+    ("binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "upstream";
+      "kind",`String "lane_output";"installation_id",`String "invalid-producer-1";
+      "selection",`String "latest_completed"]]])::consumer) in
+  let valid_producer = match consumer with
+    | `Assoc fields -> `Assoc (("instance_id",`String "released-producer")::
+        ("incarnation",`String "released-producer")::("binding",`Assoc ["sources",`List []])::
+        ("configuration",`Assoc ["id",`String "invalid-producer-1";
+          "source_path",`String (Filename.concat dir "producer.toml");"revision",`String "fixture"])::
+        List.filter (fun (key, _) -> not (List.mem key
+          ["instance_id";"incarnation";"binding";"configuration"])) fields)
+    | _ -> assert false in
+  check bool "released consumer shape is valid with a proved shared producer" true
+    (Result.is_ok (Runtime.authorize_retained_read ~bindings:[valid_producer;consumer]
+      ~access:Lane_addon_sources.Unauthenticated consumer));
+  unwrap (Store.save_binding store ~instance_id:consumer_id consumer);
+  check Alcotest.int "unreadable retained policy cannot hide a valid live installation" 1
+    (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "unreadable record still cannot be requested directly" true
+    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+      (`Assoc ["instance_id",`String "unreadable-0"])));
+  check bool "omitting an invalid producer cannot authorize its released consumer" true
+    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+      (`Assoc ["instance_id",`String consumer_id])));
+  check Alcotest.int "invalid records and dependent consumer remain available for operator repair" 4
+    (Store.bindings store |> unwrap |> List.length);
+  detach config id; await_phase clock config id "detached")
+
 let test_direct_attach_validates_package_binding () =
   with_fixture (fun env _sw config dir state ->
     let path = manifest dir "binding-contract" in
@@ -285,7 +355,8 @@ let test_direct_attach_validates_package_binding () =
 [interface]
 binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
 |});
-    let attach_binding binding = Lane_addon_runtime.dispatch ~config
+    let attach_binding binding = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config
       ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;
         "run_id",`String "binding-run";"binding",`Assoc binding]) in
     List.iter (fun binding ->
@@ -303,6 +374,8 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     let id = text "instance_id" accepted in
     let clock = Eio.Stdenv.clock env in
     await clock (fun () -> Hashtbl.mem state.modes id);
+    check bool "worker startup receives the exact validated installation binding" true
+      (Hashtbl.find_opt state.bindings id=Some (`Assoc ["sources",`List [];"limit",`Int 2]));
     detach config id;
     await_phase clock config id "detached")
 
@@ -361,10 +434,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~store ~package ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->
@@ -484,7 +557,825 @@ let test_activity_from_another_domain_reaches_the_owner () =
     detach config id;
     await_phase clock config id "detached")
 
+let test_mcp_attribution_does_not_authorize_private_lane () =
+  with_fixture (fun env sw config dir _state ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    Auth.disable_auth config.base_path;
+    check bool "fixture has authentication disabled" false (Auth.is_auth_enabled config.base_path);
+    let owner = "lane-private-owner" in
+    let meta = unwrap (Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name",`String owner;"trace_id",`String "trace-lane-owner"])) in
+    let meta_path = Keeper_types_profile.keeper_meta_path config owner in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Fs_compat.save_file meta_path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta));
+    let run_id = "mcp-private-" ^ Store.digest dir in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let id = unwrap (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+          "kind",`String "fusion_run";"run_id",`String run_id]]]])) |> text "instance_id" in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let owner_view = unwrap (Runtime.dispatch ~caller:owner ~config
+      ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])) in
+    let row_id = member "rows" owner_view |> Yojson.Safe.Util.to_list
+      |> List.hd |> text "id" in
+    let state = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+    let session_id = "untrusted-lane-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () -> Client_registry_eio.unregister_mcp_session session_id)
+      (fun () ->
+        let mcp ?auth_token name fields = Mcp_server_eio.execute_tool_eio
+          ~sw ~clock ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session_id ?auth_token state ~name ~arguments:(`Assoc fields) in
+        let failed = mcp "masc_lane_observe" ["_agent_name",`String owner] in
+        check bool "first attribution-only call fails" false (Tool_result.is_success failed);
+        check bool "failed first call cached attribution" true
+          (match Client_registry_eio.get_resolved_name session_id with
+           | Some (name, false) -> String.equal name owner
+           | Some _ | None -> false);
+        List.iter (fun (name, fields) ->
+          let result = mcp name fields in
+          check bool (name ^ " cannot promote cached attribution to authority") false
+            (Tool_result.is_success result))
+          ["masc_lane_inspect", ["instance_id",`String id];
+           "masc_lane_evidence", ["instance_id",`String id;
+             "row_ids",`List [`String row_id]];
+           "masc_lane_observe", ["instance_id",`String id];
+           "masc_lane_detach", ["instance_id",`String id]];
+        let token = match Auth.create_token config.base_path ~agent_name:owner ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let owned = mcp ~auth_token:token "masc_lane_inspect" ["instance_id",`String id] in
+        check bool ("verified owner reads private lane: " ^ Tool_result.message owned) true
+          (Tool_result.is_success owned);
+        let foreign = match Auth.create_token config.base_path ~agent_name:"foreign-lane-reader" ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let denied = mcp ~auth_token:foreign "masc_lane_inspect" ["instance_id",`String id] in
+        check bool "foreign bearer cannot borrow cached owner" false (Tool_result.is_success denied);
+        detach config id;
+        await_phase clock config id "detached"))
+
+let test_fusion_status_hint_wakes_only_its_bound_run () =
+  with_fixture (fun env _sw config dir _state ->
+    let watcher run_id =
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:"fixture-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      unwrap (Runtime.dispatch ~caller:"fixture-owner" ~config ~operation:Runtime.Attach (`Assoc [
+        "manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc [
+          "source_id",`String "fusion";"kind",`String "fusion_run";
+          "run_id",`String run_id]]]])) |> text "instance_id" in
+    let one = watcher "fusion-one" and two = watcher "fusion-two" in
+    let clock = Eio.Stdenv.clock env in
+    let request caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+    let inspect_owned id = unwrap (request "fixture-owner" Runtime.Inspect ["instance_id",`String id])
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+    let seq id = int "observation_seq" (inspect_owned id) in
+    await clock (fun () -> seq one=1 && seq two=1);
+    let foreign = unwrap (request "another-keeper" Runtime.Inspect []) in
+    check Alcotest.int "foreign inspect enumerates no private instances" 0
+      (member "instances" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    check Alcotest.int "foreign inspect exposes no private rows" 0
+      (member "rows" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "foreign retained slice exposes no private rows" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length);
+    let denied operation fields =
+      match Lane_addon_runtime.dispatch ~caller:"another-keeper"
+          ~access:(Lane_addon_sources.Keeper "another-keeper") ~config ~operation
+          (`Assoc (("instance_id",`String one)::fields)) with
+      | Error (Runtime.Request_rejected detail) ->
+          check string "private instance is denied before read or mutation"
+            "Lane instance is unavailable to this caller" detail
+      | Error (Runtime_failed detail) -> failf "access denial became runtime failure: %s" detail
+      | Ok _ -> fail "another Keeper read or mutated private evidence" in
+    List.iter (fun (operation,fields) -> denied operation fields)
+      [Runtime.Evidence,["row_ids",`List []]; Runtime.Observe,[]; Runtime.Detach,[];
+       Runtime.Act,["expected_incarnation",`String one;"request_id",`String "foreign";"action",`Assoc []];
+       Runtime.Action_status,["request_id",`String "foreign"]];
+    Runtime.notify_fusion_run ~run_id:"fusion-one";
+    await clock (fun () -> seq one=2);
+    check Alcotest.int "another Fusion binding did not run" 1 (seq two);
+    List.iter (fun id -> ignore (unwrap (request "fixture-owner" Runtime.Detach ["instance_id",`String id]))) [one;two];
+    List.iter (fun id -> await clock (fun () -> phase (inspect_owned id) = "detached")) [one;two];
+    Runtime.For_testing.reset ();
+    let owner_slice = unwrap (request "fixture-owner" Runtime.Slice ["run_id",`String "world"]) in
+    check bool "owner can read durable evidence after restart" true
+      (member "rows" owner_slice |> Yojson.Safe.Util.to_list <> []);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "durable ownership still hides private rows after restart" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw config dir _state ->
+  let owner = "private-owner" and foreign = "private-reader" in
+  let run_id = "private-fusion-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let call caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+  let id = unwrap (call owner Runtime.Attach ["manifest_path",`String (manifest dir "good");
+    "run_id",`String "private-world";"binding",`Assoc ["sources",`List [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String run_id]]]])
+    |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let view = unwrap (call owner Runtime.Inspect ["instance_id",`String id]) in
+  let row_id = member "rows" view |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let unverified = Lane_addon_runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect (`Assoc [])
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check Alcotest.int "bare caller attribution never grants private access" 0
+    (member "instances" unverified |> Yojson.Safe.Util.to_list |> List.length);
+  let tool access name fields =
+    let ctx : Tool_misc.context = {config;agent_name=owner;help_schemas=[]} in
+    match Tool_misc.dispatch ~lane_access:access ctx ~name ~args:(`Assoc fields) with
+    | Some result -> result | None -> fail "Lane tool was not dispatched" in
+  let unverified_tool = tool Lane_addon_sources.Unauthenticated "masc_lane_inspect" [] in
+  check Alcotest.int "MCP claimed Keeper name does not reveal private instances" 0
+    (Tool_result.data unverified_tool |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "unverified tool cannot export private evidence" false
+    (Tool_result.is_success (tool Lane_addon_sources.Unauthenticated "masc_lane_evidence"
+      ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  check Alcotest.int "verified tool authority still sees its private instance" 1
+    (tool (Lane_addon_sources.Keeper owner) "masc_lane_inspect" [] |> Tool_result.data
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  let denied operation fields = match call foreign operation fields with
+    | Error detail -> check string "uniform exact-instance denial" "Lane instance is unavailable to this caller" detail
+    | Ok _ -> fail "foreign Keeper accessed private instance" in
+  List.iter (fun operation -> denied operation ["instance_id",`String id])
+    [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  let public = unwrap (call foreign Runtime.Inspect []) in
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
+    (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
+    (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "foreign range query excludes private observations" 0
+    (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "claimed owner with unauthenticated HTTP access is refused" true
+    (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
+      ~config ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])));
+  ignore (unwrap (call owner Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
+  await_phase clock config id "detached";
+  Runtime.For_testing.reset ();
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
+    (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  denied Runtime.Inspect ["instance_id",`String id];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  check Alcotest.int "historical inspection excludes private bindings" 0
+    (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_mcp_attributed_name_is_not_private_lane_authority () =
+  with_fixture (fun env sw config dir _state ->
+    let owner = "mcp-private-owner" and foreign = "mcp-foreign-owner" in
+    ignore (Workspace.init config ~agent_name:(Some owner));
+    Auth.disable_auth dir;
+    let register name =
+      let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+        | Ok meta -> meta | Error reason -> fail reason in
+      let path = Keeper_types_profile.keeper_meta_path config name in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta)) in
+    register owner; register foreign;
+    let anonymous_session = "lane-anonymous-" ^ Store.digest dir in
+    let owner_session = "lane-owner-" ^ Store.digest dir in
+    let foreign_session = "lane-foreign-" ^ Store.digest dir in
+    let operator_session = "lane-operator-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () ->
+      List.iter Client_registry_eio.unregister_mcp_session
+        [anonymous_session; owner_session; foreign_session; operator_session]) (fun () ->
+      check bool "fixture runs with workspace auth disabled" false
+        (Auth.is_auth_enabled dir);
+      let run_id = "mcp-private-" ^ Store.digest dir in
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      let binding = `Assoc ["sources", `List [`Assoc [
+        "source_id", `String "fusion"; "kind", `String "fusion_run";
+        "run_id", `String run_id]]] in
+      let id = unwrap (Lane_addon_runtime.dispatch ~caller:owner
+        ~access:(Lane_addon_sources.Keeper owner) ~config ~operation:Runtime.Attach
+        (`Assoc ["manifest_path", `String (manifest dir "good");
+          "run_id", `String "mcp-private-world"; "binding", binding])
+        |> Result.map_error Lane_addon_runtime.error_to_string)
+        |> text "instance_id" in
+      let clock = Eio.Stdenv.clock env in
+      await clock (fun () -> int "observation_seq" (instance config id) = 1);
+      let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let execute ?auth_token ~session ~name arguments =
+        Mcp_server_eio_execute.execute_tool_eio ~sw ~clock
+          ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session ?auth_token state ~name ~arguments in
+      let inspect ?auth_token session arguments =
+        execute ?auth_token ~session ~name:"masc_lane_inspect" arguments in
+      let empty = `Assoc [] in
+      let first = inspect anonymous_session
+        (`Assoc ["_agent_name", `String owner]) in
+      (* The MCP pre-hook removes transport markers before schema validation;
+         attribution still must not authorize private Lane data. *)
+      check bool "first attributed call can inspect shared Lane state" true
+        (Tool_result.is_success first);
+      check Alcotest.int "first attributed call exposes no private instance" 0
+        (member "instances" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "first attributed call exposes no private rows" 0
+        (member "rows" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check bool "first call cached only an attributed name" true
+        (match Client_registry_eio.get_resolved_name anonymous_session with
+         | Some (name, false) -> String.equal name owner
+         | Some _ | None -> false);
+      let anonymous = inspect anonymous_session empty in
+      check bool "cached-name follow-up can inspect shared Lane state" true
+        (Tool_result.is_success anonymous);
+      check Alcotest.int "cached attribution exposes no private instance" 0
+        (member "instances" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "cached attribution exposes no private rows" 0
+        (member "rows" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      let token name role = match Auth.create_token dir ~agent_name:name ~role with
+        | Ok (value, _) -> value | Error _ -> fail "credential fixture creation failed" in
+      let owner_token = token owner Masc_domain.Worker in
+      let foreign_token = token foreign Masc_domain.Worker in
+      let operator_token = token "lane-operator" Masc_domain.Admin in
+      check bool "credential issuance does not enable workspace auth" false
+        (Auth.is_auth_enabled dir);
+      let owned = inspect ~auth_token:owner_token owner_session empty in
+      check bool "valid Keeper credential reads its private instance" true
+        (Tool_result.is_success owned);
+      let owned_rows = member "rows" (Tool_result.data owned) |> Yojson.Safe.Util.to_list in
+      check Alcotest.int "valid owner sees its private instance" 1
+        (member "instances" (Tool_result.data owned) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "valid owner sees its private row" 1 (List.length owned_rows);
+      let row_id = text "id" (List.hd owned_rows) in
+      let anonymous_evidence = execute ~session:anonymous_session
+        ~name:"masc_lane_evidence"
+        (`Assoc ["instance_id", `String id; "row_ids", `List [`String row_id]]) in
+      check bool "cached attribution cannot preserve private evidence" false
+        (Tool_result.is_success anonymous_evidence);
+      let foreign_view = inspect ~auth_token:foreign_token foreign_session empty in
+      check bool "foreign valid Keeper can inspect shared Lane state" true
+        (Tool_result.is_success foreign_view);
+      check Alcotest.int "foreign valid Keeper cannot see another Keeper's instance" 0
+        (member "instances" (Tool_result.data foreign_view)
+         |> Yojson.Safe.Util.to_list |> List.length);
+      let operator_view = inspect ~auth_token:operator_token operator_session empty in
+      check bool "valid operator credential retains configuration authority" true
+        (Tool_result.is_success operator_view);
+      check Alcotest.int "operator sees private instance" 1
+        (member "instances" (Tool_result.data operator_view)
+         |> Yojson.Safe.Util.to_list |> List.length);
+      detach config id;
+      await_phase clock config id "detached"))
+;;
+
+let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
+  let owner = "private-broadcast-owner" in
+  ignore (Workspace.init config ~agent_name:(Some owner));
+  let run_id = "private-broadcast-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let id = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+    (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "private-world";
+      "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+        "kind",`String "fusion_run";"run_id",`String run_id]]]]) |> unwrap |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let selected = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+    (`Assoc ["instance_id",`String id]) |> unwrap |> member "rows"
+    |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "private-send"] in
+  let send caller access = Lane_addon_runtime.dispatch ~caller ~access ~config
+    ~operation:Runtime.Evidence args in
+  let original = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check string "explicit private Broadcast commits" "committed"
+    (member "delivery" original |> text "status");
+  let alias_context : Tool_misc.context =
+    {config;agent_name="bound-session-alias";help_schemas=[]} in
+  let alias_args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "verified-alias-send"] in
+  let alias_result = match Tool_misc.dispatch
+    ~lane_access:(Lane_addon_sources.Keeper owner) alias_context
+    ~name:"masc_lane_evidence" ~args:alias_args with
+    | Some result -> result | None -> fail "Lane evidence facade was not dispatched" in
+  check bool "verified Keeper alias can send as its canonical Lane owner" true
+    (Tool_result.is_success alias_result);
+  check string "alias Broadcast commits under the verified Keeper" "committed"
+    (Tool_result.data alias_result |> member "delivery" |> text "status");
+  let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let store = Store.create ~root:store_root in
+  let broadcast_id = member "delivery" original |> member "receipt" |> text "request_id" in
+  let prepared = Store.load_broadcast store ~instance_id:id ~request_id:broadcast_id |> unwrap
+    |> (function Some value -> value | None -> fail "prepared Broadcast record missing") in
+  check string "prepared operation retains authoritative exact owner" owner
+    (prepared |> member "visibility" |> text "keeper");
+  ignore (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Detach
+    (`Assoc ["instance_id",`String id]) |> unwrap);
+  await_phase clock config id "detached";
+  unwrap (Store.remove_binding store ~instance_id:id);
+  remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+  Runtime.For_testing.reset ();
+  Runtime.register_fleet_backend {
+    snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "cached private retry must retain its accepted audience");
+    project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
+  check bool "unverified claimed owner cannot retrieve cached private evidence" true
+    (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
+  check bool "foreign caller cannot retrieve cached private evidence" true
+    (Result.is_error (send "foreign" (Lane_addon_sources.Keeper "foreign")));
+  check bool "access principal cannot impersonate saved caller" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper "foreign")));
+  let missing = `Assoc (List.remove_assoc "visibility" (Yojson.Safe.Util.to_assoc prepared)) in
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id missing);
+  check bool "missing saved visibility fails closed without original binding" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper owner)));
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id prepared);
+  let recovered = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check bool "owner recovers exact committed receipt without original binding" true
+    (member "delivery" recovered = member "delivery" original);
+  check bool "owner recovers exact retained artifact" true
+    (member "keeper_artifact" recovered = member "keeper_artifact" original))
+
+let fleet_record config operation =
+  let module Ledger = Masc.Lane_addon_broadcast_delivery in
+  let ledger=Ledger.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery") in
+  let operation_id=Ledger.Request_id.of_string operation |> unwrap in
+  match Eio_unix.run_in_systhread (fun () -> Ledger.find ledger ~caller:"fixture-operator" ~operation_id) with
+  | Ok (Some receipt) -> receipt.record
+  | Ok None -> fail "Fleet intention absent"
+  | Error _ -> fail "Fleet intention lookup failed"
+
+let fleet_recipient config operation recipient =
+  List.assoc recipient (fleet_record config operation).recipients
+
+let fleet_complete config operation =
+  Masc.Lane_addon_broadcast_delivery.complete (fleet_record config operation)
+
+let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+      "broadcast",`Bool true;"request_id",`String "slow-send"] in
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, mark_released = Eio.Promise.create () in
+    let before_commit, mark_before_commit = Eio.Promise.create () in
+    let allow_commit, mark_allow_commit = Eio.Promise.create () in
+    let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+    let cancelled_waiter, mark_cancelled_waiter = Eio.Promise.create () in
+    let waiter_context, mark_waiter_context = Eio.Promise.create () in
+    let waiters = ref 0 in
+    let writes = ref 0 in
+    let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun config path json ->
+        incr writes;
+        if !writes=1 then (
+          Eio.Promise.resolve mark_before_commit ();
+          Eio.Promise.await allow_commit);
+        Workspace_utils.write_json_commit_result config path json) in
+    let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+      (fun _request_id ->
+        incr waiters;
+        if !waiters=1 then Eio.Promise.resolve mark_cancelled_waiter ()
+        else if !waiters=2 then Eio.Promise.resolve mark_retry_waiting ()) in
+    let failed = ref true and block = ref true in
+    let roster = ref ["keeper-a";"keeper-b"] in
+    let sender_authority=ref Masc.Lane_addon_broadcast_delivery.Keeper_sender in
+    let projected_authorities=ref [] in
+    let calls = ref [] and immediate_calls = ref 0 in
+    let install () = Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (!sender_authority,!roster));
+      project=(fun ~config:_ ~sender_authority ~delivery ~recipient ->
+        projected_authorities:=sender_authority::!projected_authorities;
+        calls := (recipient,delivery.Workspace_broadcast.request_id)::!calls;
+        if recipient="keeper-a" && !block then (
+          Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
+        if recipient="keeper-b" && !failed then Error "fixture recipient store unavailable" else Ok ())} in
+    install ();
+    let previous=Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _ ->
+      incr immediate_calls; Workspace_broadcast.Passive) in
+    Fun.protect ~finally:(fun () ->
+      let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+        Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      let (_ : string -> unit) =
+        Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+      if not (Eio.Promise.is_resolved allow_commit) then Eio.Promise.resolve mark_allow_commit ();
+      if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
+      let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
+      let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await before_commit;
+      let cancelled_retry = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve mark_waiter_context context;
+          send ())) in
+      Eio.Promise.await cancelled_waiter;
+      Eio.Cancel.cancel (Eio.Promise.await waiter_context) Exit;
+      (match Eio.Promise.await cancelled_retry with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok _ -> Alcotest.fail "cancelled precommit retry must propagate cancellation");
+      check bool "cancelled waiter leaves the original owner waiting" false (Eio.Promise.is_resolved first);
+      let retry = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await retry_waiting;
+      check bool "retry arrived before the authoritative row" false (Eio.Promise.is_resolved retry);
+      Eio.Promise.resolve mark_allow_commit ();
+      let original=Eio.Promise.await_exn first in
+      let precommit_replay=Eio.Promise.await_exn retry in
+      check Alcotest.int "precommit retries create one authoritative message" 1 !writes;
+      check bool "precommit retry preserves the committed receipt" true
+        (member "delivery" original=member "delivery" precommit_replay);
+      check string "durable message receipt returns before any recipient projection" "committed"
+        (member "delivery" original |> text "status");
+      check string "committed receipt transfers recovery to the durable recipient ledger" "durable_admitted"
+        (member "delivery" original |> member "receipt" |> text "fanout_state");
+      check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;
+      check Alcotest.int "publication does not inline root recipient work" 0 (List.length !calls);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      Eio.Promise.await entered;
+      await clock (fun () -> match fleet_recipient config "slow-send" "keeper-b" with
+        | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+        | Accepted | Pending None -> false);
+      ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
+      await clock (fun () -> int "observation_seq" (instance config id) = 2);
+      let replay=send () in
+      check bool "first recipient remains blocked after scheduling returns" false (Eio.Promise.is_resolved release);
+      check bool "same-key retry preserves exact committed receipt during drain" true
+        (member "delivery" original = member "delivery" replay);
+      check bool "retry preserves original artifact despite changed live metadata" true
+        (member "keeper_artifact" original = member "keeper_artifact" replay);
+      check Alcotest.int "both recipients progress independently without replay" 2 (List.length !calls);
+      check bool "ordinary Broadcast still uses its existing synchronous behavior" true
+        (Result.is_ok (Workspace_broadcast.broadcast_once config
+          ~request_id:("wmsg-" ^ String.make 32 'b') ~from_agent:"fixture-operator" ~content:"independent message"));
+      check Alcotest.int "ordinary caller still reaches existing handler" 1 !immediate_calls;
+      block:=false; Eio.Promise.resolve mark_released ();
+      await clock (fun () -> fleet_recipient config "slow-send" "keeper-a"
+        = Masc.Lane_addon_broadcast_delivery.Accepted);
+      check bool "partial recipient failure remains durably pending" true
+        (match fleet_recipient config "slow-send" "keeper-b" with
+         | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+         | Accepted | Pending None -> false);
+      let receipt=member "delivery" original |> member "receipt" in
+      let request_id=text "request_id" receipt in
+      check bool "same identity cannot replace committed content" true
+        (Result.is_error (Workspace_broadcast.broadcast_once config
+          ~request_id ~from_agent:"fixture-operator" ~content:"different content"));
+      detach config id; await_phase clock config id "detached";
+      let store_root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      unwrap (Store.remove_binding (Store.create ~root:store_root) ~instance_id:id);
+      remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+      Runtime.For_testing.reset (); sender_authority:=Masc.Lane_addon_broadcast_delivery.External_sender; roster:=["keeper-a";"keeper-b";"new-keeper"]; failed:=false; install ();
+      let recovered=send () in
+      check bool "restart reconciles receipt after original source disappears" true
+        (member "delivery" recovered = member "delivery" original);
+      check bool "restart retains original artifact" true
+        (member "keeper_artifact" recovered = member "keeper_artifact" original);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "slow-send");
+      let count recipient=List.length (List.filter (fun (name,_) -> name=recipient) !calls) in
+      check Alcotest.int "accepted recipient is not projected again after restart" 1 (count "keeper-a");
+      check Alcotest.int "failed recipient is retried once using original identity" 2 (count "keeper-b");
+      check Alcotest.int "new roster member is outside accepted audience" 0 (count "new-keeper");
+      check bool "all recipient attempts share one authoritative message identity" true
+        (List.for_all (fun (_,id) -> id=request_id) !calls);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls);
+      check bool "sender authority survives restart and registry change" true
+        (List.for_all ((=) Masc.Lane_addon_broadcast_delivery.Keeper_sender) !projected_authorities)))
+
+let test_fleet_service_isolates_blocked_recipient_and_admissions () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock=Eio.Stdenv.clock env in
+    let id=attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected=inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation=Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+        "broadcast",`Bool true;"request_id",`String operation]) |> unwrap in
+    let first_request=ref None and blocked=ref true in
+    let entered,mark_entered=Eio.Promise.create () in
+    let release,_=Eio.Promise.create () in
+    let calls=ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender,
+        ["keeper-a";"keeper-b"]));
+      project=(fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls:=(delivery.Workspace_broadcast.request_id,recipient)::!calls;
+        if Some delivery.request_id = !first_request && recipient="keeper-a" && !blocked then begin
+          ignore (Eio.Promise.try_resolve mark_entered ());
+          Eio.Promise.await release
+        end;
+        Ok ())};
+    let original=send "blocked-operation" in
+    let first_id=member "delivery" original |> member "receipt" |> text "request_id" in
+    first_request:=Some first_id;
+    let ready,mark_ready=Eio.Promise.create () in
+    let stay,_=Eio.Promise.create () in
+    let exception Stop_fixture_service in
+    let service=Eio.Fiber.fork_promise ~sw (fun () ->
+      try Eio.Cancel.sub (fun cancellation ->
+        Eio.Switch.run (fun service_sw ->
+          Runtime.start_fleet_service ~config ~sw:service_sw ~clock;
+          Eio.Promise.resolve mark_ready (service_sw,cancellation);
+          Eio.Promise.await stay))
+      with Eio.Cancel.Cancelled Stop_fixture_service -> ()) in
+    let service_sw,cancellation=Eio.Promise.await ready in
+    (* Kick the real service after it owns the root. The admitted replay's
+       nudge must dispatch a beat, not an awaited recipient drain. *)
+    ignore (send "blocked-operation");
+    Eio.Promise.await entered;
+    await clock (fun () -> fleet_recipient config "blocked-operation" "keeper-b"
+      = Masc.Lane_addon_broadcast_delivery.Accepted);
+    check bool "first recipient is still blocked while second settles" true !blocked;
+    let count request recipient=List.length (List.filter (fun pair -> pair=(request,recipient)) !calls) in
+    (* Overlapping authoritative scans must share a still-owned projection,
+       including when their snapshots were read before another acceptance. *)
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    let later=send "separately-admitted-operation" in
+    let later_id=member "delivery" later |> member "receipt" |> text "request_id" in
+    (* No manual drain after this send: its production admission nudge must
+       be handled even though the older recipient has not returned. *)
+    await clock (fun () -> fleet_complete config "separately-admitted-operation");
+    check Alcotest.int "duplicate scans launch blocked request/recipient once" 1 (count first_id "keeper-a");
+    check Alcotest.int "accepted second recipient is not reprojected" 1 (count first_id "keeper-b");
+    check Alcotest.int "separate admission delivers first recipient" 1 (count later_id "keeper-a");
+    check Alcotest.int "separate admission delivers second recipient" 1 (count later_id "keeper-b");
+    check bool "independent admission did not release blocked work" false (Eio.Promise.is_resolved release);
+    Eio.Cancel.cancel cancellation Stop_fixture_service;
+    Eio.Promise.await_exn service;
+    check bool "cancelled projection retains its pending obligation" true
+      (match fleet_recipient config "blocked-operation" "keeper-a" with
+       | Masc.Lane_addon_broadcast_delivery.Pending _ -> true | Accepted -> false);
+    check bool "independent completed message stays completed" true
+      (fleet_complete config "separately-admitted-operation");
+    blocked:=false;
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "blocked-operation");
+    check Alcotest.int "cancellation releases ownership for one retry" 2 (count first_id "keeper-a");
+    check Alcotest.int "retry does not repeat its accepted sibling" 1 (count first_id "keeper-b");
+    let replay=send "blocked-operation" in
+    check bool "cancellation and retry preserve the original workspace receipt" true
+      (member "delivery" original = member "delivery" replay);
+    detach config id; await_phase clock config id "detached")
+
+let test_fleet_recovery_isolates_locked_journal_and_concurrent_admission () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id", `String id; "row_ids", `List [`String selected];
+        "broadcast", `Bool true; "request_id", `String operation]) |> unwrap in
+    let calls = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot = (fun ~config:_ ~caller:_ ~access:_ ->
+        Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender, ["keeper-a"; "keeper-b"]));
+      project = (fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls := (delivery.Workspace_broadcast.request_id, recipient) :: !calls;
+        Ok ())};
+    let _ = send "op-a" in
+    let ledger_root = Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery" in
+    let pending_dir = Filename.concat ledger_root "pending" in
+    let markers_a = Sys.readdir pending_dir |> Array.to_list in
+    check Alcotest.int "op-a creates one pending marker" 1 (List.length markers_a);
+    let marker_a = List.hd markers_a in
+    let journal_a = Filename.concat ledger_root marker_a in
+    let entered_lock = Atomic.make false in
+    let release_lock = Atomic.make false in
+    let hold_fiber = Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio_unix.run_in_systhread (fun () ->
+        Fs_compat.update_existing_private_file_durable_locked_result journal_a (fun _bytes ->
+          Atomic.set entered_lock true;
+          while not (Atomic.get release_lock) do
+            Unix.sleepf 0.002
+          done;
+          (None, Ok ())))) in
+    let hold_finished = ref false in
+    let finish_hold () =
+      if not !hold_finished then begin
+        hold_finished := true;
+        Atomic.set release_lock true;
+        ignore (Eio.Promise.await_exn hold_fiber)
+      end in
+    Fun.protect ~finally:finish_hold (fun () ->
+      await clock (fun () -> Atomic.get entered_lock);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      let _ = send "op-b" in
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-b");
+      check bool "op-b completes while op-a journal lock is held" true (fleet_complete config "op-b");
+      check bool "hold fiber is still holding op-a lock" false (Atomic.get release_lock);
+      finish_hold ();
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-a");
+      check bool "op-a completes after journal lock is released" true (fleet_complete config "op-a");
+      detach config id; await_phase clock config id "detached"))
+
+let test_broadcast_pending_commit_recovers_same_identity () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = ["instance_id",`String id;"row_ids",`List [`String selected]] in
+    let send_id = ["request_id",`String "failed-send"] in
+    let attempts = ref 0 in
+    let previous = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
+    let result = Fun.protect ~finally:(fun () ->
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous in
+      ()) (fun () ->
+        check bool "two destinations are refused before publication" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`Bool true;"keeper_name",`String "someone"]))));
+        check bool "nonboolean Broadcast is refused" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`String "true"]))));
+        let unauthenticated = dispatch config Runtime.Evidence (args @ send_id @ ["broadcast",`Bool true]) |> unwrap in
+        check string "sharing requires an authenticated caller" "failed"
+          (member "delivery" unauthenticated |> text "status");
+        check Alcotest.int "invalid requests never reach Broadcast" 0 !attempts;
+        Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+          (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
+    check string "admitted intention remains queued while authoritative commit is rejected" "pending_commit"
+      (member "delivery" result |> text "status");
+    check bool "Broadcast does not invent a single Keeper destination" true
+      (member "delivery" result |> member "keeper_name" = `Null);
+    check bool "rejected workspace commit cannot transfer client retry ownership" true
+      (member "delivery" result |> member "receipt" = `Null);
+    let evidence = member "evidence" result in
+    check bool "failed Broadcast retains the exact selected evidence" true
+      (Sys.file_exists (text "path" evidence));
+    check Alcotest.int "one explicit request attempts one message write" 1 !attempts;
+    ignore (unwrap (dispatch config Runtime.Inspect []));
+    ignore (unwrap (dispatch config Runtime.Evidence args));
+    check Alcotest.int "inspection and preservation never rebroadcast" 1 !attempts;
+    let projections = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "recovery must retain the admitted empty audience");
+      project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "failed-send");
+    let recovered = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap in
+    check string "queued intention becomes committed after storage recovers" "committed"
+      (member "delivery" recovered |> text "status");
+    check bool "commit recovery retains the exact published artifact" true
+      (member "keeper_artifact" recovered = member "keeper_artifact" result);
+    let receipt = member "delivery" recovered |> member "receipt" in
+    let found = Workspace_broadcast.find_broadcast ~request_id:(text "request_id" receipt)
+      config ~from_agent:"fixture-operator" ~content:(text "message" recovered) in
+    check bool "recovery finds the authoritative exact request without a new publication" true
+      (match found with Ok (Some delivery) -> delivery.seq = int "seq" receipt | _ -> false);
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    check Alcotest.int "empty accepted audience stays empty despite the later backend" 0
+      (List.length !projections);
+    Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
+      failwith "fixture recipient raised after accepting");
+    let uncertain = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ ["keeper_name",`String "fixture-recipient"])) |> unwrap in
+    check string "a recipient exception is uncertain, not a proven rejection" "outcome_unknown"
+      (member "delivery" uncertain |> text "status");
+    check string "uncertain receipt retains its intended Keeper" "fixture-recipient"
+      (member "delivery" uncertain |> text "keeper_name");
+    check bool "uncertain delivery preserves evidence" true
+      (Sys.file_exists (member "evidence" uncertain |> text "path"));
+    detach config id; await_phase clock config id "detached")
+
+let test_released_shared_bindings_keep_read_and_cleanup () =
+  with_fixture (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    detach config id; await_phase clock config id "detached";
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    (* Inspect adds presentation fields; a published binding is the durable
+       record, whose exact shape the released reader must continue to enforce. *)
+    let captured = unwrap (Store.bindings store)
+      |> List.find (fun value -> text "instance_id" value = id)
+      |> Yojson.Safe.Util.to_assoc in
+    let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
+    (* The published package envelope predates host model declarations. *)
+    let released = List.map (fun (key, value) ->
+      match key, value with
+      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "model_access" fields)
+      | _ -> key, value) released in
+    let before = `Assoc released in
+    unwrap (Store.save_binding store ~instance_id:id before);
+    Runtime.For_testing.reset ();
+    let observed = instance config id in
+    check string "released reads carry no operator acquisition authority" "unauthenticated"
+      (observed |> member "source_access" |> text "kind");
+    check Alcotest.int "released direct retained rows remain readable" 1
+      (unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+    check bool "read recognition leaves durable bytes unchanged" true
+      (unwrap (Store.bindings store) = [before]);
+    let set fields key value = (key,value)::List.remove_assoc key fields in
+    let record name installation sources =
+      released |> fun f -> set f "instance_id" (`String name)
+      |> fun f -> set f "incarnation" (`String name)
+      |> fun f -> set f "configuration" (`Assoc ["id",`String installation;
+          "source_path",`String (Filename.concat dir (installation ^ ".toml"));
+          "revision",`String (Store.digest installation)])
+      |> fun f -> set f "binding" (`Assoc ["sources",`List sources]) |> fun f -> `Assoc f in
+    let upstream installation = `Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
+      "installation_id",`String installation;"selection",`String "latest_completed"] in
+    let producer = record "released-producer" "producer" [] in
+    let consumer = record "released-consumer" "consumer" [upstream "producer"] in
+    let authorize bindings value = Runtime.authorize_retained_read ~bindings
+      ~access:Lane_addon_sources.Unauthenticated value in
+    check bool "released composed graph is shared only with its unique producer" true
+      (Result.is_ok (authorize [producer;consumer] consumer));
+    let refused label bindings value = check bool label true (Result.is_error (authorize bindings value)) in
+    let current_producer model_access = match producer with
+      | `Assoc f ->
+          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
+          `Assoc (("visibility", `Assoc ["kind",`String "shared"]) ::
+            ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated) ::
+            set f "package" (`Assoc (("model_access",model_access)::package)))
+      | _ -> assert false in
+    List.iter (fun model_access ->
+      check bool "released consumer reads current shared producer without rewriting it" true
+        (Result.is_ok (authorize [current_producer (`String model_access);consumer] consumer)))
+      ["disabled";"host_sampling"];
+    let with_producer_package transform = match current_producer (`String "disabled") with
+      | `Assoc f ->
+          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
+          `Assoc (set f "package" (`Assoc (transform package)))
+      | _ -> assert false in
+    let pre_model_producer = with_producer_package (List.remove_assoc "model_access") in
+    check bool "released consumer reads authority-bearing pre-model producer" true
+      (Result.is_ok (authorize [pre_model_producer;consumer] consumer));
+    List.iter (fun model_access ->
+      refused "invalid explicit model access fails closed"
+        [current_producer model_access;consumer] consumer)
+      [`String "unknown"; `Null; `Bool false];
+    let duplicate_model = with_producer_package (fun fields ->
+      ("model_access",`String "disabled")::fields) in
+    refused "duplicate producer model field fails closed" [duplicate_model;consumer] consumer;
+    let unknown_pre_model = with_producer_package (fun fields ->
+      ("unknown",`Bool true)::List.remove_assoc "model_access" fields) in
+    refused "unknown pre-model producer field fails closed" [unknown_pre_model;consumer] consumer;
+    let forged_released = match current_producer (`String "disabled") with
+      | `Assoc f -> `Assoc (List.remove_assoc "visibility" (List.remove_assoc "source_access" f))
+      | _ -> assert false in
+    refused "released envelope cannot smuggle current package fields" [forged_released] forged_released;
+    refused "missing producer fails closed" [consumer] consumer;
+    refused "ambiguous producer incarnation fails closed" [producer;producer;consumer] consumer;
+    let cycle = record "released-producer" "producer" [upstream "consumer"] in
+    refused "producer cycles fail closed" [cycle;consumer] consumer;
+    let private_producer = match producer with `Assoc f -> `Assoc (("visibility",`Assoc ["kind",`String "keeper";"keeper",`String "other"])
+      ::("source_access",Lane_addon_sources.access_to_json (Lane_addon_sources.Keeper "other"))::f) | _ -> assert false in
+    refused "private producer never becomes shared" [private_producer;consumer] consumer;
+    let private_without_authority = record "released-producer" "producer" [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String "private-run"]] in
+    refused "private source missing both authority fields is refused" [private_without_authority;consumer] consumer;
+    let malformed = match producer with `Assoc f -> `Assoc (set f "observation_seq" `Null) | _ -> assert false in
+    refused "malformed released record is refused" [malformed] malformed;
+    let unknown = match producer with `Assoc f -> `Assoc (("unknown",`Bool true)::f) | _ -> assert false in
+    refused "unknown released record field is refused" [unknown] unknown;
+    let missing_modern = `Assoc (List.remove_assoc "visibility" captured) in
+    refused "current source access without visibility is refused" [missing_modern] missing_modern;
+    unwrap (Store.save_binding store ~instance_id:id (`Assoc (set released "phase" (Types.phase_to_json Types.Attached))));
+    detach config id; await_phase clock config id "detached";
+    check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
+  test_case "MCP attribution never authorizes private Lane reads" `Quick
+    test_mcp_attribution_does_not_authorize_private_lane;
+  test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
+    test_fleet_service_isolates_blocked_recipient_and_admissions;
+  test_case "Fleet recovery isolates locked journal and concurrent admission" `Quick
+    test_fleet_recovery_isolates_locked_journal_and_concurrent_admission;
+  test_case "private Broadcast retry uses saved visibility after binding removal" `Quick
+    test_private_broadcast_retry_uses_saved_visibility;
+  test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick
+    test_broadcast_retry_reconciles_receipt_during_slow_fanout;
+  test_case "Broadcast intention and failed commit retain exact evidence" `Quick
+    test_broadcast_pending_commit_recovers_same_identity;
+  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
+  test_case "published shared bindings retain read and exact cleanup authority" `Quick
+    test_released_shared_bindings_keep_read_and_cleanup;
+  test_case "MCP attribution never grants private Lane authority" `Quick
+    test_mcp_attributed_name_is_not_private_lane_authority;
+  test_case "Fusion state hint wakes only the exact run binding" `Quick
+    test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick
     test_human_press_wakes_machine_watchers_once;
   test_case "a human MSX load wakes machine watchers exactly once" `Quick

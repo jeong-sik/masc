@@ -103,22 +103,28 @@ let decode ~keeper_name json =
   let* fields =
     object_fields ~context:"Item account"
       ~keys:(match status with
-        | "off" -> [ "status"; "keeper" ]
-        | "disabled" -> [ "status"; "keeper"; "reason" ]
+        | "off" -> [ "status"; "keeper"; "account_revision" ]
+        | "disabled" -> [ "status"; "keeper"; "reason"; "account_revision" ]
         | "ready" ->
-          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog" ]
+          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog"; "account_revision" ]
         | _ -> [])
       json
   in
+  let* revision = field "account_revision" fields in
+  let* revision = match status,revision with
+    | "off",`Null -> Ok None
+    | ("ready" | "disabled"),`String value when String.length value=64
+        && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) value -> Ok (Some value)
+    | _ -> Error "Item account revision is missing or malformed for its status" in
   let* reported_keeper = string "keeper" fields in
   if not (String.equal keeper_name reported_keeper)
   then Error "Item account belongs to another Keeper"
   else
     match status with
-    | "off" -> Ok Off
+    | "off" -> Ok (revision, Off)
     | "disabled" ->
       let* reason = string "reason" fields in
-      Ok (Disabled reason)
+      Ok (revision, Disabled reason)
     | "ready" ->
       let* balance_milli = nonnegative_amount "balance_milli" fields in
       let* owned_json = field "owned_items" fields in
@@ -133,5 +139,5 @@ let decode ~keeper_name json =
       then Error "Item catalog is incomplete"
       else if not (List.for_all (fun item -> List.mem (Item.id item) (ids catalog_items)) owned_items)
       then Error "owned Item is absent from catalog"
-      else Ok (Ready { balance_milli; owned_items; catalog })
+      else Ok (revision, Ready { balance_milli; owned_items; catalog })
     | _ -> Error ("unknown Item account status " ^ status)

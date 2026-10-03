@@ -464,6 +464,13 @@ let broadcast_run_status ~registry ~run_id =
     match Fusion_run_registry.get registry ~run_id with
     | None -> ()
     | Some run ->
+      (try
+         if registry == Fusion_run_registry.global () then
+           Lane_addon_runtime.notify_fusion_run ~run_id
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Keeper.warn "fusion addon hint run_id=%s failed: %s"
+           run_id (Printexc.to_string exn));
       Sse.broadcast
         (`Assoc
            [ ("type", `String "fusion_run_status")

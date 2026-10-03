@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  4›
+ ──────────────────────────────────────────────────────────────────────────────
+    Identity
+    Name:                  alpha
+    Paused:                no
+
+    Current Work
+    Task:                  —
+
+    Live Context
+    Context:               measurement missing
+
+    Current failure
+    none
+
+    Board attention
+    reading…
+
+  1-16/40
+
+  [ ]:tab  b:requeue board  B:requeue all board  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

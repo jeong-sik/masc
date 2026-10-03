@@ -317,6 +317,137 @@ let report_action (state : state) event_type content =
   state.last_action <-
     Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
+(* Local metadata and the public remote roster share identity-based navigation.
+   Replacing rows never reads a local directory. *)
+let replace_keeper_rows ~preserve_on_error (state : state)
+    ~keepers:loaded_keepers ~error:keepers_error =
+  (* Capture navigation before replacing the roster. Detail and logs are bound
+     to the selected row; message mode is bound to its explicit target. *)
+  let current_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  let selected_keeper_name =
+    match state.detail_focus_recovery with
+    | Some (origin, name, _) when state.view = Keepers Keeper_detail
+        && server_workspace_matches ~expected:(Some origin)
+             (match state.server_identity with Some current -> Ok current | None -> Error "unread") ->
+        Some name
+    | _ ->
+        if state.keeper_cursor < 0 then None
+        else List.nth_opt state.keepers state.keeper_cursor
+          |> Option.map (fun keeper -> keeper.k_name)
+  in
+  let current_keeper_mode =
+    match state.view with
+    | Keepers mode -> Some mode
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories
+    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+    | System_logs -> None
+  in
+  let current_navigation =
+    match current_keeper_mode with
+    | Some Keeper_detail ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Detail_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_logs ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Logs_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_calls ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Calls_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_message ->
+        (match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Message_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_list
+    (* The picker rides the list cursor: its own cursor points into the
+       runtime catalogue, not the roster. *)
+    | Some Keeper_runtime_pick
+    | None ->
+        Keeper_selection.List_cursor state.keeper_cursor
+  in
+
+  let keepers =
+    match keepers_error, current_keeper_mode with
+    | Some _, _ when state.detail_focus_recovery <> None ->
+        (* A partial remote roster must not make cursor zero name a different
+           Keeper while the withdrawn detail is waiting for its own name. *)
+        []
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
+                   | Keeper_runtime_pick) when preserve_on_error ->
+        (* A partial or failed read cannot prove that the focused Keeper was
+           deleted. Keep the last complete roster until a reliable refresh can
+           reconcile that identity. Message mode instead uses its explicit
+           target and can render the unavailable state safely. *)
+        state.keepers
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick
+                   | Keeper_list | Keeper_message) | Some _, None | None, _ ->
+        loaded_keepers
+  in
+  state.keepers <- keepers;
+  state.keepers_error <- keepers_error;
+
+  let next_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  (* A roster change no longer dismisses an action notice: the notice answers
+     the operator's last action, and a refresh tick would otherwise wipe it
+     before it is read. User actions still clear it. *)
+  if state.detail_focus_recovery <> None && keepers_error <> None then ()
+  else (match
+     Keeper_selection.reconcile ~current_ids:current_keeper_ids
+       ~next_ids:next_keeper_ids ~current:current_navigation
+   with
+   | Keeper_selection.List_cursor cursor ->
+       state.detail_focus_recovery <- None;
+       state.keeper_cursor <- cursor;
+       (match current_keeper_mode with
+        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
+            state.view <- Keepers Keeper_list;
+            state.detail_scroll <- 0;
+            state.log_scroll <- 0;
+            state.keeper_calls_scroll <- 0
+        (* The picker rides the list cursor, so a reconciled cursor is not a
+           lost focus: it stays open across refreshes. *)
+        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
+   | Keeper_selection.Detail_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_detail
+   | Keeper_selection.Logs_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_logs
+   | Keeper_selection.Calls_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_calls
+   | Keeper_selection.Message_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_message);
+
+  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
+
+  let current_logs : Metrics_tail.snapshot =
+    { entries = state.log_entries; error = state.log_error }
+  in
+  let selected_keeper_name_after_refresh =
+    Option.map (fun keeper -> keeper.k_name) selected_keeper
+  in
+  Metrics_tail.reconcile_selection ~current:current_logs
+    ~previous_keeper:selected_keeper_name
+    ~selected_keeper:selected_keeper_name_after_refresh
+  |> apply_keeper_log_snapshot state
+
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
@@ -383,129 +514,14 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.operator_stalled <- operator_stalled;
   state.goals_to_confirm <- load_goals_to_confirm base_path;
 
-  (* Capture navigation before replacing the roster. Detail and logs are bound
-     to the selected row; message mode is bound to its explicit target. *)
-  let current_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
-  in
-  let selected_keeper_name =
-    if state.keeper_cursor < 0 then None
-    else
-      List.nth_opt state.keepers state.keeper_cursor
-      |> Option.map (fun keeper -> keeper.k_name)
-  in
-  let current_keeper_mode =
-    match state.view with
-    | Keepers mode -> Some mode
-    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
-    | Planning | Schedules | Verification | Harness | Fusion | Repositories
-    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
-    | System_logs -> None
-  in
-  let current_navigation =
-    match current_keeper_mode with
-    | Some Keeper_detail ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Detail_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_logs ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Logs_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_calls ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Calls_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_message ->
-        (match state.msg_target_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Message_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_list
-    (* The picker rides the list cursor: its own cursor points into the
-       runtime catalogue, not the roster. *)
-    | Some Keeper_runtime_pick
-    | None ->
-        Keeper_selection.List_cursor state.keeper_cursor
-  in
-
-  (* Load keepers *)
-  let loaded_keepers, keepers_error = load_keepers base_path in
-  let keepers =
-    match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
-                   | Keeper_runtime_pick) ->
-        (* A partial or failed read cannot prove that the focused Keeper was
-           deleted. Keep the last complete roster until a reliable refresh can
-           reconcile that identity. Message mode instead uses its explicit
-           target and can render the unavailable state safely. *)
-        state.keepers
-    | Some _, Some (Keeper_list | Keeper_message) | Some _, None | None, _ ->
-        loaded_keepers
-  in
-  state.keepers <- keepers;
-  state.keepers_error <- keepers_error;
-
-  let next_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
-  in
-  (* A roster change no longer dismisses an action notice: the notice answers
-     the operator's last action, and a refresh tick would otherwise wipe it
-     before it is read. User actions still clear it. *)
-  (match
-     Keeper_selection.reconcile ~current_ids:current_keeper_ids
-       ~next_ids:next_keeper_ids ~current:current_navigation
-   with
-   | Keeper_selection.List_cursor cursor ->
-       state.keeper_cursor <- cursor;
-       (match current_keeper_mode with
-        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
-            state.view <- Keepers Keeper_list;
-            state.detail_scroll <- 0;
-            state.log_scroll <- 0;
-            state.keeper_calls_scroll <- 0
-        (* The picker rides the list cursor, so a reconciled cursor is not a
-           lost focus: it stays open across refreshes. *)
-        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
-   | Keeper_selection.Detail_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_detail
-   | Keeper_selection.Logs_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_logs
-   | Keeper_selection.Calls_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_calls
-   | Keeper_selection.Message_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_message);
-
-  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
-
-  (* Load live context for the selected keeper. Metadata-only refresh paths do
-     not read metrics, but an empty roster must clear any cached log state. *)
-  load_selected_live_context state base_path selected_keeper;
-  let current_logs : Metrics_tail.snapshot =
-    { entries = state.log_entries; error = state.log_error }
-  in
-  let selected_keeper_name_after_refresh =
-    Option.map (fun keeper -> keeper.k_name) selected_keeper
-  in
-  Metrics_tail.reconcile_selection ~current:current_logs
-    ~previous_keeper:selected_keeper_name
-    ~selected_keeper:selected_keeper_name_after_refresh
-  |> apply_keeper_log_snapshot state;
+  let keepers, error = load_keepers base_path in
+  replace_keeper_rows ~preserve_on_error:true state ~keepers ~error;
+  load_selected_live_context state base_path
+    (List.nth_opt state.keepers state.keeper_cursor);
 
   state.local_workspace <- Local_workspace_read
 
-let clear_local_workspace (state : state) =
+let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
@@ -516,10 +532,12 @@ let clear_local_workspace (state : state) =
   state.operator_stalled <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
-  state.keepers <- [];
-  state.keepers_error <- None;
+  if not keep_keeper_rows then begin
+    state.keepers <- [];
+    state.keepers_error <- None;
+    state.keeper_cursor <- 0
+  end;
   state.lanes_action_error <- None;
-  state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
   state.live_context <- Context_state.empty;
@@ -1171,7 +1189,7 @@ let load_board_list ~(host : string) ~(port : int)
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
 let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
-    ~(post_id : string) () : (board_post * board_comment list, string) result =
+    ~(post_id : string) () : (board_post * board_comment list * string option, string) result =
   let read_page offset =
     let* json =
       Masc_tui_frame_timing.time_stage ~name:"board.http_json"
@@ -1185,17 +1203,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.required_list_field json
+          (if full_history then "comments" else "comment_context") in
         let* comments = decode_board_comments comments_json in
+        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+        let* () = if String.length revision=64 && String.for_all
+            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+          then Ok () else Error "board detail comment revision is malformed" in
         let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
         let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
         let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total))
+        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
   in
-  let* (first_json, first_comments, first_offset, total) =
+  let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
   in
   let post_json =
@@ -1208,9 +1231,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
       (fun () -> decode_board_post ~require_body:true post_json)
   in
   let rec read_remaining offset total reversed =
-    if offset >= total then Ok (post, List.rev reversed)
+    if offset >= total then Ok (post, List.rev reversed, None)
     else
-      let* (_, comments, _, total) = read_page (Some offset) in
+      let* (_, comments, _, page_total, page_revision) = read_page (Some offset) in
+      let* () = if page_revision=revision && page_total=total then Ok ()
+        else Error "Board comment thread changed during full history read; refresh to read one snapshot" in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"
@@ -1219,7 +1244,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   if full_history then
     read_remaining (first_offset + List.length first_comments) total
       (List.rev first_comments)
-  else Ok (post, first_comments)
+  else
+    let* page_json = Masc.Tui_decode_fields.required_list_field first_json "comments" in
+    let* page_comments = decode_board_comments page_json in
+    let* () =
+      if List.for_all (fun page_comment ->
+          List.exists (fun context_comment ->
+            String.equal page_comment.bc_id context_comment.bc_id) first_comments)
+          page_comments then Ok ()
+      else Error "Board comment context is missing a page comment"
+    in
+    let landing =
+      if List.length first_comments = List.length page_comments then None
+      else match List.rev page_comments with
+        | [] -> None
+        | comment :: _ -> Some comment.bc_id in
+    Ok (post, first_comments, landing)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1513,23 +1553,23 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
 let load_tools ~(host : string) ~(port : int) ?keeper () :
-    (Tui_decode.tool_snapshot, string) result =
+    (Masc.Tui_decode_tools.tool_snapshot, string) result =
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_tool_snapshot json
+  | Ok json -> Masc.Tui_decode_tools.decode_tool_snapshot json
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
-    (Tui_decode.skills_catalog, string) result =
-  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
+    (Masc.Tui_decode_tools.skills_catalog, string) result =
+  Result.bind (fetch_skills_catalog ~host ~port) Masc.Tui_decode_tools.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
-    (Tui_decode.connector_snapshot, string) result =
+    (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Tui_decode.decode_connector_snapshot json with
+      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
@@ -1537,13 +1577,13 @@ let load_connectors ~(host : string) ~(port : int) :
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
                | Error detail ->
                  List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
-                 (match Tui_decode.decode_connector_name_page json with
+                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
@@ -1593,7 +1633,7 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Tui_decode.connector_with_name_pages connector ~pages
+                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
                     ~error:
                       (match read_problems with
                        | [] -> None
@@ -1654,10 +1694,10 @@ let load_repository_changes ~(host : string) ~(port : int)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
 
 let load_memory_health ~(host : string) ~(port : int) :
-    (Tui_decode.memory_health_snapshot, string) result =
+    (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_health_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
@@ -1817,10 +1857,10 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) :
+let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
     (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port with
+  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
@@ -1909,7 +1949,7 @@ let load_keeper_board_quarantines ~(host : string) ~(port : int)
    it. One fetch rather than two: a list of providers and a list of
    attachments cannot disagree if they arrive together. *)
 let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string)
-  : (Masc_tui_types.identity_provider list, string) result
+  : (Masc_tui_identity_model.identity_provider list, string) result
   =
   match Masc_tui_http.fetch_attached_tools ~host ~port ~keeper_name with
   | Error err -> Error ("identity providers load failed: " ^ err)
@@ -1940,7 +1980,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
               in
               match string_field "provider", string_field "problem" with
               | Some idp_id, Some idp_problem ->
-                Some (Masc_tui_types.Identity_unreadable { idp_id; idp_problem })
+                Some (Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem })
               | Some idp_id, None ->
                 let idp_label =
                   Option.value ~default:idp_id (string_field "provider_label")
@@ -1972,7 +2012,7 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                 in
                 let idp_switch_problem = string_field "switch_problem" in
                 Some
-                  (Masc_tui_types.Identity_declared
+                  (Masc_tui_identity_model.Identity_declared
                      { idp_id; idp_label; idp_tools; idp_also_on
                      ; idp_enabled; idp_switch_problem })
               | None, _ -> None)

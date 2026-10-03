@@ -80,11 +80,11 @@ let test_a_keeper_view_without_the_overlay_stays_unlisted () =
    the roster a settled query counted keeper names and [n] stepped the keeper
    cursor while the overlay was the list on screen. *)
 let keeper name : Tui_decode.keeper =
-  { k_origin = Tui_decode.Persisted_keeper; k_name = name; k_trace_id = name
-  ; k_paused = false; k_current_task_id = None; k_total_turns = 0
-  ; k_total_tokens = 0; k_total_cost_usd = 0.; k_last_turn_ts = ""
-  ; k_last_proactive_outcome = None
-  ; k_created_at = "2026-09-13T00:00:00Z"; k_updated_at = "2026-09-13T00:00:00Z"
+  { k_origin = Tui_decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = false
+  ; k_identity = Ok { k_trace_id = name; k_created_at = "2026-09-13T00:00:00Z"; k_updated_at = "2026-09-13T00:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.; k_last_turn_ts = ""; k_last_proactive_outcome = None }
   }
 
 let test_the_overlay_is_what_the_search_reaches () =
@@ -97,16 +97,16 @@ let test_the_overlay_is_what_the_search_reaches () =
       Alcotest.(check (option (list string)))
         (label ^ " searches the paths on screen")
         (Some [ "lib/quokka.ml"; "bin/main.ml" ])
-        (surface_row_texts state view);
+        (Masc_tui_surface_search.surface_row_texts state view);
       Alcotest.(check (option int)) (label ^ " counts a path it draws")
-        (Some 1) (surface_search_count state view ~query:"quokka");
+        (Some 1) (Masc_tui_surface_search.surface_search_count state view ~query:"quokka");
       Alcotest.(check (option int)) (label ^ " does not count the host's rows")
-        (Some 0) (surface_search_count state view ~query:"zebra-keeper");
+        (Some 0) (Masc_tui_surface_search.surface_search_count state view ~query:"zebra-keeper");
       (* Enter on a row replaces the list with that path's diff, which is text:
          no row for the count to describe and none for [n] to land on. *)
       state.repository_changes_diff_path <- Some "lib/quokka.ml";
       Alcotest.(check (option int)) (label ^ " offers no search over the diff")
-        None (surface_search_count state view ~query:"quokka"))
+        None (Masc_tui_surface_search.surface_search_count state view ~query:"quokka"))
     (overlay_hosts
     @ [ "the Repositories list", Repositories; "the Code tree", Code ])
 

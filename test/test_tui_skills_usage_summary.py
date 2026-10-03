@@ -15,6 +15,10 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_tools.ml",
     "bin/masc_tui_tool_table.ml",
     "bin/masc_tui_render.ml",
+    "lib/tui_decode_tools.ml",
+    "lib/tui_decode_tools.mli",
+    "lib/tui_decode_fields.ml",
+    "lib/tui_decode_fields.mli",
     "lib/tui_decode_skill_evidence.ml",
     "lib/tui_decode_skill_evidence.mli",
 )

@@ -44,9 +44,37 @@ let respond request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail)
 
-let dispatch ?caller state operation args =
-  Runtime.dispatch ?caller ~config:(Mcp_server.workspace_config state) ~operation args
+let dispatch ?caller ?access state operation args =
+  Runtime.dispatch ?caller ?access ~config:(Mcp_server.workspace_config state) ~operation args
   |> Result.map_error Runtime.error_to_string
+
+let source_access state request caller =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  match request_credential_standing ~base_path request with
+  | Operator_credential -> Lane_addon_sources.Operator_configuration
+  | Agent_credential -> Lane_addon_sources.Keeper caller
+  | Player_credential | No_credential -> Lane_addon_sources.Unauthenticated
+
+let broadcast_principal_for_standing standing caller =
+  match standing with
+  | Operator_credential when String.trim caller <> "" ->
+      Ok ("principal:operator:" ^ caller)
+  | Agent_credential when String.trim caller <> "" ->
+      Ok ("principal:keeper:" ^ caller)
+  | Operator_credential | Agent_credential
+  | Player_credential | No_credential ->
+      Error "Broadcast recovery requires an authenticated operator or Keeper principal"
+
+let broadcast_principal ~base_path request caller =
+  broadcast_principal_for_standing
+    (request_credential_standing ~base_path request) caller
+
+let read_context state request =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  match dashboard_actor_resolution_for_request ~base_path request with
+  | Authenticated_actor caller -> Ok (Some caller, source_access state request caller)
+  | Anonymous_actor_hint _ -> Ok (None, Lane_addon_sources.Unauthenticated)
+  | Rejected_credential _ -> Error "Lane read credential is unavailable"
 
 let query_fields request =
   Uri.query (Uri.of_string request.Httpun.Request.target)
@@ -60,8 +88,9 @@ let decode_inspect_query = function
 
 let get_inspect request reqd =
   with_read_auth (fun state _request reqd ->
-    let result = let* args = decode_inspect_query (query_fields request) in
-      dispatch state Runtime.Inspect args in
+    let result = let* caller, access = read_context state request in
+      let* args = decode_inspect_query (query_fields request) in
+      dispatch ?caller ~access state Runtime.Inspect args in
     respond request reqd result) request reqd
 
 let get_package_preview request reqd =
@@ -106,19 +135,21 @@ let get_package_preview request reqd =
 
 let get_slice request reqd =
   with_read_auth (fun state _request reqd ->
-    let result = let* args = decode_slice_query (query_fields request) in dispatch state Runtime.Slice args in
+    let result = let* caller, access = read_context state request in
+      let* args = decode_slice_query (query_fields request) in dispatch ?caller ~access state Runtime.Slice args in
     respond request reqd result) request reqd
 
 let get_action request reqd =
   with_read_auth (fun state _request reqd ->
     let result =
+      let* caller, access = read_context state request in
       let fields = query_fields request |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
       let* args = match fields with
         | ["instance_id", instance_id; "request_id", request_id]
             when String.trim instance_id <> "" && String.trim request_id <> "" ->
             Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
         | _ -> Error "action status requires exactly instance_id and request_id" in
-      dispatch state Runtime.Action_status args in
+      dispatch ?caller ~access state Runtime.Action_status args in
     respond request reqd result) request reqd
 
 (* Use the source binding's kind table so a new kind must say whether it has a
@@ -273,7 +304,7 @@ let get_live request reqd =
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
-      let result = let* args = decode_body body in dispatch ~caller state operation args in
+      let result = let* args = decode_body body in dispatch ~caller ~access:(source_access state request caller) state operation args in
       respond request reqd result)) request reqd
 
 let respond_declaration request reqd = function
@@ -285,16 +316,16 @@ let respond_declaration request reqd = function
       respond_json_value_with_cors ~status request reqd (Lane_addon_declaration.error_to_json error)
 
 let read_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state _caller _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state caller _request reqd ->
     let args = `Assoc (List.map (fun (key,value) -> key,`String value) (query_fields request)) in
-    respond_declaration request reqd (Runtime.read_declaration ~config:(Mcp_server.workspace_config state) args)) request reqd
+    respond_declaration request reqd (Runtime.read_declaration ~caller ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args)) request reqd
 
 let save_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state _caller _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
       let result = match decode_body body with
         | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
-        | Ok args -> Runtime.save_declaration ~config:(Mcp_server.workspace_config state) args in
+        | Ok args -> Runtime.save_declaration ~caller ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args in
       respond_declaration request reqd result)) request reqd
 
 let register_delivery ~sw ~clock =
@@ -324,13 +355,19 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
+  |> Http.Router.get "/api/v1/lane-addons/broadcast-principal"
+       (with_tool_actor_auth ~tool_name:"masc_lane_evidence" (fun state caller request reqd ->
+         let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+         let result = broadcast_principal ~base_path request caller
+           |> Result.map (fun principal -> `Assoc ["principal",`String principal]) in
+         respond request reqd result))
   |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
   |> Http.Router.post "/api/v1/lane-addons/subscriptions"
        (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->
          Http.Request.read_body_async reqd (fun body ->
            let result = let* args=decode_body body in
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               Lane_addon_subscription.handle ~config:(Mcp_server.workspace_config state) ~caller args) in
+               Lane_addon_subscription.handle ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) ~caller args) in
            respond request reqd result)))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration

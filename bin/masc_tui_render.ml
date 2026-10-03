@@ -10800,6 +10800,13 @@ let usage_lines ~cols (state : state) =
                 | _ -> highest
               else highest) None kuw_rows in
         let token_max = largest token_value and cost_max = largest cost_value in
+        let scale value format = function
+          | Some amount -> format amount
+          | None when List.exists (fun row ->
+              Option.fold ~none:false ~some:valid (value row)) kuw_rows ->
+              "unavailable (no complete window)"
+          | None -> "unreported"
+        in
         let width = max 1 (cols - 7) in
         let bar_cells = min 32 (max 1 (width - 2)) in
         let meter value highest row =
@@ -10822,8 +10829,8 @@ let usage_lines ~cols (state : state) =
         ; " Bars compare read windows; each metric scales to its largest Keeper."
         ; " Partial windows have no comparison bar; missing metrics can understate totals; bars are not quota."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
-            (Option.fold ~none:"unreported" ~some:(Printf.sprintf "%.0f") token_max)
-            (Option.fold ~none:"unreported" ~some:(Printf.sprintf "$%.4f") cost_max)
+            (scale token_value (Printf.sprintf "%.0f") token_max)
+            (scale cost_value (Printf.sprintf "$%.4f") cost_max)
         ; "" ]
         @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.concat_map

@@ -230,6 +230,46 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                             extra_env={"NO_COLOR": "1"} if no_color else {})
 
 
+def keeper_partial_scale(executable, *, unreported_cost=False, unreported_tokens=False):
+    responses, _ = fixtures()
+    now = time.time()
+    responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
+        "keepers": [{
+            "keeper_name": "partial-only", "sample_count": 1,
+            "total_tokens": None if unreported_tokens else 1000,
+            "total_cost_usd": None if unreported_cost else 1.0,
+            "tokens_reported_samples": 0 if unreported_tokens else 1,
+            "tokens_unreported_samples": 1 if unreported_tokens else 0,
+            "tokens_unread_samples": 0,
+            "cost_reported_samples": 0 if unreported_cost else 1,
+            "cost_unreported_samples": 1 if unreported_cost else 0,
+            "cost_unread_samples": 0,
+            "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 2}}],
+        "window_minutes": 1440, "generated_at": now,
+        "cache": {"state": "fresh", "generated_at": now}})
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        h.tab_until(process, fd, output, b"MASC Usage")
+        h.send_and_wait(process, fd, output, b"v", b"Quota scope trend")
+        h.send_and_wait(process, fd, output, b"v", b"Keeper usage")
+        screen = capture(process, fd, output, "keeper-partial-scale", 40, 160, b"partial-only")
+        tokens = "unreported" if unreported_tokens else "unavailable (no complete window)"
+        cost = "unreported" if unreported_cost else "unavailable (no complete window)"
+        assert f"Scale: tokens {tokens} · cost {cost}".encode() in screen
+        if not unreported_tokens:
+            assert b"Tokens  1000" in screen
+        if not unreported_cost:
+            assert b"Cost    $1.0000" in screen
+        assert screen.count(b"[unavailable") == 2
+        assert "█".encode() not in screen and "░".encode() not in screen
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Keeper partial-only metric scales",
+                            interact=interact, http_fixtures=responses,
+                            terminal_cols=160, terminal_rows=40)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     print("STUDIO_BINARY_SHA256=" + hashlib.sha256(open(executable, "rb").read()).hexdigest())
@@ -239,4 +279,7 @@ if __name__ == "__main__":
     keeper_comparison(executable)
     keeper_comparison(executable, no_color=True)
     keeper_comparison(executable, unreported_cost=True)
+    keeper_partial_scale(executable)
+    keeper_partial_scale(executable, unreported_cost=True)
+    keeper_partial_scale(executable, unreported_cost=True, unreported_tokens=True)
     print("tui usage studio PTY: PASS")

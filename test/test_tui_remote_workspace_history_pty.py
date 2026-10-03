@@ -953,6 +953,14 @@ def ask_workspace_withdrawal(binary: str) -> None:
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        admitted_answers: list[tuple[str, bytes]] = []
+        def answer_request(body):
+            # The client may cancel its connection while the response is
+            # held. Count admission before responding: the harness's POST
+            # receipt is only appended after a successful response write.
+            with wire.lock:
+                admitted_answers.append((wire.phase, body))
+            return answer()
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -964,7 +972,8 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: answer})
+            h.KEEPER_ASK_ANSWER_PATH: h.RequestHttpResponse(answer_request,
+                get_response=(405, {"error": "POST required"}))})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -981,14 +990,20 @@ def ask_workspace_withdrawal(binary: str) -> None:
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    # Approvals withdraws its decision authority in the
+                    # body; the composer can occupy the mismatch footer.
+                    lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
+                        and b"Enter:answer" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
                 assert h.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
+                if submit:
+                    assert h.wait_for_fixture_event(process, fd, output, answer.completed,
+                        timeout=WAIT_SECONDS), "held Ask response did not leave its fixture gate"
                 wire.publish("b-after-late")
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
@@ -997,7 +1012,9 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
-                assert len([p for p, _ in posts if p == h.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                with wire.lock:
+                    assert len(admitted_answers) == int(submit), admitted_answers
+                    assert all(phase == "a" for phase, _ in admitted_answers), admitted_answers
                 os.write(fd, b"q")
             finally:
                 answer.release.set()

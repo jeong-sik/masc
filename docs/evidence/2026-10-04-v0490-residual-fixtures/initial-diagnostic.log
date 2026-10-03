@@ -1,0 +1,36 @@
+DIAGNOSTIC existing old RC f6348780cadde3fbb9eda74c3a9d9e20fb913b7c
+binary_sha256=2aa66ae0e700fabfa0b45147de7b33c561acb49239de0bbbb12494cb5f78891b
+script_sha256 test/test_tui_keeper_portrait_pty.py e9cf4719c0753c29825787fea8292cc30bd8658107045597a082ee0e31e8a33f
+script_sha256 test/test_tui_remote_workspace_history_pty.py fde18e2ef87cb57214f7f22cfd5d5fcab0b137d2e6eea2759a302b9617d29ecb
+START item_identity_authority
+PASS item_identity_authority elapsed_s=3.020
+START ask_workspace_withdrawal
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 65393)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 496, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 484, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc-v0490-residual-fixtures-20261004/test/test_tui_keyboard_input.py", line 359, in do_POST
+    self.respond(body)
+    ~~~~~~~~~~~~^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc-v0490-residual-fixtures-20261004/test/test_tui_keyboard_input.py", line 351, in respond
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------

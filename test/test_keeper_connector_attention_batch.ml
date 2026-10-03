@@ -398,6 +398,84 @@ let test_transient_board_prefix_keeps_connector_content_within_admission_limit (
        |> Result.map Q.length |> Result.value ~default:(-1)))
 ;;
 
+let test_unread_connector_sources_survive_other_completed_work ~torn_tail () =
+  List.iter (fun count ->
+    with_ctx (Printf.sprintf "connector-unread-%b-%d" torn_tail count)
+      (fun ~base_path ~keeper_name ~meta ~ctx ->
+        let messages = List.init count (fun index ->
+          connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"restore-channel"
+            ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 1))
+            ~content:(Printf.sprintf "original message %d" index)) in
+        List.iter (enqueue_exn ~base_path keeper_name) messages;
+        let path = A.attention_path ~base_path ~keeper_name in
+        let original = Fs_compat.load_file path in
+        let backup = path ^ ".fixture-backup" in
+        if torn_tail then Fs_compat.save_file path (original ^ "{")
+        else (Sys.rename path backup; Unix.mkdir path 0o700);
+        let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+          ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+        let assert_read_failure intake =
+          match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
+          | Some (Keeper_heartbeat_stimulus_intake.Connector_read_failed error) ->
+            check bool "connector read failure is a retry, not a crashed cycle" false
+              (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
+                 (Keeper_heartbeat_stimulus_intake.Connector_read_failed error))
+          | _ -> fail "unread connector store was treated as missing content" in
+        let first = intake () in
+        assert_read_failure first;
+        check int "unread connector sources are not admitted" 0
+          (Keeper_heartbeat_source_batch.count first.source_batch);
+        check bool "no turn is spent on unread connector content alone" false
+          (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+             ~scheduled:true ~consumed_stimulus_count:0
+             ~event_queue_intake_error:first.event_queue_intake_error);
+        let bootstrap : Q.stimulus =
+          { post_id = "readable-other-work"; urgency = Q.Low; arrived_at = 10.; payload = Q.Bootstrap } in
+        enqueue_exn ~base_path keeper_name bootstrap;
+        let mixed = intake () in
+        assert_read_failure mixed;
+        check (list string) "only readable work enters the completed turn"
+          [ bootstrap.post_id ]
+          (Keeper_heartbeat_source_batch.stimuli mixed.source_batch
+           |> List.map (fun (source : Q.stimulus) -> source.post_id));
+        check bool "unrelated admitted work can still run" true
+          (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+             ~scheduled:true ~consumed_stimulus_count:1
+             ~event_queue_intake_error:mixed.event_queue_intake_error);
+        let complete batch =
+          match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+            (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_not_applicable meta)) with
+          | Keeper_heartbeat_loop.Batch_ack_completed ->
+            List.iter (fun selection ->
+              match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+                ~base_path keeper_name ~applied_at:1000. ~selection with
+              | Ok (Keeper_registry_event_queue.Turn_source_acked
+                  (Keeper_registry_event_queue.Acked _ | Keeper_registry_event_queue.Already_acked _)) -> ()
+              | Ok _ -> fail "completion did not settle the admitted source"
+              | Error detail -> fail detail)
+              (Keeper_heartbeat_source_batch.selections batch)
+          | _ -> fail "completed turn did not use normal batch settlement" in
+        complete mixed.source_batch;
+        let pending_ids () =
+          match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+          | Error detail -> fail detail
+          | Ok queue -> Q.to_list queue |> List.map (fun (source : Q.stimulus) -> source.post_id) in
+        check (list string) "successful other work cannot ACK unread messages"
+          (List.map (fun (source : Q.stimulus) -> source.post_id) messages) (pending_ids ());
+        if torn_tail then Fs_compat.save_file path original
+        else (Unix.rmdir path; Sys.rename backup path);
+        let restored = intake () in
+        check int "restored original messages enter the next turn" count
+          (Keeper_heartbeat_source_batch.count restored.source_batch);
+        check (list string) "restoration delivers every original body"
+          (List.init count (Printf.sprintf "original message %d"))
+          (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+             restored.pending_board_events);
+        complete restored.source_batch;
+        check (list string) "only successful restored delivery drains the messages" [] (pending_ids ())))
+    [ 1; 2 ]
+;;
+
 let test_proactive_yields_only_to_ready_intake () =
   with_ctx "proactive-ready-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (match Keeper_owner_registry.install_from_store
@@ -1405,6 +1483,10 @@ let () =
             "transient Board prefix preserves bounded connector content"
             `Quick
             test_transient_board_prefix_keeps_connector_content_within_admission_limit
+        ; test_case "torn connector store survives other completed work and restoration" `Quick
+            (test_unread_connector_sources_survive_other_completed_work ~torn_tail:true)
+        ; test_case "unreadable connector store survives other completed work and restoration" `Quick
+            (test_unread_connector_sources_survive_other_completed_work ~torn_tail:false)
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \
              channels queued"

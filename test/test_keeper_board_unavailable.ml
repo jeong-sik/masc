@@ -173,6 +173,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
        "first pass produces no pending_board_event (consumed, not crashed)"
        0
        (List.length events)
+   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _ ->
+     fail "Board source reported a connector read failure"
    | Keeper_heartbeat_stimulus_intake.Stimulus_retry_later unavailable ->
      failf
        "permanent poison stimulus was incorrectly retained: %s"
@@ -189,6 +191,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       "second pass over the same stimulus stays empty (no crash-loop resurgence)"
       0
       (List.length events)
+  | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _ ->
+    fail "Board source reported a connector read failure"
   | Keeper_heartbeat_stimulus_intake.Stimulus_retry_later unavailable ->
     failf
       "permanent poison stimulus was incorrectly retained on repeat: %s"
@@ -265,6 +269,8 @@ let test_transient_result_is_retryable () =
       "retry retains exact post id"
       unavailable.post_id
       actual.post_id
+  | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _ ->
+    fail "Board source reported a connector read failure"
   | Keeper_heartbeat_stimulus_intake.Stimulus_consumed _ ->
     fail "transient board read was collapsed into consumed"
 ;;

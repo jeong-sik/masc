@@ -76,11 +76,13 @@ type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_retry_later of
       Keeper_world_observation_board_signal.board_unavailable
+  | Stimulus_connector_retry_later of Keeper_external_attention.read_error
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
+  | Connector_read_failed of Keeper_external_attention.read_error
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -88,16 +90,19 @@ let event_queue_intake_error_to_string = function
   | Transient_board_read unavailable ->
     "event queue stimulus intake retry: "
     ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
+  | Connector_read_failed error ->
+    "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
 ;;
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
   | Transient_board_read _ -> "event_queue_transient_board_read"
+  | Connector_read_failed _ -> "event_queue_connector_read_failed"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Transient_board_read _ -> false
+  | Transient_board_read _ | Connector_read_failed _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -199,12 +204,9 @@ type heartbeat_event_intake = {
 }
 
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
-  Keeper_external_attention.load_events ~base_path ~keeper_name
-  |> List.find_map (function
-       | Keeper_external_attention.Recorded item
-         when String.equal item.Keeper_external_attention.event_id event_id ->
-         Some item
-       | Keeper_external_attention.Recorded _ -> None)
+  Keeper_external_attention.recorded_items_by_event_ids
+    ~base_path ~keeper_name ~event_ids:[ event_id ]
+  |> Result.map (List.assoc_opt event_id)
 ;;
 
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
@@ -361,32 +363,35 @@ let consume_single_heartbeat_stimulus
              attention item in one scan (see
              [connector_attention_items_of_batch] below) — reuse it instead
              of re-scanning the whole event log for this one id. *)
-          List.assoc_opt ca.event_id preloaded
+          Result.map (List.assoc_opt ca.event_id) preloaded
         | None ->
           recorded_attention_item_by_event_id
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
             ~event_id:ca.event_id
       in
-      let pending_events =
-        match recorded_item with
-        | Some item ->
-          [ Keeper_world_observation.pending_board_event_of_external_attention
-              ~meta:meta_after_triage
-              item
-          ]
-        | None ->
-          Log.Keeper.warn
-            "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
-            ca.event_id
-            meta_after_triage.name;
-          []
-      in
-      Log.Keeper.info
-        "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
-        ca.event_id
-        meta_after_triage.name;
-      Stimulus_consumed pending_events
+      (match recorded_item with
+       | Error error -> Stimulus_connector_retry_later error
+       | Ok recorded_item ->
+         let pending_events =
+           match recorded_item with
+           | Some item ->
+             [ Keeper_world_observation.pending_board_event_of_external_attention
+                 ~meta:meta_after_triage
+                 item
+             ]
+           | None ->
+             Log.Keeper.warn
+               "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
+               ca.event_id
+               meta_after_triage.name;
+             []
+         in
+         Log.Keeper.info
+           "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+           ca.event_id
+           meta_after_triage.name;
+         Stimulus_consumed pending_events)
     | Keeper_event_queue.Hitl_resolved r ->
       (* The approval has left the queue, so this cycle no longer skips. There
          is no observation to fabricate: the typed resolution itself is
@@ -460,7 +465,7 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_retry_later _ -> intake_result
+  | Stimulus_retry_later _ | Stimulus_connector_retry_later _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -1009,7 +1014,16 @@ let heartbeat_event_intake
                    unavailable);
               let first_withdrawn =
                 match first_withdrawn with
-                | None -> Some (selection, unavailable)
+                | None -> Some (selection, Transient_board_read unavailable)
+                | Some _ as kept -> kept
+              in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_connector_retry_later error ->
+              Log.Keeper.warn
+                "turn entry: retaining unread connector attention keeper=%s: %s"
+                keeper_name (Keeper_external_attention.read_error_to_string error);
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_read_failed error)
                 | Some _ as kept -> kept
               in
               loop remaining observations_rev selections_rev first_withdrawn rest
@@ -1087,7 +1101,7 @@ let heartbeat_event_intake
   let event_queue_intake_error =
     match hard_error, first_withdrawn with
     | Some (_, error), _ -> Some error
-    | None, Some (_, unavailable) -> Some (Transient_board_read unavailable)
+    | None, Some (_, error) -> Some error
     | None, None -> None
   in
   let event_queue_triggers =

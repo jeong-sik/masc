@@ -383,6 +383,10 @@ def run(executable: str) -> None:
         )
         if f"rename lane {NEW_LANE} to:".encode() in h.screen_text(frame):
             raise AssertionError("R opened a rename field while a write was pending")
+        # Moving away and back clears the prior notice, so x must draw its
+        # own refusal rather than satisfying the wait with R's old frame.
+        press(process, fd, output, b"k")
+        press(process, fd, output, b"j")
         h.send_and_wait(
             process, fd, output, b"x",
             b"lane write refused: " + BUSY,
@@ -425,11 +429,16 @@ def run(executable: str) -> None:
         # ends it too, with a line saying the list may be stale -- the screen
         # still shows the order from before J.
         store.fail_next_resolved = True
-        frame = h.send_and_wait(
+        h.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
-        if reading_time not in h.screen_text(frame):
-            raise AssertionError("failed refresh changed the Runtime reading time")
+        # A failed reread repaints only changed rows; the unchanged header
+        # stays in terminal state even when it is absent from this frame.
+        current_screen = h.screen_text(bytes(output))
+        if reading_time not in current_screen:
+            raise AssertionError(
+                f"failed refresh changed the Runtime reading time: expected {reading_time!r}; screen={current_screen[:1200]!r}"
+            )
         # Another client now removes runtime-a. The TUI still shows the old
         # [runtime-a; runtime-b] order, where runtime-b is second. K used to
         # post that whole stale order and restore runtime-a. The unread list

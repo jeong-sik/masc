@@ -55,7 +55,10 @@ Keeper runtime leadership role.
 
 Repository CI workflows have no PR/push/tag/scheduled triggers. Specialized
 proof and packaging workflows retain manual dispatch. Release publication is
-an explicit `publish=true` dispatch on an existing v* tag. Issue taxonomy is
+an explicit `publish=true` dispatch on an existing v* tag with `rc_run_id` naming
+its latest successful full RC. It promotes the verified artifacts without another
+build or test cycle; publication success is not a substitute for RC evidence.
+Issue taxonomy is
 operational issue automation and remains independent of CI. Disabled GitHub
 workflow states remain disabled until these definitions are integrated;
 reenabling an old automatic definition would violate this policy.

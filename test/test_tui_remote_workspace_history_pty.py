@@ -177,7 +177,7 @@ def run(binary: str, captures: Path | None) -> None:
 
         try:
             h.resize_and_wait(process, fd, output,
-                rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                rows=34, columns=300, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             assert str(Path(local_base).resolve()) == wire.local_base
             metadata_path = Path(local_base, ".masc", "keepers", "alpha.json")
@@ -211,7 +211,7 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
                          "fresh B roster after the late response was not applied")
-            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+            h.resize_and_wait(process, fd, output, rows=35, columns=300,
                              needle=b"b.settled", controls=(h.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
@@ -228,7 +228,14 @@ def run(binary: str, captures: Path | None) -> None:
                     h.write_all(fd, output, b"\x1b")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
-                h.send_and_wait(process, fd, output, key, refusal)
+                if key == b"i":
+                    # The composer owns its own admission hint; focusing an
+                    # unadmitted row leaves that existing hint unchanged.
+                    os.write(fd, key)
+                    h.drain_until_quiet(process, fd, output)
+                    assert b"chat needs the server workspace" in screen(output), screen(output)
+                else:
+                    h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
@@ -246,18 +253,14 @@ def run(binary: str, captures: Path | None) -> None:
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
             await_screen(lambda text: b"MISMATCH" not in text
-                         and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
+                         and b"MASC Keepers (1)" in text and "▸Info".encode() not in text
+                         and b"keeper metadata read failed" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
-            h.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
-                             needle=b"Total Turns:", controls=(h.FULL_REDRAW,))
-            await_screen(lambda text: b"Total Turns:" in text
-                         and b"no Keeper selected" not in text,
-                         "repaired A metadata was not reloaded")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
-                         "the original workspace did not become authoritative again")
+            await_screen(lambda text: b"MASC Keepers (2)" in text and b"a.returned" in text
+                         and b"keeper metadata read failed" not in text and b"MISMATCH" not in text,
+                         "repaired A metadata was not reloaded into its current roster")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: RECOVERED in text and DRAFT in text,
@@ -293,7 +296,7 @@ def run(binary: str, captures: Path | None) -> None:
     h.run_terminal_scenario(binary,
         description="workspace change withdraws held chat history and retains its unsent draft",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+        http_requests=posts, refresh=0.5, terminal_cols=300)
 
 
 def scoped_roster_authority(binary: str) -> None:

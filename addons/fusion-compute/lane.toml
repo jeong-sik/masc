@@ -28,26 +28,9 @@ presentation = '''{
  ]
 }'''
 binding_schema = '''{
- "type":"object", "additionalProperties":false,
- "required":["analysis_id","role","prompt","instructions","max_tokens","model_route","sources"],
- "properties":{
-  "analysis_id":{"type":"string","minLength":1},
-  "role":{"enum":["panel","judge"]},
-  "prompt":{"type":"string","minLength":1},
-  "instructions":{"type":"string","minLength":1},
-  "max_tokens":{"type":"integer","minimum":1},
-  "temperature":{"type":"number","minimum":0,"maximum":2},
-  "model_route":{"type":"string","minLength":1},
-  "sources":{"type":"array","minItems":1,"items":{
-   "type":"object","additionalProperties":false,"required":["source_id","kind"],
-   "properties":{
-    "source_id":{"type":"string","minLength":1},
-    "kind":{"enum":["snapshot_file","lane_output"]},
-    "path":{"type":"string","minLength":1},
-    "installation_id":{"type":"string","minLength":1},
-    "output_id":{"type":"string","minLength":1},
-    "selection":{"const":"latest_completed"}
-   }
-  }}
- }
+ "type":"object",
+ "oneOf":[
+  {"type":"object","additionalProperties":false,"required":["analysis_id","role","prompt","instructions","max_tokens","model_route","sources"],"properties":{"analysis_id":{"type":"string","minLength":1},"role":{"type":"string","const":"panel"},"prompt":{"type":"string","minLength":1},"instructions":{"type":"string","minLength":1},"max_tokens":{"type":"integer","minimum":1},"temperature":{"type":"number","minimum":0,"maximum":2},"model_route":{"type":"string","minLength":1},"sources":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["source_id","kind"],"properties":{"source_id":{"type":"string","minLength":1},"kind":{"enum":["snapshot_file","lane_output"],"type":"string"},"path":{"type":"string","minLength":1},"installation_id":{"type":"string","minLength":1},"output_id":{"type":"string","minLength":1},"selection":{"const":"latest_completed","type":"string"}}}}}},
+  {"type":"object","additionalProperties":false,"required":["analysis_id","role","prompt","instructions","max_tokens","model_route","sources"],"properties":{"analysis_id":{"type":"string","minLength":1},"role":{"type":"string","const":"judge"},"prompt":{"type":"string","minLength":1},"instructions":{"type":"string","minLength":1},"max_tokens":{"type":"integer","minimum":1},"temperature":{"type":"number","minimum":0,"maximum":2},"model_route":{"type":"string","minLength":1},"sources":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["source_id","kind","installation_id","output_id","selection"],"properties":{"source_id":{"type":"string","minLength":1},"kind":{"type":"string","const":"lane_output"},"path":{"type":"string","minLength":1},"installation_id":{"type":"string","minLength":1},"output_id":{"type":"string","minLength":1},"selection":{"const":"latest_completed","type":"string"}}}}}}
+ ]
 }'''

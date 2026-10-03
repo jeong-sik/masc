@@ -722,5 +722,7 @@
     "selected_suite": "test/test_tui_answering_layout_pty.py",
     "method": "actual select_sources function definitions sourced from retained script before main; no API/build/CI invoked",
     "exit_code": 0
-  }
+  },
+  "evidence_status": "historical",
+  "applicability": "Only the recorded source_base plus working_tree_delta and source_sha256 inputs. Not verification of the current PR tree; some recorded test modules were subsequently removed."
 }

@@ -23,12 +23,13 @@ val pending_board_event_of_stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
 (** Closed consumption result for an Event-Layer stimulus. A transient Board
-    read cannot be represented as an empty successful rendering: it retains
+    read or unread Connector store cannot become an empty successful rendering: it retains
     the exact pending queue selection for a later heartbeat. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_retry_later of
       Keeper_world_observation_board_signal.board_unavailable
+  | Stimulus_connector_retry_later of Keeper_external_attention.read_error
 
 (** Pure disposition boundary for one rendered Board event. Permanent
     unavailability is consumed as an empty event; transient unavailability
@@ -53,6 +54,7 @@ type event_queue_intake_error =
   | Pending_selection_failed of string
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
+  | Connector_read_failed of Keeper_external_attention.read_error
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
     with no dedicated trigger returns [None]; completion-authority rejection
@@ -64,7 +66,7 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    A transient Board read is an expected retry condition: it retains the exact
+    Board and Connector source reads are retry conditions: they retain the exact
     source without advancing Keeper failure state. Other admitted sources may
     still dispatch in the same turn. *)
 val event_queue_intake_error_counts_as_cycle_failure :
@@ -108,8 +110,9 @@ type heartbeat_event_intake = {
 
     [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
     stimulus, a preloaded (event_id, item) association to resolve [stim]'s
-    recorded item from instead of a fresh
-    {!Keeper_external_attention.load_events} scan. The caller supplies this
+    recorded item from, preserving a typed read failure instead of admitting
+    an empty source. Otherwise it uses a fresh
+    {!Keeper_external_attention.load_events_result} scan. The caller supplies this
     when consuming a batch of Connector_attention stimuli (the primary plus
     same-conversation companions) so the whole batch costs one scan
     ({!Keeper_external_attention.recorded_items_by_event_ids}) rather than
@@ -119,7 +122,7 @@ type heartbeat_event_intake = {
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
-  -> ?connector_attention_items:(string * Keeper_external_attention.item) list
+  -> ?connector_attention_items:((string * Keeper_external_attention.item) list, Keeper_external_attention.read_error) result
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
 

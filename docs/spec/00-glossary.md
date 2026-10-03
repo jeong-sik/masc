@@ -3011,6 +3011,13 @@ status: reference
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
   → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml)
 
+**Memory Category (기억 분류)**
+: Memory Fact의 내용을 찾고 묶는 데 쓰는 이름(`category`). 기본 이름은 흔한 주제의
+  제안값이며 고정 열거형이 아니다. 새 주제 이름도 소문자 `snake_case`로 쓸 수 있다.
+  이 이름은 내용만 분류하며 기억의 보존·만료·승격·수정 권한을 바꾸지 않는다.
+  → [category_of_string](../../lib/keeper/keeper_memory_os_types.mli),
+  [Librarian Category](../../config/prompts/librarian.md)
+
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은

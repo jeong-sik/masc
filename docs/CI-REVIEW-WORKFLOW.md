@@ -43,7 +43,9 @@ there is no known-failure exemption list or second standalone compilation pass.
 The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
 Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
-type checks and backend-coupled dashboard tests stay in their own job.
+type checks and dashboard payload-consumer tests stay in their own job. That
+job exercises Goal, schedule, turn-record, verification, portrait, lifecycle and
+memory behavior directly; test selection does not scan backend source strings.
 Installer script tests run once on Linux in the distribution
 job and once on macOS with stock Bash and BSD utilities;
 each of the four native targets still builds and verifies its shipped binaries

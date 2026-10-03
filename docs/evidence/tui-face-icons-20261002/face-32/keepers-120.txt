@@ -1,0 +1,32 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   MASC Keepers (2)                                                                         16:00:44  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Health  1 healthy · 1 idle
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                           Mode S   TURN TASK
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     ●          alpha                            A D      — —
+     · idle     beta                             D D      — —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS unavailable · keeper lanes load failed: HTTP 503: fixture endpoint unavailable
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  g:yolo  u:runtime  q:quit  …?
+ › to alpha   (i to write)

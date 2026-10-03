@@ -22,7 +22,8 @@ let subscription = `Assoc ["keeper_name",`String "researcher";"run_id",`String "
   "installation_id",`String "documents";"output_id",`String "changes"]
 let selection = ["run_id",`String "study";"installation_id",`String "documents";"output_id",`String "changes"]
 let args operation = `Assoc (("operation",`String operation)::selection)
-let call config caller args = S.handle ~config ~caller args
+let call config caller args =
+  S.handle ~access:(Lane_addon_sources.Keeper caller) ~config ~caller args
 let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"operator" args
 let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
@@ -77,6 +78,37 @@ let private_producer_requires_real_owner_access () = with_workspace (fun config 
   producer ~visibility:(visibility "another-owner") retained "private-instance" 1;
   check bool "explicit operator authority can read retained private output" true
     (Result.is_ok (S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"researcher" request)))
+let shared_producer_requires_subscription_owner_for_read_and_ack () = with_workspace (fun config ->
+  ignore (save config);
+  let retained = store config in
+  producer retained "shared-instance" 1;
+  append retained "shared-instance" 1;
+  let read = args "read" in
+  let untrusted operation = S.handle ~access:Lane_addon_sources.Unauthenticated
+    ~config ~caller:"researcher" operation in
+  check bool "attributed name cannot read a shared subscribed source" true
+    (Result.is_error (untrusted read));
+  let first = call config "researcher" read |> ok in
+  check int "authenticated owner reads one named shared row" 1
+    (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "valid operator can read by explicit configuration authority" true
+    (Result.is_ok (S.handle ~access:Lane_addon_sources.Operator_configuration
+      ~config ~caller:"researcher" read));
+  let cursor_path = Filename.concat (Filename.concat (Store.root retained) "subscriptions")
+    (Store.digest (Yojson.Safe.to_string subscription) ^ ".json") in
+  let acknowledge = `Assoc (("operation",`String "acknowledge")
+    :: ("receipt",receipt first) :: selection) in
+  check bool "attributed name cannot acknowledge the owner's shared cursor" true
+    (Result.is_error (untrusted acknowledge));
+  check bool "refused acknowledgment left no cursor" false (Sys.file_exists cursor_path);
+  check bool "different verified Keeper cannot use the attributed owner name" true
+    (Result.is_error (S.handle ~access:(Lane_addon_sources.Keeper "foreign")
+      ~config ~caller:"researcher" read));
+  check bool "owner's first receipt remains next after refusals" true
+    (receipt (call config "researcher" read |> ok) = receipt first);
+  ignore (ack config (receipt first) |> ok);
+  check bool "verified owner's acknowledgment commits its cursor" true
+    (Sys.file_exists cursor_path))
 let keeper_save_preserves_hidden_subscriptions () = with_workspace (fun config ->
   let other = match subscription with `Assoc fields ->
     `Assoc (("keeper_name",`String "other") :: List.remove_assoc "keeper_name" fields)
@@ -125,6 +157,9 @@ let hidden_and_absent_producers_have_identical_notices () = with_workspace (fun 
   let visibility = `Assoc ["kind", `String "keeper"; "keeper", `String "foreign"] in
   producer ~visibility retained "private-a" 1;
   check bool "private producer is indistinguishable from absence" true (notice () = absent);
+  producer ~visibility ~phase:(`Assoc ["kind", `String "invalid-private-phase"])
+    retained "private-a" 1;
+  check bool "private lifecycle errors do not reveal the producer" true (notice () = absent);
   producer ~visibility retained "private-b" 1;
   check bool "multiple private producers do not expose their count" true (notice () = absent))
 
@@ -276,7 +311,7 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
       ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) path bytes in
   let fault_call ~replace_cursor_file ~sync_parent operation = S.For_testing.handle
-    ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~config ~caller:"researcher" operation in
+    ~access:(Lane_addon_sources.Keeper "researcher") ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~config ~caller:"researcher" operation in
   let ack_args=`Assoc (("operation",`String "acknowledge")::("receipt",first_receipt)::selection) in
   check bool "before-rename acknowledgement is rejected" true
     (Result.is_error (fault_call ~replace_cursor_file:(staged ~before:true) ~sync_parent:Unix.fsync ack_args));
@@ -314,6 +349,8 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
     (Result.is_error (ack config first_receipt)))
 
 let () = run "Lane subscription use" ["operator scenarios",[
+  test_case "shared subscription requires verified cursor owner" `Quick
+    shared_producer_requires_subscription_owner_for_read_and_ack;
   test_case "hidden and absent producers share one notice" `Quick hidden_and_absent_producers_have_identical_notices;
   test_case "Keeper saves preserve hidden subscriptions" `Quick keeper_save_preserves_hidden_subscriptions;
   test_case "private producer enforces durable owner and verified access" `Quick private_producer_requires_real_owner_access;

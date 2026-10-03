@@ -534,6 +534,24 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
 (* A due date or priority edit changes neither when the goal opened nor the
    phase it reached, and it is a type this reader knows, so it is not listed as
    one it could not read. *)
+let test_unlisted_history_uses_committed_snapshot_order () =
+  let snapshot title version = `Assoc
+    [ "title", `String title; "store_version", `Int version;
+      "updated_at", `String "2026-09-10T00:00:00Z" ] in
+  let created = history_row ~goal_id:"goal-gone" ~event_type:"goal_created"
+    (snapshot "Initial" 1) in
+  let older = history_row ~ts:"2026-09-10T04:00:00Z" ~goal_id:"goal-gone"
+    ~event_type:"goal_updated" (snapshot "Older" 2) in
+  let newer = history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
+    ~event_type:"goal_updated" (snapshot "Current" 3) in
+  List.iter (fun rows ->
+    let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:0 in
+    let row = List.hd (unlisted json) in
+    check (option string) "title follows committed revision despite tied snapshot times" (Some "Current")
+      (field "title" row))
+    [[created; newer; older]; [older; newer; created]; [created; older; newer]]
+;;
+
 let test_unlisted_history_knows_the_edit_event () =
   let rows =
     [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
@@ -700,6 +718,8 @@ let () =
         ; test_case "unknown and conflicting snapshot witnesses are explicit" `Quick test_snapshot_ordering_refuses_unknown_and_conflicting_witnesses
         ; test_case "a departed goal is reconstructed" `Quick
             test_unlisted_history_reconstructs_a_departed_goal
+        ; test_case "snapshots follow committed revisions" `Quick
+            test_unlisted_history_uses_committed_snapshot_order
         ; test_case "the edit event is recognised" `Quick
             test_unlisted_history_knows_the_edit_event
         ; test_case "no outcome is invented" `Quick

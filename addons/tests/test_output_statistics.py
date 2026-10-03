@@ -8,7 +8,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tempfile
 import tomllib
@@ -68,7 +68,7 @@ class OutputStatistics(unittest.TestCase):
             requests.append({"jsonrpc": "2.0", "id": ident, "method": "tools/call", "params": {
                 "name": "lane_observe", "arguments": {"binding": {}, "sources": sources}}})
         with tempfile.TemporaryDirectory() as directory:
-            result = subprocess.run([sys.executable, str(PACKAGE / "server.py")], cwd=directory,
+            result = run_stdio([sys.executable, str(PACKAGE / "server.py")], cwd=directory,
                                     input="".join(json.dumps(item) + "\n" for item in requests),
                                     capture_output=True, text=True, check=True, timeout=10)
         self.assertEqual(result.stderr, "")

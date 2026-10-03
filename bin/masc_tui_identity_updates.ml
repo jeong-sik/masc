@@ -10,7 +10,7 @@ let github_view_loaded (state : state) request result =
     | Some keeper -> String.equal keeper.k_name keeper_name
     | None -> false
   in
-  if current && still_selected
+  if current && still_selected && server_authority_ready state
   then (
     match result with
     | Ok lines ->

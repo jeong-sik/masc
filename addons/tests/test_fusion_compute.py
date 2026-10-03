@@ -303,6 +303,23 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                     self.assertNotIn("structuredContent", replies[2]["result"])
                 self.assertEqual(replies[-1], {"jsonrpc": "2.0", "id": 3, "result": {}})
 
+    def test_temperature_bounds_before_host_sampling(self):
+        with tempfile.TemporaryDirectory() as root:
+            for temperature in (-0.1, 2.1):
+                with self.subTest(invalid=temperature):
+                    host = Host(root)
+                    configured = binding()
+                    configured["temperature"] = temperature
+                    self.assertTrue(call(host, [source()], configured)["isError"])
+                    self.assertEqual(host.calls, [])
+            for temperature in (0, 2):
+                with self.subTest(boundary=temperature):
+                    host = Host(root)
+                    configured = binding()
+                    configured["temperature"] = temperature
+                    self.assertFalse(call(host, [source()], configured)["isError"])
+                    self.assertEqual(host.calls[0]["params"]["temperature"], temperature)
+
     def test_oversized_terminal_sampling_reply_is_rejected_before_outcome_copy(self):
         class OversizedHost(Host):
             def answer(self, request):

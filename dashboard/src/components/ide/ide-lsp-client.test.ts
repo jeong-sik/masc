@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { IdeEditor } from './ide-editor'
+import { readOnlyExt } from './ide-editor-extensions'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
@@ -590,6 +591,40 @@ function readyLanguage(socket: MockWebSocket) {
 }
 const sourceDiagnostic = { range: { start: { line: 0, character: 4 }, end: { line: 0, character: 11 } },
   message: 'Unbound value missing', severity: 1 }
+
+it('renders CodeLens commands as information without an execution affordance', async () => {
+  vi.useFakeTimers()
+  installWebSocketMock()
+  const parent = document.createElement('div')
+  document.body.append(parent)
+  const view = new EditorView({ parent, state: EditorState.create({
+    doc: 'let value = 1', extensions: [readOnlyExt(), lspExtension({ filePath: 'current.ml' })],
+  }) })
+  try {
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+    readyLanguage(socket)
+    await vi.advanceTimersByTimeAsync(300)
+    const lenses = [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 13 } },
+      command: { title: 'Run tests', command: 'fixture.runTests', arguments: ['current.ml'] } }]
+    for (const request of socket.sent.map(value => JSON.parse(value)).filter(value => value.id && value.method !== 'initialize')) {
+      socket.message({ id: request.id, result: request.method === 'textDocument/codeLens' ? lenses
+        : request.method === 'textDocument/diagnostic' ? { kind: 'full', items: [] } : [] })
+    }
+    await vi.advanceTimersByTimeAsync(0)
+    const label = view.dom.querySelector<HTMLElement>('.cm-codelens-marker')!
+    expect(label.textContent).toBe('Run tests')
+    expect(getComputedStyle(label).cursor).not.toBe('pointer')
+    expect(label.title).toBe('읽기 전용 정보 · 실행할 수 없음')
+    expect(label.tabIndex).toBe(-1)
+    expect(label.matches('a, button, [role="button"], [role="link"]')).toBe(false)
+    label.click()
+    label.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    label.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+    expect(wire(socket, 'workspace/executeCommand')).toEqual([])
+    expect(view.state.doc.toString()).toBe('let value = 1')
+  } finally { view.destroy(); parent.remove() }
+})
 
 describe('inlay hints in the editor', () => {
   async function withHints(hints: unknown, verify: (view: EditorView, socket: MockWebSocket) => Promise<void>) {

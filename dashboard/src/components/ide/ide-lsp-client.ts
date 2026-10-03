@@ -231,10 +231,11 @@ class CodeLensMarker extends GutterMarker {
       const el = document.createElement('span')
       el.className = 'cm-codelens-marker'
       el.textContent = lens.command?.title ?? ''
+      el.title = '읽기 전용 정보 · 실행할 수 없음'
       el.style.cssText =
         'display:inline-flex;align-items:center;gap:4px;padding:2px 6px;' +
         'margin:2px 0;font-size:11px;color:var(--color-fg-muted);' +
-        'background:var(--color-bg-muted);border-radius:4px;cursor:pointer;user-select:none'
+        'background:var(--color-bg-muted);border-radius:4px;user-select:none'
       container.appendChild(el)
     }
     return container

@@ -5,7 +5,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scan() {
   python3 - "$REPO_ROOT" "$@" <<'PY'
 import pathlib
-import re
 import shlex
 import subprocess
 import sys
@@ -13,14 +12,24 @@ sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / 'scripts' / 'ci'))
 from dune_suite_scope import top_level_stanzas
 
 
+def form_atoms(form):
+    atoms = shlex.shlex(form[1:-1], posix=True, punctuation_chars='()')
+    atoms.whitespace_split = True
+    atoms.commenters = ';'
+    return atoms
+
+
 def scan_forms(path, ancestors=()):
     resolved = path.resolve()
     if resolved in ancestors:
         raise SystemExit(f'Include cycle: {path}')
     for form in top_level_stanzas(path.read_text(encoding='utf-8')):
-        include = re.fullmatch(r'\(include\s+([^\s)]+)\s*\)', form.strip())
-        if include:
-            included = path.parent / include.group(1)
+        atoms = form_atoms(form)
+        if next(atoms, None) == 'include':
+            arguments = list(atoms)
+            if len(arguments) != 1:
+                raise SystemExit(f'Invalid dune include: {path}: {form}')
+            included = path.parent / arguments[0]
             if not included.is_file():
                 raise SystemExit(f'Missing dune include: {included}')
             yield from scan_forms(included, (*ancestors, resolved))
@@ -39,21 +48,18 @@ total = 0
 bad = []
 for path in paths:
     for source, form in scan_forms(path):
-        head = re.match(r'\(\s*(executable|executables|test|tests)\b', form)
-        if not head:
+        head = next(form_atoms(form), None)
+        if head not in ('executable', 'executables', 'test', 'tests'):
             continue
         fields = top_level_stanzas(form[1:-1])
         field = next((child for child in fields
-                      if re.match(r'\(\s*names?\s', child)), None)
+                      if next(form_atoms(child), None) in ('name', 'names')), None)
         if field is None:
             continue
-        atoms = shlex.shlex(field[1:-1], posix=True)
-        atoms.whitespace_split = True
-        atoms.commenters = ';'
-        names = list(atoms)[1:]
+        names = list(form_atoms(field))[1:]
         for name in names:
             total += 1
-            if head.group(1).startswith('executable') and name.startswith('test_'):
+            if head in ('executable', 'executables') and name.startswith('test_'):
                 bad.append(f'{source}: {name}')
 print(total, len(paths))
 print('\n'.join(bad), end='\n' if bad else '')
@@ -104,6 +110,29 @@ DUNE
   fi
   grep -q 'Include cycle:' "$tmp/error"
   echo '[PASS] recursive includes are read; missing/cyclic includes fail'
+
+  cat > "$tmp/packages/core/test/dune" <<'DUNE'
+( ; comment before include
+ include ; comment before path
+ "stanzas/quoted suites.inc" ; comment after path
+)
+DUNE
+  printf '(include ; recursive comment\n "suites.inc")\n' > "$tmp/packages/core/test/stanzas/quoted suites.inc"
+  printf '( ; declaration comment\n executables ( ; field comment\n names "test_commented" helper))\n' > "$tmp/packages/core/test/stanzas/suites.inc"
+  out="$(scan "$tmp/dune" "$tmp/packages/core/test/dune")"
+  [[ "$(printf '%s\n' "$out" | head -1)" == '4 2' ]]
+  [[ "$(printf '%s\n' "$out" | tail -n +2)" == "$tmp/packages/core/test/stanzas/suites.inc: test_commented" ]]
+  printf '(include ; missing comment\n absent.inc)\n' > "$tmp/packages/core/test/stanzas/quoted suites.inc"
+  if scan "$tmp/packages/core/test/dune" > "$tmp/error" 2>&1; then
+    echo '[FAIL] commented missing include was accepted' >&2; return 1
+  fi
+  grep -q 'Missing dune include:' "$tmp/error"
+  printf '(include ; cycle comment\n "quoted suites.inc")\n' > "$tmp/packages/core/test/stanzas/quoted suites.inc"
+  if scan "$tmp/packages/core/test/dune" > "$tmp/error" 2>&1; then
+    echo '[FAIL] commented include cycle was accepted' >&2; return 1
+  fi
+  grep -q 'Include cycle:' "$tmp/error"
+  echo '[PASS] commented recursive includes and quoted paths preserve declarations and errors'
 
   mkdir -p "$tmp/repo/scripts/lint" "$tmp/repo/scripts/ci" "$tmp/repo/test" "$tmp/repo/packages/core/test" "$tmp/repo/.worktrees/ignored"
   cp "$REPO_ROOT/scripts/lint/test-suites-are-declared-as-tests.sh" "$tmp/repo/scripts/lint/"

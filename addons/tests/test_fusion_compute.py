@@ -816,6 +816,25 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                 context = judge.calls[0]["params"]["messages"][0]["content"]["text"]
                 self.assertIn(status, context)
 
+    def test_bounded_failure_receipts_without_response_survive_judge(self):
+        class BoundedFailureHost(Host):
+            def retain(self, value):
+                value = copy.deepcopy(value)
+                if value.get("kind") == "model_outcome":
+                    value.pop("response", None)
+                    value["instance_id"] = self.instance_id
+                return super().retain(value)
+
+        with tempfile.TemporaryDirectory() as root:
+            for status in ("host_error", "invalid_response", "outcome_unknown"):
+                with self.subTest(status=status):
+                    output = call(BoundedFailureHost(root, status=status), [source()])["structuredContent"]
+                    self.assertEqual(output["rows"][0]["fields"]["computation"]["status"], status)
+                    judge = Host(root)
+                    report = call(judge, [upstream(output)], binding("judge"))["structuredContent"]
+                    self.assertFalse(report["coverage"][0]["complete"])
+                    self.assertEqual(len(judge.calls), 1)
+
     def test_invalid_inputs_and_missing_sampling_never_call_host(self):
         with tempfile.TemporaryDirectory() as root:
             missing = source()

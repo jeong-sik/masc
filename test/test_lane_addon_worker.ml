@@ -707,6 +707,18 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     |> Yojson.Safe.from_string in
   check string "oversized response is rejected before transmission" "invalid_response"
     (uncertain |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  let oversized_record = uncertain |> Yojson.Safe.Util.member "evidence"
+    |> Yojson.Safe.Util.member "outcome" |> read_reference in
+  check string "bounded terminal preserves callback failure status" "invalid_response"
+    Yojson.Safe.Util.(oversized_record |> member "status" |> to_string);
+  check string "bounded terminal preserves installation identity" "sampling-worker"
+    Yojson.Safe.Util.(oversized_record |> member "instance_id" |> to_string);
+  let oversized_request = match Types.evidence_of_json
+      Yojson.Safe.Util.(uncertain |> member "evidence" |> member "request") with
+    | Ok reference -> reference | Error detail -> fail detail in
+  let oversized_receipt = project "sampling-worker" (selected [oversized_request]) |> List.hd in
+  check string "oversized failure projects a usable host receipt" "invalid_response"
+    Yojson.Safe.Util.(oversized_receipt |> member "terminal" |> member "status" |> to_string);
   let terminal_after_failure = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
   check bool "retention failure still has terminal recovery evidence" true
@@ -911,8 +923,20 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   let result = run bounded in
   check bool "host reply including receipt metadata obeys package envelope" true (Result.is_error result);
   (match result with
-   | Error detail -> check bool "overflow refusal also fits without echoing receipt metadata" true
-       (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes)
+   | Error detail ->
+       check bool "overflow refusal also fits without echoing receipt metadata" true
+         (String.length (Yojson.Safe.to_string (`String detail)) <= bounded.resources.max_reply_bytes);
+       let terminal = Yojson.Safe.from_string detail in
+       check string "metadata overflow returns an indexed invalid response" "invalid_response"
+         Yojson.Safe.Util.(terminal |> member "status" |> to_string);
+       let reference = match Types.evidence_of_json
+           Yojson.Safe.Util.(terminal |> member "evidence" |> member "outcome") with
+         | Ok value -> value | Error message -> fail message in
+       let bytes = match Store.read_blob_bounded
+           ~budget:(Store.read_budget ~max_bytes:bounded.resources.max_reply_bytes) store reference with
+         | Ok bytes -> bytes | Error _ -> fail "metadata overflow outcome unavailable" in
+       check string "metadata overflow callback matches retained status" "invalid_response"
+         Yojson.Safe.Util.(Yojson.Safe.from_string bytes |> member "status" |> to_string)
    | Ok _ -> fail "oversized answer accepted");
   let indexes = match sampling_requests store ~instance_id:"w" with Ok xs -> xs | Error detail -> fail detail in
   check int "both actual outcomes remain durably indexed" 2 (List.length indexes);

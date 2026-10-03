@@ -42,7 +42,7 @@ let press state keys =
           | Some action -> (
               match
                 Masc_tui_pick_list.apply ~page:runtime_picker_page
-                  ~label:runtime_picker_label catalog list action
+                  ~label:(runtime_picker_label_for pick) catalog list action
               with
               | Masc_tui_pick_list.Stay list -> list
               | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
@@ -133,6 +133,7 @@ let notice_text = function
   | None -> "no line"
   | Some (Lane_write_refused reason) -> "refuse: " ^ reason
   | Some Lane_write_pending -> "pending"
+  | Some Lane_write_confirmed -> "saved and reloaded"
 
 let stale_text state =
   match runtime_lane_stale_lines state with
@@ -213,7 +214,7 @@ let test_a_written_list_holds_edits_until_its_reread () =
   state.runtime_lane_notice <- Some Lane_write_pending;
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 (Ok ());
   expect_plan "the re-read landed" state down "write primary [b; a], cursor 1";
-  Alcotest.(check string) "the pending line went with it" "no line"
+  Alcotest.(check string) "success waits for the saved order reload" "saved and reloaded"
     (notice_text state.runtime_lane_notice)
 
 (* A standalone lane's slots are read back from the standalone lanes list;
@@ -711,6 +712,7 @@ let slot_plan_text = function
     Printf.sprintf "%s %s %s" (slot_editor_target_name target)
       (match request with
        | Drop_declared_slot -> "drop"
+       | First_declared_slot -> "first in group"
        | Move_declared_slot Move_up -> "up"
        | Move_declared_slot Move_down -> "down"
        | Write_route_order order -> "order [" ^ String.concat "; " order ^ "]")
@@ -858,15 +860,66 @@ let test_slot_selection_survives_refresh () =
 
 let test_slot_editor_keys_parse () =
   Alcotest.(check (list string)) "the editor's own keys"
-    [ "drop"; "down"; "up"; "none" ]
+    [ "drop"; "down"; "up"; "first"; "none" ]
     (List.map
        (fun key ->
           match slot_edit_of_key key with
           | Some Drop_slot -> "drop"
+          | Some First_slot -> "first"
           | Some (Move_slot Move_down) -> "down"
           | Some (Move_slot Move_up) -> "up"
           | None -> "none")
-       [ "x"; "J"; "K"; "a" ])
+       [ "x"; "J"; "K"; "1"; "a" ])
+
+let test_exact_replacement_search_exposes_model_effort_and_same_group () =
+  let state = slot_editor_state ~declared:[] ~admitted:[]
+      ~declared_cli:["account.current"] ~admitted_cli:["account.current"] () in
+  let selected = { (runtime "account.luna-medium") with
+    ro_model = "gpt-6-luna"; ro_provider_id = "account";
+    ro_exact_slot_group = Tui_decode.Exact_cli_slots;
+    ro_effective_max_context = 750000;
+    ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.Medium } in
+  state.runtime_catalog <- [runtime "http.other"; selected;
+    { selected with ro_id = "account.current" }];
+  let pick = Pick_exact_lane_replacement
+      (Standalone_lane.Librarian, "account.current", Tui_decode.Exact_cli_slots) in
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "luna medium")
+    (fun index -> String.make 1 "luna medium".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search chooses a configured model with declared effort"
+       ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "750k context")
+    (fun index -> String.make 1 "750k context".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search matches the visible formatted context"
+       ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  state.runtime_catalog <- [{ selected with ro_id = "account.current" }];
+  state.runtime_catalog_reading <- Runtime_catalog_read;
+  open_runtime_lane_pick state pick;
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check string) "loaded catalogue has no eligible replacement"
+       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note picker)
+   | None -> Alcotest.fail "replacement picker is closed");
+  List.iter (fun (reading, expected) ->
+    state.runtime_catalog_reading <- reading;
+    match runtime_picker_projection state with
+    | Some picker -> Alcotest.(check string) "cached rows do not imply a fresh read"
+        expected (runtime_picker_empty_note picker)
+    | None -> Alcotest.fail "replacement picker is closed")
+    [ Runtime_catalog_loading, "  (runtime catalogue loading)"
+    ; Runtime_catalog_failed "offline", "  (runtime catalogue read failed: offline)" ];
+  Alcotest.(check string) "first means first within the declared group"
+    "librarian_exact first in group account.current"
+    (slot_plan_text (plan_slot_edit state First_slot));
+  Alcotest.(check bool) "replacement sends one operation rather than replacing a stale list"
+    false (runtime_lane_pick_sends_whole_order pick)
 
 (* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
    candidate in first position -- the same shape a declared lane holding one
@@ -1079,6 +1132,7 @@ let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
 
 let catalogue_state () =
   let state = state () in
+  state.runtime_catalog_reading <- Runtime_catalog_read;
   state.runtime_catalog <-
     [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
       runtime "zai.glm"; runtime "kimi.k2" ];
@@ -1173,9 +1227,9 @@ let test_the_picker_keys_and_rows_go_through_the_shared_list () =
   List.iter
     (fun binding_name ->
       Alcotest.(check int)
-        (binding_name ^ " draws the label the filter matches") 1
+        (binding_name ^ " draws the model title on the summary row") 1
         (calls ~module_path:"bin/masc_tui_render.ml" ~binding_name
-           "Masc_tui_types.runtime_picker_label"))
+           "Masc_tui_types.runtime_model_picker_title"))
     [ "render_lanes_overview"; "render_runtime" ]
 
 (* The Keeper runtime picker (Keepers, [U]): the declared lanes first, then
@@ -1442,6 +1496,8 @@ let () = Alcotest.run "runtime list geometry"
         test_the_slot_editor_edits_cli_slots_after_http;
       Alcotest.test_case "slot editor keys parse" `Quick
         test_slot_editor_keys_parse;
+      Alcotest.test_case "exact replacement searches model and effort within its group" `Quick
+        test_exact_replacement_search_exposes_model_effort_and_same_group;
       Alcotest.test_case "slot selection survives refreshed declarations" `Quick
         test_slot_selection_survives_refresh;
       Alcotest.test_case "media slot selection survives refreshed declarations" `Quick

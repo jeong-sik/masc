@@ -42,6 +42,10 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 
 ## One-commit candidate verification
 
+[Release freeze](guides/RELEASE-FREEZE.md)에 따라 포함 범위와 후보를 먼저 고정합니다.
+고정 후에는 출시 차단 결함만 선별 수리하며, main 갱신을 이유로 후보에 병합하지 않습니다.
+후보 수리와 다음 버전의 기능·CI 개선은 별도 스택으로 진행합니다.
+
 후보를 고정하기 전에 포함 수리, 테스트 변경, 릴리스 노트와 본문을 대조합니다.
 후보 원장은 source SHA·ref·포함 변경·소스 리뷰 범위·run ID/attempt·산출물 identity를
 연결합니다. 후보를 교체하면 이전 run, 새 SHA, 변경 범위, 교체 이유와 재검증 범위를

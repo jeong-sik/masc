@@ -145,6 +145,12 @@ def validate_runtime(raw, plan):
             'prepared provider destination disagrees with frozen measurement')
     require(config['models'][model_id]['api-name'] == model_id,
             'prepared API model disagrees with declared runtime')
+    # Bind the complete frozen model declaration, including absent controls.
+    require(same_json(config['models'][model_id], {
+        'api-name': model_id, 'max-context': 1000000, 'tools-support': True,
+        'thinking-support': True, 'preserve-thinking': False, 'streaming': True,
+        'turn-timeout-s': 180.0}),
+        'prepared model settings disagree with frozen measurement')
     require(type(lane['max_output_tokens']) is int
             and type(plan['evaluation_overrides']['max-output-tokens']) is int
             and lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
@@ -280,7 +286,9 @@ def main():
     require(len(seen) == len(cases) * plan['trials'], "Evidence validation failed: len(seen) == len(cases) * plan['trials']")
     require(all(len(values) == 1 for values in prompt_hashes.values()), 'Evidence validation failed: all((len(values) == 1 for values in prompt_hashes.values()))')
     require(all(len(values) == 1 for values in input_hashes.values()), 'Evidence validation failed: all((len(values) == 1 for values in input_hashes.values()))')
-    require(len({row['receipt']['actor'] for row in rows}) == 1, "Evidence validation failed: len({row['receipt']['actor'] for row in rows}) == 1")
+    frozen_actor = json.loads((args.evidence/'freeze.json').read_text())['container_fixture']
+    require({row['receipt']['actor'] for row in rows} == {frozen_actor},
+            'receipt actors disagree with frozen container fixture')
     # Independently re-read the persisted registry and hash-addressed payloads.
     # The hydrated result must describe the same registered/completed run.
     receipts = {row['receipt']['run_id']: row['receipt'] for row in rows}

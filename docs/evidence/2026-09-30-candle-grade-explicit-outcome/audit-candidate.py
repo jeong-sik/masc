@@ -147,6 +147,12 @@ def validate_runtime(raw, plan):
             'prepared provider destination disagrees with frozen measurement')
     require(config['models'][model_id]['api-name'] == model_id,
             'prepared API model disagrees with declared runtime')
+    # Bind the complete frozen model declaration, including absent controls.
+    require(same_json(config['models'][model_id], {
+        'api-name': model_id, 'max-context': 1000000, 'tools-support': True,
+        'thinking-support': True, 'preserve-thinking': False, 'streaming': True,
+        'turn-timeout-s': 180.0}),
+        'prepared model settings disagree with frozen measurement')
     require(type(lane['max_output_tokens']) is int
             and same_json(lane['max_output_tokens'], plan['evaluation_overrides']['max-output-tokens']),
             'prepared output limit disagrees with plan')

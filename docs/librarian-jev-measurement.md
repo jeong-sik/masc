@@ -40,7 +40,13 @@ Replace the placeholders with the actual full objects. The input payloads,
 including the rendered prompt SHA, must match exactly. Each run and sample ID
 may occur only once. Missing/unavailable payloads, missing timings and
 contradictory skip/slot evidence are refused, never removed from a calculation.
-The baseline must record disabled preflight and entry to the generation lane.
+The baseline must record disabled preflight, null preflight elapsed time, no
+received-answer fields and entry to the generation lane. Both arms require the
+complete recorded input shape: turn and Task/Goal context, Keeper instructions,
+resolved prompt metadata and variables, and nonnegative message/fact counts.
+Identically truncated inputs are refused. Duplicate JSON keys are refused
+before normalization; the manifest digest describes canonical JSON, not the
+original file's whitespace or key order.
 Keep all selected sample IDs in the manifest to avoid selection bias.
 
 ```sh
@@ -58,6 +64,16 @@ and preflight failure evidence can include provider response bodies.
 Each pair retains `preflight_observation`, including its own `status`, decision
 or failure, independently of `preflight_status` (the whole Librarian run).
 A successful fallback can therefore still show a failed JEV evaluation.
+Failed runs require their code and detail; `baseline_failure` and
+`preflight_failure` retain these diagnostics separately, with null for other
+terminal statuses.
+
+Both recorded intervals currently use `Eio.Time.now` on `Eio.Stdenv.clock`,
+the real-time clock, rather than `Eio.Time.Mono`. Clock corrections can make
+the inner interval exceed the enclosing interval. The reporter preserves both
+values and does not invent a duration cap or silently replace either reading.
+Use separately captured monotonic-clock evidence when comparing performance
+across clock corrections.
 Received judgments require complete typed provenance and a valid probability
 distribution; incomplete exports are rejected for every evidence kind.
 

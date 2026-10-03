@@ -9938,6 +9938,10 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
+  let with_status status = function
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("status", `String status) :: List.remove_assoc "status" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
   let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with
@@ -9948,9 +9952,25 @@ let test_librarian_preflight_detail_reports_actual_route () =
         List.remove_assoc "output" (List.remove_assoc "selected_slot" fields))]
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "awaiting without generation or slot is valid" true
-    (Result.is_ok (Tui_decode.decode_lane_run_detail (not_entered `Null)));
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (not_entered `Null |> with_status "cancelled")));
   Alcotest.(check bool) "not-entered must not invent a generation slot" true
-    (Result.is_error (Tui_decode.decode_lane_run_detail (not_entered (`String "codex.fake"))));
+    (Result.is_error (Tui_decode.decode_lane_run_detail (not_entered (`String "codex.fake") |> with_status "cancelled")));
+  Alcotest.(check bool) "successful run cannot retain awaiting preflight" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail
+      (not_entered `Null |> with_status "succeeded")));
+  let without_observation output =
+    match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("output", `Assoc output) :: List.remove_assoc "output" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "output without any preflight bundle remains valid" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (without_observation [])));
+  List.iter (fun (field, value) ->
+    Alcotest.(check bool) ("route field without observation rejected: " ^ field) true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (without_observation [field, value]))))
+    ["generation_path", `String "jev_no_change";
+     "full_llm_skipped", `Bool true; "preflight_domain_rejection", `Null];
   let replace_preflight ~path observation =
     match make ~decision:"uncertain" ~path ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
@@ -9958,6 +9978,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
         | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
       `Assoc ["run", `Assoc (("output", `Assoc (("jev_preflight", observation)
         :: List.remove_assoc "jev_preflight" output)) :: List.remove_assoc "output" fields)]
+      |> with_status (if path = "not_entered" then "cancelled" else "succeeded")
     | _ -> Alcotest.fail "invalid fixture" in
   let fields = function `Assoc fields -> fields | _ -> Alcotest.fail "invalid observation" in
   let with_field key value observation =
@@ -10023,7 +10044,14 @@ let test_librarian_preflight_detail_reports_actual_route () =
     (with_field key value judged))
     ["confidence",`Float 1.1; "decision",`String "keep_current";
      "probabilities",`Assoc ["keep_current",`Float 0.05;"needs_generation",`Float 0.9]];
+  let mismatched_http = C.attempt_to_yojson (http "busy")
+    |> with_field "destination_uri" (`String "https://different.invalid/evaluate") in
+  rejected "received answer cannot misattribute a refused endpoint" ~path:"full_lane"
+    (with_field "passed_over" (`List [mismatched_http]) judged);
   let failed = observed (P.Failed {C.first_attempt=transport;later_attempts=[]}) (Some 0.1) in
+  rejected "failed observation cannot misattribute a refused endpoint" ~path:"full_lane"
+    (with_field "failure" (`Assoc ["kind", `String "every_destination_refused";
+      "attempts", `List [mismatched_http]]) failed);
   rejected "failed requires a nonempty refusal history" ~path:"full_lane"
     (with_field "failure" (`Assoc ["kind",`String "every_destination_refused";"attempts",`List []]) failed);
   List.iter (fun (decision, path, skipped) ->

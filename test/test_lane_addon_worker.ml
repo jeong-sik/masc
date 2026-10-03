@@ -868,7 +868,19 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json"));
   ignore (match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail);
   check bool "recovery reconstructs outcome from first durable terminal record" true
-    (Result.is_ok (Store.read_blob store reference)))
+    (Result.is_ok (Store.read_blob store reference));
+  let blob_path = Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json") in
+  let before = Unix.stat blob_path in
+  ignore (match sampling_requests store ~instance_id:"journal-failure" with
+    | Ok rows -> rows | Error detail -> fail detail);
+  let after = Unix.stat blob_path in
+  check bool "intact recovery blob is not replaced" true
+    (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino);
+  Unix.unlink blob_path;
+  Unix.mkfifo blob_path 0o600;
+  Fun.protect ~finally:(fun () -> Unix.unlink blob_path) (fun () ->
+    check bool "FIFO recovery blob is rejected without waiting for a writer" true
+      (Result.is_error (sampling_requests store ~instance_id:"journal-failure"))))
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;

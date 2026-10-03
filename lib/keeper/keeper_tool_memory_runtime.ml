@@ -170,7 +170,8 @@ let search_durable_facts
       ~(facts : Keeper_memory_os_types.fact list)
       ~(query : string)
       ~(limit : int)
-  : (fact_match list * int, durable_search_error) result
+  : (fact_match list * int * Keeper_memory_source_current.file_source list,
+     durable_search_error) result
   =
   let selected_sources =
     match Keeper_memory_source_current.read_for_keepers_dir
@@ -216,6 +217,12 @@ let search_durable_facts
     match StringMap.find_opt fact.source.path current_by_path with
     | Some current -> current = fact
     | None -> false in
+  (* Only query-selected identities count as a deferred lookup. Other
+     unverified paths were deliberately not read and are not search failures. *)
+  let deferred_sources = List.filter_map
+      (fun (fact : Keeper_memory_source_current.fact) ->
+        if StringSet.mem fact.source.path unverified_paths then Some fact.source
+        else None) (source_whole @ source_fragments) in
   let source_whole = List.filter still_current source_whole in
   let source_fragments = List.filter still_current source_fragments in
   let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
@@ -243,7 +250,8 @@ let search_durable_facts
          @ List.map source_match source_whole
          @ List.map ordinary_match ordinary_fragments
          @ List.map source_match source_fragments)
-    , total_candidates )
+    , total_candidates
+    , deferred_sources )
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -778,13 +786,25 @@ let keeper_memory_search_with_outcome
               ] )
         ]
     in
+    let source_verification_fields deferred =
+      match deferred with
+      | [] -> []
+      | sources ->
+        [ "source_verification", `Assoc
+            [ "status", `String "incomplete"
+            ; "deferred_sources", `List (List.map
+                (fun (source : Keeper_memory_source_current.file_source) ->
+                  `Assoc ["source_path", `String source.path;
+                          "source_sha256", `String source.sha256]) sources)
+            ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
+            ] ] in
     let current_stores () =
       match read_current_facts ~keepers_dir ~keeper_id:meta.name with
       | Error _ as error -> error
       | Ok facts ->
         (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
          | Error _ as error -> error
-         | Ok (fact_matches, fact_total) ->
+         | Ok (fact_matches, fact_total, deferred_sources) ->
            Ok
              { output =
                  durable_json
@@ -792,11 +812,11 @@ let keeper_memory_search_with_outcome
                    ~fact_total
                    ~total_matches:(List.length fact_matches)
                    ~extra_matches:[]
-                   ~read_errors:false
-                   ~read_error_fields:[]
+                   ~read_errors:(deferred_sources <> [])
+                   ~read_error_fields:(source_verification_fields deferred_sources)
              ; match_count = List.length fact_matches
              ; durable_candidates = Some fact_total
-             ; read_errors = false
+             ; read_errors = deferred_sources <> []
              ; matched_memory_ids =
                  List.filter_map
                    (fun (matched : fact_match) ->
@@ -818,7 +838,7 @@ let keeper_memory_search_with_outcome
       | Ok facts ->
         (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
          | Error _ as error -> error
-         | Ok (fact_matches, fact_total) ->
+         | Ok (fact_matches, fact_total, deferred_sources) ->
            (* A librarian made one claim of the rows it absorbed (RFC-0456
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
@@ -865,7 +885,8 @@ let keeper_memory_search_with_outcome
            in
            let selected = take limit (whole_query @ fragments) in
            let read_errors =
-             history_has_read_errors history
+             deferred_sources <> []
+             || history_has_read_errors history
              || absorbed.unreadable <> []
              || absorbed.unreadable_events <> []
              || unavailable <> None
@@ -880,7 +901,8 @@ let keeper_memory_search_with_outcome
                    ~read_errors
                    ~read_error_fields:
                      (absorbed_fields ~absorbed ~unavailable
-                      @ history_read_error_fields history)
+                      @ history_read_error_fields history
+                      @ source_verification_fields deferred_sources)
              ; match_count = List.length selected
              ; durable_candidates = Some (fact_total + absorbed.candidates)
              ; read_errors

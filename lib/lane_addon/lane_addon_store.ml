@@ -487,7 +487,7 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
                 | Error (Read_failed _) -> publish () in
             (* Once the blob is durable, remove the duplicate body so later
                queries can read a large outcome once. Compaction is optional:
-               failure keeps the complete journal and its original outcome. *)
+               failure cannot discard the already durable outcome blob. *)
             (match json with
              | `Assoc fields -> ignore (write t relative
                  (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))

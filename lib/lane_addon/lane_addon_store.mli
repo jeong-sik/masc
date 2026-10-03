@@ -30,7 +30,8 @@ val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:strin
     A matching record containing [outcome_bytes] restores its content-addressed
     blob after verifying the recorded digest. Intact existing blobs are read
     without replacement. Successful recovery attempts to compact this index;
-    compaction failure preserves the full journal. The returned JSON still
+    if compaction fails, the verified durable blob still retains the outcome
+    and the index may retain its inline copy. The returned JSON still
     includes its verified inline bytes, which callers can reuse without a
     second read charge. Recovery failures remain errors and no model invocation
     occurs. *)

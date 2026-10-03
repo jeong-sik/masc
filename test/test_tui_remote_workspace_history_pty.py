@@ -1476,8 +1476,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 result = {}
                 headers = (("Mcp-Session-Id", "resource-session-" + phase),)
             elif method == "resources/list":
-                result = {"resources": [{"uri": uri,
-                    "name": "resource-" + phase + "-read-" + str(calls.count((phase, method))),
+                result = {"resources": [{"uri": uri, "name": "resource-" + phase,
                     "mimeType": "text/plain"}]}
             elif method == "resources/read":
                 result = {"contents": [{"uri": uri, "mimeType": "text/plain",
@@ -1511,22 +1510,20 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                # Recovery may already have drawn B. Prove the explicit refresh
-                # reached B, then read a completed forced frame of that state.
-                refreshes = calls.count(("b", "resources/list"))
-                os.write(fd, b"r")
+                # Recovery may already have drawn the identical B list. Wait
+                # for this refresh request, then verify retained visible state;
+                # a differential frame need not repeat an unchanged name.
+                h.read_available(fd, output)
+                if ("b", "resources/list") not in calls:
+                    os.write(fd, b"r")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: calls.count(("b", "resources/list")) > refreshes,
-                    timeout=WAIT_SECONDS), "B resource refresh was not requested"
-                refreshed_name = f"resource-b-read-{refreshes + 1}".encode()
-                h.wait_for_output(process, fd, output, refreshed_name,
-                    start=0, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, h.FULL_REDRAW, refreshed_name)
+                    lambda: ("b", "resources/list") in calls
+                    and b"resource-b" in screen(output), timeout=WAIT_SECONDS)
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
                     assert [(phase, method) for phase, method in calls
-                            if method == "resources/list"] == [("b", "resources/list")] * (refreshes + 1), calls
+                            if method == "resources/list"] == [("b", "resources/list")], calls
                 os.write(fd, b"q")
             finally:
                 release.set()

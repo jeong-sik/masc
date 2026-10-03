@@ -27,7 +27,7 @@ import test_tui_keyboard_input as h
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
 TALL_ROWS = 30
-SHORT_ROWS = 15
+SHORT_ROWS = 20  # Usable chat height below the portrait-plus-roster requirement.
 ROSTER_COLUMNS = 34
 CAPTION = "대화 · ".encode()
 IMAGE_ID = b"42"

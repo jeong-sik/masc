@@ -882,20 +882,26 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
-       let icon equipment =
-         let size = Option.get (Keeper_portrait_draw.size_of_int 160) in
+       (* Info presents an icon rather than the endpoint's full outfit
+          preview. Retain both drawings from the same authoritative outfits. *)
+       let icon_edge = 80 in
+       let icon_size = match Keeper_portrait_draw.size_of_int icon_edge with
+         | Some size -> size | None -> fail "invalid replay icon size" in
+       let save_icon filename equipment =
          let image = Keeper_portrait_draw.render_icon
-           (Keeper_portrait_look.body_of_name keeper) equipment size in
-         Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
-       in
-       Fs_compat.save_file (Filename.concat evidence "before-icon.png") (icon starting);
-       Fs_compat.save_file (Filename.concat evidence "equipped-icon.png") (icon expected);
+           (Keeper_portrait_look.body_of_name keeper) equipment icon_size in
+         let png = match Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba with
+           | Ok png -> png | Error detail -> fail detail in
+         Fs_compat.save_file (Filename.concat evidence filename) png in
+       save_icon "before-icon.png" starting;
+       save_icon "equipped-icon.png" expected;
        Fs_compat.save_file (Filename.concat evidence "before-roster.json")
          (Yojson.Safe.pretty_to_string before_roster);
        Fs_compat.save_file (Filename.concat evidence "equipped-roster.json")
          (Yojson.Safe.pretty_to_string roster);
        Fs_compat.save_file (Filename.concat evidence "manifest.json")
          (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;"pixel_size",`Int 160;
+           "icon_pixel_size",`Int icon_edge;
            "before",Keeper_portrait_equipment.to_json starting;
            "equipped",Keeper_portrait_equipment.to_json expected;
            "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");

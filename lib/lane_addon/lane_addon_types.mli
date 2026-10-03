@@ -38,6 +38,7 @@ type resources = {
       host identity prefixes exceed the same observation envelope. *)
 }
 type refresh_policy = Every_hint | Source_changes
+type model_access = Model_disabled | Host_sampling
 type package = {
   id : string;
   revision : string;
@@ -49,6 +50,7 @@ type package = {
   action_tool : string option;
   outputs : output_ports;
   refresh_policy : refresh_policy;
+  model_access : model_access;
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;

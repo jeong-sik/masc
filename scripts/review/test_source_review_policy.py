@@ -563,9 +563,9 @@ class SourceReviewPolicy(unittest.TestCase):
                                   workflow=workflow,missing_job=summary)
                 self.assertEqual(self.invoke('merge-guard.sh','--check','--run','42').returncode,2)
 
-    def test_release_tag_inventory_allows_expected_skipped_extras(self):
+    def test_publication_run_is_not_full_release_verification(self):
         self.state.update(branch='release/v1',reviews=[self.review(run=True)],workflow='.github/workflows/release.yml')
-        self.assert_ok(self.invoke('merge-guard.sh','--check','--run','42'))
+        self.assertEqual(self.invoke('merge-guard.sh','--check','--run','42').returncode, 2)
 
     def test_release_run_movement_refuses_before_approval_post(self):
         self.state.update(branch='release/v1',run_moves=True)

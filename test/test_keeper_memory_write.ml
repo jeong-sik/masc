@@ -134,7 +134,10 @@ let match_texts json =
   match json_field "matches" json with
   | `List matches ->
     List.map
-      (fun match_json -> string_field "text" match_json)
+      (function
+        | `String text when string_field "source" json = "history" -> text
+        | `Assoc _ as match_json -> string_field "text" match_json
+        | _ -> Alcotest.fail "expected history string or durable match object")
       matches
   | _ -> Alcotest.fail "expected matches array"
 ;;
@@ -1389,7 +1392,9 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
           Alcotest.(check (list string)) "unverified-only search supplies no claim" []
             (match_texts result);
           Alcotest.(check bool) "unverified-only search is not a definitive miss" true
-            (json_field "no_match" result = `Null);
+            (match result with
+             | `Assoc fields -> not (List.mem_assoc "no_match" fields)
+             | _ -> Alcotest.fail "expected search response object");
           Alcotest.(check string) "current and all expose incomplete verification" "incomplete"
             (string_field "status" (json_field "source_verification" result));
           Alcotest.(check bool) "deferred identity does not leak withheld claim" false
@@ -1400,7 +1405,9 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~args:(`Assoc ["query", `String "no matching astronomy"; "limit", `Int 10])
             |> Yojson.Safe.from_string in
         Alcotest.(check bool) "unselected unreadable sources do not make a lookup incomplete" true
-          (json_field "source_verification" unrelated = `Null
+          ((match unrelated with
+            | `Assoc fields -> not (List.mem_assoc "source_verification" fields)
+            | _ -> Alcotest.fail "expected search response object")
            && json_field "no_match" unrelated = `Bool true);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
@@ -1790,6 +1797,34 @@ let test_history_search_reports_read_errors ~malformed () =
               | _ -> Alcotest.fail "missing failed trace")
          [ "absent-query"; "amber" ])
     [ "history"; "all" ]
+;;
+
+let test_short_acronym_search_does_not_select_word_interiors () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "short-acronym-search" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let noise = ["source revalidation"; "SRC policy"; "city notes"] in
+  let useful = ["RC는 보류한다"; "RC-12 release"; "CI가 끝났다"] in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name
+    (List.map fact (noise @ useful));
+  let ctx_work = List.fold_left (fun context text ->
+    Masc.Keeper_context_runtime.append context
+      (Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]))
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"") (noise @ useful) in
+  List.iter (fun source ->
+    let search query = Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+      ~args:(`Assoc ["query", `String query; "source", `String source; "limit", `Int 10])
+      |> Yojson.Safe.from_string |> match_texts in
+    let rc = search "RC" in
+    Alcotest.(check bool) (source ^ " finds Korean suffixed acronym") true
+      (List.mem "RC는 보류한다" rc);
+    Alcotest.(check bool) (source ^ " finds punctuated release identifier") true
+      (List.mem "RC-12 release" rc);
+    List.iter (fun unrelated ->
+      Alcotest.(check bool) (source ^ " excludes " ^ unrelated) false (List.mem unrelated rc)) noise;
+    Alcotest.(check bool) (source ^ " CI excludes city") false (List.mem "city notes" (search "CI")))
+    ["current"; "history"; "all"]
 ;;
 
 let test_search_keeps_exact_matches_in_store_order () =
@@ -3618,6 +3653,8 @@ let () =
             (test_history_search_reports_read_errors ~malformed:true)
         ; Alcotest.test_case "history search reports unreadable files" `Quick
             (test_history_search_reports_read_errors ~malformed:false)
+        ; Alcotest.test_case "short acronym search keeps Korean suffixes and excludes word interiors" `Quick
+            test_short_acronym_search_does_not_select_word_interiors
         ; Alcotest.test_case
             "search keeps exact matches in store order"
             `Quick

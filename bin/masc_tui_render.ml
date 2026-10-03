@@ -1741,8 +1741,17 @@ let schedule_list_freshness (state : state) =
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
     of the whole store this page is. *)
+let schedule_form_refusal_rows (state : state) ~cols =
+  match state.schedule_form_refusal with
+  | Some (action, detail, at)
+    when Unix.gettimeofday () -. at <= Masc_tui_types.last_action_window_s ->
+      Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+        (Terminal_text.single_line (action ^ ": " ^ detail))
+  | Some _ | None -> []
+
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let refusal_rows = schedule_form_refusal_rows state ~cols in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1755,6 +1764,28 @@ let render_schedule_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
+  let selected_row_exists, reserved_rows =
+    match state.schedules with
+    | Some snapshot when String.equal snapshot.scs_status "ok" ->
+        let warning = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+        let cancel = (if Option.is_some state.schedule_cancel_armed then 1 else 0)
+          + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
+        let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
+        selected, warning + cancel +
+          (if snapshot.scs_rows = [] then 3 else 3 + 2 + 2 + 1)
+    | Some _ | None -> false, 1
+  in
+  let room = max 0 (budget - reserved_rows) in
+  let refusal_rows =
+    if List.length refusal_rows <= room then refusal_rows
+    else if room = 0 then []
+    else
+      let cue = if selected_row_exists then "… Enter: full refusal diagnostic"
+        else "… refusal diagnostic truncated" in
+      List.init (room - 1) (fun index -> List.nth refusal_rows index)
+      @ [Message_layout.fit_width cue (max 1 (framed_inner_width cols))]
+  in
+  List.iter (c.push_styled ~style:(Theme.bad ())) refusal_rows;
   (match state.schedules with
    | None ->
        (match schedule_source_warning state with
@@ -1866,7 +1897,7 @@ let render_schedule_list (state : state) =
               next due and its divider, the column names and their rule, the
               two delivery rows, and the cancel rows. *)
            let content_height =
-             max 1 (budget - warning_rows - 3 - header_rows - 2 - cancel_rows)
+             max 1 (budget - List.length refusal_rows - warning_rows - 3 - header_rows - 2 - cancel_rows)
            in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
@@ -2292,6 +2323,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
   let wire text = String.concat "\n"
       (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
   let warnings =
+    List.map (fun line -> Theme.bad (), line) (schedule_form_refusal_rows state ~cols)
+    @
     (* The latest action refusal is the row the result handler reveals.
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
@@ -5161,12 +5194,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let section_line title = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
       let add_section title = add_line (section_line title) in
 
-      (* Identity section, beside the portrait when the pane has room *)
+      (* Identity, current task and context share the icon's header. These
+         facts use the same label column, rather than leaving the portrait's
+         lower rows blank while the current work falls below the viewport. *)
+      let header_width = match portrait with
+        | None -> inner
+        | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
+      in
       let identity =
-        let width = match portrait with
-          | None -> inner
-          | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
-        in
+        let width = header_width in
         [ section_line "Identity" ]
         @ row_lines ~width "Name:" (Terminal_text.single_line k.k_name)
         @ row_lines ~width "Paused:"
@@ -5185,26 +5221,94 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            | None -> []
            | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in
-      List.iter add_line
-        (match portrait with
-         | Some band -> Masc_tui_keeper_portrait.beside band identity
-         | None -> identity);
+      List.iter add_line identity;
       (match portrait_reading with
        | Tui_decode.Ready _ -> ()
        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
-      (* The short Overview names only the reading's state. Info retains
-         every diagnostic and exact supply amount, wrapped and scrollable. *)
-      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
-      if candle_lines <> [] then (
-        add_section "Candle details";
-        List.iter
-          (fun line ->
-            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
-              (Terminal_text.single_line line)
-            |> List.iter (fun line -> add_line ("  " ^ line)))
-          candle_lines;
-        add_empty ());
+      let add_row label value =
+        List.iter add_line (row_lines ~width:header_width label value)
+      in
+      (* Current work section *)
+      add_section "Current Work";
+      add_row "Task:"
+        (match k.k_activity with
+         | None -> "not observed"
+         | Some activity -> Terminal_text.single_line_or
+             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
+      add_empty ();
+
+      (* Live Context section (Phase 2) *)
+      add_section "Live Context";
+      (match
+         Context_state.reading_for_keeper ~keeper_name:k.k_name
+           state.live_context
+       with
+       | None ->
+           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+       | Some reading ->
+           (match
+              Terminal_text.optional_single_line reading.error,
+              reading.observation
+            with
+            | Some error, _ ->
+                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
+            | None, Some observation ->
+                (match Observation_layout.context_summary observation with
+                 | Observation_layout.Context_measured observation ->
+                     let ratio = observation.ratio in
+                     let pct =
+                       Float.of_int (Observation_layout.percentage_tenths ratio)
+                       /. 10.0
+                     in
+                     let bar_width =
+                       Layout.keeper_context_bar_width
+                         ~inner_width:header_width
+                     in
+                     add_row "Context:"
+                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+                          (ctx_color ratio) pct Ansi.reset
+                          (ctx_bar ratio bar_width)
+                          (Masc_tui_message_layout.compact_count
+                             observation.tokens)
+                          (Masc_tui_message_layout.compact_count
+                             observation.maximum));
+                     add_row "Observed:"
+                       (Terminal_text.short_timestamp observation.observed_at);
+                     add_row "Turn Ref:"
+                       (Terminal_text.single_line observation.turn_ref)
+                 | Observation_layout.Context_partial observation ->
+                     (* The one reading in this row that printed a bare number.
+                        The row also carries a cumulative figure, which says
+                        "cumulative usage" in its own sentence, and a measured
+                        one, which carries a percentage and a window -- so a
+                        number alone was the only thing here a reader had to
+                        guess the scope of, and the two differ by an order of
+                        magnitude (#33791). This one is occupancy: the
+                        projection emits an observation only once it has
+                        confirmed the turn's own usage. *)
+                     add_row "Context:"
+                       (Printf.sprintf
+                          "%s tokens in context; window not observed"
+                          (Masc_tui_message_layout.compact_count
+                             observation.tokens));
+                     add_row "Observed:"
+                       (Terminal_text.short_timestamp observation.observed_at);
+                     add_row "Turn Ref:"
+                       (Terminal_text.single_line observation.turn_ref)
+                 | Observation_layout.Context_unavailable reason ->
+                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
+            | None, None ->
+                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
+      add_empty ();
+
+      let header_lines = List.rev !lines in
+      lines := [];
+      List.iter add_line
+        (match portrait with
+         | Some band -> Masc_tui_keeper_portrait.beside band header_lines
+         | None -> header_lines);
+      let add_row label value = List.iter add_line (row_lines ~width:inner label value) in
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome
@@ -5318,79 +5422,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            add_row "Gate settings:"
              (Theme.bad () ^ "unread \xc2\xb7 "
               ^ Terminal_text.single_line reason ^ Ansi.reset));
-      add_empty ();
-
-      (* Current work section *)
-      add_section "Current Work";
-      add_row "Task:"
-        (match k.k_activity with
-         | None -> "not observed"
-         | Some activity -> Terminal_text.single_line_or
-             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
-      add_empty ();
-
-      (* Live Context section (Phase 2) *)
-      add_section "Live Context";
-      (match
-         Context_state.reading_for_keeper ~keeper_name:k.k_name
-           state.live_context
-       with
-       | None ->
-           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
-       | Some reading ->
-           (match
-              Terminal_text.optional_single_line reading.error,
-              reading.observation
-            with
-            | Some error, _ ->
-                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
-            | None, Some observation ->
-                (match Observation_layout.context_summary observation with
-                 | Observation_layout.Context_measured observation ->
-                     let ratio = observation.ratio in
-                     let pct =
-                       Float.of_int (Observation_layout.percentage_tenths ratio)
-                       /. 10.0
-                     in
-                     let bar_width =
-                       Layout.keeper_context_bar_width
-                         ~inner_width:inner
-                     in
-                     add_row "Context:"
-                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
-                          (ctx_color ratio) pct Ansi.reset
-                          (ctx_bar ratio bar_width)
-                          (Masc_tui_message_layout.compact_count
-                             observation.tokens)
-                          (Masc_tui_message_layout.compact_count
-                             observation.maximum));
-                     add_row "Observed:"
-                       (Terminal_text.short_timestamp observation.observed_at);
-                     add_row "Turn Ref:"
-                       (Terminal_text.single_line observation.turn_ref)
-                 | Observation_layout.Context_partial observation ->
-                     (* The one reading in this row that printed a bare number.
-                        The row also carries a cumulative figure, which says
-                        "cumulative usage" in its own sentence, and a measured
-                        one, which carries a percentage and a window -- so a
-                        number alone was the only thing here a reader had to
-                        guess the scope of, and the two differ by an order of
-                        magnitude (#33791). This one is occupancy: the
-                        projection emits an observation only once it has
-                        confirmed the turn's own usage. *)
-                     add_row "Context:"
-                       (Printf.sprintf
-                          "%s tokens in context; window not observed"
-                          (Masc_tui_message_layout.compact_count
-                             observation.tokens));
-                     add_row "Observed:"
-                       (Terminal_text.short_timestamp observation.observed_at);
-                     add_row "Turn Ref:"
-                       (Terminal_text.single_line observation.turn_ref)
-                 | Observation_layout.Context_unavailable reason ->
-                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
-            | None, None ->
-                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
       add_empty ();
 
       (* Runtime section *)
@@ -10747,14 +10778,6 @@ let usage_lines ~cols (state : state) =
                     ; "" ])
               kuw_rows)
   in
-  let transport =
-    match state.transport with
-    | None -> [ " Transport · not observed" ]
-    | Some reading ->
-        [ " Transport · queue pressure "
-          ^ Masc.Transport_metrics.queue_pressure_kind_to_string
-              reading.th_queue_pressure ]
-  in
   let wrap_evidence lines =
     (* Wrap before the scroll window is counted. Coverage and missing samples
        remain reachable rows on narrow terminals. *)
@@ -10778,7 +10801,15 @@ let usage_lines ~cols (state : state) =
   (* Plan cards already have a cell-sized border and wrapped contents. *)
   | Usage_plan -> scopes
   | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
-  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
+  | Usage_keepers ->
+      let currency = match Masc_tui_candle.summary_lines state.candle_observation with
+        | [] -> []
+        | lines ->
+            [ " " ^ Ansi.bold ^ "Candle · workspace supply" ^ Ansi.reset ]
+            @ List.map (fun line -> "   " ^ Terminal_text.single_line line) lines
+            @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
+      in
+      wrap_evidence (currency @ keepers)
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

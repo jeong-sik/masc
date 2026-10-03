@@ -1,0 +1,12 @@
+{
+  "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+  "binary_sha256": "8192ad7e7ec507535b1b22e1264bfa9ddf16f95f501062de3ff5c41ee92b8309",
+  "source_sha": "40136f564910544a84f9d4acd09c48e511dbf82e",
+  "columns": 100,
+  "item_rows": 24,
+  "rendered_preview": {
+    "scope": "Monochrome rendering of recorded PTY rows; font and color are presentation choices, no native pixel or installed-runtime claim",
+    "input_sha256": "0eded40d46866a3f01a01911f7242db46126f6595479e41c0095f8132e9c342d",
+    "png_sha256": "d2dfb0bd98eed845c32a7e83c7f3863cc58e0a77b00f833520e854d9912f0c5c"
+  }
+}

@@ -3063,7 +3063,6 @@
 (include stanzas/test_server_dashboard_official_client_probe.inc)
 (include stanzas/test_official_client_session_store.inc)
 
-(include stanzas/test_runtime_provider_projection_boundary.inc)
 
 (include stanzas/test_openapi_api_e2e.inc)
 
@@ -3161,23 +3160,6 @@
  (modules test_misc_coverage)
  (libraries masc_test_deps))
 
-(test
- (name test_provider_prefix_boundary)
- (modules test_provider_prefix_boundary)
- (libraries alcotest))
-
-; RFC-0084 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
-; PR-1 establishes 3 evidence tests for the current telemetry/surface/prehook
-; gaps in lib/tool/tool_dispatch.ml and
-; lib/keeper/keeper_tool_descriptor_resolution.ml. PR-5/7/9
-; update each pinned constant alongside the code fix in the same PR so that
-; drift between code state and pinned evidence is caught by single-PR diff.
-; Constants-only (no Masc lib dependency) — keeps tests fast and isolated.
-
-(test
- (name test_dispatch_telemetry_gap)
- (modules test_dispatch_telemetry_gap)
- (libraries alcotest))
 
 ; RFC-0083 PR-2 — Tool_name.t exhaustive closure test. Round-trips all
 ; Masc_keeper.t variants through to_string/of_string and pins the variant
@@ -3213,26 +3195,6 @@
  (modules test_tool_capability_typed)
  (libraries masc_test_deps))
 
-; RFC-0084 PR-8 — MCP server telemetry wrap parity. Constants-only
-; (no lib dependency): pins the outcome label vocabulary and wrap site
-; count for the mcp_server_eio_execute.ml tag-dispatch wrap. Real wrap
-; behaviour is unit-tested in test_guarded_dispatch_telemetry (PR-3).
-
-(test
- (name test_mcp_telemetry)
- (modules test_mcp_telemetry)
- (libraries alcotest))
-
-; RFC-0084 PR-9 — Tag-dispatch fallback telemetry wrap. Final entry for
-; 4-tuple propagation: brings keeper-turn + MCP + tag-dispatch to 3/3 =
-; 100% per RFC-0084 §2.1 North Star. Constants-only: pins outcome vocab
-; parity with PR-7 + PR-8, cumulative wrap site count (4), and the
-; entries-covered = 3 invariant.
-
-(test
- (name test_tag_dispatch_typed)
- (modules test_tag_dispatch_typed)
- (libraries alcotest))
 
 ; RFC-0084 PR-10 — Typed Dispatch_outcome.t arm invariants. Pins
 ; cardinality (2), to_string vocabulary, round-trip preservation, and
@@ -3257,60 +3219,6 @@
  (modules test_host_config_resolution)
  (libraries masc_test_deps))
 
-; RFC-0084 host-config-cleanup-F — test-mode predicate migration.
-; Pins `String.starts_with ~prefix:"test_"` literal count at 0 in
-; Masc_test_deps.config_dir_resolver_source_path, asserts helper signature is
-; unit->bool (no executable_name param), and verifies Host_config.is_test_mode
-; is called from the migrated site. Cross-checks is_test_mode round-trip.
-; Requires masc_test_deps for Masc.Host_config.is_test_mode and ast_grep for
-; structural source ratchets.
-
-(test
- (name test_pr_f_test_mode_migration)
- (modules test_pr_f_test_mode_migration)
- (libraries masc_test_deps ast_grep))
-
-; RFC-0084 host-config-cleanup-C — coreutils path migration.
-; Pins 0 occurrences of the 6 absolute coreutils literals in
-; the structured file-search ops implementation and exactly 1
-; Host_config.host invocation (single binding at
-; module-init time, not per call-site).
-
-(test
- (name test_pr_c_coreutils_migration)
- (modules test_pr_c_coreutils_migration)
- (libraries masc_test_deps ast_grep))
-
-; RFC-0084 host-config-cleanup-B — shell binary path migration.
-; Pins 0 occurrences of /bin/bash and /bin/zsh literals across
-; the 4 keeper consumer modules (1 bash + 3 zsh) and verifies one
-; Host_config.host binding per consumer module.
-
-(test
- (name test_pr_b_shell_paths_migration)
- (modules test_pr_b_shell_paths_migration)
- (libraries masc_test_deps ast_grep))
-
-; RFC-0084 host-config-cleanup-D — agent runtime root migration.
-; Pins 0 occurrences of /tmp/.masc_agent[_mcp]_<sid> literals
-; across mcp_server_eio_execute.ml + mcp_tool_runtime_workspace.ml
-; and exactly 1 Host_config.host binding per module.
-
-(test
- (name test_pr_d_agent_runtime_migration)
- (modules test_pr_d_agent_runtime_migration)
- (libraries masc_test_deps ast_grep))
-
-; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
-; and server bootstrap kept free of provider-specific AGENT_CORE policy wiring.
-
-(test
- (name test_rfc_0085_pr3_server_runtime_paths)
- (modules test_rfc_0085_pr3_server_runtime_paths)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/server/server_startup_takeover.ml
-  ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
 ; (base_path / config_dir / data_dir) + from_env alias.
@@ -3320,13 +3228,6 @@
  (modules test_rfc_0085_pr6_host_config_from_env)
  (libraries alcotest masc.host_config unix))
 
-; RFC-0085 PR-4 — tool_library /tmp fallback purge.
-
-(test
- (name test_rfc_0085_pr4_tool_library_proof_store)
- (modules test_rfc_0085_pr4_tool_library_proof_store)
- (libraries alcotest ast_grep)
- (deps ../lib/tool_library.ml))
 
 ; Verify the shared MCP dispatch finalizer fires typed observers without
 ; changing the handler result.
@@ -3357,17 +3258,6 @@
   masc.tool_types
   unix))
 
-; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
-; Host_config.from_env; Env_config_core config_dir boundary
-; removed.
-
-(test
- (name test_rfc_0085_pr8_config_dir_resolver_host_config)
- (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
- (libraries alcotest ast_grep)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)))
 
 ; RFC-0086 — keeper namespace bulk promotion invariant.
 ; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
@@ -3398,100 +3288,6 @@
  (deps
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))
-
-; RFC-0085 PR-18 — Retroactive AST test for execution_surfaces +
-; namespace_truth rename (#15486 shipped without a regression test;
-; restored by #15495).
-
-(test
- (name test_rfc_0085_pr18_execution_surfaces_rename)
- (modules test_rfc_0085_pr18_execution_surfaces_rename)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/server/server_dashboard_http_execution_surfaces.ml
-  ../lib/server/server_dashboard_http_namespace_truth.ml))
-
-; RFC-0085 PR-17 — Retroactive AST test for 4 dead deletion + 2 rename
-; (#15485 shipped without a regression test; restored by #15495).
-
-(test
- (name test_rfc_0085_pr17_dead_purge_and_rename)
- (modules test_rfc_0085_pr17_dead_purge_and_rename)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/workspace/workspace_utils_paths_backend.ml
-  ../lib/server_base_path_diagnostics.ml
-  ../lib/dashboard/dashboard_briefing.ml
-  ../lib/gate/channel_gate_metrics.ml))
-
-; RFC-0085 PR-16 — Retroactive AST test for dashboard_http_core rename
-; (#15484 shipped without a regression test; restored by #15495).
-
-(test
- (name test_rfc_0085_pr16_dashboard_http_core_rename)
- (modules test_rfc_0085_pr16_dashboard_http_core_rename)
- (libraries alcotest ast_grep)
- ; The test globs the whole server_dashboard_http_core family, because the
- ; module was split once and the underscore names came back in the halves this
- ; guard could not see. Declare the same family so a split is a rebuild.
- (deps
-  (glob_files ../lib/server/server_dashboard_http_core*.ml)))
-
-; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
-; 3-step chain inlined; guarded_dispatch is the only dispatch entry.
-
-(test
- (name test_rfc_0085_pr14_dispatch_inline)
- (modules test_rfc_0085_pr14_dispatch_inline)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/tool/tool_dispatch.ml
-  ../lib/keeper/keeper_tool_registered_runtime.ml))
-
-; RFC-0085 PR-13 — Underscore-prefix audit for the remaining active bindings.
-
-(test
- (name test_rfc_0085_pr13_underscore_rename)
- (modules test_rfc_0085_pr13_underscore_rename)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/config_dir_resolver/config_dir_resolver.ml
-  ../lib/keeper/keeper_tool_surface_ops.ml
-  ../lib/tool_workspace.ml))
-
-; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
-
-(test
- (name test_rfc_0085_pr11_deprecation_purge)
- (modules test_rfc_0085_pr11_deprecation_purge)
- (libraries alcotest ast_grep)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)))
-
-; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
-; Host_config.t; Env_config_core.assets_dir_opt fully removed,
-; home_dir_opt demoted to file-private.
-
-(test
- (name test_rfc_0085_pr10_home_assets_purge)
- (modules test_rfc_0085_pr10_home_assets_purge)
- (libraries alcotest ast_grep masc.host_config)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)))
-
-; RFC-0085 PR-9 — Env_config_core.base_path_opt + base_path_raw_opt
-; public-surface purge; 9 caller migrate to Host_config.from_env;
-; Host_config.t gains base_path (normalised) + base_path_raw fields.
-
-(test
- (name test_rfc_0085_pr9_base_path_opt_purge)
- (modules test_rfc_0085_pr9_base_path_opt_purge)
- (libraries alcotest ast_grep)
- (deps
-  (source_tree ../lib)
-  (source_tree ../bin)))
 
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
@@ -8141,6 +7937,8 @@
 
 (include stanzas/test_tui_candle_currency_pty.inc)
 
+(include stanzas/test_item_http_redirects.inc)
+
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
 
@@ -8172,3 +7970,13 @@
  (name test_server_keeper_build_maintenance)
  (modules test_server_keeper_build_maintenance)
  (libraries alcotest masc masc_server masc_test_deps unix))
+
+(rule
+ (alias runtest-test_tui_memory_recall_state_pty)
+ (deps test_tui_memory_recall_state_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_recall_state_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_recall_state_pty)))

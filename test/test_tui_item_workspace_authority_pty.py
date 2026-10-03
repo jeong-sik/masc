@@ -121,7 +121,8 @@ class ItemWire(authority.WorkspaceWire):
             if held:
                 self.hold_next = False
             self.events.append({"event": "items", "phase": phase, "state": state, "held": held,
-                "missing_revision": self.missing_revision, "malformed_revision": self.malformed_revision})
+                                "missing_public_revision": self.missing_revision,
+                                "malformed_public_revision": self.malformed_revision})
         if held:
             self.held_started.set()
             if not self.release_held.wait(timeout=30.0):
@@ -162,13 +163,6 @@ def run(binary, captures):
                 (captures / (name + ".txt")).write_bytes(visible())
                 (captures / (name + ".pty")).write_bytes(output)
             print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
-
-        def item_read_observed(*, missing=False, malformed=False):
-            with wire.lock:
-                return any(event["event"] == "items"
-                    and event["missing_revision"] == missing
-                    and event["malformed_revision"] == malformed
-                    for event in wire.events)
 
         def booting_observed():
             with wire.lock:
@@ -263,19 +257,29 @@ def run(binary, captures):
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
-            wire.set_missing_revision(True)
-            wait(lambda text: item_read_observed(missing=True) and b"Balance 3.250 Candle" in text,
-                 "missing public revision blocked the authenticated Item account")
-            wire.set_missing_revision(False)
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "restored revision did not reload Item facts")
-            wire.set_malformed_revision(True)
-            wait(lambda text: item_read_observed(malformed=True) and b"Balance 3.250 Candle" in text,
-                 "malformed public revision blocked the authenticated Item account")
-            capture("a-revision-malformed")
-            wire.set_malformed_revision(False)
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "valid revision recovery did not reload Item facts")
+            # Public Candle revision observations do not authorize this
+            # authenticated account endpoint. Missing/malformed public fields
+            # must not suppress a fresh, strictly decoded private account.
+            for public_revision in ("missing", "malformed"):
+                with wire.lock:
+                    before_events = len(wire.events)
+                if public_revision == "missing":
+                    wire.set_missing_revision(True)
+                else:
+                    wire.set_malformed_revision(True)
+                os.write(fd, b"r")
+                def fresh_items():
+                    with wire.lock:
+                        return any(event["event"] == "items"
+                            and event[public_revision + "_public_revision"]
+                            for event in wire.events[before_events:])
+                assert h.wait_for_fixture_state(process, fd, output, fresh_items,
+                    timeout=authority.WAIT_SECONDS), "public revision blocked the authenticated Item read"
+                wait(lambda text: b"Balance 3.250 Candle" in text and b"quill" in text and b"owned" in text,
+                     "private Item facts disappeared with " + public_revision + " public revision")
+                capture("a-public-revision-" + public_revision)
+                wire.set_missing_revision(False)
+                wire.set_malformed_revision(False)
             wire.set_booting(True)
             wait(lambda text: booting_observed() and b"No keeper selected." in text
                  and "▸Items".encode() not in text,

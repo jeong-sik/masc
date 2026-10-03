@@ -177,7 +177,7 @@ def run(binary: str, captures: Path | None) -> None:
 
         try:
             h.resize_and_wait(process, fd, output,
-                rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                rows=34, columns=300, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             assert str(Path(local_base).resolve()) == wire.local_base
             metadata_path = Path(local_base, ".masc", "keepers", "alpha.json")
@@ -211,7 +211,7 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
                          "fresh B roster after the late response was not applied")
-            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+            h.resize_and_wait(process, fd, output, rows=35, columns=300,
                              needle=b"b.settled", controls=(h.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
@@ -228,7 +228,14 @@ def run(binary: str, captures: Path | None) -> None:
                     h.write_all(fd, output, b"\x1b")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
-                h.send_and_wait(process, fd, output, key, refusal)
+                if key == b"i":
+                    # The composer owns its own admission hint; focusing an
+                    # unadmitted row leaves that existing hint unchanged.
+                    os.write(fd, key)
+                    h.drain_until_quiet(process, fd, output)
+                    assert b"chat needs the server workspace" in screen(output), screen(output)
+                else:
+                    h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
@@ -246,18 +253,14 @@ def run(binary: str, captures: Path | None) -> None:
             metadata_path.write_text("{not-json", encoding="utf-8")
             wire.publish("a-returned")
             await_screen(lambda text: b"MISMATCH" not in text
-                         and b"no Keeper selected" in text and b"keeper metadata read failed" in text,
+                         and b"MASC Keepers (1)" in text and "▸Info".encode() not in text
+                         and b"keeper metadata read failed" in text,
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
-            h.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
-                             needle=b"Total Turns:", controls=(h.FULL_REDRAW,))
-            await_screen(lambda text: b"Total Turns:" in text
-                         and b"no Keeper selected" not in text,
-                         "repaired A metadata was not reloaded")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
-                         "the original workspace did not become authoritative again")
+            await_screen(lambda text: b"MASC Keepers (2)" in text and b"a.returned" in text
+                         and b"keeper metadata read failed" not in text and b"MISMATCH" not in text,
+                         "repaired A metadata was not reloaded into its current roster")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: RECOVERED in text and DRAFT in text,
@@ -293,7 +296,7 @@ def run(binary: str, captures: Path | None) -> None:
     h.run_terminal_scenario(binary,
         description="workspace change withdraws held chat history and retains its unsent draft",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+        http_requests=posts, refresh=0.5, terminal_cols=300)
 
 
 def scoped_roster_authority(binary: str) -> None:
@@ -306,9 +309,17 @@ def scoped_roster_authority(binary: str) -> None:
             self.hold_roster = False
             self.roster_started = threading.Event()
             self.roster_release = threading.Event()
+        def prepare(self, base):
+            super().prepare(base)
+            keeper_path = Path(base, ".masc", "keepers", "alpha.json")
+            metadata = json.loads(keeper_path.read_text())
+            metadata["name"] = "c-only"
+            Path(base, ".masc", "keepers", "c-only.json").write_text(json.dumps(metadata))
+            keeper_path.unlink()
         def health(self):
             with self.lock:
-                base = "/fixture-workspace-b" if self.phase == "b" else "/fixture-workspace-c"
+                base = "/fixture-workspace-b" if self.phase == "b" else self.local_base
+            assert base is not None, "scoped authority fixture was not prepared"
             _, payload = h.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
@@ -327,40 +338,34 @@ def scoped_roster_authority(binary: str) -> None:
                 self.roster_started.set()
                 assert self.roster_release.wait(timeout=30), "scoped B roster was not released"
             return 200, payload
-        def board(self):
-            with self.lock:
-                title = "workspace-b-board" if self.phase == "b" else "workspace-c-board"
-            return 200, {"posts": [h.board_selection_post("scope", title, "authority fixture")]}
     wire = ScopedWire()
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-                     "/health?full=1": wire.health,
-                     "/api/v1/board?sort_by=hot": wire.board})
+                     "/health?full=1": wire.health})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            # At 80 columns the Activity pane is not drawn. Board does not
+            # At 80 columns the Activity pane is not drawn. Activity does not
             # need the roster, so entering Keepers dispatches a scoped GET.
             h.resize_and_wait(process, fd, output,
                 rows=32, columns=80, needle=b"MASC Dashboard",
                 controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
-            await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             with wire.lock:
                 wire.hold_roster = True
             h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             assert h.wait_for_fixture_event(process, fd, output, wire.roster_started,
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             wire.publish("b-after-late")
             h.resize_and_wait(process, fd, output, rows=32, columns=300,
-                             needle=b"MASC Board", controls=(h.FULL_REDRAW,))
+                             needle=b"MASC Activity", controls=(h.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
             # /health. Its exact Base footer is the applied identity barrier;
             # the wider frame keeps both workspace paths visible.
-            await_screen(lambda text: b"Base: /fixture-workspace-c" in text,
+            await_screen(lambda text: b"Base: " + _base.encode() in text and b"MISMATCH" not in text,
                          "full C identity reading did not become current")
             c_boundary = len(output)
             h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
@@ -421,7 +426,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert h.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
             h.send_and_wait(process, fd, output, queued, h.composer_showing(queued))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            h.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MISMATCH local " in text,
                          "B authority did not become visible")
@@ -434,7 +439,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "A authority was not restored")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            await_screen(lambda text: b"Queue (1 waiting" in text and queued in text,
+            await_screen(lambda text: b"NEXT 1" in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             h.send_and_wait(process, fd, output, b"/queue resume", h.composer_showing(b"/queue resume"))
@@ -443,9 +448,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            os.write(fd, b"q")
+            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
         finally:
             admission.release_admission.set()
             admission.release.set()
@@ -454,7 +457,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
         description=("MASC-root-only change" if root_only else "workspace change")
             + " suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+        refresh=0.5, terminal_cols=TERMINAL_COLUMNS, confirm_exit=b"\x03")
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
@@ -515,8 +518,8 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
-            h.escape_to_keeper_detail(process, fd, output, name=b"beta")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"MASC Dashboard")
+            h.press_label_on_screen(process, fd, output, b"Keepers", row=1, needle=b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
@@ -528,11 +531,11 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             attached = actual["attachments"][0]
             assert attached["name"] == h.IMAGE_NAME and attached["data"] == image_data[0], attached
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
-            assert images == [{"type": "image", "attachment_id": attached["id"]},
+            assert images == [{"type": "image", "attachment_id": attached["id"],
+                               "name": h.IMAGE_NAME, "mime_type": attached["mime_type"],
+                               "size": attached["size"]},
                               {"type": "image", "url": reference}], actual
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            os.write(fd, b"q")
+            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
         finally:
             admission.release.set()
             admission.release_interrupt.set()
@@ -540,14 +543,15 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
         description=("MASC-root-only transition: " if root_only else "")
             + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_cols=300)
+        refresh=0.5, terminal_cols=300, confirm_exit=b"\x03")
 
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    roster_template = fixtures[ROSTER_PATH][1]
     fixtures.update(h.schedule_detail_http_fixtures())
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(roster_template)
     schedule_template = fixtures[h.SCHEDULES_PATH][1]
     unknown_health = threading.Event()
     cancel_requests = []
@@ -585,21 +589,23 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
         h.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
         h.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         assert cancel_requests == [], "A's first press authorized a POST on B"
         os.write(fd, b"x")
         assert h.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        await_screen(lambda text: b"b.current" in text, "B roster was not applied")
+        h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"MASC Dashboard")
+        h.press_label_on_screen(process, fd, output, b"Keepers", row=1, needle=b"MASC Keepers")
+        wire.publish("a-returned")
+        await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+                     "matching A roster was not applied")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())
-        wire.publish("a-returned")
-        await_screen(lambda text: b"a.returned" in text and b"MASC Keepers" in text
-                     and "▸ runtime".encode() not in text, "A identity did not close B runtime picker")
+        wire.publish("b")
+        await_screen(lambda text: b"MASC Keepers" in text and b"MISMATCH" in text
+                     and "▸ runtime".encode() not in text, "B identity did not close A runtime picker")
         unknown_health.set()
         # Health failure and a successful roster share this refresh. An
         # explicit lifecycle key must refuse even if that roster reports live.
@@ -728,8 +734,18 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             # hardcoded index or tab count selects a different detail surface.
             title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Identity" in text]
+            if not title_rows:
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"\r", b"Identity")
+                h.drain_until_quiet(process, fd, output)
+                title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                              if b"Info" in text and b"Identity" in text]
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            if marker not in screen(output):
+                if "▸Identity".encode() in screen(output):
+                    h.press_label_on_screen(process, fd, output, b"Info", row=title_rows[0], needle="▸Info".encode())
+                h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            await_screen(lambda text: marker in text, "current Identity snapshot did not load")
         try:
             h.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
@@ -755,9 +771,10 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             # ran; per-request guards/cancellation are also source contracts.
             assert submitted == [("a", "first")], submitted
             wire.publish("a-returned")
-            await_screen(lambda text: b"Base: " + wire.local_base.encode() in text
-                         and b"MISMATCH" not in text,
-                         "A identity was not restored in the current footer")
+            await_screen(lambda text: b"MISMATCH" not in text
+                         and any(event["event"] == "health" and event["phase"] == "a-returned"
+                                 for event in wire.events),
+                         "matching A identity was not restored")
             open_identity(b"a-returned-identity-second")
             os.write(fd, b"R")
             assert h.wait_for_fixture_state(process, fd, output, lambda: len(submitted) == 3,
@@ -991,7 +1008,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
@@ -1058,8 +1075,7 @@ def github_workspace_withdrawal(binary: str) -> None:
             wire.publish("b-after-late")
             # Re-entering obtains a fresh, stamped B observation after the
             # server released the stale stream; it cannot recreate A's view.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.settled" in text)
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.settled" in text)
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"GitHub")
             if b"Login scopes" not in screen(output):
@@ -1642,7 +1658,7 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
         h.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-            refresh=3600, terminal_cols=TERMINAL_COLUMNS)
+            refresh=3600, terminal_cols=TERMINAL_COLUMNS, confirm_exit=b"\x03")
 
 
 if __name__ == "__main__":

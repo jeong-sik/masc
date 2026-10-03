@@ -513,11 +513,13 @@ let test_provider_refusal ~status ~rejected () =
      | Ok _ -> fail "provider refusal produced an appraisal");
     check int "one HTTP request was dispatched" 1 (F.post_count server);
     check (list string) "no undeclared CLI dispatch" [] !calls;
-    let code = if rejected then "candle_appraisal_rejected"
+    let execution_rejected = status = `Bad_request in
+    let code = if execution_rejected then "candle_appraisal_execution_rejected"
+      else if rejected then "candle_appraisal_rejected"
       else "candle_appraisal_unavailable" in
     let output, selected = check_failure code (recorded_run ~base_path) in
     check (option string) "receipt retains the refusing slot" (Some slot) selected;
-    check_http_failure ~slot ~body ~invalid:rejected output)
+    check_http_failure ~slot ~body ~invalid:(rejected && not execution_rejected) output)
 ;;
 
 let test_invalid_http_then_valid_successor_keeps_both_slots () =

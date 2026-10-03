@@ -68,6 +68,39 @@ def hydrate(source, target):
 
 
 class CandleEvidenceAudits(unittest.TestCase):
+    def test_survey_runtime_preserves_numeric_types_under_optimization(self):
+        script = SURVEY/'audit-provenance.py'
+        plan = json.loads((SURVEY/'plan.json').read_text())
+        runtime = (SURVEY/'runtime.toml').read_text()
+        probe = (
+            'import json, runpy, sys; '
+            'data=json.load(sys.stdin); '
+            'runpy.run_path(sys.argv[1])["validate_runtime"]('
+            'data["runtime"].encode(), data["plan"])'
+        )
+        cases = [
+            (runtime, plan, None),
+        ]
+        for before, after, key, value, error in [
+            ('"max_output_tokens" = 4096', '"max_output_tokens" = 4096.0',
+             'max-output-tokens', 4096.0, 'output limit'),
+            ('"exact-body-timeout-s" = 1200.0', '"exact-body-timeout-s" = 1200',
+             'exact-body-timeout-s', 1200, 'timeout'),
+        ]:
+            changed = copy.deepcopy(plan)
+            changed['evaluation_overrides'][key] = value
+            cases.append((runtime.replace(before, after), changed, error))
+        for raw, configured_plan, error in cases:
+            with self.subTest(error=error):
+                result = subprocess.run([sys.executable, '-O', '-c', probe, str(script)],
+                                        input=json.dumps({'runtime': raw, 'plan': configured_plan}),
+                                        capture_output=True, text=True, timeout=30)
+                if error is None:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(error, result.stderr)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='candle-audit-fixture-')
         self.addCleanup(self.temp.cleanup)

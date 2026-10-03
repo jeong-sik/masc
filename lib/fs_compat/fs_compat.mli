@@ -294,6 +294,14 @@ val save_file_atomic_strict_staged
     owners must converge any dependent in-memory publication before
     propagating an [After_rename] failure. *)
 
+val write_file_atomic_strict_staged_blocking
+  : string
+  -> write:(out_channel -> unit)
+  -> (unit, atomic_replace_failure) Result.t
+(** Strict streaming replacement on the calling worker, without a thread hop.
+    Only use in an existing blocking job. The callback and syncs obey the
+    same staged publication contract as {!write_file_atomic_strict_staged}. *)
+
 val write_file_atomic_strict_staged
   :  string
   -> write:(out_channel -> unit)

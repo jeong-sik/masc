@@ -607,7 +607,7 @@ let put_file_durable_blocking_with ~after_hash t ~path:source_path ~mime =
         ensure_parent_dir target;
         seek_in source 0;
         let publication =
-          Fs_compat.write_file_atomic_strict_staged target ~write:(fun output_channel ->
+          Fs_compat.write_file_atomic_strict_staged_blocking target ~write:(fun output_channel ->
             let copied_digest, copied_bytes, _ =
               scan_file_for_ingest ~buffer ~copy_to:(Some output_channel) source
             in

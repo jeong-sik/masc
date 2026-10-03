@@ -566,7 +566,12 @@ let format_row_badge badge =
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
-      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+      match badge with
+      | Badge_category (Memory_category.Custom _) ->
+          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
+          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
+      | Badge_category _ | Badge_source | Badge_dropped ->
+          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in

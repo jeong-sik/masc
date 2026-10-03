@@ -20800,9 +20800,7 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# Named families each have a Dune rule, while the keyboard aggregate runs six
-# separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
-# from test/dune and test/stanzas/*.inc and checks both forms of wiring.
+# Named families and keyboard scenario shards have their own Dune rules.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("dashboard-usage", "Dashboard and Usage regression", (run_dashboard_usage_regression,)),

@@ -110,13 +110,17 @@ let test_conflicting_declaration_is_rejected () =
   let second = make_config ~base_url ~max_concurrent_requests:5 () in
   Provider_admission.with_admission ~config:first (fun () -> ());
   let ran_under_conflict = ref false in
-  (match
-     Provider_admission.with_admission ~config:second (fun () ->
-       ran_under_conflict := true)
-   with
-   | () -> fail "a conflicting declaration must not be admitted"
-   | exception Invalid_argument _ -> ());
+  List.iter
+    (fun config ->
+       match Provider_admission.with_admission ~config (fun () ->
+         ran_under_conflict := true) with
+       | () -> fail "every conflicting declaration must be rejected"
+       | exception Invalid_argument _ -> ())
+    [ second; second; make_config ~base_url ~max_concurrent_requests:3 () ];
   check bool "the body never ran" false !ran_under_conflict;
+  let matching_ran = ref false in
+  Provider_admission.with_admission ~config:first (fun () -> matching_ran := true);
+  check bool "the matching declaration still dispatches" true !matching_ran;
   match Provider_admission.snapshot_for ~config:second with
   | None -> fail "scheduler must exist after first admitted dispatch"
   | Some snap ->

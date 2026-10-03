@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import test_tui_keyboard_input as h
 
@@ -112,10 +112,19 @@ def turn_page(
     return visible_window(output, split=split)
 
 
-def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> None:
+def run(
+    executable: str,
+    *,
+    columns: int,
+    split: bool,
+    refresh_error: bool,
+    preflight: Literal["context", "continuity", "memory"] | None = None,
+) -> None:
     scenario = ("split" if split else "stacked") + (
         " cached refresh error" if refresh_error else ""
     )
+    if preflight is not None:
+        scenario = "preflight-" + preflight
     run_id = "paging-" + scenario.replace(" ", "-")
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
@@ -132,6 +141,39 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
             for row in PAYLOAD_ROWS
         ],
     )
+    if preflight is not None:
+        observed_output: dict[str, Any] = {
+            "exact_output": "retained-generation-answer",
+            "generation_path": "full_lane",
+            "full_llm_skipped": False,
+            "preflight_domain_rejection": None,
+            "jev_preflight": {
+                "status": "skipped" if preflight == "memory" else "ineligible",
+                "reason": "disabled" if preflight == "memory" else "context pass",
+                "elapsed_s": None,
+            },
+        }
+        if preflight == "memory":
+            observed_output["after"] = {
+                "commit": "unchanged",
+                "revision": 4,
+                "fact_count": 2,
+                "change": {"added_count": 0, "removed_count": 0},
+            }
+        else:
+            observed_output["memory_write"] = "skipped_context_only"
+            observed_output["context_write"] = {
+                "status": "committed",
+                "generation": "context-generation",
+                "revision": 3,
+            }
+            if preflight == "continuity":
+                observed_output["continuity_write"] = {
+                    "status": "committed",
+                    "end_atom": 42,
+                    "prefix_sha256": "a" * 64,
+                }
+        record["output"] = observed_output
     summary = {
         key: record[key]
         for key in (
@@ -180,7 +222,46 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
         )
         h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
         h.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
-        h.send_and_wait(process, master, output, b"\r", b"INPUT")
+        h.send_and_wait(
+            process, master, output, b"\r", b"JEV" if preflight else b"INPUT"
+        )
+        if preflight is not None:
+            h.resize_and_wait(
+                process,
+                master,
+                output,
+                rows=80,
+                columns=columns,
+                needle=b"JEV",
+                controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+
+            def completed_screen() -> bytes:
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    raise AssertionError("preflight has no completed terminal frame")
+                return h.screen_text(bytes(output[: end + len(h.FRAME_END)]))
+
+            screen = completed_screen()
+            marker = b"retained-generation-answer"
+            if preflight == "memory":
+                if marker in screen:
+                    raise AssertionError("memory snapshot must start compact")
+                if "변경 없음".encode() not in screen:
+                    raise AssertionError("compact memory snapshot result is missing")
+            else:
+                for key in (b"memory_write", b"context_write", b"committed"):
+                    if key not in screen:
+                        raise AssertionError(f"default context result hid {key!r}")
+                if preflight == "continuity" and b"continuity_write" not in screen:
+                    raise AssertionError("default continuity result was hidden")
+            h.send_and_wait(process, master, output, b"d", marker)
+            if marker not in completed_screen():
+                raise AssertionError("expanded evidence lost the recorded output")
+            print(f"Librarian {preflight} default and expanded readings: PASS")
+            os.write(master, b"q")
+            return
         h.resize_and_wait(
             process,
             master,
@@ -300,4 +381,12 @@ if __name__ == "__main__":
     run(executable, columns=180, split=True, refresh_error=False)
     run(executable, columns=100, split=False, refresh_error=False)
     run(executable, columns=180, split=True, refresh_error=True)
+    for preflight in ("context", "continuity", "memory"):
+        run(
+            executable,
+            columns=180,
+            split=False,
+            refresh_error=False,
+            preflight=preflight,
+        )
     print("TUI lane run paging: PASS")

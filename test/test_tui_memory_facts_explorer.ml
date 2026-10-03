@@ -79,6 +79,23 @@ let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 ;;
 
+let test_category_toggle_obeys_visible_surface_width () =
+  let state = make_state () in
+  let drawable = Masc_tui_roster_pane.threshold_cols in
+  List.iter (fun initially_open ->
+    state.memory_facts_categories_open <- initially_open;
+    Types.toggle_memory_facts_categories ~cols:(drawable - 1) state;
+    check bool "narrow key leaves the preference unchanged" initially_open
+      state.memory_facts_categories_open;
+    Types.toggle_memory_facts_categories ~cols:drawable state;
+    check bool "first drawable width toggles the preference" (not initially_open)
+      state.memory_facts_categories_open;
+    Types.toggle_memory_facts_categories ~cols:80 state;
+    check bool "resize to narrow cannot change the wide preference" (not initially_open)
+      state.memory_facts_categories_open)
+    [false; true]
+;;
+
 let test_category_navigation () =
   let state = make_state () in
   let f1 = make_fact ~category:Cat.Constraint ~claim:"No local dune" "1" in
@@ -353,7 +370,8 @@ let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
-      , [ test_case "category navigation" `Quick test_category_navigation
+      , [ test_case "category toggle respects visible width" `Quick test_category_toggle_obeys_visible_surface_width;
+        test_case "category navigation" `Quick test_category_navigation
         ; test_case "category filtering isolation" `Quick test_category_filtering_isolation
         ] )
     ; ( "sorting"

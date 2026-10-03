@@ -21932,7 +21932,7 @@ and is loaded on demand through keeper_skill.
            state.memory_health_scroll <- 0
        | Some ("d" | "D")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
-           state.memory_facts_categories_open <- not state.memory_facts_categories_open
+           toggle_memory_facts_categories ~cols:terminal_columns state
        | Some ("d" | "D")
          when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
            | Lanes_run_detail (_, _), Some {Tui_decode.lrd_librarian_preflight=Some _;_} -> true

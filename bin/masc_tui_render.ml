@@ -4380,7 +4380,10 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
           |> List.map (fun line -> Theme.info (), line))
   in
-  preflight_lines @ (if not details && Option.is_some detail.lrd_librarian_preflight then [] else
+  let has_memory_result = match detail.lrd_librarian_preflight with
+    | Some {lp_memory_result=Some _;_} -> true
+    | _ -> false in
+  preflight_lines @ (if not details && has_memory_result then [] else
   match detail.lrd_output_availability, detail.lrd_output with
   | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
   | Some availability, output ->

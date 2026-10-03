@@ -1488,7 +1488,7 @@ let get_default_route_and_runtimes () =
   let state = runtime_state () in
   let route = match state.default_route with
     | Some _ as route -> route
-    | None -> Option.map (fun runtime -> runtime.id) state.default_runtime in
+    | None -> Option.map (fun (runtime : t) -> runtime.id) state.default_runtime in
   route, state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation

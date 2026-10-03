@@ -10,7 +10,7 @@
 - 라이브 서버: `0.49.0`, embedded SHA `83d23c96c01f2505fe0bad39c699b330a3f9df93`. 이 문서는 새 release 게시나 Full RC 성공을 주장하지 않는다.
 - 현재 health 스냅샷: operator health snapshot (captured 2026-10-03T03:14:05Z; private artifact retained).
 - `system_log_2026-10-02.jsonl`, `system_log_2026-10-03.jsonl` 전체를 읽은 시점의 166,970개 JSON row. 파싱 실패 0개. 파일 날짜 및 `ts`는 UTC, 아래 운영 시각은 KST로 명시한다. 스캔 중 파일이 증가하므로 이후 레코드는 포함하지 않는다. counts.json에 파일별 byte cutoff, 마지막 record ts, 수집 시각을 기록했다.
-- [counts.json](counts.json): 경고/오류 family별 로그 행 수와 마지막 예시. 문자열 분류는 오프라인 조사용이고 제품의 상태 분기 코드가 아니다. 하나의 실패가 provider/상위 lane/continuity에 여러 번 기록되므로 행 수를 독립 장애 건수로 해석하면 안 된다. `other` 4,350행을 포함하며 이는 미분류 잔여이지 정상 판정이 아니다.
+- [counts.json](counts.json): 경고/오류 family별 로그 행 수와 파일별 cutoff·마지막 record 시각. 문자열 분류는 오프라인 조사용이고 제품의 상태 분기 코드가 아니다. 하나의 실패가 provider/상위 lane/continuity에 여러 번 기록되므로 행 수를 독립 장애 건수로 해석하면 안 된다. `other` 4,350행을 포함하며 이는 미분류 잔여이지 정상 판정이 아니다.
 - 원본 대화·인증 토큰·secret 파일은 수집하지 않았다. 전체 playground/backup의 무결성 검사, 모든 provider 실호출, 모든 VM 검사 또는 브라우저 UI 증명은 하지 않았다.
 - 선행 조사: earlier Librarian source audit (private artifact retained), earlier Queue design audit (private artifact retained). 당시 결과를 현재 발생 증거로 재사용하지 않았다.
 

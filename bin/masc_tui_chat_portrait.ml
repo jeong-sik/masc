@@ -25,7 +25,7 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
         |> Option.map (fun box ->
           let roster_rows = rows - box.View.rows - 2 in
           let padding = (inner - box.cols) / 2 in
-          let image = Portrait.image cache ~name ~equipment box.size in
+          let image = Portrait.icon_image cache ~name ~equipment box.size in
           let picture_lines =
             View.lines ~project display box image
             |> List.map (fun line -> String.make padding ' ' ^ line) in

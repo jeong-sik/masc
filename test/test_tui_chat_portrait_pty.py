@@ -268,9 +268,9 @@ def mosaic_resizes(binary: str) -> None:
             rows = screen(output)
             caption = caption_row(rows, b"alpha")
             band = mosaic_rows(rows)
-            assert len(band) >= 6 and all(caption < row <= caption + 12 for row in band), "mosaic escaped its reserved band"
+            assert len(band) >= 4 and all(caption < row <= caption + 8 for row in band), "mosaic escaped its reserved band"
             roster = [row for row, text in rows.items() if b"KEEPERS" in text[:ROSTER_COLUMNS]]
-            assert len(roster) == 1 and roster[0] > caption + 12, "conversation icon must precede the selectable roster"
+            assert len(roster) == 1 and roster[0] > caption + 8, "conversation icon must precede the selectable roster"
             assert any(b"alpha" in text[:ROSTER_COLUMNS] for row, text in rows.items() if row > roster[0]), "portrait displaced the roster entries"
             assert_chat_intact(rows, b"alpha")
 

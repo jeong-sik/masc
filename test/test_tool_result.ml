@@ -153,35 +153,6 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
      | None -> "none")
 ;;
 
-let test_legacy_transient_failure_class_decodes_as_dependency () =
-  match Tool_result.tool_failure_class_of_string "transient_error" with
-  | Some Tool_result.Dependency_unavailable -> ()
-  | Some class_ ->
-    Alcotest.failf
-      "legacy class decoded as %s"
-      (Tool_result.tool_failure_class_to_string class_)
-  | None -> Alcotest.fail "legacy persisted failure class was lost"
-;;
-
-let test_legacy_derived_failure_class_decodes_and_writes_canonical () =
-  match
-    Tool_result.tool_failure_class_of_yojson
-      (`List [ `String "Transient_error" ])
-  with
-  | Ok Tool_result.Dependency_unavailable ->
-    Alcotest.(check string)
-      "new writes use the canonical constructor"
-      {|["Dependency_unavailable"]|}
-      (Tool_result.tool_failure_class_to_yojson
-         Tool_result.Dependency_unavailable
-       |> Yojson.Safe.to_string)
-  | Ok class_ ->
-    Alcotest.failf
-      "legacy derived class decoded as %s"
-      (Tool_result.tool_failure_class_to_string class_)
-  | Error error -> Alcotest.failf "legacy derived class was rejected: %s" error
-;;
-
 let test_persisted_terminal_effect_keeps_its_failure_class () =
   let persisted =
     `Assoc
@@ -711,10 +682,7 @@ let () =
             "plain dispatch failure honors explicit failure_class"
             `Quick
             test_plain_dispatch_failure_honors_explicit_failure_class
-        ; Alcotest.test_case
-            "legacy transient failure class remains readable"
-            `Quick
-            test_legacy_transient_failure_class_decodes_as_dependency
+
         ; Alcotest.test_case
             "persisted terminal effect keeps its failure class"
             `Quick
@@ -772,10 +740,7 @@ let () =
             "cancelled timeout remains dependency unavailable"
             `Quick
             test_cancelled_timeout_classifies_as_dependency_unavailable
-        ; Alcotest.test_case
-            "legacy derived failure class is read-compatible"
-            `Quick
-            test_legacy_derived_failure_class_decodes_and_writes_canonical
+
         ; Alcotest.test_case
             "disposition preserves typed payload"
             `Quick

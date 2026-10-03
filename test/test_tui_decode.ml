@@ -8177,7 +8177,7 @@ let test_decode_system_log_requires_the_message () =
 (* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
    rows. A row missing a core field is rejected, not dropped: a listing that
    silently thins is how a held call goes unanswered again (masc#30034).
-   [because] is optional for compatibility with servers predating task-345. *)
+   The current row carries the reason beside the question. *)
 let keeper_tool_approvals_json =
   `Assoc
     [ ( "pending"
@@ -8208,29 +8208,6 @@ let test_decode_keeper_tool_approvals () =
         (Some "fs tools change something outside this turn") held.kta_because;
       Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
       Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
-  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
-
-let test_decode_keeper_tool_approvals_accepts_legacy_row () =
-  let legacy =
-    `Assoc
-      [ ( "pending"
-        , `List
-            [ `Assoc
-                [ ("keeper", `String "orbiter")
-                ; ("tool_call_id", `String "call-legacy")
-                ; ("tool", `String "Execute")
-                ; ("args", `String "{}")
-                ; ("question", `String "Run Execute?")
-                ; ("asked_at", `Float 1787555000.)
-                ; ("timeout_sec", `Float 180.)
-                ] ] )
-      ]
-  in
-  match Tui_decode.decode_keeper_tool_approvals legacy with
-  | Error err -> Alcotest.fail err
-  | Ok [ held ] ->
-      Alcotest.(check (option string)) "legacy server has no because" None
-        held.Tui_decode.kta_because
   | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
 
 let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
@@ -9490,20 +9467,6 @@ let test_prompt_rows_hide_fragments_by_default () =
     Alcotest.(check (list string)) "only complete prompts"
       [ "keeper" ] (List.map (fun row -> row.Tui_decode.pr_key) primary);
     Alcotest.(check int) "toggle restores every editable row" 2 (List.length all)
-
-let test_decode_prompts_defaults_legacy_surface_to_primary () =
-  let json =
-    `Assoc
-      [ ( "prompts"
-        , `List [ `Assoc [ "key", `String "legacy"; "source", `String "file" ] ] )
-      ]
-  in
-  match Tui_decode.decode_prompts json with
-  | Error detail -> Alcotest.fail detail
-  | Ok snapshot ->
-    let row = List.hd snapshot.Tui_decode.ps_rows in
-    Alcotest.(check bool) "legacy row stays visible" true
-      (row.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary)
 
 let test_decode_prompts_rejects_unknown_operator_surface () =
   let json =
@@ -10792,7 +10755,6 @@ let test_decode_gate_row_of_another_operation_has_no_site () =
             "no site" None pending.Tui_decode.gp_execution_cwd
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
-
 let test_decode_execute_gate_row_quotes_a_word_with_a_space () =
   let preview =
     decoded_execute_preview ~preview:"{}"
@@ -11094,7 +11056,6 @@ let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
 
-
 let runtime_params_json =
   `Assoc
     [ ( "parameters"
@@ -11339,7 +11300,6 @@ let test_decode_runtime_params_rejects_a_row_without_a_key () =
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "accepted a parameter that names nothing"
-
 
 (* Goal detail timeline: [`Null] from the server means the approval-queue
    store could not be read, so it must decode to the explicit unavailable
@@ -11927,7 +11887,6 @@ let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
   | Error detail -> Alcotest.fail detail
 ;;
 
-
 (* --- git blame: the route's bare array, and the run lookup the margin uses --- *)
 
 let blame_json ~line_start ~line_end ~author ~at_ms =
@@ -12321,8 +12280,7 @@ let () =
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
           test_decode_keeper_tool_approvals
-      ; Alcotest.test_case "accepts a legacy row without because" `Quick
-          test_decode_keeper_tool_approvals_accepts_legacy_row
+
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
       ] );
@@ -12860,8 +12818,6 @@ let () =
           test_decode_prompts_absent_held_back_is_empty;
         Alcotest.test_case "hides assembly fragments by default" `Quick
           test_prompt_rows_hide_fragments_by_default;
-        Alcotest.test_case "legacy rows default to primary" `Quick
-          test_decode_prompts_defaults_legacy_surface_to_primary;
         Alcotest.test_case "rejects an unknown operator surface" `Quick
           test_decode_prompts_rejects_unknown_operator_surface;
         Alcotest.test_case "rejects an unknown source" `Quick

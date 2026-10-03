@@ -934,6 +934,8 @@ let test_sampling_refuses_nonfinite_evidence () = with_fixture (fun _env _sw dir
     | Ok value -> value | Error detail -> fail detail in
   let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
     | Ok value -> value | Error detail -> fail detail in
+  let result = Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
+    ~on_error:Fun.id (fun () ->
   List.iter (fun number ->
     let metadata = `Assoc ["extension",`List [`Assoc ["number",`Float number]]] in
     check bool "nonfinite request refused before invocation" true
@@ -944,7 +946,10 @@ let test_sampling_refuses_nonfinite_evidence () = with_fixture (fun _env _sw dir
     check bool "nonfinite response is not accepted" true (Result.is_error (handler params)))
     [Float.nan;Float.infinity;Float.neg_infinity];
   response_meta := Some (`Assoc ["nested",`List [`Float 0.5]]);
-  check bool "finite response remains accepted" true (Result.is_ok (handler params)))
+  check bool "finite response remains accepted" true (Result.is_ok (handler params));
+  check int "only three rejected responses and finite control invoke" 4 !calls;
+  Ok {Types.rows=[];coverage=[]}) in
+  check bool "finite evidence fixture completes an active observation" true (Result.is_ok result))
 
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in

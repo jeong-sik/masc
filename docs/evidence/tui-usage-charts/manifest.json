@@ -43,5 +43,6 @@
     "unreadable_reports": 0,
     "resolved_sha256": "5bc4362261b208359abc9a4e9b8b73ae7e96ed8f35395cbded8199181d652ced",
     "history_sha256": "ebd8f62390b1ee49568d538d4a8d181e8e1e88a63e92d9d3018b9f0732b45be7"
-  }
+  },
+  "check_output_sha256": "6e84bee7aace4a1a070328db85af172a4c6e3e775278dad993ec5e5c0b415506"
 }

@@ -30,4 +30,4 @@
 - 제약/배제: No provider/login/quota mutations. Raw live HTTP bodies and private live screenshots remain local, not published in this PR.
 - 롤백 조건: Revert this bounded UI change if integration shows quota-identity or viewport regressions.
 
-[Plan](plan-compact.png) · [Wide Plan](plan-wide.png) · [Trend](trend.png) · [Compact Trend](trend-compact.png) · [Manifest](manifest.json) · [Checks](tests.log)
+[Plan](plan-compact.png) · [Wide Plan](plan-wide.png) · [Trend](trend.png) · [Compact Trend](trend-compact.png) · [Manifest](manifest.json) · [Checks](checks.txt)

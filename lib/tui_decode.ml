@@ -5548,7 +5548,10 @@ let decode_librarian_preflight output =
     let* lp_model = match lp_status with
       | Preflight_judged _ | Preflight_invalid _ ->
         let+ model = required_string_field preflight "model" in Some model
-      | _ -> optional_string_field preflight "model" in
+      | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ ->
+        (match Json_util.assoc_member_opt "model" preflight with
+         | None -> Ok None
+         | Some _ -> Error "preflight without an evaluated answer must not report model") in
     let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
     let* () = match lp_status, lp_generation_path, lp_domain_rejection with
       | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},
@@ -5770,8 +5773,8 @@ let decode_lane_run_detail json =
     | _, _ -> Ok None
   in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
-    | Some {lp_generation_path = Generation_jev_no_change; _}, Some _ ->
-      Error "JEV no-change run must not have a selected generation slot"
+    | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
+      Error "run without generation must not have a selected generation slot"
     | _, _ -> Ok () in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with

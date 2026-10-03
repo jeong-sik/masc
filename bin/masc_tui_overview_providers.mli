@@ -2,6 +2,9 @@
     Each card labels the reported used percentage and the window's role,
     says when it resets, and shows the last report time beside every window.
 
+    A summary separates full last-reported limits from catalogue-observed
+    blocking. Shaded meter cells show the unused part of the reported limit.
+
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a
     threshold: a meter is drawn in the exhausted style only when the reported
@@ -28,8 +31,14 @@ val scope_id_cells : int
 
 val scope_name : Masc.Tui_decode_usage.provider_usage_account -> string
 
+val account_email :
+  account_emails:Masc_tui_types.overview_account_emails_reading ->
+  Masc.Tui_decode_usage.provider_usage_account -> string option
+(** Login identity for the exact quota scope, when the source reported it. *)
+
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
+  history:Masc_tui_types.provider_history_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
   account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->

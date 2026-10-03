@@ -383,7 +383,7 @@
  (name masc_tui_usage_trend)
  (wrapped false)
  (modules masc_tui_usage_trend)
- (libraries masc masc_tui_chart))
+ (libraries masc masc_tui_chart masc_tui_message_layout unix))
 
 (library
  (name masc_tui_ask_projection)
@@ -1827,6 +1827,7 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_message_layout
+  masc_tui_usage_trend
   unix))
 
 ;; The last answer to each dashboard read, kept with its entity tag so the

@@ -64,7 +64,7 @@ let meter ~cells share =
     else whole
   in
   for _ = drawn + 1 to cells do
-    Buffer.add_char buf ' '
+    Buffer.add_string buf "░"
   done;
   Buffer.contents buf
 
@@ -251,6 +251,23 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
        | distinct -> Some (Terminal_text.single_line (String.concat ", " distinct)))
   | Types.Account_emails_unread | Types.Account_emails_failed _ -> None
 
+let history_line ~history ~scope_id (window:Masc.Tui_decode_usage.provider_usage_window) =
+  let kind = match window.puw_kind with
+    | Masc.Tui_decode_usage.Window_five_hour -> "five_hour"
+    | Masc.Tui_decode_usage.Window_seven_day -> "seven_day"
+    | Masc.Tui_decode_usage.Window_duration_minutes minutes -> Printf.sprintf "duration_%dm" minutes
+    | Masc.Tui_decode_usage.Window_provider_label label -> "provider:" ^ label in
+  match history with
+  | Types.Provider_history_unread | Types.Provider_history_error _ -> None
+  | Types.Provider_history_read trend ->
+    let row = List.find_opt (fun (row:Masc_tui_usage_trend.row) ->
+      String.equal row.scope_id scope_id && String.equal row.kind kind
+      && Option.equal String.equal row.limit_id window.puw_limit_id) trend.rows in
+    Some (match row with
+      | None -> Printf.sprintf "Trend %d UTC days · no reports" trend.days
+      | Some row -> Printf.sprintf "Trend %d UTC days  %s  %d/%d days"
+          trend.days row.marks row.reported_days trend.days)
+
 (* The first window opens its account card; subsequent windows share it. *)
 type name_cell =
   | Account_name of string
@@ -262,6 +279,7 @@ type row =
       window : Masc.Tui_decode_usage.provider_usage_window;
       heard : string option;
       tag : string option;
+      trend : string option;
     }
   | Silent_row of { name : string; tag : string }
       (** An account with no report since the server started, drawn only
@@ -283,7 +301,7 @@ let account_rank observed (account : Masc.Tui_decode_usage.provider_usage_accoun
    observed exhaustion draws nothing. Its row said only "no usage data" beside
    a generic setup name, which told the operator neither which account it was
    nor anything about it. *)
-let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
+let account_rows ~now ~history (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state, tag with
@@ -297,6 +315,7 @@ let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage
         ; window = first
         ; heard = heard_text ~now first.puw_observed_at
         ; tag
+        ; trend = history_line ~history ~scope_id:account.pua_scope_id first
         }
       :: List.map
            (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
@@ -305,7 +324,7 @@ let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage
                  None
                else heard_text ~now window.puw_observed_at
              in
-             Window_row { name = No_name; window; heard; tag = None })
+             Window_row { name = No_name; window; heard; tag = None; trend = history_line ~history ~scope_id:account.pua_scope_id window })
            rest
 
 let place_email email rows =
@@ -366,15 +385,28 @@ let draw_rows ~now ~width rows =
   in
   let window_lines window heard =
     let label = window_label window in
-    let value = "Reported " ^ utilization_text window.Masc.Tui_decode_usage.puw_utilization in
+    let share = share_of_full window.Masc.Tui_decode_usage.puw_utilization in
+    let remaining =
+      if window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
+         && Float.is_finite share && share >= 0.0 && share <= 1.0
+      then Some ("Remaining " ^ utilization_text (Masc.Tui_decode_usage.Utilization_fraction (1.0 -. share)))
+      else None in
+    let reported = "Reported " ^ utilization_text window.puw_utilization in
+    let full_value = reported ^ Option.fold ~none:"" ~some:(fun remaining -> " · " ^ remaining) remaining in
+    let inline_remaining = inner - Text.display_width full_value - 3 >= meter_min_cells in
+    let value = if inline_remaining then full_value else reported in
+    let remaining_rows = if inline_remaining then [] else
+      Option.fold ~none:[] ~some:wrap remaining in
     let label_cells = min 20 (max 6 (inner / 3)) in
     let value_cells = Text.display_width value in
     let room = inner - label_cells - value_cells - 4 in
-    let meter_cells = max 1 (min meter_max_cells room) in
+    let inline = room >= meter_min_cells && Text.display_width label <= label_cells in
+    let meter_room = if inline then room else inner - value_cells - 3 in
+    let meter_cells = max 1 (min meter_max_cells meter_room) in
     let gauge = meter_open ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
                 ^ meter_close ^ " " ^ value in
     let first =
-      if room >= meter_min_cells && Text.display_width label <= label_cells then
+      if inline then
         [ pad_right label label_cells ^ " " ^ style (window_tone window) gauge ]
       else wrap label @ wrap ?tone:(window_tone window) gauge
     in
@@ -382,7 +414,7 @@ let draw_rows ~now ~width rows =
     let report = "Last report " ^ clock_text ~now window.puw_observed_at
       ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
     let metadata = "Reset " ^ reset in
-    first @ wrap (report ^ " · " ^ role_text window.puw_role) @ wrap ?tone:reset_tone metadata
+    first @ remaining_rows @ wrap (report ^ " · " ^ role_text window.puw_role) @ wrap ?tone:reset_tone metadata
   in
   let render (name, held) =
     let blocked = List.exists (function
@@ -392,8 +424,9 @@ let draw_rows ~now ~width rows =
     let body = List.concat_map (function
       | Email_row email -> wrap ~tone:quiet email
       | Silent_row { tag; _ } -> wrap "no usage data" @ wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag)
-      | Window_row { window; heard; tag; _ } ->
+      | Window_row { window; heard; tag; trend; _ } ->
           window_lines window heard
+          @ (match trend with None -> [] | Some trend -> wrap ~tone:quiet trend)
           @ (match tag with None -> [] | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))) held in
     let title = Text.fit_middle (max 1 (card_width - 4)) name in
     let top = color ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ title ^ Ansi.reset ^ color
@@ -419,7 +452,7 @@ let draw_rows ~now ~width rows =
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
+let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~account_emails ~now
     ~width =
   match providers with
   | Types.Providers_unread -> None
@@ -445,7 +478,7 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
       let accounts =
         List.filter_map
           (fun ((_, account) as entry) ->
-            match account_rows ~now entry with
+            match account_rows ~now ~history entry with
             | [] -> None
             | rows -> Some (account, rows))
           ordered
@@ -480,6 +513,33 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in
+      let reporting = List.length (List.filter (fun (_, account) ->
+        match account.Masc.Tui_decode_usage.pua_state with
+        | Masc.Tui_decode_usage.Account_reported _ -> true
+        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
+      let full_reports = List.length (List.filter (fun (_, account) ->
+        match account.Masc.Tui_decode_usage.pua_state with
+        | Masc.Tui_decode_usage.Account_reported (first, rest) ->
+          List.exists (fun (window:Masc.Tui_decode_usage.provider_usage_window) ->
+            window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
+            && at_or_past_full window.puw_utilization) (first :: rest)
+        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
+      let blocked = match runtimes with
+        | Types.Quota_read _ -> string_of_int (List.length (List.filter (function
+            | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) ordered))
+        | Types.Quota_unread | Types.Quota_failed _ -> "unknown" in
+      let trend_as_of = match history with
+        | Types.Provider_history_read trend ->
+          let day = Unix.gmtime trend.generated_at in
+          Printf.sprintf " · Trend through %02d-%02d UTC" (day.Unix.tm_mon + 1) day.Unix.tm_mday
+        | Types.Provider_history_unread -> " · Trend not read"
+        | Types.Provider_history_error _ -> " · Trend unavailable" in
+      let summary =
+        [ Printf.sprintf "Accounts %d · Reporting %d · At limit (reported) %d · Blocked (observed) %s"
+            (List.length ordered) reporting full_reports blocked
+        ; "█ used · ░ remaining at last report · 0 zero · · no daily report"
+        ; "Login does not reset quota" ^ trend_as_of ^ " · v:Trend graphs" ]
+        |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
       match rows with
       | [] ->
@@ -490,5 +550,5 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
       | _ :: _ ->
           Some
             { title = title_text ()
-            ; lines = draw_rows ~now ~width rows @ notes
+            ; lines = summary @ draw_rows ~now ~width rows @ notes
             }

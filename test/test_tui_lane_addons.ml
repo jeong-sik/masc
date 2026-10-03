@@ -452,12 +452,12 @@ let context_flow_uses_declared_connections () =
     (Option.map (fun (i : UI.instance) -> i.id)
       (UI.selected_instance {configured with presentation=UI.Technical}));
   check bool "overview starts with its selected worker regardless of hidden focus" true
-    (List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines
-     && not (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines));
+    (List.exists (String.starts_with ~prefix:"> project-metric · Project metric · attached") configured_lines
+     && not (List.exists (String.starts_with ~prefix:"  project-observer · Project observer · attached") configured_lines));
   let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} in
   check bool "moving selection still exposes the preceding observer" true
-    (List.exists (String.starts_with ~prefix:"> Project observer · attached") observer_lines
-     && List.exists (String.starts_with ~prefix:"  Project metric · attached") observer_lines);
+    (List.exists (String.starts_with ~prefix:"> project-observer · Project observer · attached") observer_lines
+     && List.exists (String.starts_with ~prefix:"  project-metric · Project metric · attached") observer_lines);
   check bool "overview offers help and opening" true
     (List.exists (String.starts_with ~prefix:"?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
@@ -642,6 +642,13 @@ let evidence_export_chooses_a_keeper_by_name () =
     (Result.is_error (UI.open_evidence ~request_id:"fixture-send" ~keepers:["imp"] {view with selected=[]}));
   check bool "submit without an open prompt is refused" true (Result.is_error (UI.submit_evidence view));
   let evidence = `Assoc ["sha256",`String "abc"] in
+  check (list string) "receipt shows the exact owner selection and intended Keeper without claiming a read"
+    ["Evidence preserved: 2 rows · sha256 abc";"Evidence owner: worker";
+     "Selected row: worker/1/chosen";"Selected row: worker/2/second";
+     "Keeper delivery to imp accepted · Keeper reads and actions are unverified"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "instance_id",`String "worker";"row_ids",`List [`String "worker/1/chosen";`String "worker/2/second"];
+      "delivery",`Assoc ["destination",`String "keeper";"keeper_name",`String "imp";"status",`String "accepted"]]));
   check (list string) "a failed delivery is reported apart from the frozen bundle"
     ["Evidence preserved: 1 row · sha256 abc";
      "Keeper delivery failed: keeper not found: imp · the bundle stays preserved"]
@@ -923,6 +930,53 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let preferred = UI.open_selected_instance {overview with snapshot=Some score_snapshot} in
   check (option string) "opening selects declared result after preceding ordinary observations"
     (Some score.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row preferred));
+  let context = {row with id="context";lane_id=worker.id ^ "/report-context";
+    title="Internal report context";observed_at=0.;fields=["raw",`String "retained source"]} in
+  let with_context = {detail with snapshot=Some
+    {snapshot with output={rows=[context;row;second];coverage=[]}};row_cursor=1} in
+  let context_lines = UI.lines ~width:100 with_context in
+  check (option string) "opening a context-only observation does not select its internal row" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
+        {snapshot with output={rows=[context];coverage=[]}}})));
+  let generic = {worker with display=(P.of_json (`Assoc []) |> ok)} in
+  check (option string) "packages without presentation keep generic records as results" (Some context.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
+        {snapshot with instances=[generic];output={rows=[context];coverage=[]}}})));
+  check bool "supporting context is not presented as a user result" true
+    (not (List.exists (fun line -> String.equal (String.trim line) context.title) context_lines));
+  check (option string) "result navigation skips the supporting context" (Some second.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation with_context 1)));
+  check (option string) "reverse result navigation stops before supporting context" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation with_context (-1))));
+  let context_records = {with_context with focus=UI.Rows;row_cursor=0} in
+  check bool "Records retains the exact supporting context" true
+    (List.mem "Row context" (UI.lines ~width:100 context_records));
+  check bool "supporting context remains explicitly selectable for evidence" true
+    (Result.is_ok (UI.evidence_request {context_records with selected=[context.id]}));
+  let returned_results = {context_records with focus=UI.Timeline} in
+  check (option string) "Records-to-Results transition cannot target hidden context for Space" None
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row returned_results));
+  check (option string) "Flow has no invisible record action target" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with presentation=UI.Flow}));
+  check (option string) "overview Flow has no invisible record action target" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with screen=UI.Overview;presentation=UI.Flow}));
+  check (option string) "raw details explicitly retain the exact context target" (Some context.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with presentation=UI.Technical}));
+  check (option string) "j after returning to Results selects the first displayed report" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation returned_results 1)));
+  let only_context = {detail with snapshot=Some
+    {snapshot with output={rows=[context];coverage=[]}};row_cursor=0} in
+  check bool "context-only observations explain that declared results are absent" true
+    (List.mem "No declared result rows in this received view." (UI.lines ~width:100 only_context)
+     && List.mem "Supporting records remain available in 4 Records." (UI.lines ~width:100 only_context));
   let producer_last = {row with id="last";title="Last result";observed_at=5.} in
   let producer_middle = {row with id="middle";title="Middle result";observed_at=2.} in
   let unsorted = UI.open_selected_instance {overview with snapshot=Some
@@ -965,8 +1019,9 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   check bool "rendering and navigation preserve immutable producer order" true
     (Option.map (fun (snapshot : UI.snapshot) -> snapshot.output.rows) next.snapshot = Some original_rows);
   let same_title_summary = UI.lines ~width:100 {next with focus=UI.Timeline} in
-  check bool "same-titled results expose the selected exact Lane" true
-    (List.mem ("  Lane " ^ same_title.lane_id) same_title_summary);
+  check bool "an undeclared record stays out of Results until a result is chosen" true
+    (List.mem "Choose a result with j/k." same_title_summary
+     && not (List.mem ("  Lane " ^ same_title.lane_id) same_title_summary));
   let same_title_raw = UI.lines ~width:100 {next with presentation=UI.Technical} in
   check bool "raw evidence joins the same selected row and Lane" true
     (List.mem ("Row " ^ same_title.id) same_title_raw
@@ -985,6 +1040,55 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   check bool "selected Add-on remains near the overview top despite preceding long descriptions" true
     (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
      && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
+
+let empty_completed_results_keep_capability_identity_and_input_details () =
+  let display = Masc.Lane_addon_presentation.of_json (`Assoc [
+    "description",`String "Combine independent panel answers into a report";
+    "readings",`List []]) |> ok in
+  let worker installation_id id : UI.instance = {id;incarnation=id;run_id="project";
+    addon_id="fusion-compute";title="Shared Fusion package";revision="1";
+    phase=UI.Row.Attached;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;
+    installation_id=Some installation_id;source_path=Some ("/config/" ^ id ^ ".toml");binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
+  let judge = worker "judge" "judge-worker" and panel = worker "panel-a" "panel-worker" in
+  let declaration name (item : UI.instance) : UI.declaration = {
+    source_path=Option.get item.source_path;installation_id=Some name;
+    desired=Some "1";applied=Some "1";instance_id=Some item.id;
+    issues=[];origin=UI.Parsed_declaration} in
+  let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
+    cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
+  let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "judge" judge;declaration "panel-a" panel]};
+    output={rows=[];coverage=[coverage]}} in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  let overview_lines = UI.lines ~width:180 overview in
+  check bool "same package installations remain distinguishable" true
+    (List.exists (String.starts_with ~prefix:"> judge · Shared Fusion package") overview_lines
+     && List.exists (String.starts_with ~prefix:"  panel-a · Shared Fusion package") overview_lines);
+  check bool "primary overview counts results instead of observation calls" true
+    (List.exists (fun line -> String.ends_with ~suffix:"0 records" line) overview_lines);
+  let detail = {overview with screen=UI.Detail (judge.id,judge.incarnation);focus=UI.Timeline} in
+  let lines = UI.lines ~width:180 detail in
+  check bool "capability description remains visible before any result row" true
+    (List.mem "Combine independent panel answers into a report" lines);
+  check bool "empty completed observation is not reported as missing observation" true
+    (List.mem "Last completed observation contains no result rows." lines
+     && not (List.mem "No completed observation received yet." lines));
+  check bool "input details are visible with their honest snapshot scope" true
+    (List.mem "Received snapshot coverage · all Add-ons" lines
+     && List.exists (String.ends_with ~suffix:"Waiting for supplied input observations") lines);
+  let changed item = {detail with snapshot=Some {snapshot with instances=[item;panel]}} in
+  check bool "first observation remains distinct" true
+    (List.mem "No completed observation received yet."
+      (UI.lines ~width:180 (changed {judge with observation_seq=0})));
+  let failed_lines = UI.lines ~width:180 (changed {judge with phase=UI.Row.Failed "model route unavailable"}) in
+  check bool "failed Add-on exposes its actual cause and retry/cleanup controls" true
+    (List.mem "Add-on failed: model route unavailable" failed_lines
+     && List.mem "o:retry observation  d:cleanup" failed_lines);
+  check bool "filtered view does not claim latest result was empty" true
+    (List.mem "No result rows in this received view."
+      (UI.lines ~width:180 (changed {judge with rows_count=2})))
 
 let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
@@ -1099,6 +1203,39 @@ let declared_layers_use_exact_configured_owners () =
   List.iter (fun text -> check bool "fan-out and join retain their exact horizontal and vertical layers"
     true (List.mem text graph)) ["Layer 0";"  [a]  |  [b]";
       "Layer 1";"  [c]  |  [d]";"Layer 2";"  [e]"];
+  let snapshot_binding path = `Assoc ["sources",`List [
+    `Assoc ["source_id",`String "project-input";"kind",`String "snapshot_file";
+      "path",`String path]]] in
+  let panel_a = {(worker "a" []) with binding=snapshot_binding "/data/research.json";
+    rows_count=1} in
+  let panel_b = {(worker "b" []) with binding=snapshot_binding "/data/second.json";
+    phase=UI.Row.Observing;observation_seq=0} in
+  let judge = {(worker "judge" ["a";"b"]) with phase=UI.Row.Failed "provider unavailable";
+    rows_count=2} in
+  let assembly = [panel_a;panel_b;judge] in
+  let assembly_declarations = List.map (fun (item : UI.instance) -> declaration item.title item) assembly in
+  let assembly_view = view assembly assembly_declarations in
+  let assembly_lines = UI.lines ~width:200 assembly_view in
+  List.iter (fun text -> check bool "bound source identity and worker result states remain distinct"
+    true (List.mem text assembly_lines)) [
+      "  project-input · snapshot /data/research.json -> a";
+      "  project-input · snapshot /data/second.json -> b";
+      "  [a]  |  [b]";"Layer 1";"  [judge]";
+      "    a: attached · last completed: 1 result row";
+      "    b: observing · no completed observation received";
+      "    judge: failed: provider unavailable · last completed: 2 records";
+      "No evidence sharing receipt in this session."];
+  let shared = UI.lines ~width:200 {assembly_view with receipt=Some (`Assoc [
+    "row_count",`Int 1;"evidence",`Assoc ["sha256",`String "fixture-sha"];
+    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]])} in
+  check bool "connection view exposes session sharing without asserting agent reading" true
+    (List.mem "Last evidence sharing receipt · this session" shared
+     && List.mem "Evidence preserved: 1 row · sha256 fixture-sha" shared
+     && List.mem "Broadcast committed · Keeper reads and actions are unverified" shared);
+  let unrelated_receipt = UI.lines ~width:200
+    {assembly_view with receipt=Some (`Assoc ["instance_id",`String "worker-a"])} in
+  check bool "a worker action receipt never proves evidence sharing" true
+    (List.mem "No evidence sharing receipt in this session." unrelated_receipt);
   let cycle = [worker "a" ["b"];worker "b" ["a"]] in
   let cyclic = lines cycle (List.map (fun (item : UI.instance) -> declaration item.title item) cycle) in
   check bool "a dependency cycle never receives an execution layer" true
@@ -1172,6 +1309,8 @@ let declared_layers_use_exact_configured_owners () =
      && not (List.mem "Layer 0" history))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "empty completed results show capability, identity and input details" `Quick
+    empty_completed_results_keep_capability_identity_and_input_details;
   test_case "declared layers use exact configured owners" `Quick
     declared_layers_use_exact_configured_owners;
   test_case "current installations and grouped retained runs preserve exact targets" `Quick

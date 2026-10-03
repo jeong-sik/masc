@@ -99,6 +99,9 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
     or unreadable observations; source coverage is not a chronological ledger. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
+(** The receipt includes [instance_id] and the exact validated [row_ids] from
+    the frozen bundle, alongside its reference and row count. Publication keeps
+    those selection coordinates; neither receipt implies delivery or reading. *)
 val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 (** Publishes a frozen bundle, its selected records and their retained source

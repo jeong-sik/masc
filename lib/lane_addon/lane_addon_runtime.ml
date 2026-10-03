@@ -1564,16 +1564,16 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
              | Ok result -> Ok result
              | Error message ->
                  let* frozen = freeze () in Ok (frozen, Delivery_failed message) in
-           let delivery = match receipt with
-             | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
-                 "status", `String (match destination with To_broadcast -> "committed"
+           let recipient_fields = match destination with
+             | To_keeper name -> ["keeper_name", `String name]
+             | To_broadcast | Preserve_only -> [] in
+           let delivery_fields = match receipt with
+             | Delivery_receipt receipt -> ["status", `String (match destination with To_broadcast -> "committed"
                    | To_keeper _ | Preserve_only -> "accepted"); "receipt", receipt]
-             | Delivery_failed message -> `Assoc ["destination",`String destination_name;
-                 "status", `String "failed"; "error", `String message]
-             | Delivery_pending_commit message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "pending_commit";"detail",`String message]
-             | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "outcome_unknown";"error",`String message] in
+             | Delivery_failed message -> ["status", `String "failed"; "error", `String message]
+             | Delivery_pending_commit message -> ["status",`String "pending_commit";"detail",`String message]
+             | Delivery_outcome_unknown message -> ["status",`String "outcome_unknown";"error",`String message] in
+           let delivery = `Assoc (("destination",`String destination_name) :: recipient_fields @ delivery_fields) in
            let delivery = match broadcast_request_id, delivery with
              | Some request_id, `Assoc fields -> `Assoc (("request_id",`String request_id) :: fields)
              | _ -> delivery in

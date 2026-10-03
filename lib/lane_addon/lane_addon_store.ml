@@ -253,7 +253,13 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                               (match Fs_compat.exact_path_kind
                                        (Filename.concat t.root (blob_path (digest bytes))) with
                                | Fs_compat.Exact_missing -> write_blob t bytes |> Result.map (fun _ -> ())
-                               | _ -> read_blob t expected |> Result.map (fun _ -> ()))
+                               | Fs_compat.Exact_kind Unix.S_REG ->
+                                   let* retained = bounded_file_for_sampling ~max_bytes
+                                     (Filename.concat t.root (blob_path (digest bytes))) in
+                                   if blob_reference retained = expected then Ok ()
+                                   else Error "sampling outcome blob digest mismatch"
+                               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                                   Error "sampling outcome blob is not a regular file")
                         | _ -> Ok ())
                     | _ -> Ok () in
                   let* () = f json in

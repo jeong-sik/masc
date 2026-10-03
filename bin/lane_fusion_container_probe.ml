@@ -280,27 +280,14 @@ let run ~repo_root ~output_dir ~head_sha =
           let edge source installation output = Printf.sprintf
             "{source_id=%S,kind=\"lane_output\",installation_id=%S,output_id=%S,selection=\"latest_completed\"}"
             source installation output in
-          let panel_paths = [
+          let paths = [
             declare "panel-a" "fusion-compute" (compute "panel" "panel-a" (Printf.sprintf "[{source_id=\"project\",kind=\"snapshot_file\",path=%S}]" source_path));
-            declare "panel-b" "fusion-compute" (compute "panel" "panel-b" (Printf.sprintf "[{source_id=\"project\",kind=\"snapshot_file\",path=%S}]" source_path))] in
-          ignore (require (R.reconcile_configuration ~config ~directory));
-          let await f = let rec loop () = match f (snapshot ()) with
-            | Some value -> value | None -> Eio.Time.sleep env#clock 0.02; loop () in loop () in
-          (* Two real workers must cross the HTTP barrier concurrently. Create
-             downstream workers only after both named ports are stable: this
-             qualifies composition independently of startup wake deduplication. *)
-          ignore (await (fun current ->
-            let output = T.output_of_json (`Assoc ["rows",member "rows" current;"coverage",member "coverage" current]) |> require in
-            if List.for_all (fun name -> match installation current name with
-              | None -> false
-              | Some instance -> List.exists (fun row ->
-                  row.T.lane_id=text "instance_id" instance ^ "/fusion/computation" && answered row
-                  && List.assoc_opt "input_complete" row.fields=Some (`Bool true)) output.rows)
-                ["panel-a";"panel-b"] then Some () else None));
-          let paths = panel_paths @ [
+            declare "panel-b" "fusion-compute" (compute "panel" "panel-b" (Printf.sprintf "[{source_id=\"project\",kind=\"snapshot_file\",path=%S}]" source_path));
             declare "judge" "fusion-compute" (compute "judge" "judge" ("[" ^ edge "panel-a" "panel-a" "result" ^ "," ^ edge "panel-b" "panel-b" "result" ^ "]"));
             declare "report" "fusion-report" ("sources=[" ^ edge "judge" "judge" "result" ^ "]")] in
           ignore (require (R.reconcile_configuration ~config ~directory));
+          let await f = let rec loop () = match f (snapshot ()) with
+            | Some value -> value | None -> Eio.Time.sleep env#clock 0.02; loop () in loop () in
           let row = await (fun current ->
             match installation current "report" with
             | None -> None
@@ -434,6 +421,8 @@ let run ~repo_root ~output_dir ~head_sha =
             match phase value with T.Detached -> true | T.Attached | T.Observing | T.Detaching | T.Failed _ -> false)
             (list "instances" current) then Some () else None));
           cleanup ();
+          ensure (List.length !http_receipts=3)
+            "an unchanged completed input triggered an additional model call before detach";
           Fs_compat.remove_tree (Store.root store);
           store_removed := true;
           List.iter (fun (_,sha,bytes) -> ensure (read sha=bytes) "Keeper artifact bytes changed after worker detach and Lane-store removal") retained;
@@ -453,7 +442,7 @@ let run ~repo_root ~output_dir ~head_sha =
           json_file (Filename.concat output_dir "preserved-evidence.json") frozen;
           json_file (Filename.concat output_dir "broadcast-receipt.json") published;
           summary := !summary @ ["panel_http_barrier",`String "both calls arrived before either response released";
-            "startup",`String "staged_after_completed_panels";
+            "startup",`String "all_four_workers_in_one_reconciliation";
             "horizontal_worker_instances",`Int 2;"judge_named_input_ports",`Int 2;
             "report_row_id",`String row.id;"local_broadcast_request_id",`String broadcast_id;
             "model_request_outcome_pairs_read_after_detach",`Int 3;

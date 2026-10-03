@@ -208,9 +208,39 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
   | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip
   | Misc_tool_help | Misc_portrait_read | Misc_web_fetch | Misc_web_search -> Tool_completed
-let snapshot_files_only = function
-  | [] -> false
-  | sources -> List.for_all (function Snapshot_file _ -> true | _ -> false) sources
+let refresh_fingerprint interest captured =
+  let stable = function
+    | Snapshot_file _ | Lane_output _ -> true
+    | Fusion_run _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> false in
+  if interest=[] || not (List.for_all stable interest) then Ok None
+  else
+    let observation = function
+      | `Assoc fields -> Ok (`Assoc (List.remove_assoc "observed_at" fields))
+      | _ -> Error "Lane-port observation must be an object" in
+    let normalize source captured = match source with
+      | Snapshot_file _ -> Ok captured
+      | Lane_output _ ->
+          (match captured with
+           | `Assoc fields ->
+               (match List.assoc_opt "observations" fields with
+                | Some (`List observations) ->
+                    let* observations = List.fold_left (fun acc value ->
+                      let* acc = acc in let* value = observation value in
+                      Ok (value :: acc)) (Ok []) observations in
+                    Ok (`Assoc (List.map (fun (key,value) ->
+                      if key="observations" then key,`List (List.rev observations)
+                      else key,value) fields))
+                | Some _ | None -> Error "Lane-port source requires observations")
+           | _ -> Error "Lane-port source must be an object")
+      | Fusion_run _ | Msx_capture _ | Dos_capture _ | Browser_document _ ->
+          Error "live captures have no stable refresh fingerprint" in
+    match captured with
+    | `List values when List.length values=List.length interest ->
+        let* values = List.fold_left2 (fun acc source value ->
+          let* acc = acc in let* value = normalize source value in
+          Ok (value :: acc)) (Ok []) interest values in
+        Ok (Some (Lane_addon_store.digest (Yojson.Safe.to_string (`List (List.rev values)))))
+    | _ -> Error "captured sources do not match the installed binding"
 let dependencies binding =
   let* sources = parse binding in
   Ok (List.filter_map (function Lane_output {installation_id;_} -> Some installation_id

@@ -27,11 +27,11 @@ access uses the server's installed host sampling factory. A shared HTTP barrier
 holds both panel responses until both requests arrive, so overlap is demonstrated
 by protocol events rather than elapsed-time thresholds. Judge input selection and
 row namespacing are performed by the real runtime's named-output source adapter.
-The two panels are installed together; Judge and report are installed after both
-panel ports contain completed answers. This qualifies the stable-input chain.
-It does not qualify simultaneous installation of all four workers or suppress
-duplicate Judge calls from overlapping upstream notifications; that runtime
-scheduling behavior remains a separate follow-up.
+All four workers are installed in one reconciliation. Judge waits for its input
+ports, and automatic refreshes compare completed input identities so overlapping
+producer notifications cannot resample an identical captured generation. The
+native composition scenario additionally forces this acquisition/notification
+overlap with a barrier and checks explicit reruns and new generations separately.
 
 The probe checks:
 
@@ -83,3 +83,10 @@ into its own structured evidence set. URI-only citations remain in the untrusted
 input context; they are not promoted to retained publication references. Keeper publication traverses those structured references
 without parsing arbitrary referenced source bodies. This keeps panel requests,
 outcomes and original input snapshots available when a final report is frozen.
+
+For `source_changes` packages, automatic Lane-output notifications are refresh
+hints. Identity includes the producer instance, generation, output selection,
+configuration revision, status, coverage and output bytes. Only the host's outer
+Lane-port acquisition timestamp is excluded. File snapshot bytes remain exact;
+live machine/browser/Fusion captures retain their existing notification behavior.
+Explicit Observe always calls the package even when input identity is unchanged.

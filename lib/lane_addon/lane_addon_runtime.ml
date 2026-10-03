@@ -366,7 +366,7 @@ let wake_dependents m producer =
   | None -> ()
   | Some owner -> entries m |> List.iter (fun e ->
       if e.running && not e.stopping && e.run_id = producer.run_id
-        && List.mem owner.id e.input_installations then wake e)
+        && List.mem owner.id e.input_installations then wake ~request:Refresh_sources e)
 let failed m e message =
   if not e.stopping then e.phase <- Failed message;
   match persist m e with Ok () -> wake_dependents m e | Error error ->
@@ -647,11 +647,9 @@ let run ~sw backend m e =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id) in
                       if e.stopping then Ok () else
-                      let fingerprint =
-                        if e.package.refresh_policy=Source_changes
-                          && Lane_addon_sources.snapshot_files_only e.refresh_interest
-                        then Some (Lane_addon_store.digest (Yojson.Safe.to_string sources))
-                        else None in
+                      let* fingerprint = match e.package.refresh_policy with
+                        | Source_changes -> Lane_addon_sources.refresh_fingerprint e.refresh_interest sources
+                        | Every_hint -> Ok None in
                       if request=Refresh_sources && previous_phase=Attached
                         && Option.is_some fingerprint && fingerprint=e.last_committed_sources
                       then (

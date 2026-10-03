@@ -35,7 +35,8 @@ profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 requires an explicit `publish=true` dispatch on an existing version tag and full
 successful verification. Development and release-profile OCaml type checks share
-one toolchain job. Installer script tests run once in the distribution job;
+one toolchain job. Installer script tests run once on Linux in the distribution
+job and once on macOS with stock Bash and BSD utilities;
 each of the four native targets still builds and verifies its shipped binaries
 and installation. The behavior lane builds its own sandbox image where it is used.
 TLA model checks run explicitly through `model-check.yml` when state-machine

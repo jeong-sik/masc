@@ -104,8 +104,18 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      # Installer script behavior runs once in full-check.yml. The native
-      # binary and packaged installation smoke checks below run on every target.
+      # Linux coverage lives in full-check.yml; one macOS target also checks
+      # the wizard/removal paths against stock Bash and BSD utilities.
+      - name: Installer behavior on macOS
+        if: matrix.arch == 'macos-arm64'
+        run: |
+          installer_python=$(command -v python3)
+          export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+          "$installer_python" test/test_installer_wizard.py
+          "$installer_python" test/test_installer_upgrade.py
+          "$installer_python" test/test_installer_uninstall.py
+          "$installer_python" test/test_package_macos_runtime.py
+          "$installer_python" test/test_installer_dependencies.py
 
       # Linux builds inside a container (see the Build step), so only the
       # macOS jobs need a toolchain on the runner itself.

@@ -1159,7 +1159,8 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   check bool "recovery reconstructs outcome from first durable terminal record" true
     (Result.is_ok (Store.read_blob store reference)))
 
-let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _env _sw dir _docker ->
+let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_recovery ->
+  with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
   let module S = Mcp_protocol.Sampling in
@@ -1169,6 +1170,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _en
     (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
     | Ok value -> value | Error detail -> fail detail in
   let evidence_directory = Filename.concat (Store.root store) "evidence" in
+  let recovery_directory = Filename.concat (Store.root store) "sampling-evidence" in
   let invocations = ref 0 in
   let broker = match Sampling.create ~store ~package:p ~instance_id:"blob-failure" ~route:"r"
     ~invoke:(fun ~route:_ ~request:_ _ ->
@@ -1176,15 +1178,18 @@ let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _en
       (* The request is already durable. Refuse only outcome blob publication;
          the independent terminal indexes remain writable. *)
       Unix.chmod evidence_directory 0o500;
+      if block_recovery then (Unix.mkdir recovery_directory 0o700; Unix.chmod recovery_directory 0o500);
       Ok {S.role=Assistant;content=Text {type_="text";text="known answer"};
         model="actual-model";stop_reason=None;_meta=None}) () with
     | Ok value -> value | Error detail -> fail detail in
   let handler = match Sampling.for_worker broker ~package:p ~instance_id:"blob-failure" with
     | Ok value -> value | Error detail -> fail detail in
-  let reply = Fun.protect ~finally:(fun () -> Unix.chmod evidence_directory 0o700)
+  let reply = Fun.protect ~finally:(fun () ->
+    Unix.chmod evidence_directory 0o700;
+    if block_recovery then Unix.chmod recovery_directory 0o700)
     (fun () -> run_sampling_observation broker handler params) in
   check int "publication failure does not reinvoke the model" 1 !invocations;
-  check bool "independent blob publication preserves the answer" true (Result.is_ok reply);
+  check bool "independent blob publication preserves the answer" (not block_recovery) (Result.is_ok reply);
   let refs = match reply with
     | Ok answer -> (match answer.S._meta with
         | Some json -> Yojson.Safe.Util.member "masc.lane_sampling" json
@@ -1192,6 +1197,10 @@ let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _en
     | Error bytes ->
         let json = try Yojson.Safe.from_string bytes with Yojson.Json_error _ ->
           fail "publication failure lost structured request evidence" in
+        check string "storage failure is not an invented model failure" "retention_error"
+          Yojson.Safe.Util.(json |> member "status" |> to_string);
+        check bool "storage error respects the package byte envelope" true
+          (String.length (Yojson.Safe.to_string (`String bytes)) <= p.resources.max_reply_bytes);
         Yojson.Safe.Util.member "evidence" json in
   let request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" refs) with
     | Ok value -> value | Error detail -> fail detail in
@@ -1215,7 +1224,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = with_fixture (fun _en
     | Ok value -> value | Error detail -> fail detail in
   check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
   check string "receipt keeps actual model identity" "actual-model"
-    Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string))
+    Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string))) [false;true]
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;

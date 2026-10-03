@@ -694,6 +694,19 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                     self.assertTrue(call(judge, [upstream(wrong)], binding("judge"))["isError"])
                     self.assertEqual(judge.calls, [])
 
+    def test_judge_rejects_nested_model_reference_claims_before_sampling(self):
+        with tempfile.TemporaryDirectory() as root:
+            panel = call(Host(root), [source()])["structuredContent"]
+            for reference in ("request", "outcome"):
+                for key, value in (("provider_key", "invented"),
+                                   ("billing", {"account": "invented"})):
+                    with self.subTest(reference=reference, key=key):
+                        wrong = copy.deepcopy(panel)
+                        wrong["rows"][0]["fields"]["model_evidence"][reference][key] = value
+                        judge = Host(root)
+                        self.assertTrue(call(judge, [upstream(wrong)], binding("judge"))["isError"])
+                        self.assertEqual(judge.calls, [])
+
     def test_retained_arbitrary_artifacts_cannot_forge_host_sampling(self):
         with tempfile.TemporaryDirectory() as root:
             panel = Host(root)

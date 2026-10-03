@@ -1143,13 +1143,13 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   let after = Unix.stat blob_path in
   check bool "intact recovery blob is not replaced" true
     (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino);
-  let recover ~sync_file ~sync_parent ~visited =
+  let recover ?(store=store) ~sync_file ~sync_parent ~visited () =
     Store.For_testing.iter_sampling_requests ~sync_file ~sync_parent store
       ~instance_id:"journal-failure" ~max_bytes:65536
       ~f:(fun _ -> incr visited; Ok ()) in
   let synced = ref [] and visited = ref 0 in
   let sync label fd = synced := !synced @ [label]; Unix.fsync fd in
-  (match recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited with
+  (match recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited () with
    | Ok () -> () | Error detail -> fail detail);
   check (list string) "intact recovery establishes file and parent durability" ["file"; "parent"] !synced;
   check int "only durable evidence reaches recovery callback" 1 !visited;
@@ -1159,8 +1159,27 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
       if label = failing then raise (Unix.Unix_error (Unix.EIO, "fsync", label))
       else Unix.fsync fd in
     check bool "failed durability is not successful recovery" true
-      (Result.is_error (recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited));
+      (Result.is_error (recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited ()));
     check int "unsynced evidence is not delivered" 0 !visited) ["file"; "parent"];
+  let reopened = Store.create ~root:(Store.root store) in
+  let root_parent = Unix.stat (Filename.dirname (Store.root store)) in
+  let root_syncs = ref 0 in
+  let sync_root ~fail_sync fd =
+    let stat = Unix.fstat fd in
+    if stat.Unix.st_dev = root_parent.Unix.st_dev && stat.Unix.st_ino = root_parent.Unix.st_ino then (
+      incr root_syncs;
+      if fail_sync then raise (Unix.Unix_error (Unix.EIO, "fsync", "root parent")));
+    Unix.fsync fd in
+  visited := 0;
+  check bool "reopened root sync failure prevents successful recovery" true
+    (Result.is_error (recover ~store:reopened ~sync_file:Unix.fsync
+      ~sync_parent:(sync_root ~fail_sync:true) ~visited ()));
+  check int "unestablished root is not delivered" 0 !visited;
+  List.iter (fun () ->
+    match recover ~store:reopened ~sync_file:Unix.fsync
+      ~sync_parent:(sync_root ~fail_sync:false) ~visited () with
+    | Ok () -> () | Error detail -> fail detail) [(); ()];
+  check int "failed root sync retries and successful sync clears its obligation" 2 !root_syncs;
   let external_path = Filename.concat dir "external-outcome.json" in
   write external_path bytes;
   let saved_blob = blob_path ^ ".saved" in
@@ -1179,13 +1198,13 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   Fun.protect ~finally:(fun () -> Unix.unlink added_link) (fun () ->
     check bool "hardlink created during sync cannot satisfy recovery" true
       (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
-        Unix.fsync fd; Unix.link blob_path added_link)));
+        Unix.fsync fd; Unix.link blob_path added_link) ()));
     check int "multiply linked evidence is not delivered" 0 !visited);
   visited := 0;
   Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
     check bool "a symlink swap during file sync cannot satisfy recovery" true
       (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
-        Unix.fsync fd; Unix.rename blob_path saved_blob; Unix.symlink external_path blob_path)));
+        Unix.fsync fd; Unix.rename blob_path saved_blob; Unix.symlink external_path blob_path) ()));
     check int "swapped evidence is not delivered" 0 !visited);
   Unix.unlink blob_path;
   Unix.mkfifo blob_path 0o600;

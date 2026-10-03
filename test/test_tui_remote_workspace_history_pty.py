@@ -1058,8 +1058,7 @@ def github_workspace_withdrawal(binary: str) -> None:
             wire.publish("b-after-late")
             # Re-entering obtains a fresh, stamped B observation after the
             # server released the stale stream; it cannot recreate A's view.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.settled" in text)
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.settled" in text)
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"GitHub")
             if b"Login scopes" not in screen(output):

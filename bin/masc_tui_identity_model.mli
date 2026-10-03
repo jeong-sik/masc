@@ -109,6 +109,9 @@ val identity_cursor_provider
 
 val identity_app_form_rows : identity_app_form option -> string list
 
+val identity_provider_attached
+  : providers:identity_provider list -> provider_id:string -> bool
+
 val identity_login_landed
   :  providers:identity_provider list
   -> login:identity_login_started

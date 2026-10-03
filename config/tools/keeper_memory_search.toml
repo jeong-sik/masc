@@ -1,13 +1,18 @@
 name = "keeper_memory_search"
 description = """
 Search durable Memory OS facts or raw conversation history, \
-case-insensitively. Facts: whole-query matches first in store order, then \
+case-insensitively. Short ASCII alphanumeric terms (1-2 characters) match \
+ASCII word boundaries (Korean suffixes remain searchable); other terms \
+retain substring matching. \
+Facts: whole-query matches first in store order, then \
 claims holding any whitespace-separated term (3+ characters match inside \
 words) by BM25. History needs a non-empty query, matched whole or by every \
 term, newest first. The default reads only current facts; source='all' \
 adds absorbed originals and history. Source-bound files are revalidated \
 only for query-matching candidates; unrelated claims remain stored and \
-unverified. total_candidates counts stored claims, not verified results. \
+unverified. source_verification.status='incomplete' means matching claims \
+were withheld because their sources could not be verified; it is not proof \
+of no relevant memory. total_candidates counts stored claims, not verified results. \
 Fact results name their store and \
 original basis; current facts include exact memory_id, category and origin \
 (authored is yours to supersede). Use a memory_id as a derived \

@@ -208,5 +208,8 @@ let register ~config ~net =
     (create_handler ~config ~net)
 
 module For_testing = struct
+  let attempt_captured ~sw ~net runtime params =
+    attempt ~sw ~net ~runtime_id:runtime.Runtime_instance.id ~runtime:(Some runtime) params
+    |> Result.map_error failure_detail
   let response_content response = response_content response |> Result.map_error failure_detail
 end

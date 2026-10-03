@@ -40,6 +40,48 @@ let test_image_only_completion_is_sampling_content () =
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 
+let test_captured_binding_survives_same_id_reload () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock @@ fun () ->
+  let root = Filename.temp_dir "sampling-snapshot-" "" in
+  let original = Runtime.For_testing.snapshot () in
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore original; Fs_compat.remove_tree root);
+  let requests = ref [] in
+  let callback _connection request body =
+    let json = Eio.Buf_read.(of_flow ~max_size:65536 body |> take_all) |> Yojson.Safe.from_string in
+    requests := (Cohttp.Request.resource request, json) :: !requests;
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"id":"snapshot-response","model":"snapshot-model","choices":[{"index":0,"message":{"role":"assistant","content":"captured binding answer"},"finish_reason":"stop"}]}|} () in
+  let socket = Eio.Net.listen env#net ~sw ~backlog:4 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
+  let port = match Eio.Net.listening_addr socket with `Tcp (_,port) -> port | _ -> fail "TCP listener missing" in
+  Eio.Fiber.fork_daemon ~sw (fun () -> Cohttp_eio.Server.run socket
+    (Cohttp_eio.Server.make ~callback ()) ~on_error:raise);
+  let path = Filename.concat root "runtime.toml" in
+  let load endpoint temperature =
+    write path (Printf.sprintf {|[providers.snapshot]
+protocol="openai-compatible-http"
+endpoint="http://127.0.0.1:%d/%s"
+[models.sample]
+api-name="snapshot-model"
+max-context=4096
+temperature=%g
+[ snapshot.sample ]
+[runtime]
+default="snapshot.sample"
+|} port endpoint temperature);
+    require (Runtime.init_default ~config_path:path) in
+  load "before" 0.25;
+  let captured = match Runtime.get_runtime_by_id "snapshot.sample" with Some value -> value | None -> fail "runtime missing" in
+  load "after" 0.75;
+  let text_params = {params with messages=[{S.role=S.User;content=S.Text {type_="text";text="test snapshot"}}]} in
+  ignore (require (Server_lane_addon_sampling.For_testing.attempt_captured ~sw ~net:env#net captured text_params));
+  match !requests with
+  | [path, body] ->
+    check string "dispatch uses the captured endpoint" "/before/chat/completions" path;
+    check (float 0.) "dispatch uses the captured fixed temperature" 0.25
+      Yojson.Safe.Util.(body |> member "temperature" |> to_float)
+  | _ -> fail "expected one captured binding request"
+
 let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(primary_images=true) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
@@ -389,6 +431,8 @@ max_reply_bytes=4194304
 let () = run "Server Lane sampling HTTP composition" ["host boundary",[
   test_case "sampling route preflight stays stable and recovers after runtime update" `Quick
     test_invalid_sampling_route_is_stable_until_runtime_update;
+  test_case "captured binding survives same-ID reload" `Quick
+    test_captured_binding_survives_same_id_reload;
   test_case "image-only completion preserves MCP content" `Quick
     test_image_only_completion_is_sampling_content;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick

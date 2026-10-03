@@ -154,7 +154,19 @@ let parse_case_result ~tool_name output =
           | Some (`Bool false) -> (
               match List.assoc_opt "message" fields with
               | Some (`String message) ->
-                  { base_path; outcome = Error (Printf.sprintf "%s" message) }
+                  let diagnostics =
+                    output
+                    |> String.split_on_char '\n'
+                    |> List.filter (fun line ->
+                           not (String.starts_with ~prefix:result_prefix line))
+                    |> String.concat "\n"
+                    |> String.trim
+                  in
+                  let message =
+                    if diagnostics = "" then message
+                    else message ^ "\n" ^ diagnostics
+                  in
+                  { base_path; outcome = Error message }
               | _ ->
                   { base_path;
                     outcome =
@@ -195,6 +207,24 @@ let run_tool_case_process tool_name =
             (Printf.sprintf "%s exited nonzero without failure payload\n%s"
                tool_name output)
       | Error message -> Error message)
+
+let test_failure_diagnostics_are_preserved () =
+  let marker ok =
+    result_prefix
+    ^ Yojson.Safe.to_string
+        (`Assoc [ "ok", `Bool ok; "message", `String "tool refused" ])
+  in
+  let output = marker false ^ "\n\nUnix.open: permission denied\n" in
+  check (result unit string) "captured child cause accompanies failure"
+    (Error "tool refused\nUnix.open: permission denied")
+    (parse_case_result ~tool_name:"fixture" output).outcome;
+  check (result unit string) "empty diagnostics keep the original message"
+    (Error "tool refused")
+    (parse_case_result ~tool_name:"fixture" (marker false ^ "\n\n")).outcome;
+  check (result unit string) "diagnostics do not turn success into failure"
+    (Ok ())
+    (parse_case_result ~tool_name:"fixture"
+       (marker true ^ "\n\nchild notice\n")).outcome
 
 let test_known_tool_inventory_matches_raw_schemas () =
   let schema_names =
@@ -247,6 +277,9 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
   run "mcp_tool_matrix"
     [
+      ( "diagnostics",
+        [ test_case "failure retains captured child diagnostics" `Quick
+            test_failure_diagnostics_are_preserved ] );
       ( "inventory",
         [
           test_case "known inventory matches raw schemas" `Quick

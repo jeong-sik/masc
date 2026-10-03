@@ -14,7 +14,9 @@ import threading
 
 import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
+import tui_keyboard_approvals as approvals
+import tui_keyboard_keepers as keepers
 
 
 BRIEFING = "/api/v1/dashboard/briefing"
@@ -27,7 +29,7 @@ def scoped_identity_journey(executable, *, unread):
     calls = []
     state = {"changed": False}
     label = b"scoped-unread-operator" if unread else b"scoped-foreign-question"
-    ask = copy.deepcopy(h.keeper_asks_response())
+    ask = copy.deepcopy(approvals.keeper_asks_response())
     ask[1]["asks"][0].update(ask_id=label.decode(), context=label.decode())
     empty_asks = copy.deepcopy(ask)
     empty_asks[1].update(asks=[], open_count=0)
@@ -144,7 +146,7 @@ def scoped_identity_journey(executable, *, unread):
         with lock:
             state["changed"] = True
         start = len(output)
-        h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"Enter:open")
+        keepers.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"Enter:open")
         identity = b"workspace identity not read"
         h.wait_for_output(process, fd, output, identity, start=start, timeout=10)
         assert_scoped(baseline)
@@ -179,7 +181,7 @@ def superseded_scoped_match_journey(executable):
     new_label = b"newer-B-question"
 
     def question(label):
-        response = copy.deepcopy(h.keeper_asks_response())
+        response = copy.deepcopy(approvals.keeper_asks_response())
         response[1]["asks"][0].update(ask_id=label.decode(), context=label.decode())
         return response
 
@@ -199,7 +201,7 @@ def superseded_scoped_match_journey(executable):
 
     gate = h.GatedHttpResponse(operator(old_operator_label), hold_seconds=30.0)
     late_gate_label = b"late-foreign-gate"
-    late_gate_snapshot = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
+    late_gate_snapshot = copy.deepcopy(approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
     late_gate_snapshot[1]["approval_queue"] = late_gate_snapshot[1]["approval_queue"][:1]
     late_gate_snapshot[1]["approval_queue"][0]["id"] = late_gate_label.decode()
     held_gate = h.GatedHttpResponse(late_gate_snapshot, hold_seconds=30.0)
@@ -298,7 +300,7 @@ def superseded_scoped_match_journey(executable):
                 assert baseline >= 1, calls
                 state["phase"] = "old-scoped"
             # Home's static footer is available before its scoped GET settles.
-            h.press_label_on_screen(process, fd, output, b"Dashboard",
+            keepers.press_label_on_screen(process, fd, output, b"Dashboard",
                                     row=1, needle=b"Enter:open")
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=10), (
                 "old scoped decision GET never reached the response gate"
@@ -396,14 +398,14 @@ def gate_before_identity_refresh_journey(executable):
     lock = threading.Lock()
     calls = []
     state = {"phase": "A", "hold_gate": False}
-    initial = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
+    initial = copy.deepcopy(approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
     initial[1]["approval_queue"] = []
     # With no cached lane modes the Approvals surface prints the exact Gate
     # error instead of retaining the older lane labels over it.
     initial[1]["hitl"] = None
     late = copy.deepcopy(initial)
     late[1]["approval_queue"] = copy.deepcopy(
-        h.blocked_gate_detail_http_fixtures()[cards.GATE_PATH][1]["approval_queue"])
+        approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH][1]["approval_queue"])
     late[1]["approval_queue"][0]["id"] = "foreign-gate-before-identity"
     held_gate = h.GatedHttpResponse(late, hold_seconds=30.0)
     initial_gate_read = threading.Event()

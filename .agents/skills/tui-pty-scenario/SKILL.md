@@ -5,9 +5,11 @@ description: "masc TUI 를 진짜 터미널(PTY)에 띄워 확인하는 파이�
 
 # TUI PTY 시나리오
 
-`test/test_tui_keyboard_input.py` 가 하네스다. `run_terminal_scenario` 가 PTY 를 열고, 가짜 HTTP
-서버를 붙이고, TUI 를 띄우고, 키를 보내고, 화면 바이트를 기다린다. 다른 `test/test_tui_*.py` 초점
-스위트들도 이 모듈을 `import test_tui_keyboard_input as h` 로 가져다 쓴다.
+`test/test_tui_keyboard_input.py` 는 가족 선택 CLI 진입점이다. 공통 하네스는
+`test/tui_keyboard_harness.py` 이며, `run_terminal_scenario` 가 PTY 를 열고 가짜 HTTP
+서버를 붙여 TUI 와 상호작용한다. 새 초점 스위트는 `import tui_keyboard_harness as h` 로
+공통 기능을 가져오고, 화면별 fixture 는 `tui_keyboard_chat`, `tui_keyboard_board` 등 실제 소유 모듈에서 가져온다.
+기존 진입점의 호환 export 는 새 테스트의 기본 import 로 사용하지 않는다.
 
 ## 바이너리
 
@@ -112,8 +114,10 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
 기본 산책에 시나리오를 더 넣지 않는다. 산책은 이미 CI 상한 가까이 걸린다(이슈 #36343).
 초점 스위트 파일을 따로 만든다. `test/test_tui_tab_strip_pty.py` 가 예다.
 
-1. `test/test_tui_<무엇을 확인하나>.py` 를 만들고 `import test_tui_keyboard_input as h` 로 하네스를 쓴다.
-2. 파일 위쪽에 이 시나리오가 지키는 소스를 적는다. PR CI 는 바뀐 경로를 따옴표째 적은 스위트를 고른다.
+1. `test/test_tui_<무엇을 확인하나>.py` 를 만들고 `import tui_keyboard_harness as h` 로 하네스를 쓴다.
+   필요한 fixture 는 그 정의가 있는 소유 모듈에서 명시적으로 import 한다.
+2. 파일 위쪽에 이 시나리오가 지키는 소스를 **큰따옴표**로 적는다. PR CI 의 현재 selector 는
+   `"경로"` 전체를 문자 그대로 찾으므로 작은따옴표로 바꾸면 소스 변경 시 선택되지 않는다.
 
    ```python
    SOURCE_MODULES = (
@@ -128,7 +132,7 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
    ```text
    (rule
     (alias runtest-test_tui_<stem>)
-    (deps test_tui_<stem>.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+    (deps test_tui_<stem>.py tui_keyboard_harness.py ../bin/masc_tui.exe)
     (action
      (run python3 %{dep:test_tui_<stem>.py} %{dep:../bin/masc_tui.exe})))
 
@@ -136,6 +140,11 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
     (name runtest)
     (deps (alias runtest-test_tui_<stem>)))
    ```
+
+위 규칙은 공통 하네스만 사용하는 최소 예다. 화면별 소유 모듈을 import 하면 그 파일과
+그 모듈이 다시 import 하는 모든 `tui_keyboard_*.py` 파일도 `deps` 에 넣는다.
+기존 CLI 진입점을 import 하는 소비자는 전체 진입점 import closure 를 선언해야 한다.
+소스 트리에서 import 가 성공해도 Dune sandbox 의 의존성이 충분하다는 증거는 아니다.
 
 ## Gotchas
 

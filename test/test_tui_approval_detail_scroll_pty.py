@@ -4,7 +4,8 @@ import os
 import re
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_approvals as _keyboard_approvals
+import tui_keyboard_harness as _keyboard_harness
 
 
 
@@ -17,8 +18,8 @@ SHORT_BODY = "deploy now"
 WINDOW_LINE = re.compile(rb"\[rows \d+-\d+/\d+\]")
 
 
-def approval_with_body(body: str) -> h.HttpFixtures:
-    fixtures = h.blocked_gate_detail_http_fixtures()
+def approval_with_body(body: str) -> _keyboard_harness.HttpFixtures:
+    fixtures = _keyboard_approvals.blocked_gate_detail_http_fixtures()
     row = fixtures["/api/v1/dashboard/gate"][1]["approval_queue"][0]
     row["tool_name"] = "connector_post"
     row["input"] = {"connector": "discord", "content": body}
@@ -27,20 +28,20 @@ def approval_with_body(body: str) -> h.HttpFixtures:
 
 
 def open_detail(process, master_fd, output, opening: bytes) -> None:
-    h.resize_and_wait(
+    _keyboard_harness.resize_and_wait(
         process, master_fd, output, rows=40, columns=100, needle=b"MASC Dashboard"
     )
-    h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
+    _keyboard_harness.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
     # The row names the operation the producer sent, verbatim.
-    h.wait_for_output(process, master_fd, output, b"connector_post", start=0, timeout=5.0)
+    _keyboard_harness.wait_for_output(process, master_fd, output, b"connector_post", start=0, timeout=5.0)
     # The queue row's preview stops before the body, so these bytes can only
     # come from the detail pane this scenario is about.
-    h.send_and_wait(process, master_fd, output, b"\r", opening)
+    _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", opening)
 
 
 def footer_row(output: bytearray) -> bytes:
     """The footer the pane drew, read off the reconstructed screen."""
-    rows = h.screen_rows(bytes(output))
+    rows = _keyboard_harness.screen_rows(bytes(output))
     carrying = [text for _, text in sorted(rows.items()) if b"j/k" in text]
     if not carrying:
         raise AssertionError(f"no footer row on screen: {rows!r}")
@@ -58,7 +59,7 @@ def run(executable: str) -> None:
             )
         os.write(master_fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="An approval detail longer than its frame says so",
         interact=overflow_says_so,
@@ -75,7 +76,7 @@ def run(executable: str) -> None:
             )
         os.write(master_fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="An approval detail that fits its frame carries no window line",
         interact=short_stays_quiet,

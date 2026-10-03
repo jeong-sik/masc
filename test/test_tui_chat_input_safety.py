@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import base64
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 
 CHAT = "/api/v1/keepers/chat/stream"
@@ -20,18 +21,18 @@ APPROVAL = "/api/v1/keepers/tool-approval"
 
 
 def open_chat(process: subprocess.Popen[bytes], fd: int, output: bytearray) -> None:
-    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-    h.select_keeper_row(process, fd, output, b"alpha")
-    h.send_and_wait(process, fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+    _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+    _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
 
 def approval_typing(binary: str, decision: str) -> None:
-    requests: h.HttpRequests = []
+    requests: _keyboard_harness.HttpRequests = []
     show_approval = threading.Event()
     release = threading.Event()
 
-    def respond(body: bytes) -> h.StreamingHttpResponse:
-        normal = h.keeper_chat_succeeded_response(body)
+    def respond(body: bytes) -> _keyboard_harness.StreamingHttpResponse:
+        normal = _keyboard_chat.keeper_chat_succeeded_response(body)
         blocks = [block for block in normal.body.split(b"\n\n") if block]
         start = next(
             i
@@ -60,7 +61,7 @@ def approval_typing(binary: str, decision: str) -> None:
                 yield b"data: " + json.dumps(event).encode() + b"\n\n"
                 release.wait(timeout=30)
 
-        return h.StreamingHttpResponse(chunks)
+        return _keyboard_harness.StreamingHttpResponse(chunks)
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -71,25 +72,25 @@ def approval_typing(binary: str, decision: str) -> None:
     ) -> None:
         try:
             open_chat(process, fd, output)
-            h.send_and_wait(process, fd, output, b"first", h.composer_showing(b"first"))
-            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"first", _keyboard_harness.composer_showing(b"first"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             # Approval arrives while the operator is already writing NEXT.
-            h.send_and_wait(process, fd, output, b"ma", h.composer_showing(b"ma"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"ma", _keyboard_harness.composer_showing(b"ma"))
             before = len(output)
             show_approval.set()
-            h.wait_for_output(process, fd, output, b"/approve", start=before, timeout=5)
-            h.send_and_wait(process, fd, output, b"yYnN", h.composer_showing(b"mayYnN"))
+            _keyboard_harness.wait_for_output(process, fd, output, b"/approve", start=before, timeout=5)
+            _keyboard_harness.send_and_wait(process, fd, output, b"yYnN", _keyboard_harness.composer_showing(b"mayYnN"))
             assert not [body for path, body in requests if path == APPROVAL], requests
             # An empty draft must also admit y/n as the first character.
-            h.send_and_wait(process, fd, output, b"\x15", b"> ")
-            h.send_and_wait(process, fd, output, b"yYnN", h.composer_showing(b"yYnN"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x15", b"> ")
+            _keyboard_harness.send_and_wait(process, fd, output, b"yYnN", _keyboard_harness.composer_showing(b"yYnN"))
             assert not [body for path, body in requests if path == APPROVAL], requests
-            h.send_and_wait(process, fd, output, b"\x15", b"> ")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x15", b"> ")
             command = ("/" + decision).encode()
-            h.send_and_wait(process, fd, output, command, h.composer_showing(command))
+            _keyboard_harness.send_and_wait(process, fd, output, command, _keyboard_harness.composer_showing(command))
             assert not [body for path, body in requests if path == APPROVAL], requests
             os.write(fd, b"\r")
-            body = h.wait_for_http_request(process, fd, output, requests, path=APPROVAL)
+            body = _keyboard_harness.wait_for_http_request(process, fd, output, requests, path=APPROVAL)
             payload = json.loads(body)
             assert payload["name"] == "alpha"
             assert payload["tool_call_id"] == "typing-call"
@@ -104,14 +105,14 @@ def approval_typing(binary: str, decision: str) -> None:
             release.set()
             os.killpg(process.pid, signal.SIGTERM)
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description=f"approval typing requires explicit /{decision}",
         interact=interact,
         confirm_exit=b"",
         http_requests=requests,
         http_fixtures={
-            CHAT: h.RequestHttpResponse(respond),
+            CHAT: _keyboard_harness.RequestHttpResponse(respond),
             APPROVAL: (200, {"settled": True, "remembered": False}),
         },
     )
@@ -126,8 +127,8 @@ def queued_attachments(binary: str) -> None:
     out with it and only it, the next reference goes out with "draft", and
     editing the queued text on the server keeps the media it was sent with.
     """
-    fixture = h.AtomicChatFixture()
-    requests: h.HttpRequests = []
+    fixture = _keyboard_chat.AtomicChatFixture()
+    requests: _keyboard_harness.HttpRequests = []
     reference = "https://example.invalid/queued.png"
     draft_reference = "file-draft-image"
 
@@ -139,29 +140,29 @@ def queued_attachments(binary: str) -> None:
         base: str,
     ) -> None:
         try:
-            h.open_atomic_chat(process, fd, output)
-            image_path = Path(base, h.IMAGE_NAME)
-            h.send_and_wait(
+            _keyboard_chat.open_atomic_chat(process, fd, output)
+            image_path = Path(base, _keyboard_chat.IMAGE_NAME)
+            _keyboard_harness.send_and_wait(
                 process, fd, output, f"/attach {image_path}\r".encode(), b"attached "
             )
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(
                 process, fd, output, f"/ref {reference}\r".encode(), b"reference(s)"
             )
-            h.send_and_wait(
-                process, fd, output, b"queued-one", h.composer_showing(b"queued-one")
+            _keyboard_harness.send_and_wait(
+                process, fd, output, b"queued-one", _keyboard_harness.composer_showing(b"queued-one")
             )
             os.write(fd, b"\r")
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 1)
-            h.send_and_wait(
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 1)
+            _keyboard_harness.send_and_wait(
                 process,
                 fd,
                 output,
                 f"/ref {draft_reference}\r".encode(),
                 b"reference(s)",
             )
-            h.send_and_wait(process, fd, output, b"draft", h.composer_showing(b"draft"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"draft", _keyboard_harness.composer_showing(b"draft"))
             os.write(fd, b"\r")
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 2)
             queued, draft = fixture.submitted
             assert [queued["message"], draft["message"]] == ["queued-one", "draft"], (
                 fixture.submitted
@@ -181,9 +182,9 @@ def queued_attachments(binary: str) -> None:
             # the reference that were sent with it; only the text changes.
             first_id = queued["request_id"]
             command = f"/queue edit {first_id} queued-one-fixed".encode()
-            h.send_and_wait(process, fd, output, command, h.composer_showing(command))
+            _keyboard_harness.send_and_wait(process, fd, output, command, _keyboard_harness.composer_showing(command))
             os.write(fd, b"\r")
-            if not h.wait_for_fixture_event(
+            if not _keyboard_harness.wait_for_fixture_event(
                 process, fd, output, fixture.edited, timeout=5
             ):
                 raise AssertionError("queue edit never reached the server")
@@ -202,14 +203,14 @@ def queued_attachments(binary: str) -> None:
             fixture.release.set()
             os.killpg(process.pid, signal.SIGTERM)
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="staged media rides with its line and survives a queue edit",
         interact=interact,
         confirm_exit=b"",
         http_fixtures=fixture.fixtures,
         http_requests=requests,
-        prepare_workspace=h.seed_image_workspace,
+        prepare_workspace=_keyboard_chat.seed_image_workspace,
     )
 
 
@@ -217,8 +218,8 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
     show_failure = threading.Event()
     release = threading.Event()
 
-    def respond(body: bytes) -> h.StreamingHttpResponse:
-        response = h.keeper_chat_failed_response(body)
+    def respond(body: bytes) -> _keyboard_harness.StreamingHttpResponse:
+        response = _keyboard_chat.keeper_chat_failed_response(body)
         blocks = [block for block in response.body.split(b"\n\n") if block]
         failure = json.loads(blocks[-1].removeprefix(b"data: "))
         assert failure["type"] == "RUN_ERROR", failure
@@ -230,7 +231,7 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
                 yield b"data: " + json.dumps(failure).encode() + b"\n\n"
                 release.wait(timeout=30)
 
-        return h.StreamingHttpResponse(chunks)
+        return _keyboard_harness.StreamingHttpResponse(chunks)
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -241,22 +242,22 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
     ) -> None:
         try:
             open_chat(process, fd, output)
-            h.send_and_wait(process, fd, output, b"trigger-error", b"trigger-error")
-            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"trigger-error", b"trigger-error")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
             before = len(output)
             show_failure.set()
-            h.wait_for_output(
+            _keyboard_harness.wait_for_output(
                 process, fd, output, b"REQUEST ERROR", start=before, timeout=5
             )
-            h.wait_for_output(
+            _keyboard_harness.wait_for_output(
                 process,
                 fd,
                 output,
-                h.FRAME_END,
-                start=h.end_of_needle(output, b"REQUEST ERROR", before),
+                _keyboard_harness.FRAME_END,
+                start=_keyboard_harness.end_of_needle(output, b"REQUEST ERROR", before),
                 timeout=5,
             )
-            screen = h.unwrapped(h.screen_text(bytes(output)))
+            screen = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(bytes(output)))
             if b"REQUEST ERROR \xc2\xb7 provider 429" not in screen:
                 raise AssertionError(f"failure progress lost its cause: {screen!r}")
             if b"stream reported an error" in screen:
@@ -266,10 +267,10 @@ def failed_progress_names_the_cause_once(binary: str) -> None:
             release.set()
             os.killpg(process.pid, signal.SIGTERM)
 
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
-    fixtures[CHAT] = h.RequestHttpResponse(respond)
-    h.run_terminal_scenario(
+    fixtures[CHAT] = _keyboard_harness.RequestHttpResponse(respond)
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="failed Keeper progress names its cause once",
         interact=interact,
@@ -299,13 +300,13 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         # selected, and only then the focus key. Pressing i on a surface whose
         # roster has not arrived focuses a row with nothing to send to, and
         # the letters below would land nowhere.
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
-        h.send_and_wait(process, fd, output, b"zqx", b"zqx")
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"zqx", b"zqx")
         os.write(fd, b"\x11")
-        h.drain_until_quiet(process, fd, output)
-        frame = h.screen_text(bytes(output))
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        frame = _keyboard_harness.screen_text(bytes(output))
         if b"MASC Keepers" not in frame:
             raise AssertionError(
                 f"Ctrl-Q on the composer row left the surface: {frame[-600:]!r}"
@@ -315,18 +316,18 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
                 f"Ctrl-Q emptied the row it was typed into: {frame[-600:]!r}"
             )
         os.write(fd, b"\x15")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         # Release the row before quitting: a focused composer takes "q" as a
         # letter. The harness supplies the second q that confirms the exit.
         os.write(fd, b"\x1b")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="the quiet leave belongs to the chat surface",
         interact=interact,
-        http_fixtures=h.overview_event_http_fixtures(),
+        http_fixtures=_keyboard_harness.overview_event_http_fixtures(),
     )
 
 

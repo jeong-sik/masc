@@ -1,5 +1,10 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
+
+(test
+ (name test_server_lane_addon_sampling)
+ (modules test_server_lane_addon_sampling)
+ (libraries masc_test_deps masc.server mcp_protocol eio_main unix))
 (include stanzas/test_librarian_working_state_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot.inc)

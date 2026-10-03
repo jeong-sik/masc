@@ -91,7 +91,7 @@ let with_fixture f =
                 Runtime.For_testing.reset ();
                 let started = ref [] in
                 let backend : Runtime.For_testing.backend = {
-                  start=(fun ~sw:_ ~instance_id ~package:_ ~on_created ->
+                  start=(fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
                     started := instance_id :: !started;
                     let connection : Runtime.For_testing.connection = {
                       observe=(fun ~binding:_ ~sources:_ -> Ok output);

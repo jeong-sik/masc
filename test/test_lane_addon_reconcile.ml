@@ -65,7 +65,7 @@ let make_backend () =
                 image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {

@@ -28,6 +28,7 @@ let rec remove_tree path =
   end else Sys.remove path
 
 type fake = {
+  bindings : (string, Yojson.Safe.t) Hashtbl.t;
   calls : (string, int) Hashtbl.t;
   stops : (string, int) Hashtbl.t;
   modes : (string, string) Hashtbl.t;
@@ -43,13 +44,14 @@ let fake_output : Types.output = {
 }
 
 let make_backend ?observe_step () =
-  let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
+  let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
+      Hashtbl.add state.bindings instance_id binding;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
         action_schema = (fun () -> None);
@@ -362,6 +364,8 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     let id = text "instance_id" accepted in
     let clock = Eio.Stdenv.clock env in
     await clock (fun () -> Hashtbl.mem state.modes id);
+    check bool "worker startup receives the exact validated installation binding" true
+      (Hashtbl.find_opt state.bindings id=Some (`Assoc ["sources",`List [];"limit",`Int 2]));
     detach config id;
     await_phase clock config id "detached")
 

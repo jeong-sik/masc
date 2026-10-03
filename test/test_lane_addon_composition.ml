@@ -63,7 +63,7 @@ let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output
                 directory (Runtime.configuration_directory config);
               let received = Hashtbl.create 4 and stopped = ref [] in
               let backend : Runtime.For_testing.backend = {
-                start=(fun ~sw:_ ~instance_id ~package ~on_created ->
+                start=(fun ~sw:_ ~instance_id ~package ~binding:_ ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
                     action_schema = (fun () -> None);

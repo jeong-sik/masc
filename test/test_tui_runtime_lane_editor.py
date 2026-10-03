@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 import test_tui_keyboard_input as h
 
 
@@ -318,6 +319,10 @@ def run(executable: str) -> None:
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
+    recorded_at = datetime.fromisoformat(
+        store.body["generated_at_iso"].replace("Z", "+00:00")
+    )
+    reading_time = f"reading {recorded_at.astimezone().strftime('%H:%M:%S')}".encode()
 
     def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC System")
@@ -328,7 +333,9 @@ def run(executable: str) -> None:
             process, fd, output, rows=30, columns=131,
             needle=b"MASC System", controls=(h.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        frame = h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        if reading_time not in h.screen_text(frame):
+            raise AssertionError("Runtime header did not use the resolved reading time")
 
         # [a] opens the name field; the letters typed after it are the name's.
         h.send_and_wait(process, fd, output, b"a", b"new lane name: _")
@@ -418,9 +425,11 @@ def run(executable: str) -> None:
         # ends it too, with a line saying the list may be stale -- the screen
         # still shows the order from before J.
         store.fail_next_resolved = True
-        h.send_and_wait(
+        frame = h.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
+        if reading_time not in h.screen_text(frame):
+            raise AssertionError("failed refresh changed the Runtime reading time")
         # Another client now removes runtime-a. The TUI still shows the old
         # [runtime-a; runtime-b] order, where runtime-b is second. K used to
         # post that whole stale order and restore runtime-a. The unread list

@@ -250,15 +250,27 @@ def ttyd_session(
             except (RuntimeError, TimeoutError) as error:
                 # pread does not move the file offset shared with ttyd's writer.
                 size = os.fstat(log.fileno()).st_size
-                bearer = env.get("MASC_TOKEN", "")
-                # Read overlap so a bearer crossing the tail boundary is redacted.
-                read_size = 4096 + len(bearer.encode("utf-8"))
-                detail = os.pread(log.fileno(), read_size, max(0, size - read_size)).decode(
-                    "utf-8", errors="replace"
-                )
-                if bearer:
-                    detail = detail.replace(bearer, "[redacted]")
-                detail = detail[-4096:]
+                private_fields = {
+                    value.encode("utf-8")
+                    for value in (
+                        env.get("MASC_TOKEN", ""), str(executable), str(base),
+                        workspace, str(WORKTREE), str(TTYD),
+                    )
+                    if value
+                }
+                # Read and crop in bytes. Same-width masking keeps the original
+                # tail boundary intact even when many private fields occur.
+                read_size = 4096 + max(map(len, private_fields), default=0)
+                detail_bytes = os.pread(log.fileno(), read_size, max(0, size - read_size))
+                masked = bytearray(detail_bytes)
+                # Search the original bytes so overlapping private values are
+                # all masked, even if an earlier match covers a later prefix.
+                for value in private_fields:
+                    offset = detail_bytes.find(value)
+                    while offset >= 0:
+                        masked[offset:offset + len(value)] = b"*" * len(value)
+                        offset = detail_bytes.find(value, offset + 1)
+                detail = bytes(masked[-4096:]).decode("utf-8", errors="replace")
                 raise type(error)(
                     f"{error}\nttyd startup log (bounded tail):\n{detail}"
                 ) from None

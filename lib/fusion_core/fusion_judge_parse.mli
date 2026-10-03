@@ -25,6 +25,12 @@
     - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
     - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
 
+    [resolved_answer], [answer], [action] and [rationale] must contain text
+    beyond ASCII whitespace (space, tab, newline, carriage return, form feed).
+    The schema and decoder enforce the same requirement, preserving accepted
+    text exactly. An insufficient decision still explains its outcome in
+    [resolved_answer]; an empty conclusion is a parse failure.
+
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 
 (** Wire field names shared by the typed decoder, its derived output schema,

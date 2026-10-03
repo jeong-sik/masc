@@ -56,6 +56,21 @@ let string_codec =
         | _ -> Error (path ^ ": expected string"))
   }
 
+(* The character class matches [String.trim]'s whitespace set. Preserve the
+   original text: this is a required-content check, not output normalization. *)
+let nonblank_string_codec =
+  { schema =
+      `Assoc
+        [ "type", `String "string"
+        ; "pattern", `String "[^ \\t\\n\\r\\f]"
+        ]
+  ; decode =
+      (fun path json ->
+        let* value = string_codec.decode path json in
+        if String.trim value = "" then Error (path ^ ": expected nonblank string")
+        else Ok value)
+  }
+
 let enum_codec values =
   { schema =
       `Assoc
@@ -199,9 +214,9 @@ let decision_case kind fields construct =
     let* _ = get path kvs tag in
     construct path kvs)
 
-let decision_answer = required wire_field_answer string_codec
-let decision_action = required wire_field_recommend_action string_codec
-let decision_rationale = required wire_field_recommend_rationale string_codec
+let decision_answer = required wire_field_answer nonblank_string_codec
+let decision_action = required wire_field_recommend_action nonblank_string_codec
+let decision_rationale = required wire_field_recommend_rationale nonblank_string_codec
 let decision_missing =
   optional ~default:[] wire_field_missing string_array_codec
 
@@ -257,7 +272,7 @@ let partial_coverage =
 let unique_insights =
   optional ~default:[] wire_field_unique_insights (list_codec insight_codec)
 let blind_spots = optional ~default:[] wire_field_blind_spots string_array_codec
-let resolved_answer = required wire_field_resolved_answer string_codec
+let resolved_answer = required wire_field_resolved_answer nonblank_string_codec
 let decision = required wire_field_decision decision_codec
 
 let synthesis_codec =

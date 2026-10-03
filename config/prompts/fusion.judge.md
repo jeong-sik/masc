@@ -70,3 +70,6 @@ no prose and no code fences. Populate consensus, contradictions,
 partial_coverage, unique_insights, and blind_spots; use [] when a collection
 has no findings. A decision.kind of answer requires answer; recommend requires
 action and rationale; insufficient uses missing (an array of strings).
+resolved_answer, answer, action, and rationale must contain nonblank text.
+When evidence is insufficient, explain the unresolved outcome in resolved_answer
+and use decision.kind=insufficient with the evidence still needed.

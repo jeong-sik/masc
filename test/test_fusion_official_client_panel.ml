@@ -1281,6 +1281,90 @@ let run_single_judge ~base_dir ~route ~on_route =
       ())
 ;;
 
+let with_blank_judge_lane ~second_answer check_result =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_dir = Filename.temp_dir "fusion-blank-judge" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; remove_tree base_dir)
+  @@ fun () ->
+  let oauth_source = Filename.concat base_dir "oauth.json" in
+  write_file ~path:oauth_source ~perm:0o600
+    (Masc_test_deps.antigravity_oauth_fixture "blank-judge");
+  let provider id answer =
+    let cli = Filename.concat base_dir id in
+    let input_path = Filename.concat base_dir (id ^ "-input") in
+    write_file ~path:cli ~perm:0o700
+      (recording_agy_script ~input_path
+         ~response:(Yojson.Safe.to_string (judge_synthesis_json ~answer)));
+    Printf.sprintf {|[providers.%s]
+protocol = "antigravity-cli"
+command = %S
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
+[%s.gemini]
+|} id cli oauth_source id
+  in
+  let config_path = Filename.concat base_dir "runtime.toml" in
+  write_file ~path:config_path ~perm:0o600
+    (provider "first" " \t\n" ^ provider "second" second_answer ^ {|
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+[runtime]
+default = "first.gemini"
+[runtime.lanes.blank-judge]
+candidates = ["first.gemini", "second.gemini"]
+|});
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> failf "blank judge fixture must initialize: %s" detail);
+  let route = ref None in
+  let result = run_single_judge ~base_dir ~route:"blank-judge"
+    ~on_route:(fun value -> route := Some value) in
+  List.iter (fun id ->
+    check bool (id ^ " client was actually invoked") true
+      (Sys.file_exists (Filename.concat base_dir (id ^ "-input")))) ["first"; "second"];
+  let route = match !route with
+    | Some value -> value
+    | None -> fail "judge did not report the attempted route" in
+  List.iter (fun (attempt : Fusion_types.seat_attempt) ->
+    match attempt.attempt_failure with
+    | Fusion_types.Judge_attempt_failed (Fusion_types.Parse_error detail) ->
+      check string "blank JSON conclusion is a parse failure"
+        "judge.resolved_answer: expected nonblank string" detail
+    | other -> failf "unexpected failure: %s" (Fusion_types.show_attempt_failure other))
+    route.failed_attempts;
+  let usage = match result with Ok (_, usage) | Error (_, usage) -> usage in
+  check int "both paid inputs retained, including cache reads" 300 usage.Fusion_types.input_tokens;
+  check int "both paid outputs retained" 14 usage.output_tokens;
+  check_result result route
+;;
+
+let test_blank_judge_conclusion_tries_next_candidate () =
+  with_blank_judge_lane ~second_answer:"ship B" (fun result route ->
+    (match result with
+     | Ok (synthesis, _) -> check string "fallback supplies the conclusion" "ship B"
+         synthesis.Fusion_types.resolved_answer
+     | Error (failure, _) -> fail (Fusion_types.judge_failure_text failure));
+    check (option string) "second candidate answers" (Some "second.gemini") route.answered_by;
+    check (list string) "first blank candidate recorded as failed" ["first.gemini"]
+      (List.map (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+         route.failed_attempts))
+;;
+
+let test_all_blank_judge_conclusions_exhaust_the_lane () =
+  with_blank_judge_lane ~second_answer:"" (fun result route ->
+    (match result with
+     | Error (Fusion_types.Parse_error _, _) -> ()
+     | Error (failure, _) -> fail (Fusion_types.judge_failure_text failure)
+     | Ok _ -> fail "blank-only lane must not report synthesis success");
+    check (option string) "no candidate answers" None route.answered_by;
+    check (list string) "both blank attempts retained in order"
+      ["first.gemini"; "second.gemini"]
+      (List.map (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+         route.failed_attempts))
+;;
+
 (* A judge seat naming a lane tries every candidate, in the lane's order, when
    each one fails. The spawn count is compared with a baseline measured on a
    one-candidate seat in the same test rather than with an assumed number of
@@ -1706,7 +1790,11 @@ let () =
             (test_antigravity_panel_selected_account_and_refresh ~linked_root:true)
         ] )
     ; ( "seat routes"
-      , [ test_case
+      , [ test_case "blank judge conclusion tries next candidate" `Quick
+            test_blank_judge_conclusion_tries_next_candidate
+        ; test_case "all blank judge conclusions exhaust the lane" `Quick
+            test_all_blank_judge_conclusions_exhaust_the_lane
+        ; test_case
             "judge lane walks candidates in order"
             `Quick
             test_judge_lane_walks_candidates_in_order

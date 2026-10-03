@@ -1351,6 +1351,59 @@ let test_judge_decision_schema_branches () =
     ]
     actual
 
+let test_judge_rejects_blank_conclusions () =
+  let answer value = `Assoc [ "kind", `String "answer"; "answer", `String value ] in
+  let recommend action rationale =
+    `Assoc [ "kind", `String "recommend"; "action", `String action;
+             "rationale", `String rationale ] in
+  List.iter (fun blank ->
+    List.iter (fun (path, resolved, decision) ->
+      let json = `Assoc [ "resolved_answer", `String resolved; "decision", decision ] in
+      match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+      | Ok _ -> Alcotest.fail (path ^ " accepted a blank conclusion")
+      | Error detail ->
+        Alcotest.(check string) "field-specific refusal"
+          (path ^ ": expected nonblank string") detail)
+      [ "judge.resolved_answer", blank, answer "substantive answer"
+      ; "judge.decision.answer", "resolved", answer blank
+      ; "judge.decision.action", "resolved", recommend blank "reason"
+      ; "judge.decision.rationale", "resolved", recommend "action" blank
+      ; "judge.resolved_answer", blank,
+          `Assoc [ "kind", `String "insufficient"; "missing", `List [`String "measurements"] ]
+      ])
+    [ ""; " "; "\t\n\r\012" ]
+
+let test_judge_preserves_nonblank_conclusions () =
+  let text = " \n근거에 따른 답변\t " in
+  let json = `Assoc [ "resolved_answer", `String text;
+    "decision", `Assoc [ "kind", `String "answer"; "answer", `String text ] ] in
+  (match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+   | Error detail -> Alcotest.fail detail
+   | Ok synthesis ->
+     Alcotest.(check string) "resolved text is lossless" text synthesis.resolved_answer;
+     Alcotest.check jdecision "answer text is lossless" (Answer text) synthesis.decision);
+  let insufficient = {|{"resolved_answer":"No measurements are available.","decision":{"kind":"insufficient","missing":["measurements"]}}|} in
+  match Fusion_judge_parse.of_string insufficient with
+  | Error detail -> Alcotest.fail detail
+  | Ok synthesis ->
+    Alcotest.check jdecision "insufficient remains explicit"
+      (Insufficient { missing_for_decision = ["measurements"] }) synthesis.decision
+
+let test_judge_conclusion_schema_requires_nonblank () =
+  let open Yojson.Safe.Util in
+  let properties = Fusion_judge_parse.output_schema |> member "properties" in
+  let check_field schema field =
+    Alcotest.(check string) (field ^ " schema constraint") "[^ \\t\\n\\r\\f]"
+      (schema |> member field |> member "pattern" |> to_string) in
+  check_field properties "resolved_answer";
+  let branches = properties |> member "decision" |> member "oneOf" |> to_list in
+  List.iter (fun (kind, fields) ->
+    let branch = List.find (fun branch ->
+      branch |> member "properties" |> member "kind" |> member "enum" |> to_list
+      = [`String kind]) branches in
+    List.iter (check_field (branch |> member "properties")) fields)
+    [ "answer", ["answer"]; "recommend", ["action"; "rationale"] ]
+
 let test_judge_rejects_null_optional_and_unknown_field () =
   let required =
     [ "resolved_answer", `String "r"
@@ -2055,6 +2108,9 @@ let () =
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
         ; Alcotest.test_case "decision_schema_branches" `Quick
             test_judge_decision_schema_branches
+        ; Alcotest.test_case "blank conclusions fail" `Quick test_judge_rejects_blank_conclusions
+        ; Alcotest.test_case "nonblank conclusions are preserved" `Quick test_judge_preserves_nonblank_conclusions
+        ; Alcotest.test_case "conclusion schema requires nonblank" `Quick test_judge_conclusion_schema_requires_nonblank
         ; Alcotest.test_case "reject_null_and_unknown" `Quick
             test_judge_rejects_null_optional_and_unknown_field
         ; Alcotest.test_case "reject_lossy_collections" `Quick test_judge_rejects_lossy_collections

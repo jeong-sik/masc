@@ -1,0 +1,5 @@
+Parser-only check; no typecheck or native execution.
+PASS lib/fusion_core/fusion_judge_parse.ml
+PASS lib/fusion_core/fusion_judge_parse.mli
+PASS test/fusion_core/test_fusion.ml
+PASS test/test_fusion_official_client_panel.ml

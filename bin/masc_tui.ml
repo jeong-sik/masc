@@ -20902,6 +20902,9 @@ and is loaded on demand through keeper_skill.
          when (state.view = Lanes || state.view = Runtime)
               && Option.is_some state.slot_editor
               && Option.is_none state.runtime_lane_pick ->
+           if Masc_tui_types.runtime_lane_write_busy state then
+             state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+           else
            (match state.slot_editor, Masc_tui_types.slot_editor_cursor_row state with
             | Some { se_target = Masc_tui_types.Exact_lane_slots lane; _ }, Some row ->
                 let group = match row.Masc_tui_types.sr_kind with

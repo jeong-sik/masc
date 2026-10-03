@@ -1209,7 +1209,24 @@ def run_replace_and_promote(executable: str) -> None:
                      "runtime_id": current, "replacement_runtime_id": replacement}]
         if posted != expected or store.exact_declared_cli["librarian_exact"] != [backup, replacement]:
             raise AssertionError(f"replacement did not preserve position: {posted!r}")
-        h.send_and_wait(process, fd, output, b"1", b"> 1/2  [CLI] gpt-6-luna medium")
+        arrived, release = store.hold_next_post()
+        mark = mark_output(fd, output)
+        try:
+            os.write(fd, b"1")
+            if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+                raise AssertionError("promotion write did not reach the fixture")
+            h.send_and_wait(process, fd, output, b"r", BUSY)
+            h.send_and_wait(process, fd, output, h.FULL_REDRAW, BUSY)
+            if b"Replace selected candidate" in h.screen_text(bytes(output)):
+                raise AssertionError("replacement search opened during the previous write")
+            if len([path for path, _ in requests if path == ROUTING_PATH]) != 2:
+                raise AssertionError("pending replacement search posted another write")
+        finally:
+            release.set()
+        h.wait_for_output(process, fd, output, b"> 1/2  [CLI] gpt-6-luna medium",
+                          start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output, b"current candidate order reloaded",
+                          start=mark, timeout=5.0)
         posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
         if posted[-1] != {"lane": "exact/librarian_exact", "action": "move",
                           "runtime_id": replacement, "direction": "first"}:

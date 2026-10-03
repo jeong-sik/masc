@@ -991,7 +991,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
-                    lambda: b"MISMATCH local " in screen(output)
+                    lambda: b"workspace identity is unverified" in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"

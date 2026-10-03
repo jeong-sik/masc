@@ -194,7 +194,7 @@ def task_context(value: Json) -> None:
         raise ValueError("unknown historical goals observation")
 
 
-def input_payload(value: Json) -> None:
+def input_payload(value: Json, actor: str) -> None:
     # SSOT: Keeper_librarian_runtime.exact_input_payload, prompt_material_payload
     # and Keeper_librarian.prompt_variables (eligible Memory-only preflight).
     payload = obj(value, "input payload")
@@ -242,6 +242,16 @@ def input_payload(value: Json) -> None:
         string(required(variables, key), "rendered variable " + key)
     for key, variable in variables.items():
         string(variable, "rendered variable " + key)
+    if variables["keeper_id"] != actor:
+        raise ValueError("run actor must match the frozen keeper_id")
+    continuity = json.loads(string(variables["continuity"], "continuity"), object_pairs_hook=unique_object)
+    if continuity is not None:
+        raise ValueError("evaluated preflight requires null frozen continuity")
+    context = json.loads(string(variables["working_context"], "working_context"), object_pairs_hook=unique_object)
+    # Keeper_librarian_context.prompt_json empty. This is the recorded
+    # projection, not proof of unexported fields in the runtime input record.
+    if context != {"sources": [], "previous": None, "unavailable": []}:
+        raise ValueError("evaluated preflight requires empty frozen working_context")
 
 
 def unique_object(pairs: list[tuple[str, Json]]) -> dict[str, Json]:
@@ -368,7 +378,7 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if source_input.get("kind") != "exact":
         raise ValueError("Librarian input must use the exact payload envelope")
     payload = source_input.get("payload")
-    input_payload(payload)
+    input_payload(payload, text(run.get("actor"), "run actor"))
     return run, payload, output, elapsed
 
 
@@ -419,6 +429,8 @@ def compare(manifest: Json) -> dict[str, Json]:
         ):
             raise ValueError("baseline must record disabled preflight and no skip")
         validate_observation(baseline_jev)
+        if "preflight_domain_rejection" not in baseline_output or baseline_output["preflight_domain_rejection"] is not None:
+            raise ValueError("baseline must explicitly record null domain rejection")
         observation = obj(
             preflight_output.get("jev_preflight"), "preflight observation"
         )

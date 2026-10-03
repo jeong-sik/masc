@@ -41,12 +41,17 @@ including the rendered prompt SHA, must match exactly. Each run and sample ID
 may occur only once. Missing/unavailable payloads, missing timings and
 contradictory skip/slot evidence are refused, never removed from a calculation.
 The baseline must record disabled preflight, null preflight elapsed time, no
-received-answer fields and entry to the generation lane. Both arms require the
-complete recorded input shape: turn and Task/Goal context, Keeper instructions,
+received-answer fields, explicit null domain rejection and entry to the generation
+lane. Both arms require the complete recorded input shape: turn and Task/Goal context, Keeper instructions,
 resolved prompt metadata and variables, and nonnegative message/fact counts.
+Each actor must match its frozen `keeper_id`. Evaluated pairs require parsed
+`continuity` to be null and parsed `working_context` to equal the producer's
+empty projection: `{"sources":[],"previous":null,"unavailable":[]}`.
+The projection does not expose `execution_basis` or a prior snapshot when sources
+are empty, so this check cannot independently attest those runtime-only fields.
 Identically truncated inputs are refused. Duplicate JSON keys are refused
-before normalization; the manifest digest describes canonical JSON, not the
-original file's whitespace or key order.
+before normalization, including within these two JSON variables; the manifest
+digest describes canonical JSON, not the original file's whitespace or key order.
 Keep all selected sample IDs in the manifest to avoid selection bias.
 
 ```sh

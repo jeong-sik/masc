@@ -70,6 +70,7 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
   List.iter (fun input ->
     write path (Yojson.Safe.to_string input);
     let source = require (Sources.acquire
+      ~access:Sources.Operator_configuration
       ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
       ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
@@ -519,7 +520,65 @@ let test_fusion_binding_targets_only_exact_run () =
            && member "observations" captured = `List []
        | _ -> false))
 
+let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
+  with_store (fun dir store ->
+    let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    let reset () =
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test () in
+    Fun.protect ~finally:(fun () ->
+      reset ();
+      match old_base with Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> unsetenv "MASC_BASE_PATH")
+      (fun () ->
+        Unix.putenv "MASC_BASE_PATH" dir;
+        reset ();
+        let registry = Fusion_run_registry.global () in
+        let run_id = "fusion-envelope-" ^ Store.digest dir in
+        Fusion_run_registry.register_running registry ~run_id
+          ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+          ~topology:Fusion_types.Simple ~started_at:1.;
+        let change_reason marker = Fusion_run_registry.mark_completed registry ~run_id
+          ~outcome:(Fusion_run_registry.Failed {reason=String.make 4096 marker;code="fixture"}) in
+        change_reason 'a';
+        let read cap = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          ~store ~package:(package dir cap)
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]])) in
+        let admitted = read 16384 |> list |> List.hd in
+        let observation = member "observations" admitted |> list |> List.hd in
+        let reference = member "evidence" observation |> list |> List.hd |> own_reference in
+        let frozen = require (Store.read_blob store reference) in
+        check bool "preflight and persisted content addresses agree" true
+          (Store.blob_reference frozen = reference);
+        let inner_size = String.length frozen in
+        let cap = inner_size + 2 in
+        check bool "only full envelope exceeds the single source array capacity" true
+          (String.length (Yojson.Safe.to_string admitted) + 2 > cap);
+        let blob_names () = Sys.readdir (Filename.concat (Store.root store) "evidence")
+          |> Array.to_list |> List.sort String.compare in
+        let before = blob_names () in
+        List.iter (fun marker ->
+          (* Equal-sized changes guarantee distinct detail blobs without a clock
+             sleep, even when all acquisitions occur in the same second. *)
+          change_reason marker;
+          let result = read cap in
+          check bool "unavailable fallback still fits the complete ingress envelope" true
+            (String.length (Yojson.Safe.to_string result) <= cap);
+          let rejected = list result |> List.hd in
+          check bool "an oversized source is explicitly unavailable" true
+            (member "complete" rejected = `Bool false && member "observations" rejected = `List []);
+          check string "inner detail fits but complete capture is refused before retention"
+            "Fusion observation exceeds the available source ingress envelope"
+            (member "detail" rejected |> text);
+          check (Alcotest.list string) "rejected captures create no orphan blobs" before (blob_names ());
+          check string "previous retained evidence remains readable" frozen
+            (require (Store.read_blob store reference))) ['a';'b';'c']))
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "Fusion envelope overflow creates no orphan and preserves existing evidence" `Quick
+    test_fusion_envelope_overflow_does_not_retain_or_remove_blobs;
   test_case "Fusion captures retain earlier state across terminal updates" `Quick
     test_fusion_capture_retains_exact_state_across_terminal_change;
   test_case "Fusion bindings target exact run updates and preserve unavailable coverage" `Quick

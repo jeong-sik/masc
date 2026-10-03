@@ -12,6 +12,7 @@ import sys
 import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from fusion_judge import JudgeFailure, JudgeSynthesis, canonical_judge
 from protocol import (InvalidInput, Source, boolean, evidence, object_value,
                       number, optional_string, row, serve, stable_id, string)
 
@@ -26,7 +27,8 @@ class RunState(Enum):
 class ReportContent:
     run_id: str
     heading: str
-    post_body: str | None
+    post_headline: str | None
+    judge: JudgeSynthesis | JudgeFailure | None
     failure: tuple[str, str] | None
 
 
@@ -42,11 +44,16 @@ def render_body(content: ReportContent, *, complete: bool) -> str:
     if content.failure is not None:
         code, error = content.failure
         body += f"\n실패: {code} · {error}\n"
-    if content.post_body is not None:
-        body += f"\n## 보존된 분석 내용\n\n{content.post_body}\n"
+    if content.post_headline is not None:
+        body += f"\n## Board 기록 요약\n\n{content.post_headline}\n"
+    if isinstance(content.judge, JudgeSynthesis):
+        body += f"\n## 보존된 분석 내용\n\n{content.judge.resolved_answer}\n"
+    elif isinstance(content.judge, JudgeFailure):
+        body += f"\n## 심판 실패\n\n{content.judge.failure_code}: {content.judge.error}\n"
     else:
         body += "\n보존된 분석 내용이 아직 없습니다.\n"
     return body + "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n"
+
 
 
 def run_state(value):
@@ -223,6 +230,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
             result_fields = result_row[0]["fields"]
+            post = result_fields["board_post"]
             if any(status_fields[key] != result_fields[key] for key in ("source_id", "incarnation")):
                 raise InvalidInput("Fusion status and result belong to different source coordinates")
             if result_row[0]["related_ids"] != [status_row[0]["id"]]:
@@ -247,7 +255,10 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if status_row and status is RunState.FAILED:
             run = status_row[0]["fields"]["fusion_run"]
             failure = (run["failure_code"], run["error"])
-        content = ReportContent(run_id, heading, post["body"] if post else None, failure)
+        judge = canonical_judge(post) if post else None
+        if status is RunState.COMPLETED and isinstance(judge, JudgeFailure):
+            raise InvalidInput("Completed Fusion run cannot carry a failed canonical judge")
+        content = ReportContent(run_id, heading, post["body"] if post else None, judge, failure)
         item = row(source, observation, lane="fusion/report", subject=run_id,
                    title=f"Fusion 보고서 · {heading}", kind="value", fields={
                        "format": "markdown", "fusion_run_id": run_id,

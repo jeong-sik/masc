@@ -4,8 +4,18 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
+  let fixture_access caller access = Option.value access ~default:(match caller with
+    | None -> Lane_addon_sources.Operator_configuration
+    | Some keeper -> Lane_addon_sources.Keeper keeper)
+  let read_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
+  let save_declaration ?caller ?access ~config args =
+    Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
   let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    let access = match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Editor = Lane_addon_declaration
@@ -43,8 +53,8 @@ let request ?revision ~mode ~file_name source_text =
   `Assoc (["mode",`String mode;"file_name",`String file_name;"source_text",`String source_text]
     @ Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)
 let read config directory name =
-  Runtime.read_declaration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
-let save config args = Runtime.save_declaration ~config args |> unwrap
+  Runtime.read_declaration ~access:Lane_addon_sources.Operator_configuration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
+let save config args = Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args |> unwrap
 let inspect config = Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []) |> runtime_result
 let reconcile config directory = Runtime.reconcile_configuration ~config ~directory |> runtime_result
 let live config = inspect config |> list "instances" |> List.filter (fun item -> text "kind" (member "phase" item) <> "detached")
@@ -60,7 +70,8 @@ let keeper_call config name args =
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in
   let context : Tool_misc.context = {config;agent_name="editor-keeper";help_schemas=[]} in
-  match Tool_misc.dispatch context ~name:descriptor.internal_name ~args:translated with
+  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper")
+    context ~name:descriptor.internal_name ~args:translated with
   | Some value -> value | None -> fail "Keeper descriptor has no executable declaration route"
 
 let with_fixture f =
@@ -139,12 +150,13 @@ let test_keeper_declaration_cannot_capture_another_fusion_owner () =
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
       ~keeper:"another-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
       ~topology:Fusion_types.Simple ~started_at:1.;
-    let bytes = Printf.sprintf {|id="foreign-fusion"
+    let source id = Printf.sprintf {|id=%S
 run_id="editor-world"
 manifest_path="../../package.toml"
 [binding]
 sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
-|} run_id in
+|} id run_id in
+    let bytes = source "foreign-fusion" in
     let result = keeper_call config "masc_lane_declaration_save"
       (request ~mode:"create" ~file_name:"foreign.toml" bytes) in
     check bool "Keeper save rejects foreign Fusion capture" false (Tool_result.is_success result);
@@ -158,9 +170,10 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       (request ~mode:"create" ~file_name:"own.toml" bytes) in
     check bool "Keeper can save its own source without granting shared read authority" true
       (Tool_result.is_success own);
-    check bool "operator declaration writer remains available" true
-      (Result.is_ok (Runtime.save_declaration ~config
-        (request ~mode:"create" ~file_name:"operator.toml" bytes))))
+    match Runtime.save_declaration ~config
+      (request ~mode:"create" ~file_name:"operator.toml" (source "operator-fusion")) with
+    | Ok _ -> ()
+    | Error error -> failf "operator declaration writer remains available: %s" error.Editor.message)
 
 let test_operator_reassignment_revokes_old_document_owner () =
   with_fixture (fun _clock config directory _root _started ->

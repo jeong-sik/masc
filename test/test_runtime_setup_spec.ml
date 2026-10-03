@@ -191,7 +191,30 @@ let test_id_names_the_client_and_the_model () =
   let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String id) ^ "\n" ^ rendered.runtime_toml in
   Alcotest.check Alcotest.bool "the rendered connection parses as configuration" true
     (Result.is_ok (Runtime_toml.parse_string whole))
+let test_image_declaration_survives_native_save () =
+  List.iter (fun declaration ->
+    let fields = ["choice", `String "codex"; "model", `String "selected-model";
+      "max_context", `Int 750000; "tools", `Bool true; "streaming", `Bool true]
+      @ (match declaration with None -> [] | Some value -> ["supports_image_input", `Bool value]) in
+    let spec = match Runtime_setup_spec.of_json (`Assoc fields) with
+      | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+    let rendered = Runtime_setup_spec.render spec in
+    let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id)
+      ^ "\n" ^ rendered.runtime_toml in
+    match Runtime_toml.parse_string whole with
+    | Error _ -> Alcotest.fail "saved native connection does not load"
+    | Ok config ->
+      match config.models with
+      | [model] ->
+        Alcotest.check (Alcotest.option Alcotest.bool) "image declaration survives save"
+          declaration (Option.bind model.capabilities
+            (fun caps -> caps.Runtime_schema.supports_image_input));
+        Alcotest.check (Alcotest.option Alcotest.int) "context is preserved"
+          (Some 750000) model.max_context
+      | _ -> Alcotest.fail "expected one saved model") [None; Some false; Some true]
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "image declaration survives native save" `Quick test_image_declaration_survives_native_save;
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;

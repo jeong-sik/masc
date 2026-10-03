@@ -154,7 +154,13 @@ class LinuxPortableBootstrap(unittest.TestCase):
                      'sed', 'tr', 'cut', 'sort', 'head', 'tail', 'date', 'sleep', 'ln', 'env'):
             tool = shutil.which(name)
             if tool:
-                (self.bin / name).symlink_to(tool)
+                # Native script launchers may resolve companions from argv[0]
+                # (for example Perl's version-selecting shasum on macOS).
+                # Execute the discovered utility at its original path while
+                # keeping the fixture-only PATH and quoted asset arguments.
+                wrapper = self.bin / name
+                wrapper.write_text('#!/bin/sh\nexec ' + shlex.quote(tool) + ' "$@"\n')
+                wrapper.chmod(0o755)
         self.env['PATH'] = str(self.bin)
 
     def platform(self, cpu, suffix):

@@ -61,6 +61,9 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "reply_count", `Int p.reply_count
      ; "pinned", `Bool p.pinned
      ]
+     @ (match p.audience with
+        | Some audience -> [ "audience", Board_audience.to_yojson audience ]
+        | None -> [])
      @ (match p.hearth with
         | Some h -> [ "hearth", `String h ]
         | None -> [])

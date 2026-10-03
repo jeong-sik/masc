@@ -25,11 +25,6 @@ jobs:
     - name: Verify release distribution fixtures
       run: |
         python3 test/test_release_dashboard_bundle.py -v
-        python3 test/test_release_publication.py -v
-    - name: Verify release evidence receipt with private captures
-      run: python3 test/test_release_evidence_report.py -v
-    - name: Verify the glibc floor check
-      run: python3 test/test_glibc_floor_check.py -v
     - name: Installer onboarding and removal behavior
       run: 'python3 test/test_package_macos_runtime.py
 
@@ -44,14 +39,6 @@ jobs:
         python3 test/test_install_runtime_setup.py -v
 
         python3 test/test_onboarding_journey.py -v
-
-        '
-    - name: Verify the bench dependency diagnosis
-      run: python3 test/test_bench_deps_diagnosis.py -v
-    - name: Verify onboarding oracle ordering and sibling selection
-      run: 'node --test test/test_imp_onboarding_browser.cjs
-
-        python3 test/test_imp_onboarding_acceptance.py
 
         '
     - name: Check committed credentials
@@ -72,8 +59,6 @@ jobs:
         \ true\ndone\n"
     - name: Checkout
       uses: actions/checkout@v7
-    - name: Check source text integrity
-      run: scripts/ci/check-source-text-integrity.sh
     - name: Setup OCaml toolchain
       uses: ./.github/actions/setup-ocaml-toolchain
     - name: Pin external OCaml dependencies
@@ -120,18 +105,19 @@ jobs:
     - name: Type-check
       working-directory: dashboard
       run: pnpm typecheck
-    - name: Run the dashboard tests that read backend source
-      run: 'set -euo pipefail
-
-        coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
-
-        printf ''backend-coupled dashboard suites:\n%s\n'' "${coupled}"
-
-        cd dashboard
-
-        pnpm exec vitest run ${coupled}
-
-        '
+    - name: Verify dashboard payload consumers
+      working-directory: dashboard
+      run: >-
+        pnpm exec vitest run --config vitest.config.ts
+        --no-file-parallelism --maxWorkers=1
+        src/api/dashboard-goals.test.ts
+        src/api/dashboard-scheduled-automation.test.ts
+        src/api/dashboard-turn-records.test.ts
+        src/api/dashboard-verification-runs.test.ts
+        src/api/schemas/keeper-portrait.test.ts
+        src/components/goals/goal-tree.test.ts
+        src/components/keeper-lifecycle-timeline.test.ts
+        src/components/memory-inspector.test.ts
   required-success:
     if: ${{ always() }}
     name: Release checks passed

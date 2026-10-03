@@ -16,7 +16,7 @@
 # /root is closed to any other account.
 
 # Where keepers work: the endpoint's remote_root (configs/render_configs.py
-# REMOTE_ROOT, compared in tests/test_endpoint_account.py).
+# REMOTE_ROOT).
 BENCH_REMOTE_ROOT=/opt/masc-bench/remote
 # The release binary, off PATH, and the wrapper the endpoint runs by name
 # (keeper_sandbox_remote.ml shim_command).

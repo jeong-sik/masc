@@ -196,12 +196,8 @@ export type TurnRecordRow = {
   diff_vs_prev: TurnBlockDiff | null
 }
 
-// The librarian taxonomy mirrors the OCaml `category` sum in
-// keeper_memory_os_types.ml; category_to_string is the wire SSOT.
-// The wire carries a string token; it is parsed once at this decode boundary into
-// a tagged value. An out-of-vocabulary token is a contract error, matching the
-// backend's closed decoder.
-export type MemoryOsFactCategoryTag =
+// Parse category metadata once at the boundary, retaining dynamic names.
+type BuiltinMemoryOsFactCategoryTag =
   | 'code_change'
   | 'fact'
   | 'preference'
@@ -210,7 +206,14 @@ export type MemoryOsFactCategoryTag =
   | 'constraint'
   | 'validated_approach'
   | 'lesson'
-export type MemoryOsFactCategory = { readonly tag: MemoryOsFactCategoryTag }
+export type MemoryOsFactCategoryTag = string
+export type MemoryOsFactCategory =
+  | { readonly tag: BuiltinMemoryOsFactCategoryTag }
+  | { readonly tag: 'custom'; readonly name: string }
+
+export function memoryOsFactCategoryToken(category: MemoryOsFactCategory): string {
+  return category.tag === 'custom' ? category.name : category.tag
+}
 
 export type MemoryOsDerivation = {
   readonly rule_id: string
@@ -226,9 +229,8 @@ export type MemoryOsFactBasis =
   | { readonly kind: 'observed'; readonly board: MemoryOsBoardRef | null }
   | { readonly kind: 'derived'; readonly derivations: MemoryOsDerivation[] }
 
-// SSOT token list — must stay byte-identical to the known arms of
-// category_of_string/category_to_string. A drift-guard test pins this set.
-const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
+// Familiar categories with dedicated presentation styles.
+const MEMORY_OS_FACT_CATEGORY_TAGS: readonly BuiltinMemoryOsFactCategoryTag[] = [
   'code_change',
   'fact',
   'preference',
@@ -241,7 +243,10 @@ const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
 
 export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory | null {
   const known = MEMORY_OS_FACT_CATEGORY_TAGS.find(tag => tag === raw)
-  return known ? { tag: known } : null
+  if (known) return { tag: known }
+  return raw === raw.trim() && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(raw)
+    ? { tag: 'custom', name: raw }
+    : null
 }
 
 // One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_api.ml).
@@ -897,7 +902,7 @@ function decodeMemoryOsUpdateSource(raw: unknown): MemoryOsUpdateSource | null {
 function memoryOsFactPayloadEqual(left: MemoryOsFact, right: MemoryOsFact): boolean {
   return left.memory_id === right.memory_id
     && left.claim === right.claim
-    && left.category.tag === right.category.tag
+    && memoryOsFactCategoryToken(left.category) === memoryOsFactCategoryToken(right.category)
     && left.first_seen === right.first_seen
     && JSON.stringify(left.basis) === JSON.stringify(right.basis)
 }

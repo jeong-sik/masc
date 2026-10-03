@@ -80,6 +80,7 @@ type runtime_route_body =
   | Runtime_route_lane_renamed of string * string
   | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string
+  | Runtime_route_exact_slot_replaced of Runtime.exact_lane * string * string
   | Runtime_route_exact_slot_moved of
       Runtime.exact_lane * string * Runtime.exact_slot_move
 
@@ -99,6 +100,7 @@ type runtime_lane_action =
   | Lane_append
   | Lane_drop
   | Lane_move
+  | Lane_replace
 
 let parse_runtime_lane_action json =
   match Json_util.assoc_member_opt "action" json with
@@ -110,11 +112,12 @@ let parse_runtime_lane_action json =
   | Some (`String "append") -> Ok Lane_append
   | Some (`String "drop") -> Ok Lane_drop
   | Some (`String "move") -> Ok Lane_move
+  | Some (`String "replace") -> Ok Lane_replace
   | Some (`String other) ->
     Error
       (Printf.sprintf
          "unknown lane action: %s (expected set, create, remove, rename, append, drop \
-          or move)"
+          move or replace)"
          other)
   | Some _ -> Error "action must be a string"
 
@@ -237,8 +240,9 @@ let parse_move_direction json =
   match Json_util.assoc_member_opt "direction" json with
   | Some (`String "up") -> Ok Runtime.Move_slot_up
   | Some (`String "down") -> Ok Runtime.Move_slot_down
+  | Some (`String "first") -> Ok Runtime.Move_slot_first
   | Some (`String other) ->
-    Error (Printf.sprintf "unknown direction: %s (expected up or down)" other)
+    Error (Printf.sprintf "unknown direction: %s (expected up, down or first)" other)
   | Some _ -> Error "direction must be a string"
   | None -> Error "direction required"
 
@@ -271,7 +275,12 @@ let parse_runtime_route_body body_str =
          parse_exact_slot_route_body json lane ~verb:"move" ~build:(fun exact runtime_id ->
            match parse_move_direction json with
            | Error _ as err -> err
-           | Ok move -> Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move))))
+           | Ok move -> Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)))
+       | Ok lane, Ok Lane_replace ->
+         parse_exact_slot_route_body json lane ~verb:"replace" ~build:(fun exact runtime_id ->
+           match required_string_field json "replacement_runtime_id" with
+           | Error _ as err -> err
+           | Ok replacement -> Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement))))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)

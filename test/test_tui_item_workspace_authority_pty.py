@@ -11,15 +11,10 @@ import os
 from pathlib import Path
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
 import test_tui_remote_workspace_history_pty as authority
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_render.ml",
-)
+
 ITEM_PATH = "/api/v1/keepers/alpha/items"
 CATALOG = (
     ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
@@ -64,7 +59,7 @@ class ItemWire(authority.WorkspaceWire):
         with self.lock:
             booting = self.booting
         payload["startup"] = {"state_ready": not booting}
-        return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
+        return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
     def set_roster_unavailable(self, unavailable):
         with self.lock:
@@ -138,20 +133,20 @@ class ItemWire(authority.WorkspaceWire):
 
 
 def run(binary, captures):
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = ItemWire(fixtures[authority.ROSTER_PATH][1])
     fixtures[authority.ROSTER_PATH] = wire.roster
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
     fixtures[ITEM_PATH] = wire.items
-    posts: h.HttpRequests = []
+    posts: _keyboard_harness.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
         def visible():
             return authority.screen(output)
 
         def wait(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(visible()), timeout=authority.WAIT_SECONDS), \
                 f"{label}: {visible()!r}"
 
@@ -167,14 +162,14 @@ def run(binary, captures):
             return b"\n".join(rows)
 
         def open_items(*, first=False):
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r",
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                 "▸Info".encode() if first else "▸Items".encode())
             if first:
-                h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"]", "▸Items".encode())
 
         try:
-            h.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
             wait(lambda text: b"a.current" in text and b"MISMATCH" not in text, "A roster")
             open_items(first=True)
             wait(lambda text: b"Balance 12.500 Candle" in text and b"owned" in text, "A Item account")
@@ -182,7 +177,7 @@ def run(binary, captures):
             capture("a-ready")
             wire.arm_items()
             os.write(fd, b"r")
-            assert h.wait_for_fixture_event(process, fd, output, wire.held_started,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_started,
                 timeout=authority.WAIT_SECONDS), "refresh did not launch the held A Item read"
             wire.publish("b")
             wait(lambda text: b"b.current" in text and b"MISMATCH local " in text
@@ -192,18 +187,18 @@ def run(binary, captures):
             capture("b-with-a-read-held")
             after_b = len(output)
             wire.release_held.set()
-            assert h.wait_for_fixture_event(process, fd, output, wire.held_returned,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_returned,
                 timeout=authority.WAIT_SECONDS), "held A Item response was not released"
             wire.publish("b-after-late")
             wait(lambda text: b"b.settled" in text, "fresh B roster after release")
-            h.resize_and_wait(process, fd, output, rows=35,
-                columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(h.FULL_REDRAW,))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=35,
+                columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(_keyboard_harness.FULL_REDRAW,))
             # B is intentionally foreign to the local workspace. Its roster
             # remains observable, but Item reads never acquire admission.
             assert b"MISMATCH local " in visible()
             assert b"Balance " not in visible() and b"owned" not in visible()
             assert "▸Items".encode() not in visible()
-            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+            assert b"99.999" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered while B was unadmitted"
             with wire.lock:
                 assert not [event for event in wire.events
@@ -217,13 +212,13 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "A did not re-read its current Item account")
             assert b"7.500" not in visible() and b"99.999" not in visible()
             assert b"1.750" in item_row(b"glasses") and b"owned" not in item_row(b"glasses")
-            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+            assert b"99.999" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered after the workspace boundary"
             capture("a-current-after-return")
-            h.send_and_wait(process, fd, output, b"j" * 14, b"Items 15/18")
+            _keyboard_harness.send_and_wait(process, fd, output, b"j" * 14, b"Items 15/18")
             wait(lambda text: b"quill" in text and b"owned" in text, "returned A's owned quill")
             assert b"1.750" in item_row(b"quill") and b"owned" in item_row(b"quill")
-            h.send_and_wait(process, fd, output, b"k" * 14, b"Items 1/18")
+            _keyboard_harness.send_and_wait(process, fd, output, b"k" * 14, b"Items 1/18")
             wire.change_account("failed")
             os.write(fd, b"r")
             wait(lambda text: b"Account unavailable:" in text and b"current Item ledger unreadable" in text,
@@ -240,7 +235,7 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Item account revision" in text,
+            wait(lambda text: b"Keeper account revision" in text,
                  "an unavailable roster retained monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-unavailable")
@@ -248,14 +243,14 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
             wire.set_missing_revision(True)
-            wait(lambda text: b"Item account revision" in text,
+            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
                  "missing revision retained Item monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             wire.set_missing_revision(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
-            wait(lambda text: b"Item account revision" in text,
+            wait(lambda text: b"Candle row account revision is missing or malformed" in text,
                  "malformed revision retained Item monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-malformed")
@@ -288,7 +283,7 @@ def run(binary, captures):
                     "gets": events, "posts": [{"path": p, "body": json.loads(b)} for p, b in posts],
                 }, indent=2) + "\n")
 
-    h.run_terminal_scenario(binary, description="Item accounts follow A/B/A workspace authority",
+    _keyboard_harness.run_terminal_scenario(binary, description="Item accounts follow A/B/A workspace authority",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=posts, refresh=0.5, terminal_rows=34,
         terminal_cols=authority.TERMINAL_COLUMNS)

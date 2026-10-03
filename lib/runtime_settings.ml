@@ -219,17 +219,19 @@ let dashboard_agent_stuck_threshold_sec =
 let keeper_supervisor_sweep_sec =
   register_float
     ~key:"keeper.supervisor_sweep_sec"
-    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.sweep_interval_sec)
-    ~min:10.0 ~max:120.0
+    ~default:Env_config_keeper.KeeperSupervisor.sweep_interval_sec
+    ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
+    ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec
     ~meta:{ description = "Supervisor sweep 주기(초)";
             value_type = "float";
-            min_value = Some (`Float 10.0); max_value = Some (`Float 120.0); choices = [] }
+            min_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec);
+            max_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec); choices = [] }
     ()
 
 let keeper_keepalive_interval_sec =
   Runtime_params.register
     ~key:"keeper.keepalive_interval_sec"
-    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.interval_sec)
+    ~default:Env_config_keeper.KeeperKeepalive.interval_sec
     ~validate:(fun interval_sec ->
       if interval_sec > 0
       then Ok ()
@@ -250,7 +252,7 @@ let keeper_keepalive_interval_sec =
 let keeper_snapshot_sec =
   register_int
     ~key:"keeper.snapshot_sec"
-    ~default:(fun () -> Env_config_keeper.KeeperRuntime.snapshot_sec)
+    ~default:Env_config_keeper.KeeperRuntime.snapshot_sec
     ~min:15 ~max:Masc_time_constants.hour_int
     ~meta:{ description = "Snapshot 캡처 주기(초)";
             value_type = "int";
@@ -261,7 +263,7 @@ let keeper_snapshot_sec =
 let keeper_work_as_hb_enabled =
   register_bool
     ~key:"keeper.work_as_hb_enabled"
-    ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.enabled)
+    ~default:Env_config_keeper.WorkAsHeartbeat.enabled
     ~meta:{ description = "Work-as-heartbeat 활성화 여부";
             value_type = "bool";
             min_value = None; max_value = None; choices = [] }

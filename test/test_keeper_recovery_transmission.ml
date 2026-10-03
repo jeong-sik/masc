@@ -318,7 +318,7 @@ let run
       ?model_input_projection
       ()
   =
-  Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+  Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
     ~runtime_id
     ?on_runtime_attempt_error
     ~keeper_name:"transmission"

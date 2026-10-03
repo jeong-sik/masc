@@ -635,6 +635,8 @@ let () =
       cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-quota"
         [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-generic-rpc"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1 true;
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-quota-then-capacity"
         [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 true;
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 21) "cli-two-capacities"

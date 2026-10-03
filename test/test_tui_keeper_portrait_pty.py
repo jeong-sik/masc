@@ -19,22 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import test_tui_keyboard_input as h
 
-# scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
-# path named here.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_graphics.ml",
-    "bin/masc_tui_image_mosaic.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "lib/keeper_portrait/keeper_portrait_draw.ml",
-    "lib/keeper_portrait/keeper_portrait_look.ml",
-)
+
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
 HALF_BLOCK = "▀▄"

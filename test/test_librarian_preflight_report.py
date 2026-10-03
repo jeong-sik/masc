@@ -55,10 +55,23 @@ def fixture() -> dict[str, Any]:
                     "output": {"state": "available"},
                 },
                 "input": {
+                    "kind": "exact",
                     "payload": {
                         "actual_input": {
-                            "prompt": {"rendered_sha256": "a" * 64},
-                            "rendered_prompt_variables": {"source": "frozen source"},
+                            "turn_ref": "fixture-trace#1",
+                            "goal_context": {"status": "no_task"},
+                            "historical_task_contexts": [],
+                            "keeper_instructions": "",
+                            "prompt": {"key": "librarian", "source": "file", "file_path": "prompts/librarian.md",
+                                       "effective_template": "{{conversation_history}}", "rendered_bytes": 13,
+                                       "rendered_sha256": "a" * 64},
+                            "rendered_prompt_variables": {
+                                "keeper_id": "fixture-keeper", "facts_budget": "max=100; current ordinary=1",
+                                "keeper_instructions": "", "historical_task_contexts": "[]", "continuity": "null",
+                                "working_context": "{}", "working_contexts_rule": "fixture rule", "goal_context": '{"status":"no_task"}',
+                                "current_memory": "frozen memory", "conversation_history": "frozen source",
+                                "turn_tool_observations": "", "counterpart_observations": "", "source": "frozen source",
+                            },
                         },
                         "message_count": 1,
                         "current_fact_count": 1,
@@ -69,7 +82,7 @@ def fixture() -> dict[str, Any]:
                     if enabled
                     else {
                         "status": "skipped",
-                        "reason": "librarian_preflight_disabled",
+                        "reason": "librarian_preflight_disabled", "elapsed_s": None,
                     },
                     "generation_path": "jev_no_change" if enabled else "full_lane",
                     "full_llm_skipped": enabled,
@@ -95,15 +108,128 @@ def fixture() -> dict[str, Any]:
 
 class ReportCliTest(unittest.TestCase):
     def execute(self, manifest: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        return self.execute_raw(json.dumps(manifest))
+
+    def execute_raw(self, raw: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
-            path.write_text(json.dumps(manifest))
+            path.write_text(raw)
             return subprocess.run(
                 [sys.executable, str(SCRIPT), str(path)],
                 check=False,
                 capture_output=True,
                 text=True,
             )
+
+    def test_complete_input_is_required_even_when_both_arms_match(self) -> None:
+        valid = fixture()["pairs"][0]["baseline"]["run"]["input"]["payload"]
+        removals = [
+            (key,) for key in valid
+        ] + [("actual_input", key) for key in valid["actual_input"]] + [
+            ("actual_input", "prompt", key) for key in valid["actual_input"]["prompt"]
+        ] + [("actual_input", "rendered_prompt_variables", key)
+             for key in valid["actual_input"]["rendered_prompt_variables"] if key != "source"]
+        for path in removals:
+            with self.subTest(path=path):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    value = manifest["pairs"][0][arm]["run"]["input"]["payload"]
+                    for key in path[:-1]:
+                        value = value[key]
+                    del value[path[-1]]
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_typed_goal_and_historical_input_alternatives(self) -> None:
+        goal = {"goal_id": "goal-fixture", "phase": "executing", "criterion": {
+            "revision": "rev-1", "title": "Keep constraints", "metric": None, "target_value": None,
+        }}
+        context = {"status": "available", "task_id": "task-1", "goals": [goal]}
+        history = [{"source": {"kind": "atoms", "trace_id": "fixture-trace", "start_atom": 0, "end_atom": 1},
+                    "attribution": {"kind": "observed", "turn_ref": "fixture-trace#1",
+                                    "task_context": {"kind": "task", "task_id": "task-1",
+                                                     "goals": {"kind": "observed", "goals": [goal]}}},
+                    "first_message": 0, "after_message": 1,
+                    "first_tool_observation": 0, "after_tool_observation": 0}]
+        manifest = fixture()
+        for arm in ("baseline", "preflight"):
+            manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"].update(
+                goal_context=copy.deepcopy(context), historical_task_contexts=copy.deepcopy(history))
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for arm in ("baseline", "preflight"):
+            del manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["historical_task_contexts"][0]["attribution"]["task_context"]["goals"]["goals"][0]["criterion"]["revision"]
+        self.assertEqual(self.execute(manifest).returncode, 1)
+
+    def test_baseline_requires_disabled_answerless_observation(self) -> None:
+        for key, value in [("elapsed_s", 0), ("elapsed_s", "missing"),
+                           ("failure", {}), *[(key, None) for key in observation() if key not in ("status", "elapsed_s")]]:
+            with self.subTest(key=key, value=value):
+                manifest = fixture()
+                baseline = manifest["pairs"][0]["baseline"]["run"]["output"]["jev_preflight"]
+                if value == "missing":
+                    del baseline[key]
+                else:
+                    baseline[key] = value
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+
+    def test_failed_arm_details_are_required_and_retained(self) -> None:
+        for arm in ("baseline", "preflight"):
+            manifest = fixture()
+            run = manifest["pairs"][0][arm]["run"]
+            run.update(status="failed", code="output_invalid", detail="fixture schema failure")
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["pairs"][0][arm + "_failure"],
+                             {"code": "output_invalid", "detail": "fixture schema failure"})
+            for key in ("code", "detail"):
+                for value in (None, "", " "):
+                    invalid = copy.deepcopy(manifest)
+                    invalid["pairs"][0][arm]["run"][key] = value
+                    self.assertEqual(self.execute(invalid).returncode, 1)
+                invalid = copy.deepcopy(manifest)
+                del invalid["pairs"][0][arm]["run"][key]
+                self.assertEqual(self.execute(invalid).returncode, 1)
+
+    def test_duplicate_keys_are_refused_before_normalization(self) -> None:
+        raw = json.dumps(fixture())
+        for old, replacement in [('"status": "succeeded"', '"status":"failed", "status":"succeeded"'),
+                                 ('"message_count": 1', '"message_count":2, "message_count":1')]:
+            result = self.execute_raw(raw.replace(old, replacement, 1))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("duplicate JSON object key", result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_huge_integer_numeric_fields_refuse_without_traceback(self) -> None:
+        for place in ("run", "observation", "probability"):
+            with self.subTest(place=place):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                if place == "run":
+                    run["elapsed_s"] = 10**999
+                elif place == "observation":
+                    run["output"]["jev_preflight"]["elapsed_s"] = 10**999
+                else:
+                    run["output"]["jev_preflight"]["probabilities"]["keep_current"] = 10**999
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("preflight measurement refused:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+    def test_wall_clock_durations_are_preserved_without_an_invented_bound(self) -> None:
+        manifest = fixture()
+        run = manifest["pairs"][0]["preflight"]["run"]
+        run["output"]["jev_preflight"]["elapsed_s"] = 10.0
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pair = json.loads(result.stdout)["pairs"][0]
+        self.assertEqual(pair["preflight_observation"]["elapsed_s"], 10.0)
+        self.assertEqual(pair["preflight_elapsed_s"], 0.1)
 
     def test_report_does_not_promote_fixture_routes_to_quality_or_requests(
         self,
@@ -128,7 +254,8 @@ class ReportCliTest(unittest.TestCase):
         second["sample_id"] = "two"
         second["baseline"]["run"]["run_id"] = "base-2"
         run = second["preflight"]["run"]
-        run.update(run_id="jev-2", status="failed", elapsed_s=6.0)
+        run.update(run_id="jev-2", status="failed", elapsed_s=6.0,
+                   code="provider_failed", detail="fixture generation failed")
         run["output"].update(
             jev_preflight=observation("failed"),
             generation_path="full_lane",
@@ -234,7 +361,7 @@ class ReportCliTest(unittest.TestCase):
                 with self.subTest(status=status, field=field):
                     manifest = fixture()
                     run = manifest["pairs"][0]["preflight"]["run"]
-                    run.update(status="failed", selected_slot=None)
+                    run.update(status="failed", selected_slot=None, code="cancelled_evaluation", detail="fixture interruption")
                     evidence = observation(status)
                     evidence[field] = observation()[field]
                     run["output"].update(jev_preflight=evidence, full_llm_skipped=False,

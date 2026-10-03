@@ -908,9 +908,15 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
     state.msg_inflight <- [queued];
-    assert_old ();
+    (* RFC-0412 §2.1: settling is a replace, not an append. The live view
+       with its running output is replaced by the settled turn's reply row,
+       so the text the operator reads changes here by contract. *)
+    let settled_screen = screen () in
+    check bool "settling replaces the running output with the reply" true
+      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen
+       && not (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen));
     check bool "complete older batch log stays authoritative" true
-      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" (screen ()));
+      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen);
     state.keeper_turns <-
       [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
         ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;

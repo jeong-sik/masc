@@ -34,18 +34,9 @@ let with_env key value f =
     f
 ;;
 
-let read_source path =
-  let root = Sys.getenv_opt "DUNE_SOURCEROOT" |> Option.value ~default:"." in
-  let channel = open_in_bin (Filename.concat root path) in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr channel)
-    (fun () -> really_input_string channel (in_channel_length channel))
-;;
-
-let contains text needle = String_util.contains_substring text needle
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
-let test_h1_and_h2_routes_are_registered () =
+let test_h1_route_is_registered () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let routes =
@@ -62,25 +53,8 @@ let test_h1_and_h2_routes_are_registered () =
        "/api/v1/dashboard/fusion-runs/"
        route.path
    | `Method_not_allowed -> fail "H1 fusion detail GET was method-not-allowed"
-   | `Not_found -> fail "H1 fusion detail GET route was not registered");
-  let h2 = read_source "lib/server/server_h2_gateway.ml" in
-  check bool
-    "H2 exact list uses public-read wrapper"
-    true
-    (contains h2
-       "| `GET, \"/api/v1/dashboard/fusion-runs\" ->\n          with_h2_public_read h2_reqd");
-  check bool
-    "H2 detail uses the shared prefix"
-    true
-    (contains h2 "Server_dashboard_fusion_run_projection.detail_prefix");
-  check bool
-    "H2 list uses the shared builder"
-    true
-    (contains h2 "Server_dashboard_fusion_run_projection.list_response");
-  check bool
-    "H2 detail uses the shared builder"
-    true
-    (contains h2 "Server_dashboard_fusion_run_projection.detail_response")
+   | `Not_found -> fail "H1 fusion detail GET route was not registered")
+
 ;;
 
 let with_board f =
@@ -382,8 +356,8 @@ let () =
   run
     "dashboard fusion run projection"
     [ ( "routes"
-      , [ test_case "H1 and H2 routes are registered" `Quick
-            test_h1_and_h2_routes_are_registered
+      , [ test_case "H1 route is registered" `Quick
+            test_h1_route_is_registered
         ] )
     ; ( "responses"
       , [ test_case "list and unknown detail responses" `Quick

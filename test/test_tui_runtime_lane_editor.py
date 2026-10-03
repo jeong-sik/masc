@@ -1132,7 +1132,19 @@ def run_replace_and_promote(executable: str) -> None:
             h.send_and_wait(process, fd, output, b"s", b"Model order")
             h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
             h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            # The matching label can already be visible before typing; a delta
+            # frame then rewrites only the query. Check the completed selection.
+            h.write_all(fd, output, b"luna medium")
+            def replacement_filtered():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                return (b"filter: luna medium" in screen
+                        and b"> [CLI replacement] gpt-6-luna medium" in screen
+                        and b"Selected: account.luna-medium" in screen)
+            if not h.wait_for_fixture_state(process, fd, output, replacement_filtered, timeout=3.0):
+                raise AssertionError("model/effort query did not select the replacement")
             h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()

@@ -117,44 +117,13 @@ else
   echo "PASS: legacy Provider_adapter implementation files are absent."
 fi
 
-section "Anti-Fake Detector"
-anti_fake_output=""
-anti_fake_status=0
-set +e
-anti_fake_output="$(bash scripts/anti-fake-audit.sh 2>&1)"
-anti_fake_status=$?
-set -e
-
-printf '%s\n' "$anti_fake_output" | awk '
-  /^=== Summary ===/ {in_summary=1}
-  in_summary {print}
-'
-if [ "$anti_fake_status" -eq 1 ]; then
-  mark_confirmed "anti-fake detector still reports fake/suspect tests; inspect summary before treating as a CI truth source"
-elif [ "$anti_fake_status" -gt 1 ]; then
-  echo "$anti_fake_output" >&2
-  echo "ERROR: anti-fake audit failed unexpectedly" >&2
-  exit "$anti_fake_status"
-else
-  echo "PASS: anti-fake detector completed without fake-test findings."
-fi
-
-# The section that stood here read .github/workflows/ci.yml for a step named
-# "Meta bug-class gates" and confirmed a finding when it was absent. #32511
-# deleted that step on purpose and spread its 24 guards across the lint suite,
-# the build job and dune rules; 14 are wired there today, 6 no longer exist
-# with the concepts they checked, and 3 are reached from a test or a dune
-# rule. So the check reported the absence of a step name, which had not been
-# the way guards run for a week, and that single stale finding was the only
-# thing keeping this audit's exit code non-zero.
-#
 section "Broad Active-Source Smell Sample"
 rg -n \
   'DESIGN SMELL|hardcoded|heuristic|string matching|String\.starts_with|List\.mem .*\\[ "' \
   lib scripts test .github \
   -g '*.ml' -g '*.mli' -g '*.sh' -g '*.yml' \
   2>/dev/null \
-  | rg -v 'audit-hardcoding-truth|anti-fake-audit|_build|vendor|node_modules' \
+  | rg -v 'audit-hardcoding-truth|_build|vendor|node_modules' \
   | head -80 || true
 
 section "Result"

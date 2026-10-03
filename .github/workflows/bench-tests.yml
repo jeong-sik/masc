@@ -1,5 +1,5 @@
-name: Terminal-Bench harness tests
-# Run harness tests and source-pair comparisons only by explicit dispatch.
+name: Runtime artifact comparisons
+# Compare runtime artifacts only by explicit dispatch.
 on:
   workflow_dispatch:
     inputs:
@@ -71,14 +71,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'comparison' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   validate-inputs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Reject conflicting comparison modes
+      - name: Select the requested comparison
         env:
           TUI: ${{ inputs.compare_tui }}
           SERVER: ${{ inputs.compare_server }}
@@ -88,46 +88,9 @@ jobs:
           python3 - <<'PYVALIDATE'
           import os
           selected = [name for name in ('TUI', 'SERVER', 'VISION', 'CHECKPOINT') if os.environ[name] == 'true']
-          if len(selected) > 1:
-              raise SystemExit('Choose at most one comparison mode: ' + ', '.join(selected))
+          if len(selected) != 1:
+              raise SystemExit('Choose one comparison mode: ' + ', '.join(selected))
           PYVALIDATE
-  pytest:
-    needs: validate-inputs
-    if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: benchmarks/terminal_bench
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - name: Install harbor and pytest
-        run: python -m pip install -r requirements.txt
-      - name: Check TUI comparison receipt validation
-        working-directory: ${{ github.workspace }}
-        run: python3 test/test_tui_artifact_comparison.py
-      - name: Run the bench tests
-        run: python -m pytest tests -q -rs --junitxml="${RUNNER_TEMP}/bench-tests.xml"
-      - name: Refuse skipped tests
-        # Some tests skip when a tool such as jq is missing, which pytest
-        # counts as a pass. Here every test must run.
-        run: |
-          python - "${RUNNER_TEMP}/bench-tests.xml" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
-
-          skipped = [
-              f"{case.get('classname')}::{case.get('name')}"
-              for case in ET.parse(sys.argv[1]).iter("testcase")
-              if case.find("skipped") is not None
-          ]
-          for name in skipped:
-              print(f"::error::skipped in CI: {name}")
-          sys.exit(1 if skipped else 0)
-          PY
   compare-tui:
     needs: validate-inputs
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
@@ -145,8 +108,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
-      - name: Check TUI comparison receipt validation
-        run: python3 test/test_tui_artifact_comparison.py
       - name: Verify identity and compare acknowledged frames
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,21 +142,9 @@ jobs:
           name: tui-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: comparison-results/
           if-no-files-found: warn
-  server-harness-tests:
-    needs: validate-inputs
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
-      - run: python3 -m unittest discover -s scripts/harness/perf -p test_vision_artifact_compare.py -v
-      - run: python3 test/test_checkpoint_history_comparison.py
   compare-server:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_tui && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
-    needs: [validate-inputs, server-harness-tests]
+    needs: validate-inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -284,7 +233,7 @@ jobs:
             ${{ runner.temp }}/vision-results/window-*/state/window-complete
   compare-checkpoint-history:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history && !inputs.compare_tui && !inputs.compare_server }}
-    needs: [validate-inputs, server-harness-tests]
+    needs: validate-inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:

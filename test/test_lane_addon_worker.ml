@@ -821,8 +821,8 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       let recovered = Store.create ~root:(Store.root store) in
       let result = Store.iter_sampling_requests recovered ~instance_id ~max_bytes:65536
         ~f:(fun row -> found := Yojson.Safe.Util.member "state" row = `String "finished"; Ok ()) in
-      check bool "recovery visits known outcome before reporting broken primary index" true !found;
-      check bool "broken index is still an explicit error" true (Result.is_error result);
+      check bool "journal recovery visits the known outcome despite broken primary" true !found;
+      check bool "readable journal provides successful recovery" true (Result.is_ok result);
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory);
     let request_record = match sampling_requests store ~instance_id with
@@ -1115,7 +1115,10 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
         ~instance_id:"journal-failure" with
       | Ok rows -> rows | Error detail -> fail detail in
     check int "reopened recovery reads primary while journal stays unavailable" 1
-      (List.length recovered));
+      (List.length recovered);
+    check bool "unavailable journal with absent primary remains an error" true
+      (Result.is_error (sampling_requests (Store.create ~root:(Store.root store))
+        ~instance_id:"no-primary-fallback")));
   let rows = match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail in
   let row = match rows with [row] -> row | _ -> fail "missing terminal recovery row" in
   let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with

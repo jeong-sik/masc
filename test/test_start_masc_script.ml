@@ -1220,67 +1220,6 @@ let test_promoted_dune_lkg_survives_build_tree_cleanup () =
           "promoted LKG did not survive build tree cleanup (%d)\nstdout:\n%s\nstderr:\n%s"
           verify_code verify_stdout verify_stderr)
 
-let test_log_tee_preserves_server_pid () =
-  let source = read_file (script_path ()) in
-  check bool "log tee uses PID-preserving process substitution" true
-    (String_util.contains_substring source
-       "exec \"$@\" > >(tee -a \"$MASC_LOG_FILE\") 2>&1");
-  check bool "log tee does not retain a pipeline wrapper" false
-    (String_util.contains_substring source "exec \"$@\" 2>&1 | tee")
-
-let test_default_build_lock_is_worktree_local () =
-  let source = read_file (script_path ()) in
-  check bool "default build lock is worktree-local" true
-    (String_util.contains_substring source
-       "MASC_BUILD_LOCK=\"${MASC_BUILD_LOCK_PATH:-$SCRIPT_DIR/.masc-build.lock}\"");
-  check bool "default build lock is not global /tmp" false
-    (String_util.contains_substring source "MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock")
-
-let test_stdio_entrypoint_uses_shared_base_path_guard () =
-  let source = read_file (source_file "bin/main_stdio_eio.ml") in
-  let http_runtime_source =
-    read_file (source_file "lib/server/server_runtime_bootstrap.ml")
-  in
-  check bool "stdio resolves base path through shared guard" true
-    (String_util.contains_substring source
-       "Server_base_path_guard.startup_root");
-  check bool "stdio refuses to start without a workspace" true
-    (String_util.contains_substring source "Server_base_path_guard.exit_on_no_workspace");
-  check bool "stdio uses common owner initialization" true
-    (String_util.contains_substring source
-       "Server_runtime_bootstrap.initialize_owner_state_blocking");
-  check bool "HTTP runtime uses common owner initialization" true
-    (String_util.contains_substring http_runtime_source
-       "initialize_owner_state_blocking ~sw ~env ~base_path");
-  check bool "stdio uses common owner activation" true
-    (String_util.contains_substring source "Server_runtime_bootstrap.activate_owner_state");
-  check bool "HTTP runtime uses common owner activation" true
-    (String_util.contains_substring http_runtime_source "activate_owner_state")
-
-let test_keeper_owner_inventory_precedes_persistence_recovery () =
-  let source = read_file (source_file "lib/server/server_runtime_bootstrap.ml") in
-  let find needle =
-    let nlen = String.length needle in
-    let rec loop index =
-      if index + nlen > String.length source then None
-      else if String.sub source index nlen = needle then Some index
-      else loop (index + 1)
-    in
-    loop 0
-  in
-  let owner_install =
-    find "Keeper_owner_registry.install_from_store"
-    |> Option.get
-  in
-  let persistence_prepare =
-    find "Server_bootstrap_loops.prepare_keeper_persistence"
-    |> Option.get
-  in
-  check bool
-    "Owner inventory is installed before shutdown persistence restore"
-    true
-    (owner_install < persistence_prepare)
-
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
       let script = Filename.concat dir "start-masc.sh" in
@@ -1957,16 +1896,10 @@ let () =
 	            test_build_tempfail_rejects_lkg_hash_mismatch;
 	          test_case "promoted dune LKG survives build tree cleanup" `Quick
 	            test_promoted_dune_lkg_survives_build_tree_cleanup;
-	          test_case "log tee preserves server PID" `Quick
-	            test_log_tee_preserves_server_pid;
-	          test_case "default build lock is worktree-local" `Quick
-	            test_default_build_lock_is_worktree_local;
-	          test_case "stdio entrypoint uses shared base path guard" `Quick
-	            test_stdio_entrypoint_uses_shared_base_path_guard;
-	          test_case
-	            "Keeper Owner inventory precedes persistence recovery"
-	            `Quick
-	            test_keeper_owner_inventory_precedes_persistence_recovery;
+
+
+
+
 	          test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case

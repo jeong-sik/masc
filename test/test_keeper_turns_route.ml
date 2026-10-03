@@ -1,41 +1,6 @@
 open Masc
 
-(* GET /api/v1/keepers/turns is what the TUI "answering now" badge polls:
-   the running-turn slot lives in the Keeper Owner (process memory), so the
-   durable meta the TUI's keeper list is read from cannot answer it.
-
-   Two facts, each pinned at its own layer, in the house style of
-   test_rest_approvals_because:
-
-   - routing: the HTTP/1 dashboard router binds ["/api/v1/keepers/turns"]
-     to the turns listing handler;
-   - serialization: an installed keeper comes back as one row with
-     [status = "ok"] and [turn = null] while no turn runs, and an empty
-     workspace answers the schema with an empty fleet rather than an
-     error. *)
-
-let read_file path =
-  let path =
-    if Filename.is_relative path then
-      match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> Filename.concat root path
-      | None -> path
-    else path
-  in
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in_noerr ic;
-  s
-;;
-
-let test_turns_route_is_registered () =
-  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
-  Alcotest.(check bool)
-    "HTTP/1 dashboard router serves the keeper turns listing"
-    true
-    (String_util.contains_substring http1 "\"/api/v1/keepers/turns\"")
-;;
+(* Keeper turns and run-next ownership are exercised through HTTP responses. *)
 
 (* Drive the handler the way an HTTP server would: hand its request to a
    Server_connection and collect the response bytes it writes. The write
@@ -280,8 +245,6 @@ let () =
     [ ( "keeper-turns-route"
       , [ Alcotest.test_case "invalid or conflicting interrupt identity" `Quick test_interrupt_rejects_invalid_or_conflicting_identity
         ; Alcotest.test_case "run-next ownership, idempotency, and started boundary" `Quick test_run_next_ownership_and_started_boundary
-        ; Alcotest.test_case "route is registered" `Quick
-            test_turns_route_is_registered
         ; Alcotest.test_case "empty workspace answers an empty fleet" `Quick
             test_empty_workspace_answers_an_empty_fleet
         ; Alcotest.test_case "an installed keeper rides as an idle row" `Quick

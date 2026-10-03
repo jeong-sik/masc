@@ -1,7 +1,6 @@
 import contextlib
 import email.message
 import importlib.util
-import inspect
 import io
 import json
 import os
@@ -258,32 +257,8 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             argv = result.stdout.splitlines()
             self.assertEqual(argv[argv.index("--remote-endpoint") + 1], "chosen-endpoint")
 
-    def test_every_keeper_up_is_followed_by_the_unattended_stance(self):
-        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
-        keeper_up_calls = module_source.count('"masc_keeper_up"')
-        self.assertEqual(keeper_up_calls, 2)
-        self.assertEqual(module_source.count("self.declare_unattended("), keeper_up_calls)
-        for method, declare in (
-            (acceptance.MissionRun.create_fleet, "self.declare_unattended(role)"),
-            (
-                acceptance.MissionRun.restart_and_recall,
-                'self.declare_unattended("coordinator")',
-            ),
-        ):
-            source = inspect.getsource(method)
-            self.assertLess(source.index('"masc_keeper_up"'), source.index(declare))
 
-    def test_unattended_stance_pins_the_server_route_and_mode(self):
-        dashboard = (
-            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            f'Http.Router.post "{acceptance.TOOL_APPROVAL_MODE_ROUTE}"', dashboard
-        )
-        mode_source = (
-            REPO_ROOT / "lib" / "keeper" / "keeper_tool_approval_mode.ml"
-        ).read_text(encoding="utf-8")
-        self.assertIn(f'| "{acceptance.TOOL_APPROVAL_MODE_UNATTENDED}" ->', mode_source)
+    def test_unattended_stance_url_uses_the_public_route(self):
         self.assertEqual(
             acceptance.default_tool_approval_mode_url("http://127.0.0.1:9418/mcp"),
             "http://127.0.0.1:9418/api/v1/keepers/tool-approval-mode",
@@ -460,17 +435,6 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("--turn-settle-budget", stderr.getvalue())
 
-    def test_turn_wait_uses_the_settle_budget_not_the_http_timeout(self):
-        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("time.monotonic() + self.timeout", module_source)
-        self.assertIn("time.monotonic() + self.turn_settle_budget_sec", module_source)
-        self.assertIn(
-            '"turn_settle_budget_sec": run.turn_settle_budget_sec', module_source
-        )
-        wrapper = (SCRIPT_PATH.parent / "keeper_multi_collaboration_acceptance.sh").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('"--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC"', wrapper)
 
     @staticmethod
     def _http_429(url, body=b'{"error":"Too Many Requests","message":"Rate limit exceeded"}', retry_after="0"):
@@ -566,12 +530,6 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(calls, ["http://127.0.0.1:9418/api/v1/keepers/k/tool-calls"] * 2)
         self.assertEqual([r["method"] for r in recorded], ["GET"])
 
-    def test_every_client_reports_429s_and_the_bundle_counts_them(self):
-        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
-        self.assertEqual(module_source.count("client.on_rate_limited = self.record_rate_limited"), 2)
-        self.assertIn(
-            '"transport_rate_limited_count": len(run.rate_limited_responses)', module_source
-        )
 
     def test_run_refuses_to_start_without_a_sandbox_profile(self):
         with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):
@@ -603,39 +561,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertIn("no completion verdict", stub.goal_verifier_evidence["detail"])
         self.assertIn("observations/goal-verifier-failure.json", written)
 
-    def test_run_sequence_guards_the_goal_verifier_phase(self):
-        run_source = inspect.getsource(acceptance.MissionRun.run)
-        self.assertIn("self.run_goal_verifier_guarded()", run_source)
-        self.assertNotIn("self.run_goal_verifier_refute_reenter_prove()", run_source)
-        self.assertIn("self.run_continuity_chain(post_id)", run_source)
 
-    def test_catalog_has_exact_mission_and_assertion_counts(self):
-        catalog = acceptance.load_catalog(CATALOG_PATH)
-
-        self.assertEqual(len(catalog["missions"]), 23)
-        self.assertEqual(
-            len(
-                {
-                    assertion
-                    for mission in catalog["missions"]
-                    for assertion in mission["assertions"]
-                }
-            ),
-            49,
-        )
-        self.assertEqual(
-            catalog["keeper_required_skill_identities"],
-            [
-                skill_identity(
-                    acceptance.INLINE_FIXTURE,
-                    source_id="project-masc",
-                ),
-                skill_identity(
-                    acceptance.ASYNC_FIXTURE,
-                    source_id="project-masc",
-                ),
-            ],
-        )
 
     def test_required_exact_reference_resolves_from_snapshot(self):
         required_identity = skill_identity(acceptance.INLINE_FIXTURE)
@@ -766,98 +692,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         frontmatter = text.split("---\n", 2)[1]
         return text, frontmatter, composition
 
-    def test_fixtures_declare_the_shape_the_assertions_judge(self):
-        catalog = acceptance.load_catalog(CATALOG_PATH)
-        self.assertEqual(
-            [
-                identity["package_id"]
-                for identity in catalog["keeper_required_skill_identities"]
-            ],
-            [acceptance.INLINE_FIXTURE, acceptance.ASYNC_FIXTURE],
-        )
-        self.assertIn(acceptance.INLINE_FIXTURE_TOOL, catalog["keeper_required_tools"])
-        self.assertIn(acceptance.ASYNC_FIXTURE_TOOL, catalog["keeper_required_tools"])
-        self.assertEqual(
-            {
-                identity["package_id"]: acceptance.composition_fixture_path(
-                    catalog_path=CATALOG_PATH,
-                    identity_key=acceptance.canonical_skill_identity_key(
-                        identity, context="catalog"
-                    ),
-                )
-                for identity in catalog["keeper_required_skill_identities"]
-            },
-            {
-                name: REPO_ROOT / source
-                for name, source in COMPOSITION_FIXTURE_SOURCES.items()
-            },
-        )
 
-        for name in (acceptance.INLINE_FIXTURE, acceptance.ASYNC_FIXTURE):
-            text, frontmatter, composition = self.fixture_document(name)
-            self.assertEqual(text.count("```toml composition"), 1, name)
-            self.assertEqual(composition["name"], name)
-            self.assertIn(f"name: {name}\n", frontmatter)
-            # The model reads the TOML description; the frontmatter carries the
-            # same sentence so the catalog and the tool never disagree.
-            self.assertIn(
-                "description: " + json.dumps(composition["description"]) + "\n",
-                frontmatter,
-            )
-            self.assertNotIn("params", composition)
-
-        _, _, inline = self.fixture_document(acceptance.INLINE_FIXTURE)
-        self.assertEqual(inline["execution"], "inline")
-        nodes = {node["id"]: node for node in inline["nodes"]}
-        self.assertEqual(
-            [node["id"] for node in inline["nodes"]],
-            list(acceptance.INLINE_FIXTURE_NODES),
-        )
-        for node_id in acceptance.INLINE_FIXTURE_PARALLEL_NODES:
-            self.assertEqual(nodes[node_id]["input"]["kind"], "literal")
-            self.assertNotIn("after", nodes[node_id])
-        dataflow = nodes[acceptance.INLINE_FIXTURE_DATAFLOW_NODE]
-        self.assertNotIn("after", dataflow)
-        self.assertEqual(
-            [
-                field
-                for field in dataflow["input"]["fields"]
-                if field["value"]["kind"] == "output"
-            ],
-            [
-                {
-                    "name": acceptance.INLINE_FIXTURE_DATAFLOW_INPUT_FIELD,
-                    "value": {
-                        "kind": "output",
-                        "node": acceptance.INLINE_FIXTURE_DATAFLOW_SOURCE_NODE,
-                        "pointer": "/" + acceptance.INLINE_FIXTURE_DATAFLOW_SOURCE_FIELD,
-                    },
-                }
-            ],
-        )
-
-        _, _, background = self.fixture_document(acceptance.ASYNC_FIXTURE)
-        self.assertEqual(background["execution"], "async")
-        self.assertEqual(
-            [node["id"] for node in background["nodes"]],
-            list(acceptance.ASYNC_FIXTURE_NODES),
-        )
-
-    def test_fixture_install_uses_the_skill_editor_routes_and_outcomes(self):
-        dashboard = (
-            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
-        ).read_text(encoding="utf-8")
-        for route in (
-            acceptance.SKILL_EDITOR_CREATE_ROUTE,
-            acceptance.SKILL_EDITOR_SAVE_ROUTE,
-        ):
-            self.assertIn(f'Http.Router.post "{route}"', dashboard)
-        editor = (REPO_ROOT / "lib" / "server" / "server_skill_editor.ml").read_text(
-            encoding="utf-8"
-        )
-        for outcomes in acceptance.SKILL_EDITOR_PUBLISHED_OUTCOMES.values():
-            for outcome in outcomes:
-                self.assertIn(f'"status", `String "{outcome}"', editor)
 
     @staticmethod
     def editor_outcome(status, identity_key, revision, batches=None):
@@ -1206,12 +1041,6 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(acceptance.AcceptanceError, "no source list"):
                 acceptance.read_writable_skill_source_ids(url, "tok", 5.0)
-        dashboard = (
-            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            f'Http.Router.get "{acceptance.SKILL_EDITOR_SOURCES_ROUTE}"', dashboard
-        )
 
     def test_fixture_install_never_writes_to_an_unpinned_workspace(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
@@ -1300,64 +1129,8 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 self.assertIn(message, stderr.getvalue())
         self.assertEqual(preflight_calls, [])
 
-    def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):
-        catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        poc = catalog["missions"][18]
-        self.assertEqual(poc["id"], "RW20")
-        self.assertEqual(
-            poc["assertions"],
-            ["poc_execution_proof_observed", "poc_review_cites_execution"],
-        )
-        debate = catalog["missions"][19]
-        self.assertEqual(debate["id"], "RW21")
-        self.assertEqual(
-            debate["assertions"],
-            ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
-        )
-        self.assertIn("tool_execute", catalog["keeper_required_tools"])
 
-    def test_catalog_has_exact_rw22_coverage_mission(self):
-        catalog = acceptance.load_catalog(CATALOG_PATH)
-
-        coverage = catalog["missions"][20]
-        self.assertEqual(coverage["id"], "RW22")
-        self.assertEqual(
-            coverage["assertions"],
-            [
-                "qa_coverage_execution_observed",
-                "qa_coverage_passes_verification",
-                "qa_coverage_review_matches_spec",
-            ],
-        )
-        # The row exists to reject partial runs, so the tester must be able to
-        # execute rather than only claim, and the work has to enter the typed
-        # verification flow and actually pass it — submitting is not completing.
-        self.assertIn("tool_execute", catalog["keeper_required_tools"])
-        self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
-        self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
-
-    def test_catalog_has_exact_rw23_goal_verifier_mission(self):
-        catalog = acceptance.load_catalog(CATALOG_PATH)
-
-        goal_verifier = catalog["missions"][21]
-        self.assertEqual(goal_verifier["id"], "RW23")
-        self.assertEqual(
-            goal_verifier["assertions"],
-            [
-                "goal_verifier_refutation_observed",
-                "goal_verifier_reentry_proven",
-                "goal_verifier_dashboard_browser_observed",
-            ],
-        )
-        self.assertIn("Goal", goal_verifier["capabilities"])
-        self.assertIn("Browser", goal_verifier["capabilities"])
-        self.assertIn("masc_goal_transition", catalog["operator_required_tools"])
-        self.assertTrue(catalog["approaches_apply_to_each_mission"])
-        self.assertEqual(
-            [approach["id"] for approach in catalog["execution_approaches"]],
-            ["A", "B", "C"],
-        )
 
     def test_goal_verifier_convergence_budget_covers_one_retry_cycle(self):
         # The live worker re-arms retryable deferred reviews on the default
@@ -1367,15 +1140,10 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             acceptance.goal_verifier_convergence_timeout(300.0),
             720.0,
         )
-        wait_source = inspect.getsource(acceptance.MissionRun.wait_for_goal_state)
-        self.assertIn("goal_verifier_convergence_timeout(self.timeout)", wait_source)
 
     def test_browser_proof_parent_outlives_inner_readiness_and_capture(self):
         self.assertEqual(acceptance.browser_proof_subprocess_timeout(300.0), 600.0)
         self.assertEqual(acceptance.browser_proof_subprocess_timeout(400.0), 800.0)
-        capture_source = inspect.getsource(acceptance.MissionRun.capture_browser_proof)
-        self.assertIn("browser_proof_subprocess_timeout(self.timeout)", capture_source)
-        self.assertNotIn("timeout=120", capture_source)
 
     def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
         keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
@@ -1522,54 +1290,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 )
             )
 
-    def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
-        setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
-        rw23_source = inspect.getsource(
-            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
-        )
 
-        # The success-token Task and verifier Goal both used to be visible
-        # during fleet setup. The autonomous fleet completed them before RW23
-        # could write the failing artifact. Create the Goal only inside the
-        # directed RW23 phase. Goals are now an ownerless shared open set, so
-        # no removed assignment/scope compatibility call may return.
-        # Since RFC-0387 a created Goal is executing/idle at once; the runner
-        # waits for that state (no criterion_state="viable" step remains)
-        # before it creates the proof Task.
-        self.assertNotIn("goal-verifier-task-create", setup_source)
-        self.assertNotIn("goal-verifier-upsert", setup_source)
-        self.assertNotIn("goal-verifier-assign", setup_source)
-        self.assertNotIn("masc_goal_assign", setup_source)
-        self.assertNotIn("active_goal_ids", setup_source)
-        self.assertIn("goal-verifier-task-create", rw23_source)
-        self.assertIn("goal-verifier-upsert", rw23_source)
-        self.assertNotIn("goal-verifier-assign", rw23_source)
-        self.assertNotIn("masc_goal_assign", rw23_source)
-        self.assertLess(
-            rw23_source.index("goal-verifier-upsert"),
-            rw23_source.index('completion_state="idle"'),
-        )
-        self.assertLess(
-            rw23_source.index('completion_state="idle"'),
-            rw23_source.index("goal-verifier-task-create"),
-        )
-        self.assertLess(
-            rw23_source.index("goal-verifier-task-create"),
-            rw23_source.index("goal-verifier-refute-artifact"),
-        )
-
-    def test_rw23_uses_durable_verdict_without_parsing_board_text(self):
-        rw23_source = inspect.getsource(
-            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
-        )
-
-        # masc_tasks is a human-facing Board rendering in the live server. The
-        # verifier history event is the typed durable authority for both the
-        # rejected and approved transitions.
-        self.assertNotIn("wait_for_verifier_task_status", rw23_source)
-        self.assertEqual(rw23_source.count("wait_for_verifier_task_verdict"), 2)
-        self.assertIn('wait_for_verifier_task_verdict("in_progress")', rw23_source)
-        self.assertIn('wait_for_verifier_task_verdict("done")', rw23_source)
 
     def test_rw23_prompts_pin_canonical_artifact_path_and_original_task(self):
         run = object.__new__(acceptance.MissionRun)

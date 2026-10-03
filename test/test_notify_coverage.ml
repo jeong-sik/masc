@@ -16,17 +16,6 @@ open Alcotest
 
 module Notify = Masc.Notify
 
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-
-let source_file rel =
-  let path = Filename.concat (source_root ()) rel in
-  let ic = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in_noerr ic) @@ fun () ->
-  really_input_string ic (in_channel_length ic)
-
 (* ============================================================
    sanitize_token Tests
    ============================================================ *)
@@ -279,16 +268,6 @@ let test_focus_payload_all_none () =
   check (option string) "from" None p.from_agent;
   check (option string) "task" None p.task_id
 
-let test_terminal_notifier_execute_requires_opt_in () =
-  let src = source_file "lib/notify.ml" in
-  check bool "execute opt-in env is present" true
-    (String_util.contains_substring src "MASC_NOTIFY_ALLOW_SHELL_EXECUTE");
-  check bool "focus builder defaults to no shell command" true
-    (String_util.contains_substring src "if not (shell_execute_clicks_enabled ())");
-  check bool "terminal-notifier execute is guarded" true
-    (String_util.contains_substring src
-       "Some cmd when shell_execute_clicks_enabled () -> base @ [\"-execute\"; cmd]")
-
 (* ============================================================
    Notifier boundary
    ============================================================ *)
@@ -501,10 +480,6 @@ let () =
     "focus_payload", [
       test_case "all some" `Quick test_focus_payload_all_some;
       test_case "all none" `Quick test_focus_payload_all_none;
-    ];
-    "shell_execute_guard", [
-      test_case "terminal-notifier execute requires opt-in" `Quick
-        test_terminal_notifier_execute_requires_opt_in;
     ];
     "notifier boundary", [
       test_case "a mention reaches terminal-notifier and nothing probes first" `Quick

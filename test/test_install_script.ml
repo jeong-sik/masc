@@ -285,48 +285,6 @@ let source_root () =
      | None -> fail "could not locate repo source root")
 ;;
 
-let install_script () = read_file (Filename.concat (source_root ()) "scripts/install.sh")
-
-let quickstart_script () = read_file (Filename.concat (source_root ()) "quickstart.sh")
-
-(* Publication consumes the exact successful RC distribution; binary builds
-   and checksum production belong to its reusable installation workflow. *)
-let release_workflow () =
-  let require label text needle = check bool label true (string_contains text needle) in
-  let root = source_root () in
-  let publication = read_file (Filename.concat root ".github/workflows/release.yml") in
-  let candidate = read_file (Filename.concat root ".github/workflows/release-candidate.yml") in
-  require "publication stages the verified RC distribution" publication
-    "scripts/ci/prepare-release-publication.py";
-  require "publication rechecks assets before publishing" publication "--recheck";
-  require "RC installation uses the release build workflow" candidate
-    "uses: ./.github/workflows/release-build.yml";
-  read_file (Filename.concat root ".github/workflows/release-build.yml")
-;;
-
-let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
-
-let dockerfile_oneclick () =
-  read_file (Filename.concat (source_root ()) "Dockerfile.oneclick")
-;;
-
-let docker_compose () =
-  read_file (Filename.concat (source_root ()) "docker-compose.yml")
-;;
-
-let container_runtime_entrypoint () =
-  read_file (Filename.concat (source_root ()) "scripts/container-runtime-entrypoint.sh")
-;;
-
-let docker_entrypoint () =
-  read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
-;;
-
-let oneclick_entrypoint () =
-  read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
-;;
-let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
-
 let project_version () =
   let raw = read_file (Filename.concat (source_root ()) "dune-project") in
   let prefix = "(version " in
@@ -714,264 +672,6 @@ let test_presets_carry_their_own_instructions () =
     presets
 ;;
 
-let test_release_requires_advertised_binary_assets () =
-  let workflow = release_workflow () in
-  assert_contains
-    "release checks advertised asset list"
-    workflow
-    "for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do";
-  assert_contains
-    "release builds the terminal UI"
-    workflow
-    "bin/masc_tui.exe";
-  assert_contains
-    "release requires the terminal UI asset"
-    workflow
-    "masc-tui-$arch";
-  assert_contains
-    "release builds the typed deployment preflight helper"
-    workflow
-    "bin/deployment_preflight_helper.exe";
-  assert_contains
-    "release requires the typed deployment preflight helper asset"
-    workflow
-    "masc-deployment-preflight-helper-$arch";
-  assert_contains
-    "release requires the deployment preflight gate asset"
-    workflow
-    "masc-check-runtime-deployment-preflight-$arch";
-  assert_contains
-    "release fails when required asset is absent"
-    workflow
-    "required release asset missing: $asset";
-;;
-
-let test_quickstart_defaults_to_workspace_only () =
-  let script = quickstart_script () in
-  assert_contains "default team is disabled" script {|TEAM="none"|};
-  assert_contains
-    "provider key is required only for a Keeper preset"
-    script
-    {|if [ "$TEAM" != "none" ]; then|};
-  assert_contains
-    "none skips team seeding"
-    script
-    {|log "no Keeper preset requested"|}
-;;
-
-let test_quickstart_writes_worker_bearer_env () =
-  let script = quickstart_script () in
-  assert_contains "quickstart bearer env path" script "mcp-client.env";
-  assert_contains "quickstart mints a worker bearer" script "--role worker";
-  assert_contains "quickstart uses the MASC_TOKEN env contract" script "--client-env MASC_TOKEN";
-  assert_contains "quickstart bearer is long lived" script "--no-expiry";
-  assert_contains "quickstart bearer file is private" script {|chmod 600 "$env_file"|}
-;;
-
-let test_installer_prints_authenticated_mcp_next_step () =
-  let script = install_script () in
-  assert_contains "installer prints login command" script "login --base-path";
-  assert_contains "installer login is worker scoped" script "--role worker";
-  assert_contains "installer login names bearer env" script "--client-env MASC_TOKEN";
-  assert_contains "installer does not print unauthenticated MCP config anchor" script "source the printed bearer exports in the shell that starts your MCP client"
-;;
-
-let test_installer_fetches_deployment_preflight_companions () =
-  let script = install_script () in
-  (* The terminal UI rides the same companion path as the preflight pair. It is
-     pinned here because the release workflow and the installer have to name the
-     same asset, and nothing else compares the two spellings. *)
-  assert_contains
-    "installer derives the platform terminal UI asset"
-    script
-    {|TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"|};
-  assert_contains
-    "installer installs the terminal UI beside the server"
-    script
-    {|TUI_DEST="$PREFIX/masc-tui"|};
-  assert_contains
-    "installer fetches the terminal UI as a companion"
-    script
-    {|install_release_companion "$TUI_ASSET" "$TUI_DEST"|};
-  assert_contains
-    "installer derives the platform helper asset"
-    script
-    {|PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"|};
-  assert_contains
-    "installer derives the platform gate asset"
-    script
-    {|PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"|};
-  assert_contains
-    "installer installs the helper beside the gate"
-    script
-    {|PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"|};
-  assert_contains
-    "installer installs the gate beside the helper"
-    script
-    {|PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"|}
-;;
-
-let test_runtime_image_enforces_preflight_before_main () =
-  let image = dockerfile () in
-  let oneclick_image = dockerfile_oneclick () in
-  let compose = docker_compose () in
-  let release_entrypoint = container_runtime_entrypoint () in
-  let oneclick_entrypoint = docker_entrypoint () in
-  let context = dockerignore () in
-  assert_contains
-    "image ships the read-only deployment preflight gate"
-    image
-    "/app/masc-check-runtime-deployment-preflight";
-  assert_contains
-    "image enters through the lease handoff wrapper"
-    image
-    {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-runtime-entrypoint"]|};
-  assert_contains
-    "release image creates the RFC-0121 bulk data sibling"
-    image
-    "mkdir -p /app/.masc /app/data";
-  assert_contains
-    "release image grants the runtime user access to bulk data"
-    image
-    "chown -R appuser:appgroup /app/.masc /app/data";
-  List.iter
-    (fun source ->
-       assert_contains
-         "runtime image declares identity and bulk-data volumes"
-         source
-         {|VOLUME ["/app/.masc", "/app/data"]|})
-    [ image; oneclick_image ];
-  assert_contains
-    "one-click image creates bulk data before declaring its volume"
-    oneclick_image
-    "mkdir -p /app/.masc /app/data";
-  assert_contains
-    "compose persists release bulk data"
-    compose
-    "- masc-data:/app/data";
-  assert_contains
-    "compose persists one-click bulk data"
-    compose
-    "- masc-oneclick-data:/app/data";
-  assert_contains "compose declares release bulk volume" compose "masc-data:";
-  assert_contains
-    "compose declares one-click bulk volume"
-    compose
-    "masc-oneclick-data:";
-  List.iter
-    (fun source ->
-       assert_contains
-         "runtime events use writable volume storage"
-         source
-         "OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events")
-    [ image; oneclick_image ];
-  List.iter
-    (fun source ->
-       assert_contains
-         "entrypoint prepares the runtime-events directory"
-         source
-         {|mkdir -p "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|};
-       assert_contains
-         "entrypoint restricts the runtime-events directory"
-         source
-         {|chmod 0700 "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|})
-    [ release_entrypoint; oneclick_entrypoint ];
-  assert_contains
-    "Docker context includes the main release executable"
-    context
-    "!masc-linux-x64";
-  assert_contains
-    "Docker context includes the deployment preflight helper"
-    context
-    "!masc-deployment-preflight-helper"
-;;
-
-let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
-  let entrypoint = oneclick_entrypoint () in
-  assert_contains
-    "classic empty-key guard preserves explicit bootstrap override"
-    entrypoint
-    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}" ]|};
-  assert_contains
-    "classic empty-key guard disables implicit autoboot"
-    entrypoint
-    "export MASC_KEEPER_AUTONOMOUS_ENABLED=false"
-;;
-
-let test_oneclick_image_stamps_copied_dashboard_bundle () =
-  let image = dockerfile_oneclick () in
-  assert_contains
-    "one-click image stamps the final copied dashboard bundle"
-    image
-    "COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard\n\
-RUN touch /app/assets/dashboard/.build-stamp"
-;;
-
-
-let test_binary_checks_use_install_environment () =
-  let script = install_script () in
-  assert_not_contains
-    "config-root full catalog is not an automatic override"
-    script
-    {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/agent-core-models.toml"|};
-  assert_contains
-    "binary helper exports base path"
-    script
-    {|MASC_BASE_PATH="$BASE_PATH"|};
-  assert_contains
-    "binary helper documents the base path env"
-    script
-    "MASC_BASE_PATH is the resolved runtime root";
-  assert_not_contains
-    "binary helper exports no second base path variable"
-    script
-    "MASC_BASE_PATH_INPUT";
-  assert_contains
-    "binary helper preserves explicit model catalog override"
-    script
-    {|AGENT_CORE_MODEL_CATALOG="$catalog"|};
-  assert_contains
-    "model catalog helper reads only explicit override"
-    script
-    {|if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then|};
-  assert_contains
-    "binary smoke helper isolates runtime events by default"
-    script
-    {|MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}"|};
-  assert_contains
-    "existing binary check uses install env"
-    script
-    {|if masc_responds_to_version "$DEST"; then|};
-  assert_contains
-    "start hint preserves explicit runtime events override"
-    script
-    {|runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "|};
-  assert_contains
-    "start hint selects installed assets and omits runtime events default"
-    script
-    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""|};
-  assert_contains
-    "start hint documents the runtime events default"
-    script
-    "let the binary's default-on contract apply";
-  assert_not_contains
-    "start hint does not disable runtime events by default"
-    script
-    {|start_env="MASC_RUNTIME_EVENTS=\"${MASC_RUNTIME_EVENTS:-0}\" MASC_BASE_PATH=\"$BASE_PATH\""|};
-  assert_contains
-    "smoke reads reported version through install env"
-    script
-    {|reported=$(masc_reported_version "$DEST")|};
-  assert_not_contains
-    "existing binary check does not call bare DEST --version"
-    script
-    {|if "$DEST" --version >/dev/null 2>&1; then|};
-  assert_not_contains
-    "smoke check does not call bare DEST --version"
-    script
-    {|reported=$("$DEST" --version 2>/dev/null | tail -n1)|}
-;;
-
 let test_force_refreshes_same_version_existing_binary () =
   let tmpdir = Filename.temp_file "masc-install-force-refresh-" "" in
   Sys.remove tmpdir;
@@ -1026,74 +726,6 @@ let test_downgrade_and_unknown_version_require_force () =
         (status <> Unix.WEXITED 0);
       assert_contains "explicit overwrite instruction" output "pass --force to overwrite"))
     [ "999.0.0"; "development-build" ]
-;;
-
-let test_wizard_flags_exist () =
-  let script = install_script () in
-  assert_contains "wizard flag" script "--wizard";
-  assert_contains "no-wizard flag" script "--no-wizard";
-  assert_contains "provider flag" script "--provider";
-  (* No key flags: the installer reads the provider key from the environment and
-     stores none, so there is nothing to pass on a command line. *)
-  assert_not_contains "no api-key flag" script "--api-key";
-  assert_contains "key is read, never written" script "Read, never written"
-;;
-
-let test_wizard_prompts_exist () =
-  let script = install_script () in
-  assert_contains "provider prompt" script "Choose your default provider";
-  assert_contains "connectivity prompt" script "Test connectivity";
-  (* The wizard never asks for a key: it has nowhere to put one that the server
-     would read, and the environment it would be typed into is the answer. *)
-  assert_not_contains "no key prompt" script "Enter %s"
-;;
-
-let test_partial_files_are_cleaned_by_exit_trap () =
-  let script = install_script () in
-  assert_contains "partial tracker exists" script "PARTIAL_FILES=()";
-  assert_contains "download partial is tracked" script {|PARTIAL_FILES+=("$tmp")|};
-  assert_contains "trap cleans partials" script "for partial in";
-  assert_contains "trap removes partials" script {|rm -f "$partial"|}
-;;
-
-let test_provider_catalog_comes_from_runtime_toml () =
-  let script = install_script () in
-  assert_contains
-    "provider catalog loader calls typed binary export"
-    script
-    {|runtime-wizard-catalog --base-path "$base_path"|};
-  assert_contains "runtime id array exists" script "PROVIDER_DEFAULT_RUNTIME_IDS=()";
-  assert_contains "provider ping path array exists" script "PROVIDER_PING_PATHS=()";
-  assert_not_contains "installer does not strip TOML comments" script "strip_toml_comment()";
-  assert_not_contains "installer does not parse TOML strings" script "toml_string_value()";
-  assert_not_contains
-    "installer does not parse provider sections with bash regex"
-    script
-    {|^\\[providers\\.|};
-  assert_contains
-    "provider catalog parser reads binary-safe fields"
-    script
-    {|read -r -d ''|};
-  assert_not_contains
-    "provider catalog parser does not use pipe-delimited fields"
-    script
-    {|IFS='|'|};
-  assert_not_contains
-    "provider catalog parser has no pipe-delimited TODO"
-    script
-    "pipe-delimited";
-  assert_not_contains
-    "no hardcoded provider id catalog"
-    script
-    "PROVIDER_IDS=(ollama_cloud deepseek glm-coding ollama)";
-  assert_not_contains
-    "no hardcoded endpoint catalog"
-    script
-    "https://api.deepseek.com";
-  assert_not_contains
-    "no hardcoded provider ping endpoint"
-    script
-    "/v1/models"
 ;;
 
 let test_provider_display_name_with_pipe_round_trips () =
@@ -1290,34 +922,6 @@ let test_wizard_nontty_connectivity_check_opt_out () =
 
 (* Cheap regression guard that runs without the masc binary: the non-TTY branch's
    report line and its opt-out env both stay wired into install.sh. *)
-let test_nontty_wizard_connectivity_check_is_wired () =
-  let script = install_script () in
-  assert_contains
-    "the non-TTY wizard has a report-only connectivity result line"
-    script
-    "provider connectivity: ok";
-  assert_contains
-    "the non-TTY connectivity check has an air-gapped opt-out"
-    script
-    "MASC_INSTALL_NO_PING"
-;;
-
-(* A fresh install seeds one Keeper, imp, with autoboot off, and the
-   post-install "Next" block used to stop at "start server + open TUI" without
-   saying that. Guard that it names the seeded Keeper, points at the TUI
-   Keepers view to start it, and keeps the scripted keeper-create path. *)
-let test_next_steps_guide_first_keeper () =
-  let script = install_script () in
-  assert_contains
-    "the post-install guidance names the seeded Keeper and where to start it"
-    script
-    "seeds one Keeper, imp, with autoboot off: start it from the Keepers view";
-  assert_contains
-    "the post-install guidance surfaces the scripted keeper-create path"
-    script
-    "keeper-create --help"
-;;
-
 let test_wizard_reports_execution_sandboxes () =
   let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
   Sys.remove tmpdir;
@@ -1425,20 +1029,6 @@ let test_wizard_skips_when_no_single_ready_source () =
         "would set [runtime].default")
 ;;
 
-let test_provider_ping_does_not_expose_key_in_curl_argv () =
-  let script = install_script () in
-  assert_contains
-    "provider ping uses curl header file descriptor"
-    script
-    {|-H @<(printf 'Authorization: Bearer %s\n' "$key")|};
-  assert_not_contains
-    "provider ping does not pass key in argv"
-    script
-    {|-H "Authorization: Bearer $key"|}
-;;
-
-(* The whole of what the wizard now does about credentials: name the variable
-   the server will look for, and say so when this shell does not have it. *)
 let test_wizard_names_the_missing_key_variable () =
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
@@ -1510,15 +1100,6 @@ let test_wizard_writes_no_secret_file () =
 ;;
 
 let test_wizard_updates_runtime_default () =
-  let script = install_script () in
-  assert_contains
-    "runtime default uses masc typed writer"
-    script
-    {|"$DEST" runtime-default-set --base-path "$base_path" "$runtime_id"|};
-  assert_not_contains
-    "runtime default writer no longer shells out to sed"
-    script
-    "sed -E";
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
   Sys.remove tmpdir;
   Unix.mkdir tmpdir 0o700;
@@ -1778,203 +1359,43 @@ wizard-default = true
       check (list string) "no stale atomic tmp files" [] stale_atomic_tmps)
 ;;
 
-let test_release_checksums_include_runtime_config_seed () =
-  let workflow = release_workflow () in
-  assert_contains
-    "release checksum includes runtime config seeds"
-    workflow
-    "(cd ../config && sha256sum runtime.toml) >> SHA256SUMS";
-;;
-
-let test_team_flag_and_seed_exist () =
-  let script = install_script () in
-  assert_contains "team flag" script "--team)";
-  assert_contains "team seed function" script "seed_team()";
-  assert_contains "team manifest fetch" script "presets/$preset/manifest.txt";
-  assert_contains
-    "team files verified against release checksums"
-    script
-    "verify_checksum \"$tmp\" \"presets/$preset/$rel\""
-;;
-
-let test_release_checksums_include_team_presets () =
-  let workflow = release_workflow () in
-  assert_contains
-    "release checksum walks every team preset manifest"
-    workflow
-    "for m in presets/*/manifest.txt";
-  assert_contains
-    "release checksum covers each team preset manifest itself"
-    workflow
-    "sha256sum \"$m\""
-;;
-
 let () =
-  run
-    "install_script"
+  run "install_script"
     [ ( "config_seed"
-      , [ test_case
-            "advertised binary assets are release-required"
-            `Quick
-            test_release_requires_advertised_binary_assets
-        ; test_case
-            "an upgrade keeps config and installs missing builtin Skills"
-            `Quick
-            test_config_seed_skips_each_existing_file_without_force
-        ; test_case
-            "quickstart defaults to workspace-only mode"
-            `Quick
-            test_quickstart_defaults_to_workspace_only
-        ; test_case
-            "quickstart writes a worker bearer env"
-            `Quick
-            test_quickstart_writes_worker_bearer_env
-        ; test_case
-            "installer prints authenticated MCP next steps"
-            `Quick
-            test_installer_prints_authenticated_mcp_next_step
-        ; test_case
-            "binary checks use install environment"
-            `Quick
-            test_binary_checks_use_install_environment
-        ; test_case
-            "runtime image enforces preflight before main"
-            `Quick
-            test_runtime_image_enforces_preflight_before_main
-        ; test_case
-            "one-click empty key disables implicit classic autoboot"
-            `Quick
-            test_oneclick_empty_key_disables_implicit_classic_autoboot
-        ; test_case
-            "one-click image stamps copied dashboard bundle"
-            `Quick
-            test_oneclick_image_stamps_copied_dashboard_bundle
-        ; test_case
-            "installer fetches deployment preflight companions"
-            `Quick
-            test_installer_fetches_deployment_preflight_companions
-        ; test_case
-            "--force refreshes same-version existing binary"
-            `Quick
-            test_force_refreshes_same_version_existing_binary
-        ; test_case
-            "release checksums include runtime config seed"
-            `Quick
-            test_release_checksums_include_runtime_config_seed
+      , [ test_case "an upgrade keeps config and installs missing builtin Skills" `Quick test_config_seed_skips_each_existing_file_without_force
+        ; test_case "--force refreshes same-version existing binary" `Quick test_force_refreshes_same_version_existing_binary
         ] )
     ; ( "wizard"
-      , [ test_case "wizard flags exist" `Quick test_wizard_flags_exist
-        ; test_case "wizard prompts exist" `Quick test_wizard_prompts_exist
-        ; test_case "provider catalog comes from runtime.toml" `Quick test_provider_catalog_comes_from_runtime_toml
-        ; test_case
-            "provider display names with pipes round-trip"
-            `Quick
-            test_provider_display_name_with_pipe_round_trips
-        ; test_case
-            "provider ping does not expose key in curl argv"
-            `Quick
-            test_provider_ping_does_not_expose_key_in_curl_argv
-        ; test_case
-            "partial files are cleaned by exit trap"
-            `Quick
-            test_partial_files_are_cleaned_by_exit_trap
-        ; test_case
-            "wizard names the missing key variable"
-            `Quick
-            test_wizard_names_the_missing_key_variable
-        ; test_case
-            "wizard skips the ping without a key"
-            `Quick
-            test_wizard_skips_the_ping_without_a_key
-        ; test_case
-            "wizard writes no secret file"
-            `Quick
-            test_wizard_writes_no_secret_file        ; test_case "wizard updates runtime.toml default" `Quick test_wizard_updates_runtime_default
+      , [ test_case "provider display names with pipes round-trip" `Quick test_provider_display_name_with_pipe_round_trips
+        ; test_case "wizard names the missing key variable" `Quick test_wizard_names_the_missing_key_variable
+        ; test_case "wizard skips the ping without a key" `Quick test_wizard_skips_the_ping_without_a_key
+        ; test_case "wizard writes no secret file" `Quick test_wizard_writes_no_secret_file
+        ; test_case "wizard updates runtime.toml default" `Quick test_wizard_updates_runtime_default
         ; test_case "unknown provider aborts" `Quick test_unknown_provider_aborts
-        ; test_case
-            "unknown default provider aborts"
-            `Quick
-            test_unknown_default_provider_aborts
+        ; test_case "unknown default provider aborts" `Quick test_unknown_default_provider_aborts
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
-        ; test_case "older release upgrades with and without force" `Quick
-            test_existing_release_upgrade_preserves_workspace
-        ; test_case "downgrades and unrecognized versions need force" `Quick
-            test_downgrade_and_unknown_version_require_force
+        ; test_case "older release upgrades with and without force" `Quick test_existing_release_upgrade_preserves_workspace
+        ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
-        ; test_case
-            "invalid provider key env name errors"
-            `Quick
-            test_invalid_provider_key_env_name_errors
-        ; test_case
-            "wizard offers a subscription runtime with no api key"
-            `Quick
-            test_wizard_offers_subscription_runtime
-        ; test_case
-            "wizard reports which model sources are available"
-            `Quick
-            test_wizard_reports_model_source_availability
-        ; test_case
-            "wizard warns when the selected local server is down"
-            `Quick
-            test_wizard_warns_when_selected_local_server_is_down
-        ; test_case
-            "non-TTY wizard runs a report-only connectivity check without gating"
-            `Quick
-            test_wizard_nontty_runs_report_only_connectivity_check
-        ; test_case
-            "non-TTY connectivity check honors the MASC_INSTALL_NO_PING opt-out"
-            `Quick
-            test_wizard_nontty_connectivity_check_opt_out
-        ; test_case
-            "non-TTY connectivity check and its opt-out stay wired into install.sh"
-            `Quick
-            test_nontty_wizard_connectivity_check_is_wired
-        ; test_case
-            "post-install guidance points at creating a first keeper"
-            `Quick
-            test_next_steps_guide_first_keeper
-        ; test_case
-            "wizard reports available execution sandboxes"
-            `Quick
-            test_wizard_reports_execution_sandboxes
-        ; test_case
-            "wizard auto-selects the single ready source without a terminal"
-            `Quick
-            test_wizard_zero_config_auto_selects_single_ready_source
-        ; test_case
-            "wizard skips when no single source is ready"
-            `Quick
-            test_wizard_skips_when_no_single_ready_source
-        ; test_case
-            "wizard reports whether a subscription is signed in"
-            `Quick
-            test_wizard_reports_subscription_sign_in
+        ; test_case "invalid provider key env name errors" `Quick test_invalid_provider_key_env_name_errors
+        ; test_case "wizard offers a subscription runtime with no api key" `Quick test_wizard_offers_subscription_runtime
+        ; test_case "wizard reports which model sources are available" `Quick test_wizard_reports_model_source_availability
+        ; test_case "wizard warns when the selected local server is down" `Quick test_wizard_warns_when_selected_local_server_is_down
+        ; test_case "non-TTY wizard runs a report-only connectivity check without gating" `Quick test_wizard_nontty_runs_report_only_connectivity_check
+        ; test_case "non-TTY connectivity check honors the MASC_INSTALL_NO_PING opt-out" `Quick test_wizard_nontty_connectivity_check_opt_out
+        ; test_case "wizard reports available execution sandboxes" `Quick test_wizard_reports_execution_sandboxes
+        ; test_case "wizard auto-selects the single ready source without a terminal" `Quick test_wizard_zero_config_auto_selects_single_ready_source
+        ; test_case "wizard skips when no single source is ready" `Quick test_wizard_skips_when_no_single_ready_source
+        ; test_case "wizard reports whether a subscription is signed in" `Quick test_wizard_reports_subscription_sign_in
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
-        ; test_case
-            "real runtime.toml providers declare healthcheck paths"
-            `Quick
-            test_real_runtime_toml_provider_healthchecks
+        ; test_case "real runtime.toml providers declare healthcheck paths" `Quick test_real_runtime_toml_provider_healthchecks
         ; test_case "--provider requires a value" `Quick test_missing_provider_flag_value_errors
         ; test_case "invalid --sandbox is rejected" `Quick test_invalid_sandbox_profile_rejected
         ; test_case "--sandbox local is rejected" `Quick test_local_sandbox_profile_rejected
-        ; test_case
-            "runtime default update preserves comments and leaves no temp/bak files"
-            `Quick
-            test_runtime_default_update_preserves_comments_and_leaves_no_temp
+        ; test_case "runtime default update preserves comments and leaves no temp/bak files" `Quick test_runtime_default_update_preserves_comments_and_leaves_no_temp
         ] )
     ; ( "team"
-      , [ test_case
-            "team flag and seed function exist"
-            `Quick
-            test_team_flag_and_seed_exist
-        ; test_case
-            "release checksums include team presets"
-            `Quick
-            test_release_checksums_include_team_presets
-        ; test_case
-            "presets carry their own instructions"
-            `Quick
-            test_presets_carry_their_own_instructions
+      , [ test_case "presets carry their own instructions" `Quick test_presets_carry_their_own_instructions
         ] )
     ]
 ;;

@@ -89,7 +89,7 @@ let encode_bounded ~max_bytes json =
   | Stack_overflow -> Error "sampling evidence nesting exceeds encoder capacity"
   | Yojson.Json_error _ | Invalid_argument _ -> Error "sampling evidence cannot be serialized"
 
-let package_response (answer : S.create_message_result) = answer
+let package_response (answer : S.create_message_result) = { answer with _meta = None }
 
 let bound_refusal ~max_bytes message =
   let json_len s = String.length (Yojson.Safe.to_string (`String s)) in
@@ -208,12 +208,8 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     match outcome with
     | Answer answer ->
         let answer = package_response answer in
-        let metadata = match answer._meta with
-          | Some (`Assoc fields) -> List.filter (fun (key, _) ->
-              key = "masc.lane_provider" || key = "masc.lane_host") fields
-          | Some _ | None -> [] in
         let response = {answer with _meta=Some (`Assoc
-          (("masc.lane_sampling",references) :: List.remove_assoc "masc.lane_sampling" metadata))} in
+          ["masc.lane_sampling", references])} in
         let* () = Eio_unix.run_in_systhread (fun () ->
           encode_bounded ~max_bytes:package.resources.max_reply_bytes
             (S.create_message_result_to_yojson response) |> Result.map (fun _ -> ()))

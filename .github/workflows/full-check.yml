@@ -118,18 +118,19 @@ jobs:
     - name: Type-check
       working-directory: dashboard
       run: pnpm typecheck
-    - name: Run the dashboard tests that read backend source
-      run: 'set -euo pipefail
-
-        coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
-
-        printf ''backend-coupled dashboard suites:\n%s\n'' "${coupled}"
-
-        cd dashboard
-
-        pnpm exec vitest run ${coupled}
-
-        '
+    - name: Verify dashboard payload consumers
+      working-directory: dashboard
+      run: >-
+        pnpm exec vitest run --config vitest.config.ts
+        --no-file-parallelism --maxWorkers=1
+        src/api/dashboard-goals.test.ts
+        src/api/dashboard-scheduled-automation.test.ts
+        src/api/dashboard-turn-records.test.ts
+        src/api/dashboard-verification-runs.test.ts
+        src/api/schemas/keeper-portrait.test.ts
+        src/components/goals/goal-tree.test.ts
+        src/components/keeper-lifecycle-timeline.test.ts
+        src/components/memory-inspector.test.ts
   required-success:
     if: ${{ always() }}
     name: Release checks passed

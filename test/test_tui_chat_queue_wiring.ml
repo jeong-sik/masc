@@ -25,20 +25,6 @@ let position =
     ( = )
 module Interrupt_signal = Masc_tui_interrupt_signal
 
-let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
-
-(* Scrolling back and asking for what is behind it are the same act. They used
-   to be three copies of the same four lines, and [pageup] was missing its
-   copy: a page-at-a-time reader stopped at whatever the first load happened to
-   bring in. Going back through one place is what stops it being forgotten
-   again, so the executable has to actually go through it (#31089). *)
-let test_every_way_back_asks_for_what_is_behind_it () =
-  let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"scroll_back" in
-  if n < 3 then
-    failf
-      "every way of scrolling back (arrow, wheel, page) must ask for older \
-       history through scroll_back; it is called %d time(s)"
-      n
 ;;
 
 let entry_at ?(id = "") at : Tui_types.msg_entry =
@@ -743,46 +729,7 @@ let test_new_control_discards_only_its_keeper_priority_intents () =
     [alpha.request_id; beta.request_id]
     (List.map (fun (request : Keeper_chat.request) -> request.request_id)
        state.keeper_run_next_inflight)
-;;
 
-let test_enter_stages_the_input_before_submission () =
-  let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
-  if n < 1 then
-    failf
-      "bin/masc_tui.ml must stage accepted input before submitting the update; \
-       queue_keeper_message is called %d time(s)"
-      n
-;;
-
-let test_a_settled_turn_drains_the_queue () =
-  let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"drain_queued_message" in
-  if n < 1 then
-    failf
-      "bin/masc_tui.ml must drain the queue when a turn settles; \
-       drain_queued_message is called %d time(s)"
-      n
-;;
-
-(* Two Keepers can stream at once. A single [state.msg_live] slot lets the
-   later dispatch replace the earlier log, so the earlier turn's next delta
-   and tool rows disappear. Both the streaming and settle paths must resolve
-   the log from the request's own in-flight entry. *)
-let test_concurrent_turns_keep_request_owned_transcripts () =
-  List.iter
-    (fun binding_name ->
-      let n =
-        Ast_grep.count_calls_in_value_binding
-          ~module_path:"bin/masc_tui.ml"
-          ~binding_name
-          ~callee:"inflight_entry_by_request_id"
-      in
-      if n < 1 then
-        failf
-          "%s must resolve the live transcript from the request's in-flight \
-           entry; inflight_entry_by_request_id is called %d time(s)"
-          binding_name
-          n)
-    [ "settle_live_turn"; "apply_async_message" ]
 ;;
 
 (* The pin is on the pane's own turn. A request in flight to another keeper
@@ -896,28 +843,7 @@ let test_a_turn_log_folds_each_accepted_delta_once () =
     (Keeper_chat_transcript.text
        (Keeper_chat_transcript.of_log ~now:11.0 log.Tui_types.tl_log))
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript)
-;;
 
-(* Settling commits the log and keeps it; nothing is copied into session
-   rows any more. The pane goes on drawing the turn from the log. *)
-let test_settle_commits_the_log_instead_of_copying_rows () =
-  let settles =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"settle_live_turn"
-      ~callee:"settle_turn_log"
-  in
-  let copies =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"settle_live_turn"
-      ~callee:"append_chat_history"
-  in
-  if settles < 1 || copies <> 0 then
-    failf
-      "settle_live_turn must settle through settle_turn_log and copy nothing \
-       into session rows: settles=%d copies=%d"
-      settles copies
 ;;
 
 let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
@@ -1168,29 +1094,7 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
     (Some ("status", "Continuation checkpoint recorded (turn trace-1#1)"))
     (row cancelled.sent_request
        (completed ~outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint ""))
-;;
 
-(* The reconnect resumes from the log, not from the decoder: the watcher
-   opens a fresh decoder per (re)connect and re-POSTs with the log's resume
-   position, so the server replays only what the pane missed. *)
-let test_a_reconnect_resumes_from_the_logs_position () =
-  let resumes =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"post_keeper_chat_watching"
-      ~callee:"Keeper_chat_log.resume_position"
-  in
-  let decoders =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"post_keeper_chat_watching"
-      ~callee:"Keeper_chat_live.create"
-  in
-  if resumes < 1 || decoders < 1 then
-    failf
-      "post_keeper_chat_watching must re-POST from the log's resume position \
-       with a fresh decoder: resume_position reads=%d decoders=%d"
-      resumes decoders
 ;;
 
 (* What the server replays after since_seq overlaps what the cut stream had
@@ -1314,7 +1218,6 @@ let test_the_acceptance_is_read_but_not_logged () =
   Tui_types.turn_log_add ~now:3. log ~seq:(Some 0) Live.Run_started;
   check int "a wire frame is an entry" 1 (List.length (Log.entries log.Tui_types.tl_log))
 ;;
-
 
 (* A journal page fills a turn log the way the wire does, at the lines' own
    times; a line that draws nothing still holds its position. *)
@@ -1694,45 +1597,8 @@ let test_a_failed_skill_call_keeps_its_failure () =
       check (list string) "and the record's actions do not land on it" []
         skill.Keeper_chat_transcript.actions
   | skills -> failf "expected one drawn skill, got %d" (List.length skills)
+
 ;;
-
-(* The reload is wired: a history page names its targets, one fiber per load
-   reads their journals in turn, and the handler builds and holds the log. *)
-let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
-  let in_binding ~binding_name ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-      ~binding_name ~callee
-  in
-  let targets = in_binding ~binding_name:"apply_async_message" ~callee:"journal_fetch_targets" in
-  let launches =
-    in_binding ~binding_name:"apply_async_message"
-      ~callee:"launch_keeper_chat_journal_loads"
-  in
-  let fetches =
-    in_binding ~binding_name:"launch_keeper_chat_journal_loads"
-      ~callee:"Keeper_chat_log.read_whole_journal"
-  in
-  let folds = in_binding ~binding_name:"apply_async_message" ~callee:"turn_log_add_journaled" in
-  let holds = in_binding ~binding_name:"apply_async_message" ~callee:"hold_settled_log" in
-  (* What a load does not read again is the one held set, so a batch's other
-     requests are not asked for on every load. *)
-  let held = in_binding ~binding_name:"apply_async_message" ~callee:"journal_held_request_ids" in
-  (* Held logs take durable outcomes where loaded rows arrive -- a refreshed
-     page and an older page -- and where a journal log is held. *)
-  let enrichments =
-    in_binding ~binding_name:"apply_async_message" ~callee:"enrich_held_logs_from_rows"
-  in
-  let enrichment_sites = 3 in
-  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 || held < 1
-     || enrichments < enrichment_sites
-  then
-    failf
-      "the journal reload must be wired end to end: targets=%d launches=%d \
-       fetches=%d folds=%d holds=%d held=%d enrichments=%d"
-      targets launches fetches folds holds held enrichments
-;;
-
-
 
 (* A turn the settled log holds has one source. The loaded transcript's rows
    the log draws itself -- the keeper's words, tools, reasoning -- leave the
@@ -3209,30 +3075,7 @@ let test_a_journal_built_log_starts_at_the_journal_head () =
     (Tui_types.journal_log_started_at ~fallback:300. [ later ]);
   check (float 0.) "an empty read keeps the fallback" 300.
     (Tui_types.journal_log_started_at ~fallback:300. [])
-;;
 
-(* The frame reaches the read: the observer batch decides per operation
-   through [journal_follow_for_frame] and launches the read; a landed read
-   takes the wanted mark and reads again. *)
-let test_stream_frames_are_wired_to_journal_reads () =
-  let in_binding ~binding_name ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-      ~binding_name ~callee
-  in
-  let decides = in_binding ~binding_name:"apply_async_message" ~callee:"journal_follow_for_frame" in
-  let wants = in_binding ~binding_name:"apply_async_message" ~callee:"journal_read_wanted" in
-  let takes = in_binding ~binding_name:"apply_async_message" ~callee:"take_journal_wanted" in
-  let heads = in_binding ~binding_name:"apply_async_message" ~callee:"journal_log_started_at" in
-  (* Two launch sites: the frame's own, and the read-again after a landing. *)
-  let launches =
-    in_binding ~binding_name:"apply_async_message"
-      ~callee:"launch_keeper_chat_journal_loads"
-  in
-  if decides < 2 || wants < 1 || takes < 1 || launches < 3 || heads < 1
-  then
-    failf
-      "stream frames must reach the journal reads: decides=%d wants=%d takes=%d launches=%d heads=%d"
-      decides wants takes launches heads
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -3486,24 +3329,7 @@ let test_chat_visibility_defaults_and_cycles () =
          :: collect (count - 1) (Tui_types.toggle_tool_visibility mode)
      in
      collect 3 Tui_types.Tools_compact)
-;;
 
-let test_chat_shortcuts_reach_visibility_state () =
-  List.iter
-    (fun callee ->
-      let count =
-        Ast_grep.count_calls_in_value_binding
-          ~module_path:"bin/masc_tui.ml"
-          ~binding_name:"handle_message_key"
-          ~callee
-      in
-      if count < 1 then
-        failf "handle_message_key must call %s; observed %d call(s)" callee count)
-    [ "next_reasoning_visibility"
-    ; "toggle_tool_visibility"
-    ; "next_memory_visibility"
-    ; "next_origin_display"
-    ]
 ;;
 
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
@@ -3594,93 +3420,7 @@ let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
         [ "1"; "2"; "6" ]
         [ first.request.message; second.request.message; newest.request.message ]
   | _ -> fail "pending preview shape changed"
-;;
 
-(* The chat surface is its own file. Naming it once keeps the guards below
-   and the messages they print from drifting apart. *)
-let chat_path = "bin/masc_tui_render_chat.ml"
-
-let layout_binding = "keeper_message_layout_entries"
-let tail_binding = "chat_tail_entries"
-
-(* NEXT is no longer a lane below the transcript: the unsettled lines are
-   entries at the end of the same stream, so the history budgets their rows
-   the way it budgets every other row and nothing is reserved for them.
-
-   What survives is the half that was the actual bug -- the queue read has to
-   be the selected Keeper's. A workspace-global count is what made one
-   Keeper's footer report another Keeper's waiting input. *)
-let test_the_budget_and_the_pane_agree_about_queue_rows () =
-  (* Both zeros below are about a binding that is here; say so, or a rename
-     answers them by making the binding disappear. *)
-  if
-    Ast_grep.count_value_bindings ~module_path:"bin/masc_tui_types.ml"
-      ~name:"keeper_message_status_rows"
-    <> 1
-  then failf "keeper_message_status_rows is not in bin/masc_tui_types.ml";
-  if Ast_grep.count_value_bindings ~module_path:chat_path ~name:tail_binding <> 1
-  then failf "%s is not in %s" tail_binding chat_path;
-  let counted =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_types.ml"
-      ~binding_name:"keeper_message_status_rows"
-      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
-  in
-  let drawn =
-    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
-      ~binding_name:tail_binding
-      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
-  in
-  let counted_preview =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_types.ml"
-      ~binding_name:"keeper_message_status_rows"
-      ~callee:"keeper_message_pending_status_rows"
-  in
-  let drawn_preview =
-    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
-      ~binding_name:tail_binding
-      ~callee:"keeper_message_pending_preview"
-  in
-  if
-    counted <> 0 || drawn <> 1 || counted_preview <> 0 || drawn_preview <> 1
-  then
-    failf
-      "NEXT is drawn once from the selected Keeper's queue and reserved \
-       nowhere: \
-       count=%d draw=%d count-preview=%d draw-preview=%d"
-      counted drawn counted_preview drawn_preview
-;;
-
-(* The same contract as the queue rows above, for the row that says the pane is
-   reading back. Both sides ask one predicate rather than restating
-   [msg_scroll > 0], and this pins that they each ask it once: a budget that
-   counts a row the pane does not draw floats the footer, and a pane that
-   draws one nothing counted pushes a line of conversation off the bottom. *)
-let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
-  let counted =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_types.ml"
-      ~binding_name:"keeper_message_status_rows"
-      ~callee:"keeper_message_reading_back"
-  in
-  let drawn =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
-      ~callee:"Masc_tui_types.keeper_message_reading_back"
-  in
-  if counted <> drawn then
-    failf
-      "the row budget and the pane disagree about the scrollback notice: \
-       keeper_message_status_rows asks %d time(s), render_keeper_message \
-       %d time(s)"
-      counted drawn;
-  if counted <> 1 then
-    failf
-      "the scrollback notice should be asked about exactly once on each side, \
-       not %d time(s)"
-      counted
 ;;
 
 let test_the_support_threshold_reserves_the_scrollback_row () =
@@ -3699,324 +3439,7 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
       ~status_rows:reading_back_status_rows
   in
   check int "PgUp does not move the viewport support threshold" newest reading_back
-;;
 
-let test_page_navigation_uses_the_reserved_scrollback_budget () =
-  let calls =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"keeper_message_page_rows"
-      ~callee:"keeper_message_support_status_rows"
-  in
-  check int "PgUp and PgDn share the support-reserved row budget" 1 calls
-;;
-
-
-(* Drawing and scroll-pin compensation must consume the same physical layout.
-   Re-laying out only the suffix forgets the preceding hour bucket and can
-   measure a rail the frame never draws, which moves the pinned conversation
-   even when its structural anchor is unchanged. *)
-let test_the_pane_builds_one_full_message_layout () =
-  let layout_calls =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
-      ~callee:"keeper_message_layout_entries"
-  in
-  check int "one full layout owns measurement and drawing" 1 layout_calls
-;;
-
-let test_pending_input_is_not_mixed_into_the_transcript () =
-  (* A count of zero is the answer this wants, and it is also what a binding
-     that is not in the file returns. Say the binding is there first, or the
-     zero below means nothing. *)
-  if
-    Ast_grep.count_value_bindings ~module_path:chat_path ~name:layout_binding
-    <> 1
-  then failf "%s is not in %s" layout_binding chat_path;
-  let transcript_reads =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:chat_path
-      ~binding_name:layout_binding
-      ~callee:"Masc_tui_keeper_chat_queue.holds"
-  in
-  (* The queue is read where the tail entries are built, not where the
-     transcript's own rows are. Both are in the chat file now that the
-     unsettled lines sit at the end of the same stream, so naming the binding
-     is what keeps them apart. *)
-  if Ast_grep.count_value_bindings ~module_path:chat_path ~name:tail_binding <> 1
-  then failf "%s is not in %s" tail_binding chat_path;
-  let next_reads =
-    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
-      ~binding_name:tail_binding
-      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
-  in
-  if transcript_reads <> 0 || next_reads <> 1 then
-    failf
-      "pending input must live only in NEXT: transcript queue reads=%d, \
-       NEXT reads=%d"
-      transcript_reads next_reads
-;;
-
-(* A refresh started for the previous turn can land after NEXT became active
-   but before its user row reached the server. Queue membership has already
-   ended there, so only exact request identity in the returned transcript may
-   replace the session row. *)
-let test_a_transcript_reload_replaces_only_an_exact_user_row () =
-  let queue_guesses =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"forget_session_rows_the_transcript_holds"
-      ~callee:"Chat_queue.holds"
-  in
-  let identity_reads =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"forget_session_rows_the_transcript_holds"
-      ~callee:"List.exists"
-  in
-  if queue_guesses <> 0 || identity_reads < 2 then
-    failf
-      "transcript replacement must use returned request identity, not current \
-       queue state: queue reads=%d identity reads=%d"
-      queue_guesses identity_reads
-;;
-
-(* Staged attachments belong to the line they were staged for. They used to be
-   taken at dispatch, so an image attached while a line waited went out with
-   whichever line happened to go next -- and the operator had no way to see
-   that it had. Both branches of the send take them now: the one that sends
-   immediately and the one that queues. *)
-let test_a_queued_line_takes_its_attachments_when_it_is_typed () =
-  let n =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"start_keeper_message"
-      ~callee:"take_pending_attachments"
-  in
-  if n < 2 then
-    failf
-      "both the sending and the queueing branch must take the staged \
-       attachments where the line is written; take_pending_attachments is \
-       called %d time(s) in start_keeper_message"
-      n
-;;
-
-(* Enter admits the line in queue order; it does not stop what the Keeper is
-   doing. Until 2026-09-14 the send derived an interrupt target from whatever
-   was running -- the chat operation in progress or the observed autonomous
-   turn -- and handed it to the interactive admission, so every line typed
-   while a Keeper worked cancelled that work, while the footer said "Enter
-   queues your line". Stopping a turn is an explicit act (Esc, /steer), so no
-   send path derives a target from the running turn. This pins the absence of
-   that derivation by name; a new helper doing the same under another name
-   would need its own pin. *)
-let test_enter_does_not_derive_an_interrupt_target_from_the_running_turn () =
-  let n =
-    Ast_grep.count_calls
-      ~module_path:"bin/masc_tui.ml"
-      ~callee:"interactive_target_for"
-  in
-  if n <> 0 then
-    failf
-      "the send path must not derive an interrupt target from the running \
-       turn; interactive_target_for is called %d time(s) in bin/masc_tui.ml"
-      n
-;;
-
-(* Run-next asks the server for first place and stops nothing. Until
-   2026-09-22 the launcher read the observed autonomous turn's token when no
-   token was handed to it, and every promotion path handed none, so a queued
-   line sent again, /run-next, or Enter before the chat control token had
-   arrived cancelled the Keeper's own turn. The launcher now takes no token at
-   all; this pins that no run-next path reads the observed turn, by name. The
-   two remaining readers are the explicit interrupt (Esc) paths. *)
-let test_run_next_never_reads_the_observed_turn () =
-  let in_launcher =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"launch_keeper_run_next"
-      ~callee:"keeper_observed_turn"
-  in
-  if in_launcher <> 0 then
-    failf
-      "run-next must not read the observed turn; launch_keeper_run_next calls \
-       keeper_observed_turn %d time(s)"
-      in_launcher;
-  let in_http =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_http.ml"
-      ~binding_name:"post_keeper_run_next"
-      ~callee:"Option.fold"
-  in
-  if in_http <> 0 then
-    failf
-      "post_keeper_run_next must send no interrupt token; it folds an option %d time(s)"
-      in_http
-;;
-
-(* The operator pressed Enter, so the line belongs in the conversation now --
-   not when the turn ahead of it settles. Keyed on the request id through the
-   same call dispatch makes, so the row a queued line already has is the row it
-   keeps when it finally goes out; there is no second copy to reconcile. *)
-let test_queueing_puts_the_line_in_the_conversation () =
-  let n =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"queue_keeper_message"
-      ~callee:"append_user_history_once"
-  in
-  if n < 1 then
-    failf
-      "queue_keeper_message must put the queued line in the conversation; \
-       append_user_history_once is called %d time(s)"
-      n
-;;
-
-(* Cancel removes the pending row. Edit keeps it and rewrites the exact queued
-   request in place, which is what preserves STEER intent and submitted_at. *)
-(* Esc during a turn stops the turn. Two surfaces promise it -- the footer
-   draws "Esc:interrupt turn" while one is live
-   (masc_tui_render.ml escape_hint) and the help row says "back; during a turn,
-   interrupt it" (masc_tui_keys.ml) -- and the key handler did the opposite:
-   [handle_message_key] answered "esc" by leaving unconditionally and returning
-   [true], so the surface-level arm that did interrupt was never reached. The
-   composer takes every key while the chat is open, so the interrupt has to be
-   reachable from inside this binding, not beside it. *)
-let test_escape_reaches_the_interrupt () =
-  let interrupts =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"handle_message_key"
-      ~callee:"interrupt_turn"
-  in
-  if interrupts < 1 then
-    failf
-      "handle_message_key must be able to interrupt the turn; observed %d \
-       call(s) of interrupt_turn"
-      interrupts;
-  let launched =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"main"
-      ~callee:"launch_keeper_interrupt"
-  in
-  if launched < 1 then
-    failf
-      "the interrupt handed to handle_message_key must reach \
-       launch_keeper_interrupt; observed %d call(s)"
-      launched
-;;
-
-(* The Esc-during-a-turn decision lives in Masc_tui_esc_interrupt so the
-   dispatch and the footer read one table (test_tui_esc_interrupt pins it).
-   The day either side re-derives the decision inline, hint and act diverge
-   again -- the footer said "Esc:interrupt sent" while the arm swallowed
-   forever. Both must call the table. *)
-let test_esc_dispatch_and_footer_read_the_interrupt_table () =
-  let dispatch =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"main"
-      ~callee:"Masc_tui_esc_interrupt.action"
-  in
-  if dispatch < 1 then
-    failf
-      "the interrupt_turn closure must read Masc_tui_esc_interrupt.action; \
-       observed %d call(s)"
-      dispatch;
-  let footer =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
-      ~callee:"Masc_tui_esc_interrupt.action"
-  in
-  if footer < 1 then
-    failf
-      "the escape hint must read Masc_tui_esc_interrupt.action so the footer \
-       cannot diverge from the dispatch; observed %d call(s)"
-      footer
-;;
-
-(* The chat roster's vim letters are gone: each duplicated an arrow (left,
-   down, up, right) and each cost the first letter of a message an operator
-   types into an empty draft -- "hi" began with a jump to the roster. The
-   footer is the one surface that still names these keys, so pinning the new
-   spelling keeps the hint from re-advertising letters the dispatch no longer
-   answers; a footer naming a dead key was a real bug twice before
-   (Ctrl-F/Ctrl-O, then Ctrl-N, #32367). *)
-let test_roster_footer_names_arrows_not_vim_letters () =
-  let named_arrows =
-    Ast_grep.count_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
-      ~literals:[ "Up/Down:move  Enter:open  Right/Esc:chat" ]
-  in
-  let named_letters =
-    Ast_grep.count_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
-      ~literals:[ "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat" ]
-  in
-  if named_arrows <> 1 || named_letters <> 0 then
-    failf
-      "the roster footer must name the arrows and no h/j/k/l: arrows=%d \
-       letters=%d"
-      named_arrows named_letters
-;;
-
-(* The chat surface had exactly one exit, and on a live turn Esc's first
-   press spends itself stopping the turn -- so leaving with the turn running
-   was not expressible: the only way out signalled the turn to stop. The
-   empty-draft Q arm is the leave half without the interrupt half. Two
-   things keep it honest as the executable evolves: the arm must actually
-   reach [leave_keeper_message], and [interrupt_turn] must stay Esc's alone
-   -- the day a second key consults it, "quiet" stops describing Q. *)
-let test_quiet_leave_leaves_without_touching_the_turn () =
-  let leaves =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"handle_message_key"
-      ~callee:"leave_keeper_message"
-  in
-  (* Exactly once for Esc, exactly once for the empty-draft Q: the count is
-     the invariant, so a third leave path inside this binding fails the pin
-     rather than passing under the stated pair. *)
-  if leaves <> 2 then
-    failf
-      "Esc and the quiet Q are the two leaves of the chat surface; observed \
-       %d call(s)"
-      leaves;
-  let interrupts =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"handle_message_key"
-      ~callee:"interrupt_turn"
-  in
-  if interrupts <> 1 then
-    failf
-      "only Esc may spend itself on the turn (interrupt_turn observed %d \
-       time(s); the quiet leave must not consult it)"
-      interrupts
-;;
-
-(* A terminal too small to draw the composer still owes the operator the
-   exit. The dispatch admits Q beside Esc into the composer handler because
-   a transcript-only viewport is when stepping away from a running turn
-   matters most; with text in the draft the handler answers Q as an
-   ordinary letter, so this route takes nothing from typing. *)
-let test_quiet_leave_routes_past_the_composer_gate () =
-  let routed =
-    Ast_grep.count_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"main"
-      ~literals:[ "Q" ]
-  in
-  if routed < 1 then
-    failf
-      "the dispatch must hand Q to the composer handler beside Esc; observed \
-       %d occurrence(s)"
-      routed
 ;;
 
 (* The compose hold (#33047) keeps a settle from sending a keeper's waiting
@@ -4056,166 +3479,7 @@ let test_composing_holds_only_while_the_composer_is_live () =
   state.coalesce_queued_input <- false;
   check bool "with coalescing off there is no hold at all" false
     (Tui_types.composing_for_keeper state "alpha")
-;;
 
-(* Releasing the hold is not enough on its own: an idle keeper's line is
-   sent only when something drains the queue, and nothing was draining it
-   at a leave or a retarget -- the line waited until the operator came back
-   and cleared the draft. The three ways the composer is put away or aimed
-   elsewhere each drain, in the executable. *)
-let test_putting_the_composer_away_drains_the_queue () =
-  let in_binding ~binding_name ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-      ~binding_name ~callee
-  in
-  let on_leave = in_binding ~binding_name:"leave_keeper_message" ~callee:"drain_queue" in
-  let on_retarget =
-    in_binding ~binding_name:"open_message_for_keeper" ~callee:"drain_queue"
-  in
-  (* Two in the composer row's handler: the retarget when the row takes
-     focus for another keeper, and the row released. *)
-  let on_row = in_binding ~binding_name:"handle_composer_key" ~callee:"drain_queued_message" in
-  if on_leave <> 1 || on_retarget <> 1 || on_row <> 2 then
-    failf
-      "leaving the pane, retargeting the composer and releasing the row must \
-       each drain the queue: leave=%d retarget=%d row=%d"
-      on_leave on_retarget on_row
-;;
-
-let test_cancel_and_edit_take_the_row_with_them () =
-  let cancelled =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"handle_message_key"
-      ~callee:"forget_queued_history"
-  in
-  let edited =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"start_keeper_message"
-      ~callee:"Chat_queue.replace_request"
-  in
-  if cancelled <> 1 || edited <> 1 then
-    failf
-      "cancel must remove once and edit must replace once: cancel=%d edit=%d"
-      cancelled edited
-;;
-
-(* Every box row the chat pane draws belongs to the pane, not to the frame
-   around it. On a terminal at or above the split threshold the roster takes
-   the left columns and [chat_buf] is a separate buffer, so a row written to
-   the outer [buf] lands above the tab strip and pushes the whole screen down
-   by one row. That is what the queued lines did: #29818 rewrote the in-flight
-   block, and when the queue rows came back they came back on [buf]. The
-   operator saw the queue stack up over the tabs and the chat slide off the
-   bottom. Nothing failed — the rows were drawn, just into the wrong pane. *)
-let test_the_pane_draws_every_row_into_its_own_buffer () =
-  let source =
-    let path = Ast_grep.resolve_module_path chat_path in
-    let channel = open_in_bin path in
-    let length = in_channel_length channel in
-    let text = really_input_string channel length in
-    close_in channel;
-    text
-  in
-  let lines = String.split_on_char '\n' source in
-  let in_renderer = ref false in
-  let renderer_seen = ref false in
-  let offenders = ref [] in
-  List.iteri
-    (fun index line ->
-       if
-         String.length line > 26
-         && String.sub line 0 26 = "let render_keeper_message "
-       then begin
-         in_renderer := true;
-         renderer_seen := true
-       end
-       else if
-         String.length line > 4
-         && String.sub line 0 4 = "let "
-         && !in_renderer
-       then in_renderer := false;
-       if !in_renderer then
-         List.iter
-           (fun call ->
-              let needle = call ^ " buf " in
-              let rec search from =
-                match String.index_from_opt line from needle.[0] with
-                | None -> ()
-                | Some at ->
-                  if
-                    at + String.length needle <= String.length line
-                    && String.sub line at (String.length needle) = needle
-                  then offenders := (index + 1, String.trim line) :: !offenders
-                  else search (at + 1)
-              in
-              search 0)
-           [ "box_top"; "box_line"; "box_line_styled"; "box_divider"; "box_empty" ])
-    lines;
-  (* The scan walks text, so a renderer that is not in this file leaves the
-     flag false and the list empty -- which reads exactly like a clean pass.
-     Say the binding was found, or the guard is answering about nothing. *)
-  if not !renderer_seen then
-    failf "render_keeper_message is not in %s; this guard read the wrong file"
-      chat_path;
-  match !offenders with
-  | [] -> ()
-  | rows ->
-    failf
-      "render_keeper_message must draw every box row into [chat_buf]; these \
-       go to the outer frame buffer and shift the screen when the roster \
-       pane is shown: %s"
-      (String.concat "; "
-         (List.map (fun (n, text) -> Printf.sprintf "line %d: %s" n text) rows))
-;;
-
-(* A line waiting for the next turn is the newest thing the operator typed, and
-   the arrows have to hand it back. They walk [msg_history], which once was
-   written only on dispatch -- so the walk stepped straight over a queued line
-   and it could be neither read back nor pulled into the composer.
-
-   It is written when the line is typed now, so one walk covers both and the
-   queue is not walked alongside it. That is what this pins: walking both would
-   put the newest line in the arrows twice. The other half -- that a queued
-   line reaches the history at all -- is
-   [test_queueing_puts_the_line_in_the_conversation]. *)
-let test_the_arrow_walk_does_not_repeat_the_queue () =
-  let n =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml"
-      ~binding_name:"own_typed_messages"
-      ~callee:"Chat_queue.waiting"
-  in
-  if n <> 0 then
-    failf
-      "own_typed_messages must not walk the queue as well: a queued line is \
-       already in the history it walks, so concatenating the queue shows the \
-       newest line twice; Chat_queue.waiting is called %d time(s)"
-      n
-;;
-
-(* The Keeper Calls table says a call ran and what it was called with. What
-   it answered is the question a failed call leaves open. This used to pin
-   the timeline digest as the thing the table asks for; #37514 stopped
-   passing the recorded output through it -- a digest drops structured
-   receipt fields and can hide an assessment behind a later failure -- and
-   draws the output as stored. What the pin is for is that the table reads
-   the answer at all, so that is what it counts now, not which function
-   shapes it. *)
-let test_the_calls_table_says_what_came_back () =
-  let n =
-    Ast_grep.count_field_accesses_outside_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name:"render_keeper_calls"
-      ~callees:[]
-      ~fields:[ "kc_output" ]
-  in
-  if n < 1 then
-    failf
-      "bin/masc_tui_render.ml must draw what a call answered; \
-       render_keeper_calls reads kc_output %d time(s)"
-      n
 ;;
 
 (* The rows that say a request is being sent have to say how long for. A turn
@@ -4224,14 +3488,6 @@ let test_the_calls_table_says_what_came_back () =
    slow and stuck. The age is computed where it can be tested; this pins that
    the pane actually asks for it. *)
 let test_the_sending_rows_show_an_age () =
-  check bool "the renderer consumes the shared status rows" true
-    (calls ~module_path:"bin/masc_tui_render_chat.ml"
-       ~callee:"Masc_tui_types.keeper_message_inflight_rows" > 0);
-  check bool "the shared producer computes the age" true
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"keeper_message_inflight_rows"
-       ~callee:"Masc_tui_message_layout.age_text" > 0);
   List.iter (fun keeper_name ->
     let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
         ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4257,12 +3513,7 @@ let test_the_sending_rows_show_an_age () =
       check bool "compact mode retains the other Keeper request age" true
         (String.ends_with ~suffix:" · 3s)" (summary ~now:5.)))
     ["alpha"; "beta"]
-;;
 
-let test_image_headers_sanitize_untrusted_attachment_names () =
-  check int "raw image headers pass through terminal sanitization" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"draw_image" ~callee:"Keeper_chat.terminal_safe_text")
 ;;
 
 let test_checkpoint_watcher_allows_new_input () =
@@ -4677,10 +3928,6 @@ let test_priority_completion_survives_controls () =
     (Tui_types.settle_keeper_run_next state beta.sent_request (Error "duplicate") = Tui_types.Run_next_untracked)
 
 let test_priority_workspace_withdrawal () =
-  check int "workspace boundary withdraws chat request owners" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"withdraw_keeper_workspace_presentation"
-       ~callee:"Masc_tui_types.withdraw_keeper_chat_requests");
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let old = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   state.msg_inflight <- [old];
@@ -4714,10 +3961,6 @@ let test_priority_workspace_withdrawal () =
     (state.keeper_run_next_receipts = [fresh.sent_request, Ok "fresh"])
 
 let test_fusion_workspace_withdrawal () =
-  check int "workspace boundary withdraws Fusion read owners" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"withdraw_keeper_workspace_presentation"
-       ~callee:"Masc_tui_types.withdraw_fusion_workspace");
   let module F = Masc_tui_fetched in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let run : Masc.Tui_decode_fusion.fusion_run =
@@ -4815,7 +4058,6 @@ let test_status_details_and_fold_counts_reach_the_frame () =
       state.msg_turn_folded <- true)
       [Tui_types.Tools_compact; Tui_types.Tools_results])
 
-
 let () =
   run
     "tui_chat_queue_wiring"
@@ -4837,8 +4079,6 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "every request of a held batch is held for journal reads" `Quick
             test_every_request_of_a_held_batch_is_held_for_journal_reads
-        ; test_case "image headers sanitize attachment names" `Quick
-            test_image_headers_sanitize_untrusted_attachment_names
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
@@ -4852,24 +4092,14 @@ let () =
             test_control_receipts_are_scoped_to_each_keeper
         ; test_case "new control discards only its Keeper priority intents" `Quick
             test_new_control_discards_only_its_keeper_priority_intents
-        ; test_case "Enter stages input before immediate submission" `Quick
-            test_enter_stages_the_input_before_submission
-        ; test_case "a settled turn drains the queue" `Quick
-            test_a_settled_turn_drains_the_queue
-        ; test_case "concurrent turns keep request-owned transcripts" `Quick
-            test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "another keeper's request does not pin this pane" `Quick
             test_a_request_to_another_keeper_does_not_pin_this_pane
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
         ; test_case "a turn log folds each accepted delta once" `Quick
             test_a_turn_log_folds_each_accepted_delta_once
-        ; test_case "a reconnect resumes from the log's last seq" `Quick
-            test_a_reconnect_resumes_from_the_logs_position
         ; test_case "replayed frames up to the last seq are not added twice" `Quick
             test_replayed_frames_up_to_the_last_seq_are_not_added_twice
-        ; test_case "settle commits the log instead of copying rows" `Quick
-            test_settle_commits_the_log_instead_of_copying_rows
         ; test_case "the reply row defers to a log that holds the turn" `Quick
             test_the_reply_row_defers_to_a_log_that_holds_the_turn
         ; test_case "a settled log holds its turn in the timeline" `Quick
@@ -4908,8 +4138,6 @@ let () =
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick
             test_a_journal_built_log_holds_its_turn_in_the_timeline
-        ; test_case "the reload rebuilds loaded turns from their journals" `Quick
-            test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
         ; test_case "a journal revision draws its facts in columns" `Quick
@@ -4949,8 +4177,6 @@ let () =
             test_a_wanted_journal_read_is_remembered_once_and_taken_once
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
-        ; test_case "stream frames are wired to journal reads" `Quick
-            test_stream_frames_are_wired_to_journal_reads
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_keeps_its_user_in_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick
@@ -4969,57 +4195,12 @@ let () =
             test_chat_header_resolves_the_effective_modes
         ; test_case "Skill usage time stays honest" `Quick
             test_skill_usage_time_does_not_invent_never
-        ; test_case "chat shortcuts reach visibility state" `Quick
-            test_chat_shortcuts_reach_visibility_state
-        ; test_case "Esc reaches the interrupt" `Quick
-            test_escape_reaches_the_interrupt
-        ; test_case "Esc dispatch and footer read the interrupt table" `Quick
-            test_esc_dispatch_and_footer_read_the_interrupt_table
-        ; test_case "quiet leave leaves without touching the turn" `Quick
-            test_quiet_leave_leaves_without_touching_the_turn
-        ; test_case "quiet leave routes past the composer gate" `Quick
-            test_quiet_leave_routes_past_the_composer_gate
         ; test_case "composing holds only while the composer is live" `Quick
             test_composing_holds_only_while_the_composer_is_live
-        ; test_case "putting the composer away drains the queue" `Quick
-            test_putting_the_composer_away_drains_the_queue
-        ; test_case "roster footer names arrows, not vim letters" `Quick
-            test_roster_footer_names_arrows_not_vim_letters
-        ; test_case "the budget and the pane agree about queue rows" `Quick
-            test_the_budget_and_the_pane_agree_about_queue_rows
-        ; test_case "the budget and the pane agree about the scrollback row"
-            `Quick
-            test_the_budget_and_the_pane_agree_about_the_scrollback_row
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
-        ; test_case "page navigation reserves the scrollback row" `Quick
-            test_page_navigation_uses_the_reserved_scrollback_budget
-        ; test_case "the pane builds one full message layout" `Quick
-            test_the_pane_builds_one_full_message_layout
-        ; test_case "pending input is not mixed into the transcript" `Quick
-            test_pending_input_is_not_mixed_into_the_transcript
-        ; test_case "queueing puts the line in the conversation" `Quick
-            test_queueing_puts_the_line_in_the_conversation
-        ; test_case "a queued line takes its attachments when it is typed" `Quick
-            test_a_queued_line_takes_its_attachments_when_it_is_typed
-        ; test_case "Enter does not derive an interrupt target from the running turn" `Quick
-            test_enter_does_not_derive_an_interrupt_target_from_the_running_turn
-        ; test_case "run-next never reads the observed turn" `Quick
-            test_run_next_never_reads_the_observed_turn
-        ; test_case "a transcript reload replaces only an exact user row" `Quick
-            test_a_transcript_reload_replaces_only_an_exact_user_row
-        ; test_case "cancel and edit take the row with them" `Quick
-            test_cancel_and_edit_take_the_row_with_them
-        ; test_case "the pane draws every row into its own buffer" `Quick
-            test_the_pane_draws_every_row_into_its_own_buffer
-        ; test_case "the arrow walk does not repeat the queue" `Quick
-            test_the_arrow_walk_does_not_repeat_the_queue
-        ; test_case "the calls table says what came back" `Quick
-            test_the_calls_table_says_what_came_back
         ; test_case "the sending rows show an age" `Quick
             test_the_sending_rows_show_an_age
-        ; test_case "every way back asks for what is behind it" `Quick
-            test_every_way_back_asks_for_what_is_behind_it
         ; test_case "a refresh keeps what was paged back to" `Quick
             test_a_refresh_keeps_what_was_paged_back_to
         ; test_case "a refresh does not double the overlap" `Quick

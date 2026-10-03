@@ -8,15 +8,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_chat_log.ml",
-    "bin/masc_tui_observer.ml",
-    "bin/masc_tui_sse_lines.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_gate_text.ml",
-)
+
 
 
 def run(executable: str) -> None:

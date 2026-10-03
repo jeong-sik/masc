@@ -13,14 +13,9 @@ import test_tui_home_decision_cards_pty as cards
 import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-)
+
+REFUSAL = b"Cannot decide: workspace identity is unverified"
+ASK_REFUSAL = b"Cannot answer: workspace identity is unverified; draft retained"
 
 
 def foreign_decision(executable, kind):

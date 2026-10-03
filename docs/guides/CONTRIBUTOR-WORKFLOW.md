@@ -204,6 +204,9 @@ threshold. A cold dependency cache can take longer; only an actual successful
 completion is build evidence.
 
 There is no PR, general push or scheduled CI. At `release/vX.Y.Z`, explicitly
+freeze the included scope under [Release freeze](RELEASE-FREEZE.md); admit only
+reviewed release-blocking repairs afterwards. Main updates belong to the next
+version and do not require merging main into this candidate. Then explicitly
 request [release-candidate.yml](../../.github/workflows/release-candidate.yml)
 for full builds, type checks, behavior tests and installation verification on
 that head. Tag publication also requires full checks and tests. See the

@@ -47,9 +47,14 @@ new verification. No retry count or elapsed time can substitute for success.
 
 ## Verify behavior as well as compilation
 
+[Release verification scope](RELEASE-VERIFICATION.md) separates mandatory core
+flows, changed-surface checks and supporting-tool/extended validation. This is
+the target classification, not permission to skip the current candidate's gates.
+
 Compilation checks interface/type correctness. Behavior checks exercise the
-shipped feature surfaces, including multi-turn continuity, authority changes,
-recall states, runtime adapters and user-visible interactions. Keep meaningful
+shipped feature surfaces, including multi-turn continuity, memory injection,
+runtime adapters and user-visible interactions. Keeper-selection and workspace
+connection changes require their own concrete affected-surface checks. Keep meaningful
 feature tests and installation smoke; source wording, arbitrary snapshots and
 checker self-tests are not product behavior proof. Review test cleanup as a
 separate change rather than deleting useful coverage during an RC failure.

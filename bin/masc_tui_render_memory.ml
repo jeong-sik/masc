@@ -1359,7 +1359,11 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                    store_ordinary_facts)
         in
         let keys = "  c/C:category  " in
-        let after = if state.memory_facts_categories_open then "  d:접기" else "  d:Category 펼치기" in
+        let after =
+          if cols < Masc_tui_roster_pane.threshold_cols then ""
+          else if state.memory_facts_categories_open then "  d:접기"
+          else "  d:Category 펼치기"
+        in
         let pills =
           if not show_category_strip then "  c/C:category · Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
@@ -1509,7 +1513,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
         | _ -> None
     in
-    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
+    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
     let height = max 0 (budget - List.length header) in
     let categories = Category_all :: memory_fact_categories state in
     let selected =

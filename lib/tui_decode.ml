@@ -5651,7 +5651,9 @@ let decode_librarian_preflight output =
     let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
       | None -> Ok None
       | Some after ->
-        let* revision = required_nonnegative_int_field after "revision" in
+        let* revision = required_int_field after "revision" in
+        let* () = if revision > 0 then Ok ()
+          else Error "invalid Memory snapshot revision" in
         let* facts = required_nonnegative_int_field after "fact_count" in
         let* change = required_member after "change" in
         let* added = required_nonnegative_int_field change "added_count" in

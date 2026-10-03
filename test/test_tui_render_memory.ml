@@ -1612,6 +1612,15 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
       first <= Masc_tui_roster_pane.pane_cols &&
       target = Masc_tui_press.Press_memory_category (Types.Category_ordinary Cat.Preference))
       (Masc_tui_hit.to_list zones));
+  List.iter (fun initially_open ->
+    state.memory_facts_categories_open <- initially_open;
+    let narrow, _ = render (Masc_tui_roster_pane.threshold_cols - 1) in
+    check bool "hidden Category rail offers no toggle" false
+      (List.exists (contains "d:") narrow);
+    let wide, _ = render Masc_tui_roster_pane.threshold_cols in
+    check bool "drawable Category rail offers its actual action" true
+      (List.exists (contains (if initially_open then "d:접기" else "d:Category 펼치기")) wide)
+  ) [false; true];
   let narrow, _ = render 80 in
   check bool "narrow frame keeps full fact width" false
     (List.exists (contains "CATEGORIES") narrow);

@@ -701,11 +701,10 @@ def run_empty_cli_group(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the Librarian posted nothing")
-            time.sleep(0.05)
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the Librarian posted nothing")
         expected = [{"lane": "exact/librarian_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -773,16 +772,17 @@ def run_curator_takes_cli(executable: str) -> None:
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b", "7 of 7 · / filter".encode())
+        if b"Add fallback candidate" not in h.screen_text(bytes(output)):
+            raise AssertionError("clearing the rejected candidate filter closed the picker")
         h.send_and_wait(process, fd, output, b"/", b"filter:")
         h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        deadline = time.monotonic() + 5.0
-        while not exact_posts():
-            if time.monotonic() > deadline:
-                raise AssertionError("the CLI pick on the curator posted nothing")
-            time.sleep(0.05)
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: bool(exact_posts()), timeout=5.0,
+        ):
+            raise AssertionError("the CLI pick on the curator posted nothing")
         expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
                      "runtime_id": new_cli}]
         if exact_posts() != expected:
@@ -837,14 +837,16 @@ def run_provider_jump(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"s", b"Model order")
         h.wait_for_output(process, fd, output,
-                          b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
+                          b"> 1/1  [HTTP] glm-5-turbo default", start=0, timeout=5.0)
         h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
-        # [e] after it lands on the picker and returns to the slot rows.
+        # first Esc clears the filter and the second returns to the slot rows.
         os.write(fd, b"d")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b", "6 of 6 · / filter".encode())
+        if b"Add fallback candidate" not in h.screen_text(bytes(output)):
+            raise AssertionError("clearing the provider filter closed the picker")
         h.send_and_wait(process, fd, output, b"\x1b",
-                        b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
+                        b"> 1/1  [HTTP] glm-5-turbo default")
         os.write(fd, b"d")
         # Config colours a header's pieces apart, so the drawn screen, not
         # the byte stream, is what names the table.

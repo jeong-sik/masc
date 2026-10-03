@@ -42,6 +42,7 @@ type t = {
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list; mutable connected_models : model list;
   mutable cursor : int;
   mutable result_scroll : int;
+  mutable saved_scroll_max : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -61,7 +62,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
-  cursor=0; result_scroll=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  cursor=0; result_scroll=0; saved_scroll_max=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
@@ -265,8 +266,9 @@ let saved_rows = function
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
-  | Saved_partly { unverified; not_rechecked = _ } ->
+  | Saved_partly { unverified; not_rechecked } ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") unverified
+    @ List.map (fun runtime_id -> "  " ^ runtime_id ^ " (이번 저장에서 재검증하지 않음)") not_rechecked
 let saved_of_json json =
   let selected = match field "runtime_ids" json with
     | `List ids -> List.filter_map string ids
@@ -297,6 +299,7 @@ let saved t json =
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  t.cursor <- 0;
   t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
 let input_response ~sequence t result =
@@ -506,7 +509,7 @@ let key t key =
   | (Finished _ | Failed) when key="up" || key="k" ->
     t.result_scroll <- max 0 (t.result_scroll - 1); Nothing
   | (Finished _ | Failed) when key="down" || key="j" ->
-    t.result_scroll <- t.result_scroll + 1; Nothing
+    t.result_scroll <- min t.saved_scroll_max (t.result_scroll + 1); Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -659,7 +662,8 @@ let visible_lines ~height ~width t =
     let count = List.length rows in
     let overflow = height >= 2 && count > height in
     let content_height = height - if overflow then 1 else 0 in
-    let scroll = min (max 0 (count - content_height)) (max 0 t.result_scroll) in
+    t.saved_scroll_max <- max 0 (count - content_height);
+    let scroll = min t.saved_scroll_max (max 0 t.result_scroll) in
     t.result_scroll <- scroll;
     let visible = List.filteri (fun index _ -> index >= scroll && index < scroll + content_height) rows in
     visible @ if overflow then

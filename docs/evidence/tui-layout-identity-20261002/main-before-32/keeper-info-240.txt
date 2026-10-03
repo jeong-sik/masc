@@ -1,0 +1,32 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+                                                                                                                                                                                        │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs                                                                              │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+               ▀▀             Identity                                                                                                                                                  │· beta             no events
+              ▀▀▀▀            Name:                  alpha                                                                                                                              │───────────────────────────────────────────────────────
+             ▄▀▀▀▀▄           Paused:                no                                                                                                                                 │alpha · no events on this feed yet
+          ▀   ▀▀▀▀   ▀
+         ▄▀▀▄▄▄▀▄▄▄▄▀▀▄
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+
+
+    Current failure
+    none
+
+    Board attention
+    reading…
+
+    Gate
+    Tool calls:            auto · per Gate policy
+    Effects (Gate mode):   workspace
+    Lane first:            lane order
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable
+  1-24/47
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  o:logs  t:calls  g:yolo  U:runtime  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

@@ -38,6 +38,7 @@ import type {
 import {
   activeKeeperName,
   keeperActionErrors,
+  keeperChatHistoryErrors,
   keeperChatHistoryHydration,
   keeperHydrating,
   keeperProbing,
@@ -361,14 +362,10 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 // the merge are the fresher copy, and re-merging mid-session would
 // race the in-flight stream entries.
 const hydratedChatKeepers = new Set<string>()
-// Remember only failures owned by history hydration. Other operator actions
-// share the visible error slot and must survive a successful history refresh.
-const chatHistoryErrors = new Map<string, string>()
-
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
-  chatHistoryErrors.clear()
+  keeperChatHistoryErrors.value = {}
   keeperChatHistoryHydration.value = {}
 }
 
@@ -401,11 +398,7 @@ export async function hydrateKeeperChatHistory(
     // fetched tool rows from the rail/inspector.
     void hydrateKeeperToolOutputs(keeperName)
     setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
-    const historyError = chatHistoryErrors.get(keeperName)
-    if (historyError !== undefined && keeperActionErrors.value[keeperName] === historyError) {
-      setRecordValue(keeperActionErrors, keeperName, null)
-    }
-    chatHistoryErrors.delete(keeperName)
+    setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -418,8 +411,7 @@ export async function hydrateKeeperChatHistory(
     const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
     console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
     const historyError = `이전 대화 불러오기 실패: ${message}`
-    chatHistoryErrors.set(keeperName, historyError)
-    setRecordValue(keeperActionErrors, keeperName, historyError)
+    setRecordValue(keeperChatHistoryErrors, keeperName, historyError)
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
   }

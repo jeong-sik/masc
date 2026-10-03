@@ -27,14 +27,8 @@ HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
 TEST_TIMEOUT_GRACE_SEC="${CI_TEST_TIMEOUT_GRACE_SEC:-5}"
 
-# Injectable clock: CI_TEST_NOW_CMD overrides the epoch source so tests can
-# drive the deadline with a fake clock instead of the wall clock.
 now_epoch() {
-  if [[ -n "${CI_TEST_NOW_CMD:-}" ]]; then
-    eval "${CI_TEST_NOW_CMD}"
-  else
-    date +%s
-  fi
+  date +%s
 }
 
 START_EPOCH="$(now_epoch)"

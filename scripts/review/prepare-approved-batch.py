@@ -11,10 +11,12 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import sys
 
 
+scope_matches = runpy.run_path(str(Path(__file__).with_name("review-scope.py")))["scope_matches"]
 
 class Reason(Enum):
     INVALID_SELECTION = "invalid_selection"
@@ -156,25 +158,12 @@ def scoped_approval(f, trees, repo, selected, pull, *, gh, approve):
     accepted = []
     for review_id in approval.ids:
         review = f.api(gh, f"repos/{repo}/pulls/{selected.pr}/reviews/{review_id}")
-        lines = [line.removeprefix("review-scope: ") for line in review["body"].splitlines()
-                 if line.startswith("review-scope: ")]
-        if len(lines) != 1:
-            continue
-        try:
-            scope = json.loads(lines[0])
-        except json.JSONDecodeError:
-            continue
-        if (not isinstance(scope, dict)
-                or set(scope) != {"base_ref", "base_sha", "stack"}
-                or scope["base_ref"] != pull["base"]["ref"]
-                or scope["stack"] != stack_scope(pull)):
-            continue
-        reviewed_base = f.sha(scope["base_sha"])
-        trees.ensure(reviewed_base)
-        # Unrelated main advancement does not change the reviewed PR diff.
-        # Retargeting or integrating part of the head changes this boundary.
-        if trees.merge_base(reviewed_base, selected.head) != trees.merge_base(
-                pull["base"]["sha"], selected.head):
+        def merge_base(base, head):
+            trees.ensure(base)
+            return trees.merge_base(base, head)
+        if not scope_matches(review["body"], base_ref=pull["base"]["ref"],
+                base_sha=pull["base"]["sha"], stack=stack_scope(pull),
+                head=selected.head, merge_base=merge_base):
             continue
         accepted.append(review_id)
     if not accepted:

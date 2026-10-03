@@ -1644,6 +1644,29 @@ let test_the_default_may_name_a_lane () =
    same reason: the caller sees the admitted slots and an order rebuilt from
    them would delete the rest. Each names one slot and the file's order
    decides where it goes. *)
+let test_exact_candidate_replacement_and_first_preserve_other_slots () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention
+      ~slots:["catalog.only"; "openai.gpt"; "runpod_mtp.qwen"] ()
+    |> lane_write_ok "declare candidates including an unadmitted slot";
+    Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"openai.gpt" ~replacement:"openai.small" ()
+    |> lane_write_ok "replace at the existing position";
+    Alcotest.(check (list string)) "unadmitted and other candidates remain"
+      ["catalog.only"; "openai.small"; "runpod_mtp.qwen"]
+      (exact_lane_slots path "board_attention_exact");
+    Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ~move:Runtime.Move_slot_first ()
+    |> lane_write_ok "make the selected candidate first";
+    Alcotest.(check (list string)) "remaining candidates retain their relative order"
+      ["runpod_mtp.qwen"; "catalog.only"; "openai.small"]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "reject a duplicate replacement" ~path ~names:["already declared"]
+      (fun () -> Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:"openai.small" ~replacement:"runpod_mtp.qwen" ()))
+;;
+
 let test_an_exact_slot_drop_and_move_read_the_declaration () =
   with_runtime_file (fun path ->
     Runtime.set_exact_output_lane_slots ~runtime_config_path:path
@@ -4237,6 +4260,8 @@ let () =
             "an exact slot drop and move read the declaration"
             `Quick
             test_an_exact_slot_drop_and_move_read_the_declaration
+        ; Alcotest.test_case "replace and promote preserve other declared candidates"
+            `Quick test_exact_candidate_replacement_and_first_preserve_other_slots
         ; Alcotest.test_case
             "an exact append or set refuses a declared CLI slot"
             `Quick

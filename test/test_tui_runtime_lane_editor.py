@@ -257,12 +257,20 @@ class LaneStore:
                         declared_cli.append(slot)
                     else:
                         declared.append(slot)
-                elif action in ("move", "drop"):
+                elif action in ("move", "drop", "replace"):
                     source = declared if slot in declared else declared_cli
                     if slot not in source:
                         return 400, {"error": f"{slot} is not a slot of {name}"}
                     if action == "drop":
                         source.remove(slot)
+                    elif action == "replace":
+                        replacement = request["replacement_runtime_id"]
+                        if replacement in declared + declared_cli:
+                            return 400, {"error": "replacement already declared"}
+                        source[source.index(slot)] = replacement
+                    elif request["direction"] == "first":
+                        source.remove(slot)
+                        source.insert(0, slot)
                     else:
                         index = source.index(slot)
                         neighbor = index + (1 if request["direction"] == "down" else -1)
@@ -548,7 +556,7 @@ def run_exact(executable: str) -> None:
             raise AssertionError("r read no standalone lanes")
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)
-        h.wait_for_output(process, fd, output, b"> runtime-a", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output, b"> model-a default", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         wait_for_posts(1)
         # The write answered once the picker closes. Only then is the held
@@ -631,7 +639,7 @@ def run_cli_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.send_and_wait(process, fd, output, b"s", b"Model order")
         h.wait_for_output(process, fd, output,
                           b"[CLI] codex_subscription.gpt-6-luna", start=mark, timeout=5.0)
         h.wait_for_output(process, fd, output,
@@ -653,18 +661,18 @@ def run_cli_editor(executable: str) -> None:
         if store.exact_declared_cli["librarian_exact"] != [cli[1], cli[0], *cli[2:]]:
             raise AssertionError("the server fixture did not reorder the CLI declaration")
         h.resize_and_wait(process, fd, output, rows=15, columns=100,
-                          needle=b"MASC Lanes / Providers", controls=(h.FULL_REDRAW,))
+                          needle=b"Model order", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"j" * 9,
                         b"> 11/11  [CLI] codex_subscription.extra-7")
-        h.send_and_wait(process, fd, output, b"a", b"add provider")
-        h.send_and_wait(process, fd, output, b"e",
+        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b",
                         b"> 11/11  [CLI] codex_subscription.extra-7")
         h.send_and_wait(process, fd, output, b"k" * 10,
                         b"> 1/11  [HTTP]")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] model default")
         h.wait_for_output(process, fd, output,
-                          b"[HTTP tail] runtime-a", start=mark, timeout=5.0)
+                          b"[HTTP tail] model-a default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
@@ -674,7 +682,7 @@ def run_cli_editor(executable: str) -> None:
         h.wait_for_output(process, fd, output,
                           b"> 1/12  [HTTP]", start=mark, timeout=5.0)
         h.send_and_wait(process, fd, output, b"j" * 11,
-                        b"> 12/12  [CLI] aaa_cli.fixture")
+                        b"> 12/12  [CLI] model default")
         if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
             raise AssertionError("new official client did not append to CLI tail")
         os.write(fd, b"q")
@@ -717,7 +725,7 @@ def run_empty_cli_group(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"s",
                         "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
-        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
@@ -732,7 +740,7 @@ def run_empty_cli_group(executable: str) -> None:
         h.wait_for_output(process, fd, output,
                           "CLI slots · tried after every HTTP slot (1)".encode(),
                           start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] model default")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
@@ -782,10 +790,9 @@ def run_curator_takes_cli(executable: str) -> None:
                         "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
         # aaa_muse sorts before runtime-a by id; having no output-schema
         # channel is what puts it after every candidate that lands.
-        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] aaa_cli.fixture")
-        h.send_and_wait(process, fd, output, b"/", b"filter:")
+        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] model default")
         h.send_and_wait(process, fd, output, b"aaa_muse",
-                        b"> [no output schema] aaa_muse.fixture")
+                        b"> [no output schema] model default")
         h.send_and_wait(process, fd, output, b"\r",
                         b"aaa_muse.fixture has no output-schema channel")
         # The refusal is drawn from the state alone; give a stray write the
@@ -793,9 +800,9 @@ def run_curator_takes_cli(executable: str) -> None:
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"add provider")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
         h.send_and_wait(process, fd, output, b"/", b"filter:")
-        h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] model default")
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
@@ -855,14 +862,15 @@ def run_provider_jump(executable: str) -> None:
                           needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.send_and_wait(process, fd, output, b"s", b"Model order")
         h.wait_for_output(process, fd, output,
                           b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"a", b"add provider")
+        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         # The picker owns focus: [d] neither jumps nor closes it, so the
         # [e] after it lands on the picker and returns to the slot rows.
         os.write(fd, b"d")
-        h.send_and_wait(process, fd, output, b"e",
+        h.send_and_wait(process, fd, output, b"\x1b", b"Add fallback candidate")
+        h.send_and_wait(process, fd, output, b"\x1b",
                         b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
         os.write(fd, b"d")
         # Config colours a header's pieces apart, so the drawn screen, not
@@ -915,7 +923,7 @@ def run_cli_binding_jump(executable: str) -> None:
                           needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
-        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.send_and_wait(process, fd, output, b"s", b"Model order")
         h.resize_and_wait(process, fd, output, rows=30, columns=132,
                           needle=b"CLI slots", controls=(h.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
@@ -1139,7 +1147,92 @@ def run_default_route(executable: str) -> None:
         interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
+def run_replace_and_promote(executable: str) -> None:
+    """Model/effort search replaces in place even with an older read in flight."""
+    store = LaneStore()
+    current, backup, replacement = "account.current", "account.backup", "account.luna-medium"
+    assert isinstance(store.body, dict)
+    runtimes = store.body["runtimes"]
+    assert isinstance(runtimes, list)
+    for runtime_id, model, effort in (
+        (current, "gpt-6-sol", "low"),
+        (backup, "gpt-6-sol", "high"),
+        (replacement, "gpt-6-luna", "medium"),
+    ):
+        runtimes.append({
+            **h.runtime_resolved_runtime(runtime_id, "Selected account", model,
+                                         provider_id="account"),
+            "exact_slot_group": "cli_slots",
+            "declared_reasoning_effort": effort,
+            "effective_max_context": 750000,
+        })
+    lane = store.exact_lane("librarian_exact")
+    lane.update(declared_slots=[], admitted_slots=[], dropped_slots=[],
+                declared_cli_slots=[backup, current], cli_slots=[backup, current])
+    store.exact_declared["librarian_exact"] = []
+    store.exact_declared_cli["librarian_exact"] = [backup, current]
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        arrived, release = store.hold_next_standalone_read()
+        try:
+            os.write(fd, b"r")
+            if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
+                raise AssertionError("the old lane read did not start")
+            h.send_and_wait(process, fd, output, b"s", b"Model order")
+            h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
+            h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
+            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
+        finally:
+            release.set()
+        h.wait_for_output(process, fd, output, b"> 2/2  [CLI] gpt-6-luna medium",
+                          start=0, timeout=5.0)
+        h.wait_for_output(process, fd, output, b"current candidate order reloaded",
+                          start=0, timeout=5.0)
+        posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+        expected = [{"lane": "exact/librarian_exact", "action": "replace",
+                     "runtime_id": current, "replacement_runtime_id": replacement}]
+        if posted != expected or store.exact_declared_cli["librarian_exact"] != [backup, replacement]:
+            raise AssertionError(f"replacement did not preserve position: {posted!r}")
+        h.send_and_wait(process, fd, output, b"1", b"> 1/2  [CLI] gpt-6-luna medium")
+        posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+        if posted[-1] != {"lane": "exact/librarian_exact", "action": "move",
+                          "runtime_id": replacement, "direction": "first"}:
+            raise AssertionError(f"promotion posted {posted[-1]!r}")
+        if store.exact_declared_cli["librarian_exact"] != [replacement, backup]:
+            raise AssertionError("promotion lost or reordered other candidates")
+        h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
+        h.resize_and_wait(process, fd, output, rows=40, columns=131,
+                          needle=b"Account", controls=(h.FULL_REDRAW,))
+        screen = h.screen_text(bytes(output))
+        if screen.count(b"context") <= 3:
+            raise AssertionError("a tall terminal still shows only three model choices")
+        if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
+            raise AssertionError("expanded model choices are not visible")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        h.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable, description="Librarian replaces model and effort and promotes within its group",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+    )
+
+
+
 if __name__ == "__main__":
+    run_replace_and_promote(os.path.abspath(sys.argv[1]))
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))

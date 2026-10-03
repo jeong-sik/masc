@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+                                                                                                                                                                                        │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC Workspace (1)  16:01:23  HTTP [connected]                                                                                                                                       │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+  ┌ Repositories · j/k select                                                                                          ┐  ┌ masc                                                     ┐  │· beta             no events
+  │ NAME               BRANCH       STATUS    SYNC   PATH                                                              │  │ Path: /srv/masc/workspace/masc                           │  │───────────────────────────────────────────────────────
+  │ masc               main         ready     auto   /srv/masc/workspace/masc                                          │  │ Stored as: workspace/masc                                │  │alpha · no events on this feed yet
+  │                                                                                                                    │  │ Keepers: alpha                                           │
+  │                                                                                                                    │  └──────────────────────────────────────────────────────────┘
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  │                                                                                                                    │
+  └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  j/k:scroll  H:recent activity  PgUp/PgDn:page  Home/End:top/bottom  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  q:quit  …?
+ › to alpha   (i to write)

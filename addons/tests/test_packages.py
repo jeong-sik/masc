@@ -11,7 +11,7 @@ import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tempfile
 import threading
@@ -77,7 +77,7 @@ class ProtocolCase(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
                 "name": "lane_observe", "arguments": {"binding": binding, "sources": sources}}}]
-        proc = subprocess.run([sys.executable, str(ADDONS / package / "server.py")],
+        proc = run_stdio([sys.executable, str(ADDONS / package / "server.py")],
                               input="".join(json.dumps(r) + "\n" for r in requests),
                               text=True, capture_output=True, check=True, timeout=10, cwd=cwd)
         self.assertEqual(proc.stderr, "")
@@ -94,7 +94,8 @@ class ProtocolCase(unittest.TestCase):
         if expected_summary is None:
             self.assertEqual(output, json.loads(result["content"][0]["text"]))
         else:
-            self.assertEqual(result["content"][0]["text"], expected_summary)
+            summary = expected_summary(output) if callable(expected_summary) else expected_summary
+            self.assertEqual(result["content"][0]["text"], summary)
         self.assertEqual(set(output), {"rows", "coverage"})
         for row in output["rows"]:
             self.assertEqual(set(row), ROW_FIELDS)
@@ -221,7 +222,7 @@ class WebLayer(ProtocolCase):
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, *args):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

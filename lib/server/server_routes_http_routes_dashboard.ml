@@ -605,6 +605,7 @@ type runtime_config_write_operation =
   | Runtime_config_lane_renamed of string * string
   | Runtime_config_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_config_exact_slot_dropped of Runtime.exact_lane * string
+  | Runtime_config_exact_slot_replaced of Runtime.exact_lane * string * string
   | Runtime_config_exact_slot_moved of
       Runtime.exact_lane * string * Runtime.exact_slot_move
   | Runtime_config_assignment of string * string option
@@ -673,8 +674,15 @@ let runtime_config_write_operation_details =
       , `String
           (match move with
            | Runtime.Move_slot_up -> "up"
-           | Runtime.Move_slot_down -> "down") )
+           | Runtime.Move_slot_down -> "down"
+           | Runtime.Move_slot_first -> "first") )
     ]
+  | Runtime_config_exact_slot_replaced (exact, runtime_id, replacement) ->
+    [ "operation", `String "routing"
+    ; "lane", `String (runtime_route_lane_to_string (Runtime_exact_lane exact))
+    ; "action", `String "replace"
+    ; "runtime_id", `String runtime_id
+    ; "replacement_runtime_id", `String replacement ]
   | Runtime_config_assignment (keeper_name, runtime_id) ->
     [ ("operation", `String "assignment")
     ; ("keeper_name", `String keeper_name)
@@ -699,7 +707,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_lane_created _ | Runtime_config_lane_removed _
   | Runtime_config_lane_renamed _
   | Runtime_config_exact_slot_appended _ | Runtime_config_exact_slot_dropped _
-  | Runtime_config_exact_slot_moved _ -> "routing"
+  | Runtime_config_exact_slot_moved _ | Runtime_config_exact_slot_replaced _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
   | Runtime_config_fusion _ -> "fusion"
   | Runtime_config_account_removal _ -> "account_removal"
@@ -1118,6 +1126,15 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+  | Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)) ->
+    let operation = Runtime_config_exact_slot_replaced (exact, runtime_id, replacement) in
+    (match Runtime.replace_exact_output_lane_slot ~lane:exact ~slot:runtime_id ~replacement () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
 
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -1227,6 +1244,8 @@ module For_testing = struct
         Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
         Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "drop", [ runtime_id ])
+    | Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)) ->
+        Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "replace", [runtime_id; replacement])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
           ( runtime_route_lane_to_string (Runtime_exact_lane exact)
@@ -1234,7 +1253,8 @@ module For_testing = struct
           , [ runtime_id
             ; (match move with
                | Runtime.Move_slot_up -> "up"
-               | Runtime.Move_slot_down -> "down")
+               | Runtime.Move_slot_down -> "down"
+               | Runtime.Move_slot_first -> "first")
             ] )
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report

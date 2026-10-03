@@ -39,7 +39,7 @@ let with_environment name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
   Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous)) f
-let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=ref true)
+let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=ref true)
     ?(stop_attempts=ref []) f =
   let root = Filename.temp_dir "lane-composition-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> remove root) (fun () ->
@@ -79,7 +79,7 @@ let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output
                       else (stopped := instance_id :: !stopped; Ok ()))} in
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
-                acquire=Lane_addon_sources.acquire;
+                acquire;
                 recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer
@@ -124,6 +124,45 @@ let source received id = match Hashtbl.find_opt received id with
 let require_some label = function Some value -> value | None -> fail label
 let completed received id = Option.bind (source received id) (fun source ->
   match list "observations" source with [observation] -> Some observation | _ -> None)
+
+let test_pending_notification_does_not_repeat_same_completed_input () =
+  let entered,enter = Eio.Promise.create () and released,release = Eio.Promise.create () in
+  let acquisitions = ref 0 and calls = ref 0 in
+  let consumer binding = member "value" binding=`String "judge" in
+  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
+    if consumer binding then (
+      incr acquisitions;
+      if !acquisitions=1 then (Eio.Promise.resolve enter (); Eio.Promise.await released));
+    Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
+  let produce ~binding ~sources:_ = if consumer binding then incr calls; output in
+  with_fixture ~acquire ~produce (fun clock config root directory _received _stopped ->
+    let producer_manifest = manifest ~name:"producer" root in
+    ignore (declare directory producer_manifest "producer" "[]");
+    reconcile config directory;
+    let producer = active config "producer" |> text "instance_id" in
+    let sequence id = member "observation_seq" (instance config id) |> Yojson.Safe.Util.to_int in
+    await clock (fun () -> sequence producer=1);
+    let consumer_manifest = manifest ~name:"judge" root in
+    write consumer_manifest (In_channel.with_open_bin consumer_manifest In_channel.input_all
+      ^ "\n[interface]\nrefresh_policy=\"source_changes\"\n");
+    ignore (declare ~value:"judge" directory consumer_manifest "judge" (edge "producer"));
+    reconcile config directory;
+    let judge = active config "judge" |> text "instance_id" in
+    Eio.Promise.await entered;
+    (* The second producer commit queues a refresh while the first acquisition
+       is suspended. It then captures that very same completed generation. *)
+    ignore (dispatch config Runtime.Observe ["instance_id",`String producer]);
+    await clock (fun () -> sequence producer=2);
+    Eio.Promise.resolve release ();
+    await clock (fun () -> member "unchanged_source_refreshes" (instance config judge)=`Int 1);
+    check int "one model-facing package call for the captured generation" 1 !calls;
+    check int "duplicate refresh adds no output generation" 1 (sequence judge);
+    ignore (dispatch config Runtime.Observe ["instance_id",`String judge]);
+    await clock (fun () -> sequence judge=2);
+    check int "explicit repeat remains an actual package call" 2 !calls;
+    ignore (dispatch config Runtime.Observe ["instance_id",`String producer]);
+    await clock (fun () -> sequence judge=3);
+    check int "a new producer generation still calls the consumer" 3 !calls)
 
 let test_namespaced_output_fits_declared_capacity () =
   let original = List.hd output.rows in
@@ -556,7 +595,7 @@ summaries = {
         else "Fusion status is available in structuredContent with exact run identity; no retained Board evidence is available in this capture."
         if output["rows"] else "No Fusion snapshot rows are available; structuredContent reports the observation coverage."),
     "fusion-report": lambda output: (
-        "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence."
+        "Fusion reports and their retained input contexts are in structuredContent."
         if any(row["lane_id"] == "fusion/report" for row in output["rows"])
         else "No Fusion reports are available; inspect structuredContent coverage for missing inputs."),
 }
@@ -1024,6 +1063,8 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
     (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "pending notifications preserve one call per completed input" `Quick
+    test_pending_notification_does_not_repeat_same_completed_input;
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
     test_native_fusion_report_is_readable_after_detach;
   test_case "namespaced output and oversized worker replies honor declared capacity" `Quick

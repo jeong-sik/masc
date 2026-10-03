@@ -1,0 +1,416 @@
+[2026-09-30 06:43:14] [INFO] [MCP] Tag registry initialized: 190 tools registered
+[2026-09-30 06:43:15] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=0 failures=0
+[2026-09-30 06:43:15] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-30 06:43:15] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-30 06:43:15] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-30 06:43:15] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-30 06:43:15] [INFO] [Server] [auto 127.0.0.1:49303] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-30 06:43:15] [INFO] [Server] config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip
+[2026-09-30 06:43:15] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-30 06:43:15] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-09-30 06:43:15] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-30 06:43:15] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-30 06:43:15] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-09-30 06:43:15] [INFO] [Backend] Board: JSONL default backend
+[2026-09-30 06:43:15] [INFO] [Board] Board flusher actor started
+[2026-09-30 06:43:15] [INFO] [Board] JSONL backend initialized
+[2026-09-30 06:43:15] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4-flash
+[2026-09-30 06:43:15] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /Users/runner/work/_temp/item-http-evidence/workspace/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-09-30 06:43:15] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-09-30 06:43:15] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:15] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:15] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:15] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-09-30 06:43:15] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-09-30 06:43:15] [INFO] [Server] publication recovery owner discovery settled
+[2026-09-30 06:43:15] [WARN] [Server] startup minted MASC_ADMIN_TOKEN for admin because env was unset
+[2026-09-30 06:43:15] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-09-30 06:43:15] [INFO] [Server] startup skipped credential sync for 2 non-bootable keeper(s): [item-paid-probe=paused, item-runtime-probe=paused]
+[2026-09-30 06:43:15] [INFO] [Keeper] keeper_owner: installed 2 single-owner actor(s) before persistence recovery
+[2026-09-30 06:43:15] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000049 examined=0 failures=0
+[2026-09-30 06:43:15] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000907 examined=2 failures=0
+[2026-09-30 06:43:15] [INFO] [Keeper] boot reconcile: examined=2 readable=2 quarantined=0 failed=0
+[2026-09-30 06:43:15] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.001200 examined=2 failures=0
+[2026-09-30 06:43:15] [INFO] [Server] Runtime_params restored from /Users/runner/work/_temp/item-http-evidence/workspace
+[2026-09-30 06:43:15] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-09-30 06:43:15] [INFO] [Server] Domain_pool created (1 domains) for dashboard/keeper compute
+[2026-09-30 06:43:15] [INFO] [ServerBootstrap] resolved: source=local_masc path=/Users/runner/work/_temp/item-http-evidence/workspace/.masc/config
+[2026-09-30 06:43:15] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-09-30 06:43:15] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.0 total_ms=0.0
+[2026-09-30 06:43:15] [INFO] [Misc] prompt assets synced from binary: 33 copied, 0 overwritten
+[2026-09-30 06:43:15] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=18.3 total_ms=18.3
+[2026-09-30 06:43:15] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=0.0 total_ms=18.4
+[2026-09-30 06:43:16] [INFO] [Misc] tool assets synced from binary: 206 copied, 0 overwritten
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=60.8 total_ms=79.2
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=0.0 total_ms=79.2
+[2026-09-30 06:43:16] [INFO] [Misc] mcp assets synced from binary: 2 copied, 0 overwritten
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=1.1 total_ms=80.3
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=0.0 total_ms=80.3
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=11.8 total_ms=92.1
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=0.1 total_ms=92.2
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=1.8 total_ms=94.1
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=0.0 total_ms=94.1
+[2026-09-30 06:43:16] [INFO] [Server] keeper_gate: installed durable queue base_path=/Users/runner/work/_temp/item-http-evidence/workspace pending=0 replayed=0 replay_failed=0 retired=0
+[2026-09-30 06:43:16] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.2 total_ms=94.2
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.0 total_ms=94.3
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task_group: starting initialize (parallel, 1 tasks)
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.1 total_ms=94.4
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.1 total_ms=94.5
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task_group: finished initialize
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task_group: starting cleanup (parallel, 1 tasks)
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task: starting jsonl_prune
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task: finished jsonl_prune
+[2026-09-30 06:43:16] [INFO] [Server] lazy_task_group: finished cleanup
+[2026-09-30 06:43:16] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-09-30 06:43:16] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-09-30 06:43:16] [INFO] [startup] subsystems: keeper loops started
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=1.6 total_ms=96.0
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=0.0 total_ms=96.1
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.0 total_ms=96.1
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=0.0 total_ms=96.1
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=96.1
+[2026-09-30 06:43:16] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.2 total_ms=96.4
+[2026-09-30 06:43:16] [WARN] [Keeper/item-runtime-probe] memory lane unit failed: Sys_error("Mutex.lock: Resource deadlock avoided")
+[2026-09-30 06:43:16] [INFO] [Keeper] autoboot: durable Librarian catch-up submitted for 2 unlaunched keeper(s) [item-paid-probe, item-runtime-probe]
+[2026-09-30 06:43:16] [INFO] [Misc] candle: enabled (ledger recovery may await its writer lock)
+[2026-09-30 06:43:16] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-09-30 06:43:16] [INFO] [Misc] startup microvm sweep swept no runtime: none of apple_container, microsandbox, nerdctl_kata has both its CLI on PATH and a guest listing this build can scope to a base path
+[2026-09-30 06:43:16] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=0.002
+[2026-09-30 06:43:16] [INFO] [Server] host_fd_pressure_poller: started path=/Users/runner/work/_temp/item-http-evidence/workspace/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-09-30 06:43:16] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-09-30 06:43:16] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-30 06:43:16] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-30 06:43:16] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=35.8 total_ms=132.2
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.0 total_ms=132.2
+[2026-09-30 06:43:16] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=0.1 total_ms=132.3
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.0 total_ms=132.3
+[2026-09-30 06:43:16] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.0 total_ms=132.3
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.0 total_ms=132.4
+[2026-09-30 06:43:16] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=132.4
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=browser_webdriver.begin elapsed_ms=0.0 total_ms=132.4
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=browser_webdriver.end elapsed_ms=0.3 total_ms=132.7
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=browser_stagehand.begin elapsed_ms=0.0 total_ms=132.7
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=browser_stagehand.end elapsed_ms=0.1 total_ms=132.8
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=132.8
+[2026-09-30 06:43:16] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+MASC MCP Server listening on http://127.0.0.1:49303
+   Base path: /Users/runner/work/_temp/item-http-evidence/workspace
+   MASC dir: /Users/runner/work/_temp/item-http-evidence/workspace/.masc
+   Process cwd: /Users/runner/work/_temp/item-http-evidence
+   MASC_BASE_PATH(env): /Users/runner/work/_temp/item-http-evidence/workspace
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+[2026-09-30 06:43:16] [INFO] [Server] browser-lane: stagehand has no [browser.stagehand]
+[2026-09-30 06:43:16] [INFO] [Server] imessage: starting in-process gateway (reply_mode=self-chat interval=2s cursor=0)
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=6.8 total_ms=139.6
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=139.6
+[2026-09-30 06:43:16] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=139.6
+[2026-09-30 06:43:16] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting execution refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting mission refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-09-30 06:43:16] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-09-30 06:43:16] [WARN] [Auth] HTTP auth rejected: h1 /api/v1/keepers/item-runtime-probe/items -> 401
+[2026-09-30 06:43:16] [INFO] [Server] browser-lane: automation has no browser.geckodriver
+[2026-09-30 06:43:16] [INFO] [Dashboard] execution_trust warm cache done (0.1s)
+[2026-09-30 06:43:16] [INFO] [Dashboard] light shell cache pre-warmed (77.4ms)
+[2026-09-30 06:43:16] [INFO] [Dashboard] board surface pre-warmed (77.7ms)
+[2026-09-30 06:43:16] [INFO] [Dashboard] planning surface pre-warmed (77.9ms)
+[2026-09-30 06:43:16] [INFO] [Dashboard] config surface pre-warmed (79.1ms)
+[2026-09-30 06:43:16] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (80.5ms)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_balance (id=3, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [Session] [AgentRegistry] New identity: item-runtime-probe (session=6cbd1d97, mcp=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [Session] Session registered: item-runtime-probe (total: 1)
+[2026-09-30 06:43:16] [INFO] [MCP] keeper_candle_balance -> {"keeper":"item-runtime-probe","balance_milli":"0","owned_items":[]}
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call completed: keeper_candle_balance (outcome=ok)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_balance (id=4, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [ToolValidation] tool_input_validation rejected keeper_candle_balance: Tool 'keeper_candle_balance' declares no input fields but received arguments
+[2026-09-30 06:43:16] [WARN] [MCP] tool call failed: keeper_candle_balance — duration_ms=0|detail=Tool 'keeper_candle_balance' declares no input fields but received arguments
+[2026-09-30 06:43:16] [ERROR] [MCP] keeper_candle_balance -> Tool 'keeper_candle_balance' declares no input fields but received arguments
+[2026-09-30 06:43:16] [ERROR] [MCP] tools/call completed: keeper_candle_balance (outcome=error)
+[2026-09-30 06:43:16] [INFO] [Dashboard] execution warm cache done (0.1s)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_equip (id=5, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":false,"equipment":{"face":"bare_face","...
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:16] [INFO] [Dashboard] shell cache pre-warmed (138.1ms)
+[2026-09-30 06:43:16] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (138.2ms total)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_equip (id=6, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [WARN] [MCP] tool call failed: keeper_candle_equip — duration_ms=2|detail=item-runtime-probe does not own glasses
+[2026-09-30 06:43:16] [ERROR] [MCP] keeper_candle_equip -> item-runtime-probe does not own glasses
+[2026-09-30 06:43:16] [ERROR] [MCP] tools/call completed: keeper_candle_equip (outcome=error)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_purchase (id=7, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [MCP] keeper_candle_purchase -> {"account":{"keeper":"item-runtime-probe","balance_milli":"0","owned_items":["gl...
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call completed: keeper_candle_purchase (outcome=ok)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_purchase (id=8, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-runtime-probe already owns glasses
+[2026-09-30 06:43:16] [ERROR] [MCP] keeper_candle_purchase -> item-runtime-probe already owns glasses
+[2026-09-30 06:43:16] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_purchase (id=9, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-runtime-probe has 0 milli-Candle; this item costs 200
+[2026-09-30 06:43:16] [ERROR] [MCP] keeper_candle_purchase -> item-runtime-probe has 0 milli-Candle; this item costs 200
+[2026-09-30 06:43:16] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call: keeper_candle_equip (id=10, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:16] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":true,"equipment":{"face":"glasses","nec...
+[2026-09-30 06:43:16] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:16] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_equip (id=11, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":true,"equipment":{"face":"bare_face","n...
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_equip (id=12, session=mcp_VWgR0OX_HGe_3VDR)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":true,"equipment":{"face":"glasses","nec...
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_balance (id=15, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [INFO] [Session] [AgentRegistry] New identity: item-paid-probe (session=cd1c1a70, mcp=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [INFO] [Session] Session registered: item-paid-probe (total: 2)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_balance -> {"keeper":"item-paid-probe","balance_milli":"700","owned_items":[]}
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_balance (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_equip (id=16, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-paid-probe","changed":false,"equipment":{"face":"bare_face","nec...
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_purchase (id=17, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_purchase -> {"account":{"keeper":"item-paid-probe","balance_milli":"500","owned_items":["cro...
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_purchase (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_purchase (id=18, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-paid-probe already owns crown
+[2026-09-30 06:43:20] [ERROR] [MCP] keeper_candle_purchase -> item-paid-probe already owns crown
+[2026-09-30 06:43:20] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_purchase (id=19, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-paid-probe has 500 milli-Candle; this item costs 700
+[2026-09-30 06:43:20] [ERROR] [MCP] keeper_candle_purchase -> item-paid-probe has 500 milli-Candle; this item costs 700
+[2026-09-30 06:43:20] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call: keeper_candle_equip (id=20, session=mcp_VWgR1TQ_HGe_43UN)
+[2026-09-30 06:43:20] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-paid-probe","changed":true,"equipment":{"face":"bare_face","neck...
+[2026-09-30 06:43:20] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:20] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-09-30 06:43:20] [INFO] [Server] Cancelling orchestrator...
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] orchestrator cancelled (0.00s)
+[2026-09-30 06:43:20] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-09-30 06:43:20] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-09-30 06:43:20] [INFO] [Pulse] stopped after 2 beats
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-09-30 06:43:20] [INFO] [Pulse] stopped after 2 beats
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:20] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:20] [INFO] [Server] [auto 127.0.0.1:49303] stats: h2=0 h1=36
+[2026-09-30 06:43:20] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-09-30 06:43:20] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-09-30 06:43:20] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-09-30 06:43:20] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-09-30 06:43:20] [INFO] [Server] MASC MCP: Shutdown complete.
+[2026-09-30 06:43:20] [INFO] [MCP] Tag registry initialized: 190 tools registered
+[2026-09-30 06:43:22] [INFO] [Log] Restored 209 log entries from disk
+[2026-09-30 06:43:22] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=0 failures=0
+[2026-09-30 06:43:22] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-30 06:43:22] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-30 06:43:22] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-30 06:43:22] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-30 06:43:22] [INFO] [Server] config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip
+[2026-09-30 06:43:22] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-30 06:43:22] [INFO] [Server] [auto 127.0.0.1:49303] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-30 06:43:22] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-09-30 06:43:22] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-30 06:43:22] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-30 06:43:22] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-09-30 06:43:22] [INFO] [Backend] Board: JSONL default backend
+[2026-09-30 06:43:22] [INFO] [Board] Board flusher actor started
+[2026-09-30 06:43:22] [INFO] [Board] JSONL backend initialized
+[2026-09-30 06:43:22] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4-flash
+[2026-09-30 06:43:22] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /Users/runner/work/_temp/item-http-evidence/workspace/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-09-30 06:43:22] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-09-30 06:43:22] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:22] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:22] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-09-30 06:43:22] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-09-30 06:43:22] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-09-30 06:43:22] [INFO] [Server] publication recovery owner discovery settled
+[2026-09-30 06:43:22] [WARN] [Server] startup minted MASC_ADMIN_TOKEN for admin because env was unset
+[2026-09-30 06:43:22] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-09-30 06:43:22] [INFO] [Server] startup skipped credential sync for 2 non-bootable keeper(s): [item-paid-probe=paused, item-runtime-probe=paused]
+[2026-09-30 06:43:22] [INFO] [Keeper] keeper_owner: installed 2 single-owner actor(s) before persistence recovery
+[2026-09-30 06:43:22] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000025 examined=0 failures=0
+[2026-09-30 06:43:22] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000481 examined=2 failures=0
+[2026-09-30 06:43:22] [INFO] [Keeper] boot reconcile: examined=2 readable=2 quarantined=0 failed=0
+[2026-09-30 06:43:22] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000773 examined=2 failures=0
+[2026-09-30 06:43:22] [INFO] [Server] Runtime_params restored from /Users/runner/work/_temp/item-http-evidence/workspace
+[2026-09-30 06:43:22] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-09-30 06:43:22] [INFO] [Server] Domain_pool created (1 domains) for dashboard/keeper compute
+[2026-09-30 06:43:22] [INFO] [ServerBootstrap] resolved: source=local_masc path=/Users/runner/work/_temp/item-http-evidence/workspace/.masc/config
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.0 total_ms=0.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=5.9 total_ms=5.9
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=0.1 total_ms=5.9
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=19.6 total_ms=25.5
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=0.1 total_ms=25.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=0.4 total_ms=26.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=0.0 total_ms=26.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=11.5 total_ms=37.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=0.1 total_ms=37.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=1.8 total_ms=39.4
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=0.0 total_ms=39.5
+[2026-09-30 06:43:22] [INFO] [Server] keeper_gate: installed durable queue base_path=/Users/runner/work/_temp/item-http-evidence/workspace pending=0 replayed=0 replay_failed=0 retired=0
+[2026-09-30 06:43:22] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.1 total_ms=39.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.0 total_ms=39.6
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task_group: starting initialize (parallel, 1 tasks)
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.1 total_ms=39.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.0 total_ms=39.6
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task_group: finished initialize
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task_group: starting cleanup (parallel, 1 tasks)
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task: starting jsonl_prune
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task: finished jsonl_prune
+[2026-09-30 06:43:22] [INFO] [Server] lazy_task_group: finished cleanup
+[2026-09-30 06:43:22] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-09-30 06:43:22] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-09-30 06:43:22] [INFO] [startup] subsystems: keeper loops started
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=2.3 total_ms=42.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=0.0 total_ms=42.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.0 total_ms=42.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=0.0 total_ms=42.0
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=42.0
+[2026-09-30 06:43:22] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.1 total_ms=42.1
+[2026-09-30 06:43:22] [WARN] [Keeper/item-runtime-probe] memory lane unit failed: Sys_error("Mutex.lock: Resource deadlock avoided")
+[2026-09-30 06:43:22] [INFO] [Keeper] autoboot: durable Librarian catch-up submitted for 2 unlaunched keeper(s) [item-paid-probe, item-runtime-probe]
+[2026-09-30 06:43:22] [INFO] [Misc] candle: enabled (ledger recovery may await its writer lock)
+[2026-09-30 06:43:22] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-09-30 06:43:22] [INFO] [Misc] startup microvm sweep swept no runtime: none of apple_container, microsandbox, nerdctl_kata has both its CLI on PATH and a guest listing this build can scope to a base path
+[2026-09-30 06:43:22] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=0.000
+[2026-09-30 06:43:22] [INFO] [Server] dated-jsonl count cache restored: rows=1
+[2026-09-30 06:43:22] [INFO] [Server] host_fd_pressure_poller: started path=/Users/runner/work/_temp/item-http-evidence/workspace/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-09-30 06:43:22] [INFO] [Metrics] tool_metrics_persist: hydrated 16 record(s), pruned=0 record(s)
+[2026-09-30 06:43:22] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-30 06:43:22] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-30 06:43:22] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=5.3 total_ms=47.4
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.0 total_ms=47.5
+[2026-09-30 06:43:22] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=0.1 total_ms=47.5
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.0 total_ms=47.6
+[2026-09-30 06:43:22] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.1 total_ms=47.6
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.0 total_ms=47.6
+[2026-09-30 06:43:22] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=47.7
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=browser_webdriver.begin elapsed_ms=0.0 total_ms=47.7
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=browser_webdriver.end elapsed_ms=0.4 total_ms=48.1
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=browser_stagehand.begin elapsed_ms=0.0 total_ms=48.1
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=browser_stagehand.end elapsed_ms=0.1 total_ms=48.2
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=48.2
+[2026-09-30 06:43:22] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+MASC MCP Server listening on http://127.0.0.1:49303
+   Base path: /Users/runner/work/_temp/item-http-evidence/workspace
+   MASC dir: /Users/runner/work/_temp/item-http-evidence/workspace/.masc
+   Process cwd: /Users/runner/work/_temp/item-http-evidence
+   MASC_BASE_PATH(env): /Users/runner/work/_temp/item-http-evidence/workspace
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+[2026-09-30 06:43:22] [INFO] [Server] browser-lane: stagehand has no [browser.stagehand]
+[2026-09-30 06:43:22] [INFO] [Server] imessage: starting in-process gateway (reply_mode=self-chat interval=2s cursor=0)
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=1.5 total_ms=49.7
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=49.7
+[2026-09-30 06:43:22] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=49.7
+[2026-09-30 06:43:22] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting execution refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting mission refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-09-30 06:43:22] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-09-30 06:43:22] [INFO] [Server] browser-lane: automation has no browser.geckodriver
+[2026-09-30 06:43:22] [INFO] [Dashboard] execution_trust warm cache done (0.1s)
+[2026-09-30 06:43:22] [INFO] [Dashboard] light shell cache pre-warmed (80.2ms)
+[2026-09-30 06:43:22] [INFO] [Dashboard] board surface pre-warmed (80.4ms)
+[2026-09-30 06:43:22] [INFO] [Dashboard] planning surface pre-warmed (80.6ms)
+[2026-09-30 06:43:22] [INFO] [Dashboard] config surface pre-warmed (81.7ms)
+[2026-09-30 06:43:22] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (83.2ms)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_balance (id=23, session=mcp_VWgR1zW_HHh_1OUB)
+[2026-09-30 06:43:22] [INFO] [Session] [AgentRegistry] New identity: item-runtime-probe (session=cf96898b, mcp=mcp_VWgR1zW_HHh_1OUB)
+[2026-09-30 06:43:22] [INFO] [Session] Session registered: item-runtime-probe (total: 1)
+[2026-09-30 06:43:22] [INFO] [MCP] keeper_candle_balance -> {"keeper":"item-runtime-probe","balance_milli":"0","owned_items":["glasses"]}
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call completed: keeper_candle_balance (outcome=ok)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_purchase (id=24, session=mcp_VWgR1zW_HHh_1OUB)
+[2026-09-30 06:43:22] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=0|detail=item-runtime-probe already owns glasses
+[2026-09-30 06:43:22] [INFO] [Dashboard] execution warm cache done (0.2s)
+[2026-09-30 06:43:22] [ERROR] [MCP] keeper_candle_purchase -> item-runtime-probe already owns glasses
+[2026-09-30 06:43:22] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:22] [INFO] [Dashboard] shell cache pre-warmed (162.6ms)
+[2026-09-30 06:43:22] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (162.7ms total)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_equip (id=25, session=mcp_VWgR1zW_HHh_1OUB)
+[2026-09-30 06:43:22] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":false,"equipment":{"face":"glasses","ne...
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_equip (id=26, session=mcp_VWgR1zW_HHh_1OUB)
+[2026-09-30 06:43:22] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-runtime-probe","changed":true,"equipment":{"face":"bare_face","n...
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_balance (id=29, session=mcp_VWgR20V_HHh_3Ri4)
+[2026-09-30 06:43:22] [INFO] [Session] [AgentRegistry] New identity: item-paid-probe (session=f7db9673, mcp=mcp_VWgR20V_HHh_3Ri4)
+[2026-09-30 06:43:22] [INFO] [Session] Session registered: item-paid-probe (total: 2)
+[2026-09-30 06:43:22] [INFO] [MCP] keeper_candle_balance -> {"keeper":"item-paid-probe","balance_milli":"500","owned_items":["crown"]}
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call completed: keeper_candle_balance (outcome=ok)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_equip (id=30, session=mcp_VWgR20V_HHh_3Ri4)
+[2026-09-30 06:43:22] [INFO] [MCP] keeper_candle_equip -> {"keeper":"item-paid-probe","changed":false,"equipment":{"face":"bare_face","nec...
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call completed: keeper_candle_equip (outcome=ok)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_purchase (id=31, session=mcp_VWgR20V_HHh_3Ri4)
+[2026-09-30 06:43:22] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-paid-probe already owns crown
+[2026-09-30 06:43:22] [ERROR] [MCP] keeper_candle_purchase -> item-paid-probe already owns crown
+[2026-09-30 06:43:22] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:22] [INFO] [MCP] tools/call: keeper_candle_purchase (id=32, session=mcp_VWgR20V_HHh_3Ri4)
+[2026-09-30 06:43:22] [WARN] [MCP] tool call failed: keeper_candle_purchase — duration_ms=1|detail=item-paid-probe has 500 milli-Candle; this item costs 700
+[2026-09-30 06:43:22] [ERROR] [MCP] keeper_candle_purchase -> item-paid-probe has 500 milli-Candle; this item costs 700
+[2026-09-30 06:43:22] [ERROR] [MCP] tools/call completed: keeper_candle_purchase (outcome=error)
+[2026-09-30 06:43:22] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:22] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-09-30 06:43:22] [INFO] [Server] Cancelling orchestrator...
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] orchestrator cancelled (0.00s)
+[2026-09-30 06:43:22] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-09-30 06:43:22] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-09-30 06:43:22] [INFO] [Pulse] stopped after 2 beats
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-09-30 06:43:22] [INFO] [Pulse] stopped after 2 beats
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:22] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-09-30 06:43:22] [INFO] [Server] [auto 127.0.0.1:49303] stats: h2=0 h1=18
+[2026-09-30 06:43:22] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-09-30 06:43:22] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-09-30 06:43:22] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-09-30 06:43:22] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-09-30 06:43:22] [INFO] [Server] MASC MCP: Shutdown complete.

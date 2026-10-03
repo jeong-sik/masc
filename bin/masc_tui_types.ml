@@ -3373,28 +3373,48 @@ type memory_state =
   | Memory_read_error
 
 let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let librarian_failed =
+    match k.mkh_librarian.mlh_state with
+    | Some (Masc.Tui_decode_memory_health.Pass_stopped _
+           | Masc.Tui_decode_memory_health.Pass_raised _) -> true
+    | Some (Masc.Tui_decode_memory_health.Pass_off
+           | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
+           | Masc.Tui_decode_memory_health.Pass_drained
+           | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_not_committed)
+    | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
+    && librarian_failed
     && not k.mkh_source_snapshot_present
   then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
   then Memory_source_only
   else if not k.mkh_snapshot_present
   then Memory_no_current
-  else if k.mkh_librarian_failures > 0
+  else if librarian_failed
   then Memory_degraded
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.Masc.Tui_decode_memory_health.ma_code
+        then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
   then Memory_warning
   else Memory_ordinary
+
+let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot) =
+  if snapshot.mhs_refused_keepers <> [] then None
+  else Some (List.fold_left (fun count keeper ->
+    match memory_state keeper with
+    | Memory_starving -> count + 1
+    | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+    | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
 let memory_state_label = function
   | Memory_ordinary -> "ok"
@@ -5216,11 +5236,18 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
+  (* Navigation intent only: never a retained Keeper row or read authority. *)
+  mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
+  mutable keeper_sandbox_logs_origin: Tui_decode.server_identity option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5253,6 +5280,8 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  (* Polling intent contains no consent URL or presentation from the old read. *)
+  mutable identity_login_intents: (Tui_decode.server_identity * string * string) list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -5726,6 +5755,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -6217,10 +6247,73 @@ type state = {
   refresh_interval: float;
 }
 
+(* Pending reads and post-action offers belong to the workspace that admitted
+   them. A successful health response with missing paths is still unread;
+   only comparable paths can confirm that an origin has been replaced. *)
+let server_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+let reconcile_detail_intent_origins (state : state) reading =
+  match reading with
+  | Error _ -> ()
+  | Ok (current : Tui_decode.server_identity) ->
+      if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let foreign = function
+          | None -> false
+          | Some (origin : Tui_decode.server_identity) ->
+              not (String.equal (canonical_path origin.sid_base_path)
+                     (canonical_path current.sid_base_path)
+                   && String.equal (canonical_path origin.sid_masc_root)
+                        (canonical_path current.sid_masc_root))
+        in
+        state.identity_login_intents <- List.filter
+          (fun (origin, _, _) -> not (foreign (Some origin)))
+          state.identity_login_intents;
+        (match state.detail_focus_recovery with
+         | Some (origin, _, _) when foreign (Some origin) -> state.detail_focus_recovery <- None
+         | Some _ | None -> ());
+        if foreign state.connector_unbind_offer_origin then begin
+          state.connector_unbind_offer_pending <- [];
+          state.connector_unbind_offer_origin <- None
+        end;
+        if foreign state.keeper_sandbox_logs_origin then begin
+          state.keeper_sandbox_logs_requested <- None;
+          state.keeper_sandbox_logs_origin <- None
+        end
+      end
+
+
+(* Keeper/provider keys do not include a workspace. Authority withdrawal must
+   retire both queued responses and consent already presented by that origin. *)
+let withdraw_identity_readings (state : state) =
+  state.identity_login_requests <- [];
+  state.identity_logins <- [];
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_attempt_error <- None;
+  state.identity_app_form <- None;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
     state.identity_logins
+
+(* A recovered provider read may still be pending browser consent. Continue
+   the existing cadence without resurrecting the withdrawn consent URL. *)
+let identity_login_pending_for_keeper (state : state) keeper_name =
+  server_authority_ready state
+  && List.exists (fun (origin, keeper, _) ->
+       String.equal keeper keeper_name
+       && server_workspace_matches ~expected:(Some origin)
+            (match state.server_identity with Some current -> Ok current | None -> Error "unread"))
+       state.identity_login_intents
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -6253,6 +6346,10 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider) ->
+      not (String.equal keeper keeper_name && String.equal provider provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6263,9 +6360,19 @@ let forget_identity_login (state : state) ~keeper_name ~provider_id =
 let remember_identity_login (state : state) login =
   forget_identity_login state ~keeper_name:login.ils_keeper
     ~provider_id:login.ils_provider;
-  state.identity_logins <- state.identity_logins @ [login]
+  state.identity_logins <- state.identity_logins @ [login];
+  (match state.server_identity with
+   | Some origin when server_authority_ready state ->
+       state.identity_login_intents <-
+         (origin, login.ils_keeper, login.ils_provider) :: state.identity_login_intents
+   | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_login_intents <- List.filter
+    (fun (_, keeper, provider_id) ->
+      not (String.equal keeper keeper_name
+           && identity_provider_attached ~providers ~provider_id))
+    state.identity_login_intents;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -7425,6 +7532,39 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let remember_keeper_detail_focus state =
+  match state.detail_focus_recovery, state.view, state.workspace_identity,
+        state.server_identity, selected_keeper state with
+  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
+    when state.detail_tab <> Detail_items ->
+      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+  | _ -> ()
+
+let restore_keeper_detail_focus state =
+  match state.detail_focus_recovery with
+  | None -> false
+  | Some _ when state.view <> Keepers Keeper_detail && state.view <> Keepers Keeper_list ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (_, _, tab) when state.detail_tab <> tab ->
+      state.detail_focus_recovery <- None;
+      false
+  | Some (origin, name, tab)
+    when state.workspace_identity = Workspace_identity_match
+      && state.local_workspace = Local_workspace_read
+      && Option.is_none state.keepers_error
+      && server_workspace_matches ~expected:(Some origin)
+           (match state.server_identity with Some value -> Ok value | None -> Error "unread") ->
+      state.detail_focus_recovery <- None;
+      (match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers with
+       | None -> false
+       | Some cursor ->
+           state.keeper_cursor <- cursor;
+           state.detail_tab <- tab;
+           state.view <- Keepers Keeper_detail;
+           true)
+  | Some _ -> false
+
 let keeper_detail_target_matches state keeper_name =
   match selected_keeper state with
   | Some keeper -> String.equal keeper.k_name keeper_name
@@ -7957,11 +8097,15 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
+  detail_focus_recovery = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
+  keeper_sandbox_logs_origin = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -7974,6 +8118,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_intents = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;
@@ -8218,6 +8363,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;

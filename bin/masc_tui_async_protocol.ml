@@ -209,7 +209,7 @@ type async_msg =
   | Keeper_chat_older_loaded of
       int * string * float * (Masc_tui_keeper_chat_history.page, string) result
   | Lanes_loaded of
-      ( Masc.Tui_decode.keeper_lanes_snapshot
+      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
@@ -284,7 +284,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
-  | Connectors_loaded of (Masc.Tui_decode_connectors.connector_snapshot, string) result
+  | Connectors_loaded of unit ref * (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
       results :
@@ -397,7 +397,8 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_action_done of
-      string
+      Masc.Tui_decode.server_identity option
+      * string
       * Masc_tui_keeper_control.action
       * (Masc_tui_keeper_control.outcome, string) result
   | Board_new_post_done of {

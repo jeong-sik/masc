@@ -1,0 +1,110 @@
+{
+    "version": "1.1.409",
+    "time": "1790923345892",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "Import \"test_tui_keyboard_input\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 83,
+                    "character": 11
+                },
+                "end": {
+                    "line": 83,
+                    "character": 34
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "Argument of type \"ModuleSpec | None\" cannot be assigned to parameter \"spec\" of type \"ModuleSpec\" in function \"module_from_spec\"\n  Type \"ModuleSpec | None\" is not assignable to type \"ModuleSpec\"\n    \"None\" is not assignable to \"ModuleSpec\"",
+            "range": {
+                "start": {
+                    "line": 85,
+                    "character": 40
+                },
+                "end": {
+                    "line": 85,
+                    "character": 44
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "\"loader\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 86,
+                    "character": 9
+                },
+                "end": {
+                    "line": 86,
+                    "character": 15
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "\"exec_module\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 86,
+                    "character": 16
+                },
+                "end": {
+                    "line": 86,
+                    "character": 27
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "Cannot assign to attribute \"EXECUTABLE\" for class \"ModuleType\"\n  Attribute \"EXECUTABLE\" is unknown",
+            "range": {
+                "start": {
+                    "line": 87,
+                    "character": 6
+                },
+                "end": {
+                    "line": 87,
+                    "character": 16
+                }
+            },
+            "rule": "reportAttributeAccessIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/scripts/capture-tui-audit.py",
+            "severity": "error",
+            "message": "Cannot assign to attribute \"TTYD\" for class \"ModuleType\"\n  Attribute \"TTYD\" is unknown",
+            "range": {
+                "start": {
+                    "line": 88,
+                    "character": 6
+                },
+                "end": {
+                    "line": 88,
+                    "character": 10
+                }
+            },
+            "rule": "reportAttributeAccessIssue"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 2,
+        "errorCount": 6,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.625
+    }
+}
+

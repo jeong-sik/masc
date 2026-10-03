@@ -83,8 +83,8 @@ def prepare(binding, sources):
     limit = binding.get("max_tokens")
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise InvalidInput("max_tokens must be a positive provider output limit")
-    if not sources or any(not source.observations for source in sources):
-        raise InvalidInput("Fusion computation requires supplied observations for every input")
+    if not sources:
+        raise InvalidInput("Fusion computation requires supplied input sources")
     if role is Role.JUDGE:
         declared = binding.get("sources")
         if not isinstance(declared, list) or not declared:
@@ -105,7 +105,7 @@ def prepare(binding, sources):
     references, inputs, statuses = [], [], []
     producer_instances = set()
     for source in sources:
-        complete = source.complete
+        complete = source.complete and bool(source.observations)
         for observation in source.observations:
             string(observation.get("id"), "input observation.id")
             string(observation.get("kind"), "input observation.kind")
@@ -143,6 +143,9 @@ def prepare(binding, sources):
                     refs = model_references(fields.get("model_evidence"),
                                             pending=computation_status is ComputationStatus.OUTCOME_UNKNOWN)
                     validate_sampling_result(computation, fields, refs, item.get("evidence"), observation.get("sampling_receipts"))
+                    references.extend(refs.values())
+                    # Retain immutable lineage; URI-only citations remain in untrusted input.
+                    references.extend(retained(item.get("evidence"), "upstream computation"))
                     input_complete = boolean(fields.get("input_complete"), "input_complete")
                     input_coverage = fields.get("input_coverage")
                     if not isinstance(input_coverage, list):
@@ -174,6 +177,15 @@ def prepare(binding, sources):
 
 def observe(binding: dict, sources: tuple[Source, ...], client: SamplingClient) -> dict:
     analysis_id, role, request, references, statuses = prepare(binding, sources)
+    if any(not source.observations for source in sources):
+        # Runtime starts independent workers before all upstream ports exist.
+        # Missing observations are a wait for input, never a model failure or
+        # a permission to analyze an empty replacement for the declared input.
+        for status, source in zip(statuses, sources):
+            if not source.observations:
+                status["detail"] = "; ".join(filter(None, (source.detail,
+                    "Waiting for supplied input observations")))
+        return {"rows": [], "coverage": statuses}
     response, error, refs, validation_error = None, None, None, None
     try:
         response = client.create_message(request)

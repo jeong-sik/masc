@@ -85,7 +85,11 @@ def main():
     if ttyd is None:
         raise FileNotFoundError(f'ttyd is not executable: {args.ttyd}')
     sys.path.insert(0, str(ROOT / 'test'))
-    import test_tui_keyboard_input as h
+    import tui_keyboard_fusion as _keyboard_fusion
+    import tui_keyboard_harness as _keyboard_harness
+    import tui_keyboard_repositories as _keyboard_repositories
+    import tui_keyboard_resources as _keyboard_resources
+    import tui_keyboard_workspace as _keyboard_workspace
     inputs = {
         'executable': executable,
         'capture_script': Path(__file__).resolve(),
@@ -108,11 +112,11 @@ def main():
     c.EXECUTABLE = executable
     c.TTYD = Path(ttyd).resolve()
     os.environ['MASC_TOKEN'] = 'masc-tui-keyboard-regression-token'
-    os.environ['PATH'] = h.path_without_masc(os.environ.get('PATH', ''))
-    fixtures = h.overview_event_http_fixtures()
-    fixtures.update(h.keeper_runtime_http_fixtures())
-    fixtures.update(h.row_budget_http_fixtures())
-    fixtures["/api/v1/gate/keepers?detailed=true"] = h.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
+    os.environ['PATH'] = _keyboard_harness.path_without_masc(os.environ.get('PATH', ''))
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures.update(_keyboard_harness.keeper_runtime_http_fixtures())
+    fixtures.update(_keyboard_harness.row_budget_http_fixtures())
+    fixtures["/api/v1/gate/keepers?detailed=true"] = _keyboard_harness.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
     fixtures["/api/v1/runtime/config/raw"] = (503, {"error": "runtime config load failed: fixture configuration unavailable"})
     if args.workspace_currency:
         _, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
@@ -120,14 +124,14 @@ def main():
         for keeper in roster["keepers"]:
             keeper["candle_balance_milli"] = "12500"
             keeper["candle_account_revision"] = "a" * 64
-    fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
-    goal = h.planning_goal('goal-audit-ready', 'Audit goal')
+    fixtures[_keyboard_repositories.REPOSITORIES_PATH] = _keyboard_repositories.repositories_fixture()
+    goal = _keyboard_harness.planning_goal('goal-audit-ready', 'Audit goal')
     goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
                 measurement={'state': 'not_recorded'}, stagnation_seconds=None,
                 tasks=[{'id': 'task-audit-ready'}], children=[])
-    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
-    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {'tree': [goal]})
-    _, runtime = h.empty_runtime_resolved_fixture()
+    fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([goal])
+    fixtures[_keyboard_harness.DASHBOARD_GOALS_PATH] = (200, {'tree': [goal]})
+    _, runtime = _keyboard_harness.empty_runtime_resolved_fixture()
     runtime['provider_usage_windows'] = [{
         'scope': 'provider:audit', 'scope_id': hashlib.md5(b'provider:audit').hexdigest(),
         'providers': [{'id': 'audit', 'display_name': 'Audit provider'}],
@@ -136,20 +140,20 @@ def main():
             'utilization': {'unit': 'fraction', 'value': 0.4},
             'resets_at': None, 'observed_at': 1787356800.0, 'source': 'fixture'}],
     }]
-    fixtures[h.RUNTIME_RESOLVED_PATH] = (200, runtime)
-    post = h.board_selection_post('layout', '댓글 폭 기준 화면', '본문과 댓글의 독립적인 폭을 확인합니다.\n' * 8)
-    comments = [dict(h.board_detail_comment('layout-comment',
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = (200, runtime)
+    post = _keyboard_harness.board_selection_post('layout', '댓글 폭 기준 화면', '본문과 댓글의 독립적인 폭을 확인합니다.\n' * 8)
+    comments = [dict(_keyboard_harness.board_detail_comment('layout-comment',
                 '긴 댓글 본문은 작성자 옆의 좁은 잔여 폭이 아닌 댓글 영역 전체를 사용해야 합니다.\n' * 10),
                 author=args.author)]
     post['comment_count'] = 1
     fixtures['/api/v1/board?sort_by=hot'] = (200, {'posts': [post]})
-    fixtures['/api/v1/board/post-layout?format=flat'] = (200, h.board_detail_page(post, comments))
+    fixtures['/api/v1/board/post-layout?format=flat'] = (200, _keyboard_harness.board_detail_page(post, comments))
     if args.panes_only:
-        fixtures.update(h.code_lane_fixtures())
-        fixtures['/mcp'] = h.resources_mcp_fixture()['/mcp']
-        run = h.fusion_run('pane-audit', keeper='alpha')
-        fixtures[h.FUSION_RUNS_PATH] = h.fusion_runs_response([run])
-        fixtures[f'{h.FUSION_RUNS_PATH}/pane-audit'] = h.fusion_detail_response(run, 'Pane audit synthesis')
+        fixtures.update(_keyboard_workspace.code_lane_fixtures())
+        fixtures['/mcp'] = _keyboard_resources.resources_mcp_fixture()['/mcp']
+        run = _keyboard_fusion.fusion_run('pane-audit', keeper='alpha')
+        fixtures[_keyboard_fusion.FUSION_RUNS_PATH] = _keyboard_fusion.fusion_runs_response([run])
+        fixtures[f'{_keyboard_fusion.FUSION_RUNS_PATH}/pane-audit'] = _keyboard_fusion.fusion_detail_response(run, 'Pane audit synthesis')
     # The MCP callable is bound by the hashed fixture helper, while the other
     # actual response values remain in the fixture digest.
     fixture_values = {key: ({'factory': 'resources_mcp_fixture'} if key == '/mcp' and args.panes_only else value)
@@ -209,9 +213,9 @@ def main():
         ('system', 'go System', 'runtime.toml', ['runtime config load failed:']),
     ]
     with tempfile.TemporaryDirectory(prefix='masc-tui-audit-fixture-') as base:
-        h.seed_workspace(base)
-        h.seed_row_budget_workspace(base)
-        with h.test_http_endpoint(h.with_workspace_identity(fixtures, base), None) as (port, start, identity):
+        _keyboard_harness.seed_workspace(base)
+        _keyboard_harness.seed_row_budget_workspace(base)
+        with _keyboard_harness.test_http_endpoint(_keyboard_harness.with_workspace_identity(fixtures, base), None) as (port, start, identity):
             identity(base)
             start()
             with sync_playwright() as p:

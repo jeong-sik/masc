@@ -9269,7 +9269,10 @@
 
 (rule
  (alias runtest-test_tui_lane_initial_authority)
- (deps test_tui_lane_initial_authority.py test_tui_keyboard_input.py)
+ (deps test_tui_lane_initial_authority.py
+       tui_keyboard_harness.py
+       tui_keyboard_keepers.py
+       tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_initial_authority.py} %{exe:../bin/masc_tui.exe})))
 
@@ -9284,7 +9287,9 @@
 
 (rule
  (alias runtest-test_tui_memory_recall_state_pty)
- (deps test_tui_memory_recall_state_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_memory_recall_state_pty.py
+       tui_keyboard_harness.py
+       tui_keyboard_memory.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_memory_recall_state_pty.py} %{dep:../bin/masc_tui.exe})))
 

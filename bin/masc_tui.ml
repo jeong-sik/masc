@@ -9947,6 +9947,9 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* A decision receipt states what one workspace's Keeper answered; the
+     next workspace's screens must not carry it. *)
+  state.home_decision_receipt <- None;
   state.task_detail_id <- None;
   state.task_detail_scroll <- 0;
   state.task_history <- None;

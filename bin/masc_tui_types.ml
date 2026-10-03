@@ -6389,10 +6389,15 @@ let remember_identity_login (state : state) login =
    | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  (* The poll ends when consent lands (attached) or when it never can
+     (provider no longer declared). A provider removed mid-consent left its
+     intent polling for the life of the process before this read the
+     inventory's absence as an answer. *)
   state.identity_login_intents <- List.filter
     (fun (_, keeper, provider_id) ->
       not (String.equal keeper keeper_name
-           && identity_provider_attached ~providers ~provider_id))
+           && (identity_provider_attached ~providers ~provider_id
+               || not (identity_provider_declared ~providers ~provider_id))))
     state.identity_login_intents;
   state.identity_logins <-
     List.filter

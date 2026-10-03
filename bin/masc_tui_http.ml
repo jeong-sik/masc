@@ -646,6 +646,36 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
+(* A Broadcast keeps one captured bearer for principal proof and the write.
+   A refused bearer is not silently refreshed into another actor's authority. *)
+type bound_credential = { bound_headers : (string * string) list }
+let bind_credential () = {bound_headers=auth_headers ()}
+let get_json_bound ~credential ~host ~port ~path =
+  let url = url_of ~host ~port ~path in
+  let response = timed ~verb:"GET" ~path (fun () ->
+    Masc_http_client.get_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers ()) in
+  match response with
+  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail)
+  | Ok (status_code,body) -> decode_json ~allow_empty:false ~status_code ~body
+let lane_broadcast_principal_bound ~credential ~host ~port =
+  let ( let* ) = Result.bind in
+  let* json = get_json_bound ~credential ~host ~port
+    ~path:"/api/v1/lane-addons/broadcast-principal" in
+  match json with
+  | `Assoc ["principal",`String principal]
+    when String.starts_with ~prefix:"principal:" principal
+         && String.length principal > String.length "principal:" -> Ok principal
+  | _ -> Error "Broadcast principal response is invalid"
+let post_json_bound ~credential ~host ~port ~path ~body =
+  let url = url_of ~host ~port ~path in
+  let response = timed ~verb:"POST" ~path (fun () ->
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()) in
+  match response with
+  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+  | Ok (status_code,body) -> decode_json ~allow_empty:true ~status_code ~body
+
 (** Model discovery, preparation and serial verification own their completion.
     The login panel's request fiber still propagates cancellation on close or
     replacement. Omitting the pool deadline avoids misreporting a slow save as

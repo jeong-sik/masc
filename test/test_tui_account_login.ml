@@ -279,16 +279,41 @@ let partly_checked_save () =
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
   let rows () = List.map Login.row_text (Login.lines t) in
-  check bool "retained connections do not appear as failures" false
-    (List.exists (fun row -> contains row kept) (rows ()));
+  check bool "retained runtime is explicitly not rechecked" true
+    (List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") (rows ()));
   check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
   check bool "the notice says existing connections were retained" true (contains t.notice "기존 연결은 그대로 유지했습니다");
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
   let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
   ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
-  check bool "only an unmeasured runtime is listed" true
+  check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
-     List.mem ("  " ^ added ^ " (quota_exhausted)") r && not (List.exists (fun row -> contains row kept) r));
+     List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
+  let visible () = Login.visible_lines ~height:2 ~width:32 t2 |> List.map Login.row_text in
+  let initial = visible () in
+  check bool "small result starts with its save notice" true
+    (List.exists (fun row -> contains row "저장했습니다") initial);
+  let expected = List.concat_map
+      (Masc_tui_message_layout.wrap_words ~max_cells:32)
+      [ "  " ^ added ^ " (quota_exhausted)";
+        "  " ^ kept ^ " (이번 저장에서 재검증하지 않음)" ] in
+  let seen = ref initial in
+  List.iter (fun _ -> ignore (Login.key t2 "j"); seen := visible () @ !seen)
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  List.iter (fun row -> check bool "every result fragment is reachable by scrolling" true
+      (List.mem row !seen)) expected;
+  let bottom = visible () in
+  ignore (Login.key t2 "j"); ignore (Login.key t2 "j");
+  ignore (Login.key t2 "k");
+  check bool "coalesced down down up moves from the bottom" true (visible () <> bottom);
+  ignore (Login.key t2 "j"); ignore (visible ());
+  List.iter (fun _ -> ignore (Login.key t2 "j"); ignore (visible ())) expected;
+  ignore (Login.key t2 "k");
+  check bool "one up key moves after repeated down keys at the bottom" true
+    (visible () <> bottom);
+  List.iter (fun _ -> ignore (Login.key t2 "k"))
+    (Masc_tui_message_layout.wrap_words ~max_cells:32 t2.notice @ expected);
+  check (list string) "scroll can return to the initial result" initial (visible ());
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
     [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();

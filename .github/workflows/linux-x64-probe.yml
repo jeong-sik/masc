@@ -318,7 +318,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  lane-fusion-ref:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'lane-fusion-container'
+    name: Validate Fusion qualification ref
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require a release branch or tag
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/v*|refs/tags/v*) ;;
+            *) echo "Native Fusion qualification belongs to a Release/Tag candidate" >&2; exit 1 ;;
+          esac
+
   lane-fusion-container-probe:
+    needs: lane-fusion-ref
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'lane-fusion-container'
     name: Qualify isolated Fusion containers
     runs-on: ubuntu-24.04

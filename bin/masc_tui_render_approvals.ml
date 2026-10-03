@@ -19,10 +19,7 @@ module Rows = Masc_tui_rows
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
   let width = max 8 (cols - 6) in
-  (* The fields are handed to [Approval_detail.of_fields] as they are built,
-     not bound first: it is where every value is made terminal-safe, and the
-     field guard in test_tui_http_ast.ml reads a wire field as sanitised only
-     inside that call. *)
+  (* [Approval_detail.of_fields] makes every value terminal-safe. *)
   let lines =
     Approval_detail.of_fields ~width
       (match row with
@@ -448,7 +445,6 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
     | None -> ""
 ;;
 
-
 (* The two rows drawn under the approval queue: what the selected ask is, and
    its payload. Both sit below the box with the frame's own margins, so both
    belong inside [framed_inner_width]. The payload row always asked for that
@@ -556,7 +552,6 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
   in
   String.concat "\n" metadata_rows, payload_line
 ;;
-
 
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in

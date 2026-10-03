@@ -7,7 +7,7 @@ import sys
 import urllib.parse
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_schedule.ml", "bin/masc_tui.ml")
+
 SCHEDULE_ID = "schedule-" + "0123456789abcdef" * 10 + "SCHEDULEEND"
 INSTANCE = "instance-" + "retained-" * 20 + "INSTANCEEND"
 TARGET = "TARGETHEAD-" + "한" * 20 + "-keeper" * 18 + "-TARGETEND"

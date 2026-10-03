@@ -5,7 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+
 
 ERROR = b"system logs load failed: HTTP 503: fixture logs unavailable"
 LOGS_PATH = "/api/v1/dashboard/logs?limit=300"

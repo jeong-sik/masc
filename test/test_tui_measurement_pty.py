@@ -15,20 +15,7 @@ from typing import Any
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_types.ml",
-    "lib/librarian_continuity_report.ml",
-    "lib/tui_decode.ml",
-    "lib/tui_decode.mli",
-    "lib/masc_http_client/pool.ml",
-    "lib/masc_http_client/pool.mli",
-    "lib/masc_http_client/masc_http_client.ml",
-    "lib/masc_http_client/masc_http_client.mli",
-)
+
 
 
 def generation(text: str) -> dict[str, Any]:

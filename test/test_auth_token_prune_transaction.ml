@@ -22,6 +22,12 @@ let with_workspace f =
   with_workspace_at (Filename.temp_dir "token-prune-transaction-" "") f
 
 (* A fixed clock leaves issuance's live bearers far from the expired fixture. *)
+let read path = In_channel.with_open_bin path In_channel.input_all
+
+let rec waitpid child =
+  try Unix.waitpid [] child with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid child
+
 let now = 1_735_689_600.
 let expired = "2000-01-01T00:00:00Z"
 
@@ -201,14 +207,14 @@ let test_fifo_refusal_releases_publishers () =
           Unix.close finished_read;
           if not !reaped then (
             (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-            ignore (Unix.waitpid [] child));
+            ignore (waitpid child));
           Fs_compat.remove_tree base_path)
         (fun () ->
           let ready, _, _ = Unix.select [finished_read] [] [] 10.0 in
           if ready = [] then fail "FIFO prune or the following publisher blocked";
           let completed = Bytes.create 1 in
           let bytes = Unix.read finished_read completed 0 1 in
-          let _, status = Unix.waitpid [] child in
+          let _, status = waitpid child in
           reaped := true;
           check int "child completed its actual prune and publisher controls" 1 bytes;
           match status with
@@ -228,7 +234,11 @@ let test_regular_symlink_refuses_plan () =
   check_live base_path token
 
 let test_relative_base_preserves_regular_reads () =
-  let base_path = Filename.temp_dir ~temp_dir:(Sys.getcwd ()) "token-prune-relative-" "" in
+  let parent = Filename.temp_dir "token-prune-relative-" "" in
+  let previous = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir previous; Fs_compat.remove_tree parent) (fun () ->
+  Unix.chdir parent;
+  let base_path = Filename.concat parent "workspace" in
   with_workspace_at base_path @@ fun base_path ->
   let _expired_token = make_expired base_path "expired" in
   let token, _ = mint base_path "live" Masc_domain.Admin in
@@ -240,7 +250,7 @@ let test_relative_base_preserves_regular_reads () =
     (Sys.file_exists (Auth.credential_file base_path "expired"));
   check_live base_path token;
   let publisher, _ = mint relative_base "publisher" Masc_domain.Admin in
-  check_live relative_base publisher
+  check_live relative_base publisher)
 
 let test_dangling_target_is_not_orphan_authority () =
   with_workspace @@ fun base_path ->
@@ -424,12 +434,12 @@ let test_normalized_canonical_survives_uuid_cleanup_failure () =
   let uuid = match credential.id with Some id -> Auth.credential_file base_path
       (Masc_domain.Credential_id.to_string id) | None -> fail "fixture needs UUID" in
   let before_uuid = read uuid in
-  let retirement = Auth_credential_base.with_credential_transaction base_path (fun transaction ->
-    let snapshot = auth_ok (Auth_credential_base.credential_prune_snapshot_in_transaction transaction) in
-    let _, authority = List.find (fun (current, _) -> current.Masc_domain.agent_name = "Alice") snapshot.credentials in
-    Unix.unlink uuid; Unix.mkdir uuid 0o700;
-    Auth_credential_base.retire_prune_credential_in_transaction transaction authority) |> auth_ok in
-  check bool "UUID failure is explicit" true (Result.is_error retirement);
+  let retirement = Prune.For_testing.run_after_snapshot ~base_path ~now
+      ~after_snapshot:(fun () -> Unix.unlink uuid; Unix.mkdir uuid 0o700)
+    |> auth_ok in
+  (match retirement with
+   | [{ Prune.agent_name = "Alice"; reason = Prune.Expired; outcome = Prune.Failed _ }] -> ()
+   | _ -> fail "UUID cleanup failure must preserve the canonical owner for retry");
   check bool "normalized canonical remains retryable" true
     (Sys.file_exists (Auth.credential_file base_path "Alice"));
   Unix.rmdir uuid; Auth.save_private_text_file uuid before_uuid;

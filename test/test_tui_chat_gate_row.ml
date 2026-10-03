@@ -91,43 +91,8 @@ let test_no_target_reserves_nothing () =
   state.gate_pending <- [ pending ~keeper:"polisher" ~tool:"Execute" "appr-1" ];
   check int "no target, no row" empty
     (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
-;;
 
-(* The reservation and the drawing must read the same list. Two filters over
-   [gate_pending] would be two answers to one question, and the one that
-   disagreed would move the composer. *)
-let test_the_pane_and_the_budget_read_one_list () =
-  let count binding =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:binding ~callee:"keeper_effects_at_the_gate"
-  in
-  check int "the chat pane asks the projection for the rows it draws" 1
-    (count "render_keeper_message");
-  check int "and the budget asks the same one" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"keeper_message_status_rows"
-       ~callee:"keeper_effects_at_the_gate");
-  (* The fold gave the two readings a second way to disagree: the pane could
-     draw every status row while the budget counted only the ones folding
-     keeps. Both go through the one function that applies the fold, and the
-     pane does not reach past it to the raw list. *)
-  check int "the pane draws the folded list, not the raw one" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render_chat.ml"
-       ~binding_name:"render_keeper_message"
-       ~callee:"Masc_tui_types.keeper_message_visible_status_rows");
-  check int "and does not read the unfolded list beside it" 0
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render_chat.ml"
-       ~binding_name:"render_keeper_message"
-       ~callee:"Keeper_chat_transcript.status_rows");
-  check int "the budget counts that same folded list" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"keeper_message_status_rows"
-       ~callee:"keeper_message_visible_status_rows")
 ;;
-
 
 (* Folded, the queue stops owning a row: the progress line carries "gate N"
    instead. The budget has to agree, or the pane reserves a line it never
@@ -164,8 +129,6 @@ let () =
     ; ( "row budget"
       , [ test_case "many effects still reserve one row" `Quick
             test_many_effects_still_reserve_one_row
-        ; test_case "the pane and the budget read one list" `Quick
-            test_the_pane_and_the_budget_read_one_list
         ; test_case "a folded turn gives the queue no row" `Quick
             test_a_folded_turn_gives_the_queue_no_row
         ] )

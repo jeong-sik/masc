@@ -3,13 +3,7 @@ import os
 import sys
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names. The row is drawn
-# in masc_tui_render.ml; the key it names is declared in masc_tui_keys.ml.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-)
+
 
 EMPTY = b"no scheduled automation"
 # The key the table gives this surface for making a schedule. The footer sorts

@@ -809,7 +809,6 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
 
 module For_testing = struct
   let iter_sampling_requests = iter_sampling_requests_with
-  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with

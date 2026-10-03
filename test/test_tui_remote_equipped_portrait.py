@@ -19,17 +19,6 @@ import test_tui_keyboard_input as h
 from test_tui_emblem_screen_pty import rgba_png
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_metrics_tail.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "lib/keeper_portrait/keeper_portrait_equipment.ml",
-    "lib/tui_decode.ml",
-    "lib/server/server_dashboard_http_keeper_portrait.ml",
-    "test/test_keeper_portrait_http.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 KITTY_CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")

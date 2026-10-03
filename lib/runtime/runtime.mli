@@ -475,6 +475,22 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+val dashboard_runtime_resolved_snapshot : unit -> dashboard_runtime_resolved_snapshot
+(** All routing fields and assignment resolution from one loaded-state read. *)
+
 type keeper_dispatch_snapshot
 (** Effective route, ordered candidates and their frozen dispatch identities
     from one loaded-state read. Unrelated config edits do not change it. *)

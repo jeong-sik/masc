@@ -1882,6 +1882,33 @@ let resolve_assignment (assigned_id : string) =
   resolve_assignment_in (runtime_state ()) assigned_id
 ;;
 
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+let dashboard_runtime_resolved_snapshot () =
+  let state = runtime_state () in
+  { rs_default_route = state.default_route
+  ; rs_default_runtime = state.default_runtime
+  ; rs_runtimes = state.runtimes
+  ; rs_assignments = state.keeper_assignments
+  ; rs_lanes = state.lanes
+  ; rs_media_failover = state.media_failover
+  ; rs_declared_media_failover = state.declared_media_failover
+  ; rs_config_path = state.config_path
+  ; rs_resolve_assignment = resolve_assignment_in state
+  }
+;;
+
 type keeper_dispatch_snapshot =
   { route : string option
   ; candidates : (string * Runtime_candidate_backpressure.candidate option) list

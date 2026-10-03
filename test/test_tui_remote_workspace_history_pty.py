@@ -424,7 +424,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert h.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
             h.send_and_wait(process, fd, output, queued, h.composer_showing(queued))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            h.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MISMATCH local " in text,
                          "B authority did not become visible")
@@ -437,7 +437,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "A authority was not restored")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            await_screen(lambda text: b"Queue (1 waiting" in text and queued in text,
+            await_screen(lambda text: b"NEXT 1" in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             h.send_and_wait(process, fd, output, b"/queue resume", h.composer_showing(b"/queue resume"))
@@ -446,9 +446,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            os.write(fd, b"q")
+            h.send_and_wait(process, fd, output, b"\x03", b"Ctrl-C: press again to quit")
         finally:
             admission.release_admission.set()
             admission.release.set()
@@ -457,7 +455,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
         description=("MASC-root-only change" if root_only else "workspace change")
             + " suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+        refresh=0.5, terminal_cols=TERMINAL_COLUMNS, confirm_exit=b"\x03")
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:

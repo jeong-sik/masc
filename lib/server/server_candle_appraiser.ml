@@ -37,22 +37,15 @@ type observation =
   | Rejection of {slot : string; detail : string; output : Yojson.Safe.t}
   | Failure of {transport : string; detail : string}
   | Http_failure of {slot : string; error : Exact.execution_error}
+(* [invalid_output] observes an unusable model output. A refusal that
+   rejects the request itself is not an output problem -- it is observed
+   through [request_refused] and reported as [A.Execution_rejected]; both
+   keep the obligation off the maintenance pulse, but they answer different
+   questions and no longer share one boolean. *)
 let invalid_output = function
   | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> true
-  | Exact.Provider_response_refused { refusal; _ } ->
-    (* A frozen request refused for its input or binding cannot recover from a
-       maintenance pulse. Keep it pending until an explicit event, just like
-       rejected model output. Availability failures can recover without an edit. *)
-    (match refusal with
-     | Exact.Request_body_refused | Exact.Auth_failed
-     | Exact.Authorization_refused
-     | Exact.Invalid_request | Exact.Not_found
-     | Exact.Context_overflow | Exact.Input_capacity -> true
-     | Exact.Refusal_body_not_received | Exact.Rate_limited
-     | Exact.Overloaded | Exact.Payment_required
-     | Exact.Server_error | Exact.Network_error
-     | Exact.Timeout -> false)
+  | Exact.Provider_response_refused _ -> false
   | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded -> false
 let observation_json = function
   | Dispatch slot -> `Assoc ["kind", `String "dispatch"; "slot", `String slot]
@@ -98,7 +91,26 @@ let retryable_candidate rejection =
   | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected
   | Exact.Input_contract_rejected | Exact.Output_requirement_rejected
   | Exact.Input_capacity _ -> false
-let terminal_error ~rejected ~retryable cause =
+(* A refusal that rejects the request itself -- typed input, authentication,
+   configuration -- is [A.Execution_rejected] by the variant's own contract:
+   the obligation stays pending and awaits a change event. An unreadable or
+   unusable model output stays [A.Invalid_response]. These used to share one
+   flag, so an HTTP 400 refusal of the request reported as an invalid
+   response. *)
+let request_refused = function
+  | Exact.Provider_response_refused { refusal; _ } ->
+    (match refusal with
+     | Exact.Request_body_refused | Exact.Auth_failed
+     | Exact.Authorization_refused | Exact.Invalid_request
+     | Exact.Not_found | Exact.Context_overflow | Exact.Input_capacity
+     | Exact.Payment_required -> true
+     | Exact.Refusal_body_not_received | Exact.Rate_limited
+     | Exact.Overloaded
+     | Exact.Server_error | Exact.Network_error | Exact.Timeout -> false)
+  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  | Exact.Unexpected_output_content | Exact.Invalid_json_output
+  | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded -> false
+let terminal_error ~rejected ~refused ~retryable cause =
   let detail = flow_failure cause in
   match cause with
   | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
@@ -110,17 +122,21 @@ let terminal_error ~rejected ~retryable cause =
       A.Transport_unavailable detail
   | Exact.Flow_candidates_exhausted {rejection;_} ->
       if retryable || retryable_candidate rejection then A.Transport_unavailable detail
+      else if refused then A.Execution_rejected detail
       else if rejected then A.Invalid_response detail
       else A.Execution_rejected detail
   | Exact.Flow_exact_execution_failed _ ->
       if retryable then A.Transport_unavailable detail
+      else if refused then A.Execution_rejected detail
       else if rejected then A.Invalid_response detail
       else A.Execution_rejected detail
 let execute_http ~observe ~resolved ~request ~prompt ~requirement =
   let rejected = ref false in
   let retryable = ref false in
+  let refused = ref false in
   let failed (candidate : Exact.flow_attempt_receipt) (error : Exact.execution_error) =
     if invalid_output error.Exact.cause then rejected := true;
+    if request_refused error.cause then refused := true;
     if retryable_execution error.cause then retryable := true;
     observe (Http_failure {slot=candidate.visit.identity.candidate_id;error}) in
   let rec candidates = function
@@ -163,7 +179,7 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
           | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _ | Exact.Flow_measurement_start_failed _
           | Exact.Flow_before_measurement_dispatch_callback_failed _ | Exact.Flow_measurement_terminal_callback_failed _
           | Exact.Flow_before_dispatch_callback_failed _ | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _ -> ());
-         let error = terminal_error ~rejected:!rejected ~retryable:!retryable cause in
+         let error = terminal_error ~rejected:!rejected ~refused:!refused ~retryable:!retryable cause in
          (match Exact.flow_execution_terminal_kind cause with
           | Exact.Advanceable_candidates_exhausted -> Error (Advanceable error)
           | Exact.Non_advanceable_terminal -> Error (Terminal error))

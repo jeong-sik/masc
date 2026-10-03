@@ -3570,19 +3570,16 @@ let render_keeper_message (state : state) =
            | Leave -> return_hint ())
         | None -> return_hint ()
     in
-    (* Named beside the empty-draft Q arm in the dispatch, and reading the
-       same condition it does, chat focus included: the hint exists exactly
-       when the key would leave, and is absent exactly when Q is a letter
-       someone is typing, the roster holds focus, or something is mid-flight
-       for Esc to settle (a capture, a half-edited queued line). The compact
-       footer omits it for width, not because the key went away -- the help
-       sheet still names it. *)
+    (* Q is a quiet exit only with an empty draft; Ctrl-Q remains available
+       while typing. The compact footer omits this hint for width, but the
+       help sheet names both keys. *)
     let leave_hint =
       if state.keeper_message_focus = Right_pane
-         && Option.is_some state.msg_live
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture
-      then "  Ctrl-Q:leave"
+      then
+        if Buffer.length state.msg_input = 0 then "  Q / Ctrl-Q:leave"
+        else "  Ctrl-Q:leave"
       else ""
     in
     let switch_hint =

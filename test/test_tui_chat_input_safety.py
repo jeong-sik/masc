@@ -330,6 +330,70 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
     )
 
 
+def empty_q_leaves_a_running_turn(binary: str) -> None:
+    requests: h.HttpRequests = []
+    release = threading.Event()
+    started = threading.Event()
+
+    def respond(body: bytes) -> h.StreamingHttpResponse:
+        normal = h.keeper_chat_succeeded_response(body)
+        blocks = [block for block in normal.body.split(b"\n\n") if block]
+        start = next(
+            i for i, block in enumerate(blocks)
+            if json.loads(block.removeprefix(b"data: "))["type"] == "RUN_STARTED"
+        )
+
+        def chunks() -> Iterator[bytes]:
+            started.set()
+            yield b"\n\n".join(blocks[: start + 1]) + b"\n\n"
+            release.wait(timeout=30)
+
+        return h.StreamingHttpResponse(chunks)
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        fd: int,
+        _slave: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        try:
+            open_chat(process, fd, output)
+            h.send_and_wait(process, fd, output, b"first", h.composer_showing(b"first"))
+            h.send_and_wait(process, fd, output, b"\r", "기존 작업 처리 중".encode())
+            h.send_and_wait(process, fd, output, b"draftQ", h.composer_showing(b"draftQ"))
+            h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+            h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                              needle=b"Q / Ctrl-Q:leave")
+            h.send_and_wait(process, fd, output, b"Q", b"Keepers")
+            h.drain_until_quiet(process, fd, output)
+            screen = h.screen_text(bytes(output))
+            if not started.is_set() or release.is_set():
+                raise AssertionError("the streamed turn did not remain held")
+            if any("interrupt" in path for path, _ in requests):
+                raise AssertionError(f"empty Q interrupted the turn: {requests!r}")
+            if (
+                b"MASC Keepers" not in screen
+                or "Keepers ▸ alpha ▸ chat".encode() in screen
+            ):
+                raise AssertionError(f"empty Q stayed in chat: {screen[-600:]!r}")
+        finally:
+            release.set()
+            os.killpg(process.pid, signal.SIGTERM)
+
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures[CHAT] = h.RequestHttpResponse(respond)
+    h.run_terminal_scenario(
+        binary,
+        description="empty Q leaves a running Keeper turn without interrupting it",
+        interact=interact,
+        confirm_exit=b"",
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     executable = str(Path(sys.argv[1]).resolve())
     approval_typing(executable, "approve")
@@ -337,3 +401,4 @@ if __name__ == "__main__":
     queued_attachments(executable)
     failed_progress_names_the_cause_once(executable)
     quiet_leave_belongs_to_the_chat_surface(executable)
+    empty_q_leaves_a_running_turn(executable)

@@ -1228,17 +1228,15 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* Q / Ctrl-Q is the leave half of Esc with the interrupt half taken out.
      Esc's first press on a live turn spends itself stopping the turn, so an
      operator who wants to walk away and let the turn run needs a quiet exit.
-     Ctrl-Q (byte 17) is always available for this quiet leave without colliding
-     with printable text. In a viewport too small to draw the composer where input
-     is unsupported, printable Q also routes here. In ordinary typing mode,
-     printable Q is never swallowed and types into the draft normally. *)
+     Empty-draft Q leaves; with text it remains a letter. Ctrl-Q (byte 17)
+     leaves regardless of the draft. *)
   | k
     when state.view = Keepers Keeper_message
          && state.keeper_message_focus = Right_pane
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture
-         && ((String.equal k "Q" && not (keeper_message_input_supported state))
-             || (String.length k = 1 && Char.code k.[0] = 17)) ->
+         && Masc_tui_keys.chat_quiet_leave
+              ~draft_empty:(Buffer.length state.msg_input = 0) k ->
     (* The surface guard is the point of this arm, not decoration.
        [handle_message_key] has a second caller -- the composer row on every
        other surface -- and this arm leaves the chat pane by changing

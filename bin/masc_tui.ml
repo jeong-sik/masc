@@ -3564,11 +3564,16 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Workspace_identity_match, Some identity ->
   (* The read-state Item endpoint owns account authority. Public roster
      currency observations require CanAdmin and may legitimately be absent;
-     only current Keeper presence is required before this authenticated read. *)
+     only current Keeper presence is required before this authenticated read.
+     A partial roster's silence is not absence: past the cap the roster says
+     nothing about a locally known Keeper, and [Unobserved] is exactly that
+     silence -- the authoritative read proceeds and the endpoint itself
+     answers for a Keeper that is truly gone. A complete roster's [Absent]
+     and this Keeper's own decode failure remain refusals. *)
   match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-  | Unobserved | Invalid _ | Absent ->
+  | Invalid _ | Absent ->
     state.item_account_error <- Some "Keeper is not observed in the current roster"
-  | Present _ ->
+  | Present _ | Unobserved ->
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -10486,7 +10491,18 @@ let apply_http_surfaces state ~mailbox results =
           | Config_params -> launch_runtime_params_load state ~mailbox
           | Config_runtime | Config_models | Config_themes ->
               launch_runtime_config_load state ~mailbox
-          | Config_prompts | Config_presets | Config_voice -> ())
+          | Config_prompts | Config_voice -> ()
+          (* Presets read through the workspace request, so a pane opened
+             before the identity reading settled failed as unverified; the
+             pane has no periodic reload to recover it. *)
+          | Config_presets -> launch_presets_load state ~mailbox)
+     (* Resources lists read through the workspace request too, and the
+        cadence pass deliberately never relists this surface -- without a
+        replay here the pane stays failed until a manual refresh. *)
+     | Resources ->
+         Masc_tui_resources_requests.launch_list state ~host:server_peer_host
+           ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+           ~check:(capture_workspace_check state ~mailbox)
      | _ -> ());
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())

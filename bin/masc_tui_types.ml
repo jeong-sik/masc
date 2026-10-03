@@ -144,8 +144,20 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
+    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+       default cluster, [<base>/.masc/clusters/<name>] otherwise), so the
+       local root must be composed the same way from the same cluster
+       selection: a plain [<base>/.masc] classifies every healthy
+       non-default-cluster connection as a mismatch and refuses all Keeper
+       messages. *)
+    let local_cluster_root =
+      let masc_root = Filename.concat local_base_path Common.masc_dirname in
+      match Env_config_core.cluster_name_opt () with
+      | None | Some "" | Some "default" -> masc_root
+      | Some cluster ->
+        Filename.concat (Common.clusters_dir_from_base_path ~base_path:local_base_path)
+          (Workspace_utils.sanitize_namespace_segment cluster) in
+    let local_masc_root = canonical_path local_cluster_root in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading

@@ -1674,14 +1674,18 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          default-light body above. Without it a fill whose keepers came from
          the fixture-seeded cache rather than a projected snapshot carries no
          observation stamp, and every repeat request recomputes instead of
-         reusing the bytes it already prepared. *)
-      |> Dashboard_projection_cache.with_current_keeper_observations ~config
+         reusing the bytes it already prepared. An explicit fixture is the
+         exception both places: its Candle, portraits and balances are
+         synthetic by contract, and the wrapper skips its gate for fixture
+         requests -- so the fill leaves them alone too. One projection, not
+         two: each one takes a fresh Candle ledger read, and a second pass
+         over an already-projected body only re-observed what the first had
+         stamped. *)
+      |> (match fixture with
+          | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
+          | Some _ -> fun json -> json)
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
-      |> fun json ->
-      match fixture with
-      | Some _ -> json
-      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config json
     in
     let payload =
       Dashboard_cache.get_or_compute_payload_with_timeout

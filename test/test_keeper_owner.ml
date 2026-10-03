@@ -4202,7 +4202,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
-let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) () =
+let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) ?(completed_reply=false) () =
   init_runtime_default_for_tests ();
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4379,6 +4379,70 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
           check string "queued artifact purpose" "Use in booklet" observed.purpose;
           let bytes = Keeper_peer_artifact.fetch ~config observed |> Result.get_ok in
           check int "queued artifact bytes" artifact.blob.bytes (String.length bytes));
+       if completed_reply then begin
+         let turn_ref = Ids.Turn_ref.make ~trace_id:"owned-delegate" ~absolute_turn:7 in
+         let full_reply = "REVIEW-BEGIN\n" ^ String.make 900 'x' ^ "\nREVIEW-END" in
+         Keeper_chat_store.append_turn ~base_dir:base_path ~keeper_name:meta.name
+           ~user_content:"PRIVATE-USER-INPUT" ~user_attachments:[]
+           ~tool_calls:[{Keeper_chat_store.call_id="private-tool"; execution_id=None;
+             call_name="Read"; args="PRIVATE-TOOL-INPUT"}]
+           ~turn_ref ~assistant_content:"INTERMEDIATE-UNPROVENANCED-ASSISTANT" ();
+         let delivery_key = Keeper_chat_delivery_identity.Operation
+           (Keeper_chat_delivery_identity.Request_id.of_string operation_id_raw |> Result.get_ok) in
+         Keeper_chat_store.append_assistant_message_once ~base_dir:base_path
+           ~keeper_name:meta.name ~delivery_key ~turn_ref ~content:full_reply ()
+         |> Result.get_ok |> ignore;
+         Keeper_chat_store.append_assistant_message_result ~base_dir:base_path
+           ~keeper_name:meta.name ~turn_ref
+           ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+           ~content:"TRANSPORT-FAILURE-MUST-NOT-BECOME-REPLY" () |> Result.get_ok;
+         Keeper_chat_store.append_assistant_message_result ~base_dir:base_path
+           ~keeper_name:meta.name
+           ~turn_ref:(Ids.Turn_ref.make ~trace_id:"owned-delegate" ~absolute_turn:8)
+           ~content:"OTHER-TURN-REPLY" () |> Result.get_ok;
+         let other_key = Keeper_chat_delivery_identity.Operation
+           (Keeper_chat_delivery_identity.Request_id.of_string "different-owned-operation" |> Result.get_ok) in
+         Keeper_chat_store.append_assistant_message_once ~base_dir:base_path
+           ~keeper_name:meta.name ~delivery_key:other_key ~turn_ref
+           ~content:"SAME-TURN-WRONG-OPERATION" () |> Result.get_ok |> ignore;
+         let owner = Owner_registry.get ~base_path ~keeper_name:meta.name |> Result.get_ok in
+         ignore (owner_ok (Owner.claim_next_operation owner));
+         ignore (owner_ok (Owner.succeed_running_operation owner ~operation_id
+           ~outcome_ref:(Ids.Turn_ref.to_string turn_ref)));
+         let read caller = Keeper_tool_surface_ops.keeper_delegate_status_body
+           ~config ~caller reference in
+         let status = read "agent-operation-caller" in
+         check bool "completed owned operation is readable" true (Tool_result.is_success status);
+         let reply = Yojson.Safe.Util.member "completed_reply" (Tool_result.data status) in
+         check string "reply is available" "available"
+           Yojson.Safe.Util.(reply |> member "status" |> to_string);
+         check string "exact terminal turn retained" (Ids.Turn_ref.to_string turn_ref)
+           Yojson.Safe.Util.(reply |> member "turn_ref" |> to_string);
+         let replies = Yojson.Safe.Util.(reply |> member "replies" |> to_list) in
+         check int "only exact utterance returned" 1 (List.length replies);
+         check string "full review survives preview boundary" full_reply
+           Yojson.Safe.Util.(List.hd replies |> member "text" |> to_string);
+         let denied = read "different-agent" in
+         check bool "other caller cannot read completed body" false (Tool_result.is_success denied);
+         check bool "denial does not expose full reply" false
+           (String_util.contains_substring (Yojson.Safe.to_string (Tool_result.data denied)) "REVIEW-BEGIN");
+         let check_unavailable label expected outcome_ref =
+           let reply = Keeper_tool_surface_ops.completed_delegate_reply
+             ~base_dir:base_path ~keeper_name:meta.name ~delivery_key ~outcome_ref in
+           check string (label ^ " is unavailable") "unavailable"
+             Yojson.Safe.Util.(reply |> member "status" |> to_string);
+           check string (label ^ " preserves cause") expected
+             Yojson.Safe.Util.(reply |> member "reason" |> to_string)
+         in
+         check_unavailable "invalid turn reference" "invalid_outcome_ref" "not-a-turn";
+         check_unavailable "missing exact reply" "reply_not_found"
+           (Ids.Turn_ref.to_string (Ids.Turn_ref.make ~trace_id:"owned-delegate" ~absolute_turn:999));
+         let chat_path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name:meta.name in
+         let original = In_channel.with_open_bin chat_path In_channel.input_all in
+         write_file chat_path (original ^ "{torn-chat-row\n");
+         check_unavailable "unreadable chat authority" "chat_store_unavailable"
+           (Ids.Turn_ref.to_string turn_ref)
+       end else begin
        let cancelled =
          Keeper_tool_surface_ops.keeper_delegate_cancel_body
            ~config
@@ -4396,7 +4460,8 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            (`Assoc [ "target", target ])
        in
        check int "cancelled operation leaves queued list" 0
-         Yojson.Safe.Util.(Tool_result.data listed_after_cancel |> to_list |> List.length))
+         Yojson.Safe.Util.(Tool_result.data listed_after_cancel |> to_list |> List.length)
+       end)
 ;;
 
 let test_connector_submit_uses_owner_operation_idempotency () =
@@ -5235,6 +5300,8 @@ let () =
             "agent delegate submits owner operation without waiting"
             `Quick
             (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:false)
+        ; test_case "completed delegate returns full owned exact-turn reply" `Quick
+            (test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true)
         ; test_case "peer artifacts reach the recipient Owner queue" `Quick
             (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:true)
         ; test_case

@@ -69,17 +69,13 @@ def hydrate(source, target):
 
 class CandleEvidenceAudits(unittest.TestCase):
     def test_survey_runtime_preserves_numeric_types_under_optimization(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
         script = SURVEY/'audit-provenance.py'
         plan = json.loads((SURVEY/'plan.json').read_text())
         runtime = (SURVEY/'runtime.toml').read_text()
-        probe = (
-            'import json, runpy, sys; '
-            'data=json.load(sys.stdin); '
-            'runpy.run_path(sys.argv[1])["validate_runtime"]('
-            'data["runtime"].encode(), data["plan"])'
-        )
         cases = [
-            (runtime, plan, None),
+            ('original', runtime, plan, None),
         ]
         for before, after, key, value, error in [
             ('"max_output_tokens" = 4096', '"max_output_tokens" = 4096.0',
@@ -89,17 +85,25 @@ class CandleEvidenceAudits(unittest.TestCase):
         ]:
             changed = copy.deepcopy(plan)
             changed['evaluation_overrides'][key] = value
-            cases.append((runtime.replace(before, after), changed, error))
-        for raw, configured_plan, error in cases:
-            with self.subTest(error=error):
-                result = subprocess.run([sys.executable, '-O', '-c', probe, str(script)],
-                                        input=json.dumps({'runtime': raw, 'plan': configured_plan}),
-                                        capture_output=True, text=True, timeout=30)
-                if error is None:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                else:
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(error, result.stderr)
+            cases.append((f'runtime-{key}', runtime.replace(before, after), plan, error))
+            cases.append((f'plan-{key}', runtime, changed, error))
+        for name, raw, configured_plan, error in cases:
+            with self.subTest(case=name):
+                # Keep every frozen declaration consistent so only the numeric
+                # type guard can reject each synthetic bundle through main().
+                configured_plan = copy.deepcopy(configured_plan)
+                configured_plan['runtime_config_sha256'] = hashlib.sha256(raw.encode()).hexdigest()
+                (bundle/'.masc/config/runtime.toml').write_text(raw)
+                write_json(bundle/'plan.json', configured_plan)
+                metadata = json.loads((bundle/'metadata.json').read_text())
+                metadata['plan'] = configured_plan
+                write_json(bundle/'metadata.json', metadata)
+                for filename in ('freeze.json', 'frozen-audit.json'):
+                    record = json.loads((bundle/filename).read_text())
+                    record.update(plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest(),
+                                  runtime_config_sha256=configured_plan['runtime_config_sha256'])
+                    write_json(bundle/filename, record)
+                self.run_audit(script, bundle, bundle, error=error)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='candle-audit-fixture-')

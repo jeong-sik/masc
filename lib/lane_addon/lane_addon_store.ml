@@ -59,11 +59,6 @@ let write_sampling_blob t bytes =
   | Error _ ->
       let* () = write t (recovery_blob_path (digest bytes)) bytes in
       Ok (blob_reference bytes)
-let resolved_blob_path t hash =
-  let recovery = recovery_blob_path hash in
-  match Fs_compat.exact_path_kind (Filename.concat t.root recovery) with
-  | Fs_compat.Exact_missing -> blob_path hash
-  | _ -> recovery
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with
@@ -81,10 +76,13 @@ let bounded_protect f =
   match protect (fun () -> Ok (f ())) with
   | Ok result -> result | Error detail -> Error (Read_failed detail)
 let read_file_bounded ~budget path = bounded_protect (fun () ->
-  let channel = open_in_bin path in
+  let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+  let channel = Unix.in_channel_of_descr fd in
   Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let size = in_channel_length channel in
-    if size > budget.remaining then Error Read_limit_exceeded
+    let stat = Unix.fstat fd in
+    let size = stat.Unix.st_size in
+    if stat.Unix.st_kind <> Unix.S_REG then Error (Read_failed "retained evidence is not a regular file")
+    else if size > budget.remaining then Error Read_limit_exceeded
     else begin
       budget.remaining <- budget.remaining - size;
       try Ok (really_input_string channel size)
@@ -92,19 +90,21 @@ let read_file_bounded ~budget path = bounded_protect (fun () ->
     end))
 let read_blob_bounded ~budget t reference =
   let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
-  let relative = match kind with Blob -> resolved_blob_path t hash | Sequence -> sequence_path hash in
-  let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
-  if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch")
-let read_blob ?(max_bytes=max_int) t reference = protect (fun () ->
-  let* kind, hash = retained_address reference in
-  let relative = match kind with Blob -> resolved_blob_path t hash | Sequence -> sequence_path hash in
-  let channel = open_in_bin (Filename.concat t.root relative) in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-    let size = in_channel_length channel in
-    if size > max_bytes then Error "retained evidence exceeds the source envelope"
-    else
-      let bytes = really_input_string channel size in
-      if digest bytes = hash then Ok bytes else Error "evidence digest mismatch"))
+  let read relative =
+    let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
+    if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch") in
+  match kind with
+  | Sequence -> read (sequence_path hash)
+  | Blob ->
+      (match read (blob_path hash) with
+       | Ok _ as result -> result
+       | Error Read_limit_exceeded as result -> result
+       | Error (Read_failed _) -> read (recovery_blob_path hash))
+let read_blob ?(max_bytes=max_int) t reference =
+  read_blob_bounded ~budget:(read_budget ~max_bytes) t reference
+  |> Result.map_error (function
+    | Read_limit_exceeded -> "retained evidence exceeds the source envelope"
+    | Read_failed detail -> detail)
 
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
 let sequence_schema = "masc.lane-jsonl-sequence.v1"

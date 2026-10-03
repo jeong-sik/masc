@@ -3680,13 +3680,17 @@ let test_execution_parameterized_payload_separates_request_queries () =
     check bool "each scoped encoding retains its own complete identity bytes" true
       (encoded.identity == payload.raw_json)) payloads;
   let keys = List.map execution_payload_key payloads in
-  check int "every distinct query owns its response bytes"
-    (List.length payloads) (List.length (List.sort_uniq String.compare keys));
+  check int "distinct resolved queries own separate response bytes"
+    (List.length payloads - 2) (List.length (List.sort_uniq String.compare keys));
+  List.iter (fun payload ->
+    check string "equivalent fixture selections share their cache key"
+      (execution_payload_key explicit) (execution_payload_key payload))
+    [ absent; empty ];
   let open Yojson.Safe.Util in
-  check bool "absent fixture stays null" true
-    (absent.json |> member "query" |> member "fixture" = `Null);
-  check string "empty fixture stays explicitly empty" ""
-    (empty.json |> member "query" |> member "fixture" |> to_string);
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check string "query records the selected environment fixture" "execution_smoke"
+      (payload.json |> member "query" |> member "fixture" |> to_string))
+    [ absent; empty; explicit ];
   check bool "full query preserved" true
     (explicit.json |> member "query" |> member "full" |> to_bool);
   check bool "light query preserved" true

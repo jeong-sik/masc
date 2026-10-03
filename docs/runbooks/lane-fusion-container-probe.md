@@ -8,11 +8,14 @@ Keeper activity.
 
 ```sh
 gh workflow run linux-x64-probe.yml --repo jeong-sik/masc \
-  --ref <branch-containing-the-probe> -f target=lane-fusion-container
+  --ref release/vX.Y.Z -f target=lane-fusion-container
 ```
 
-Run this at a work-unit finishing boundary. Follow the repository execution
-protocol: do not build Dune or Docker locally and do not watch/poll CI in a loop.
+Run this explicitly at the Release/Tag boundary on a candidate containing the
+probe. This full native qualification is not a pre-release two-minute Core gate.
+Follow the repository execution protocol: do not run a local full Dune build or
+watch/poll CI in a loop. Separately authorized package-only Docker qualification
+does not prove this native scenario.
 A dispatched or queued run is not evidence that the qualification executed.
 
 The intended scenario is:

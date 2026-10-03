@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import tempfile
 import tomllib
 import unittest
@@ -79,7 +80,8 @@ class Host:
         return {"error": {"code": -32603, "message": json.dumps(terminal)}}
 
 
-def call(host, inputs, settings=None, *, sampling=True, ping=False):
+def call(host, inputs, settings=None, *, sampling=True, ping=False,
+         command=None, command_env=None, transport_timeout=None):
     settings = copy.deepcopy(settings if settings is not None else binding())
     if not settings.get("sources"):
         declared = []
@@ -94,9 +96,24 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
                 declared.append({"source_id": item["source_id"], "kind": "snapshot_file",
                                  "path": "/fixture/" + item["source_id"] + ".json"})
         settings["sources"] = declared
-    process = subprocess.Popen([sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
+    process = subprocess.Popen(command if command is not None else
+                               [sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, env={})
+                               stderr=subprocess.PIPE, text=True,
+                               env=command_env if command is not None else {})
+    timed_out = threading.Event()
+    def expire_transport():
+        if process.poll() is None:
+            timed_out.set()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+    timer = None
+    if transport_timeout is not None:
+        timer = threading.Timer(transport_timeout, expire_transport)
+        timer.daemon = True
+        timer.start()
     stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
     try:
         assert stdin is not None and stdout is not None and stderr is not None
@@ -105,6 +122,8 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
             stdin.flush()
         def read():
             line = stdout.readline(MAXIMUM_FRAME + 1)
+            if timed_out.is_set():
+                raise TimeoutError("Fixture worker transport deadline exceeded")
             if not line:
                 raise AssertionError("worker closed stdout: " + stderr.read())
             host.last_reply_bytes = len(line.encode("utf-8"))
@@ -138,6 +157,9 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
         assert stderr.read() == ""
         return message["result"]
     finally:
+        if timer is not None:
+            timer.cancel()
+            timer.join()
         if process.poll() is None:
             process.kill()
             process.wait()
@@ -150,6 +172,21 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False):
 
 
 class FusionCompute(unittest.TestCase):
+    def test_stalled_fixture_transport_is_terminated_and_reaped(self):
+        from unittest.mock import patch
+        created = []
+        original = subprocess.Popen
+        def spawn(*args, **kwargs):
+            process = original(*args, **kwargs)
+            created.append(process)
+            return process
+        with tempfile.TemporaryDirectory() as root, patch("test_fusion_compute.subprocess.Popen", side_effect=spawn):
+            with self.assertRaises(TimeoutError):
+                call(Host(root), [source()], command=[sys.executable, "-c", "import time; time.sleep(60)"],
+                     command_env={}, transport_timeout=0.2)
+        self.assertTrue(created)
+        self.assertTrue(all(process.poll() is not None for process in created))
+
     def test_declared_upstream_without_observations_waits_without_sampling(self):
         with tempfile.TemporaryDirectory() as root:
             pending = source()

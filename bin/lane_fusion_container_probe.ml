@@ -371,9 +371,9 @@ let run ~repo_root ~output_dir ~head_sha =
           let report_id = installation current "report" |> Option.get |> text "instance_id" in
           let selected = ["instance_id",`String report_id;"row_ids",`List [`String row.id]] in
           let frozen = dispatch config R.Evidence selected in
+          let broadcast_request_id = "container-report:" ^ row.id in
           let published = dispatch ~caller:"container-probe-operator" config R.Evidence
-            (selected @ ["broadcast",`Bool true;
-              "request_id",`String "container-probe-report-publication"]) in
+            (selected @ ["broadcast",`Bool true;"request_id",`String broadcast_request_id]) in
           let delivery = member "delivery" published in
           ensure (text "destination" delivery="broadcast" && text "status" delivery="committed") "local Broadcast did not commit";
           let receipt = member "receipt" delivery in

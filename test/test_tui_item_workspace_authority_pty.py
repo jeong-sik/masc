@@ -138,6 +138,7 @@ def run(binary, captures):
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = ItemWire(fixtures[authority.ROSTER_PATH][1])
     fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/api/v1/gate/keepers"] = wire.roster
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
     fixtures[ITEM_PATH] = wire.items

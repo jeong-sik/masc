@@ -34,3 +34,9 @@ The final diagnostic observed a real cancelled-response BrokenPipe: the response
 Final independent review covered all five source files including the GET refusal and MCP qualification, with no remaining P0-P2 findings. No runtime or build claim is inferred from that source review.
 
 The checked-in terminal text captures omit trailing blank cells; raw PTY captures remain in the diagnostic artifact directory.
+
+## Formal review correction
+
+Rondo identified that the initial RequestHttpResponse GET refusal did not prevent DELETE from reaching admission. A real HTTP probe reproduced DELETE200 with one admission. The fixture now uses MethodHttpResponse and rejects every non-POST method before the held response gate. The same probe verified GET405/DELETE405 with zero admissions and a closed gate in both modes. The exact zero/one POST count and workspace-A attribution remain.
+
+The final Ask artifacts now use the current candidate fd7e6c37 macOS binary (SHA-256f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d), with updated script hash in ask-manifest.json. Both modes passed. Earlier diagnostic descriptions above remain historical; no final candidate compile/FullRC success is claimed.

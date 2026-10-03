@@ -1,5 +1,6 @@
 {
-  "scope": "old RC diagnostic, not residual candidate validation",
-  "source_sha256": "332847e5ade476ffe5aa6e03d9be0adccb832ccf43bc64c7aa67ea6cb3caf19b",
-  "binary_sha256": "2aa66ae0e700fabfa0b45147de7b33c561acb49239de0bbbb12494cb5f78891b"
+  "scope": "fd7e6c37 candidate binary plus edited fixture diagnostic; not PR41031 exact-head binary verification",
+  "candidate_commit": "fd7e6c37e006af09b1dba65fb2b3b55249104c7f",
+  "source_sha256": "5e1e408dc7c414c8997f7da885c7d8e7adab4baf60785ebc8d6931f90e607c35",
+  "binary_sha256": "f3531778d03b6b2bfd68ae86ba47507cb653bcffd62cd543b2720c4e918b882d"
 }

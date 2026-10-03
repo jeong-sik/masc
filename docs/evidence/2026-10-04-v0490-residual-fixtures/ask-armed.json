@@ -1,13 +1,9 @@
 {
   "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
   "admitted_count": 0,
-  "admitted_bodies": [],
+  "admitted_method_phase": [],
   "response_recorded_count": 0,
   "response_recorded_bodies": [],
-  "get_response": [
-    405,
-    {
-      "error": "POST required"
-    }
-  ]
+  "gate_requested": false,
+  "gate_completed": false
 }

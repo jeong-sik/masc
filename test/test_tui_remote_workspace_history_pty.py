@@ -953,13 +953,15 @@ def ask_workspace_withdrawal(binary: str) -> None:
         fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
-        admitted_answers: list[tuple[str, bytes]] = []
-        def answer_request(body):
+        admitted_answers: list[tuple[str, str]] = []
+        def answer_request(method):
+            if method != "POST":
+                return 405, {"error": "POST required"}
             # The client may cancel its connection while the response is
             # held. Count admission before responding: the harness's POST
             # receipt is only appended after a successful response write.
             with wire.lock:
-                admitted_answers.append((wire.phase, body))
+                admitted_answers.append((method, wire.phase))
             return answer()
         b_asks = threading.Event()
         def asks():
@@ -972,8 +974,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: h.RequestHttpResponse(answer_request,
-                get_response=(405, {"error": "POST required"}))})
+            h.KEEPER_ASK_ANSWER_PATH: h.MethodHttpResponse(answer_request)})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -1014,7 +1015,8 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 assert b"ship the cold-start change now?" not in screen(output)
                 with wire.lock:
                     assert len(admitted_answers) == int(submit), admitted_answers
-                    assert all(phase == "a" for phase, _ in admitted_answers), admitted_answers
+                    assert all(method == "POST" and phase == "a"
+                               for method, phase in admitted_answers), admitted_answers
                 os.write(fd, b"q")
             finally:
                 answer.release.set()

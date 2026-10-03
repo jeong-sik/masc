@@ -1,0 +1,34 @@
+[
+  {
+    "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+    "method": "GET",
+    "status": 405,
+    "body": "{\"error\": \"POST required\"}",
+    "gate_requested": false,
+    "admitted_count": 0
+  },
+  {
+    "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+    "method": "DELETE",
+    "status": 405,
+    "body": "{\"error\": \"POST required\"}",
+    "gate_requested": false,
+    "admitted_count": 0
+  },
+  {
+    "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+    "method": "GET",
+    "status": 405,
+    "body": "{\"error\": \"POST required\"}",
+    "gate_requested": false,
+    "admitted_count": 0
+  },
+  {
+    "scenario": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+    "method": "DELETE",
+    "status": 405,
+    "body": "{\"error\": \"POST required\"}",
+    "gate_requested": false,
+    "admitted_count": 0
+  }
+]

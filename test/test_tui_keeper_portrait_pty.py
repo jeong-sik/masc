@@ -190,7 +190,7 @@ def open_alpha_detail(process, fd, output) -> None:
 def reopen_alpha_items(process, fd, output, balance: bytes) -> None:
     h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
-    # Workspace withdrawal returns to the list but retains the chosen detail tab.
+    # Re-enter explicitly; identity recovery can retain detail navigation and its tab.
     h.send_and_wait(process, fd, output, b"\r", balance)
 
 
@@ -896,7 +896,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
 
     def frame(process, fd, output, predicate):
         assert h.wait_for_fixture_state(process, fd, output,
-            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), last_frame_rows(output)
 
     def recover(process, fd, output):
         probes = identity["probes"]
@@ -913,8 +913,10 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             if boundary == "identity":
+                # Temporary identity loss retains the detail tab while its
+                # Keeper rows and authenticated account authority are withdrawn.
                 frame(process, fd, output, lambda text:
-                      b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
+                      b"No keeper selected." in text and b"Balance " not in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             balance[0] = "13000"
@@ -928,7 +930,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             if boundary == "identity":
-                frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
+                frame(process, fd, output, lambda text: b"No keeper selected." in text and b"Balance " not in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             # Keep authority unread until the late response has settled.
@@ -942,7 +944,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
             if boundary == "identity":
-                assert b"MASC Keepers" in text
+                assert b"No keeper selected." in text
             else:
                 assert b"Account unavailable:" in text
             assert b"Balance 13.000 Candle" not in text

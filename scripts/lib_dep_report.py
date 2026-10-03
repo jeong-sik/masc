@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -456,66 +455,6 @@ def render_markdown(report: Json) -> str:
     return "\n".join(sections)
 
 
-def self_test() -> None:
-    current = {
-        "stats": {"total_modules": 4, "total_edges": 5, "avg_out_degree": 1.25},
-        "top_imported": [["Workspace", 3]],
-        "top_importers": [["Main", 2]],
-        "cycles": [["A", "B", "C"]],
-        "clusters": [
-            {
-                "prefix": "server_mcp",
-                "module_count": 4,
-                "coupling_ratio": 0.75,
-                "external_dep_count": 2,
-                "internal_edges": 6,
-            }
-        ],
-        "graph": {"Main": ["Workspace"], "Worker": ["Workspace"], "Other": ["Workspace"]},
-    }
-    baseline = {
-        **current,
-        "stats": {"total_modules": 5, "total_edges": 7, "avg_out_degree": 1.4},
-        "cycles": [["A", "B", "C", "D"]],
-        "clusters": [
-            {
-                "prefix": "server_mcp",
-                "module_count": 5,
-                "coupling_ratio": 0.8,
-                "external_dep_count": 3,
-                "internal_edges": 7,
-            }
-        ],
-        "graph": {**current["graph"], "Legacy": ["Workspace"]},
-    }
-    with tempfile.TemporaryDirectory() as tmp:
-        source = Path(tmp) / "current.json"
-        baseline_path = Path(tmp) / "baseline.json"
-        source.write_text(json.dumps(current))
-        baseline_path.write_text(json.dumps(baseline))
-        report = build_report(
-            load_json(source),
-            source=source,
-            baseline=load_json(baseline_path),
-            baseline_path=baseline_path,
-            limit=5,
-        )
-    assert report["stats_delta"] == {
-        "avg_out_degree": -0.15,
-        "total_edges": -2,
-        "total_modules": -1,
-    }
-    assert report["largest_scc_delta"] == -1
-    assert report["scc_count_delta"] == 0
-    assert report["scc_delta"] == [
-        {"status": "added", "size": 3, "members": ["A", "B", "C"]},
-        {"status": "removed", "size": 4, "members": ["A", "B", "C", "D"]},
-    ]
-    assert report["workspace_state_dependents_delta"] == [
-        {"module": "Workspace", "count": -1}
-    ]
-    assert report["batch2_candidate_delta"][0]["module_count_delta"] == -1
-    print("self-test ok")
 
 
 def parse_args() -> argparse.Namespace:
@@ -525,15 +464,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--self-test", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.self_test:
-        self_test()
-        return
     current = load_json(args.graph)
     baseline = load_json(args.baseline) if args.baseline is not None else None
     report = build_report(

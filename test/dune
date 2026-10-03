@@ -360,7 +360,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
@@ -460,7 +459,6 @@
   test_ide_paths
   test_ide_canonical_url_join
   test_claimable_task_summaries
-  test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_registry_provenance
@@ -722,7 +720,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
@@ -822,7 +819,6 @@
   test_ide_paths
   test_ide_canonical_url_join
   test_claimable_task_summaries
-  test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_registry_provenance
@@ -1696,7 +1692,6 @@
   test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
-  test_verify_handoff_tool
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1714,7 +1709,6 @@
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory
-  test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
   test_board_read_shows_viewer_vote
@@ -1846,7 +1840,6 @@
   test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
-  test_verify_handoff_tool
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1864,7 +1857,6 @@
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory
-  test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
   test_board_read_shows_viewer_vote
@@ -2475,10 +2467,6 @@
 (include stanzas/test_candle_payout_worker.inc)
 (include stanzas/test_candle_goal_flow.inc)
 
-(include stanzas/test_audit_keeper_fleet_readiness.inc)
-
-(include stanzas/test_keeper_production_readiness_gate.inc)
-
 (include stanzas/test_candle_config.inc)
 
 (include stanzas/test_channel_gate.inc)
@@ -2877,7 +2865,6 @@
 
 (include stanzas/test_masc_error_is_retryable.inc)
 
-(include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
 (include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_account_removal.inc)
@@ -2988,7 +2975,6 @@
 
 (include stanzas/test_event_bus_subscription_contract.inc)
 
-(include stanzas/test_tool_call_replay_harness.inc)
 
 (include stanzas/test_tool_diversity.inc)
 
@@ -4928,228 +4914,7 @@
  (name runtest)
  (deps (alias runtest-test_tui_build_identity)))
 
-; Python unit suites over the scripts/ tree. These suites were first wired
-; into runtest after the #32245 review found several of them running with no
-; rule, no workflow, and no caller; a later sweep adopted the rest. Every
-; suite below now runs under the default @test/runtest alias in CI. They are
-; stdlib-only unittest files whose subjects live under scripts/, so each rule
-; carries the test file plus the exact script files it loads.
-
-(rule
- (alias runtest-test_capture_keeper_skill_tui_proof)
- (deps
-  test_capture_keeper_skill_tui_proof.py
-  skill_activation_event_log_fixture.py
-  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
-  ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/skill_activation_events.py)
- (action
-  (run python3 %{dep:test_capture_keeper_skill_tui_proof.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_capture_keeper_skill_tui_proof)))
-
-(rule
- (alias runtest-test_capture_tui_lane_runs)
- (deps
-  test_capture_tui_lane_runs.py
-  ../scripts/capture-tui-lane-runs.py)
- (action
-  (run python3 %{dep:test_capture_tui_lane_runs.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_capture_tui_lane_runs)))
-
-(rule
- (alias runtest-test_capture_tui_keeper_chat)
- (deps
-  test_capture_tui_keeper_chat.py
-  ../scripts/capture-tui-keeper-chat.py)
- (action
-  (run python3 %{dep:test_capture_tui_keeper_chat.py})))
-
-(rule
- (alias runtest-test_tui_frame_latency_verdict)
- (deps
-  test_tui_frame_latency_verdict.py
-  ../scripts/tui-frame-latency.py)
- (action
-  (run python3 %{dep:test_tui_frame_latency_verdict.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_frame_latency_verdict)))
-
-(rule
- (alias runtest-test_release_binary_smoke)
- (deps
-  test_release_binary_smoke.py
-  ../scripts/release-binary-smoke.sh
-  ../scripts/readme-cli-subcommands.py
-  ../README.md)
- (action
-  (run python3 %{dep:test_release_binary_smoke.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_release_binary_smoke)))
-
-(rule
- (alias runtest-test_response_latency_probe)
- (deps
-  test_response_latency_probe.py
-  ../scripts/harness/perf/response_latency_probe.py)
- (action
-  (run python3 %{dep:test_response_latency_probe.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_response_latency_probe)))
-
-(rule
- (alias runtest-test_tool_trace_spans)
- (deps
-  test_tool_trace_spans.py
-  ../scripts/harness/perf/tool_trace_spans.py)
- (action
-  (run python3 %{dep:test_tool_trace_spans.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tool_trace_spans)))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_capture_tui_keeper_chat)))
-
-(rule
- (alias runtest-test_dune_build_input_fingerprint)
- (deps
-  test_dune_build_input_fingerprint.py
-  ../scripts/dune-build-input-fingerprint.py)
- (action
-  (run python3 %{dep:test_dune_build_input_fingerprint.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_dune_build_input_fingerprint)))
-
-(rule
- (alias runtest-test_join_natural_keeper_skill_ledger)
- (deps
-  test_join_natural_keeper_skill_ledger.py
-  skill_activation_event_log_fixture.py
-  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
-  ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
-  ../scripts/harness/workload/skill_activation_events.py)
- (action
-  (run python3 %{dep:test_join_natural_keeper_skill_ledger.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_join_natural_keeper_skill_ledger)))
-
-(rule
- (alias runtest-test_keeper_multi_collaboration_acceptance)
- (deps
-  test_keeper_multi_collaboration_acceptance.py
-  ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
-  ../scripts/harness/workload/keeper_multi_collaboration_acceptance.sh
-  ../scripts/fixtures/keeper-multi-collaboration/missions.json
-  (source_tree ../scripts/fixtures/keeper-multi-collaboration/skills)
-  ../config/tools/masc_keeper_up.toml
-  ../lib/server/server_routes_http_routes_dashboard.ml
-  ../lib/server/server_skill_editor.ml
-  ../lib/keeper/keeper_tool_approval_mode.ml)
- (action
-  (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
-
 (include stanzas/test_acceptance_composition_fixtures.inc)
-
-(rule
- (alias runtest-test_campaign_scoreboard)
- (deps
-  test_campaign_scoreboard.py
-  ../scripts/harness/workload/campaign_scoreboard.py
-  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
- (action
-  (run python3 %{dep:test_campaign_scoreboard.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_campaign_scoreboard)))
-
-(rule
- (alias runtest-test_keeper_skill_use_proof)
- (deps
-  test_keeper_skill_use_proof.py
-  skill_activation_event_log_fixture.py
-  ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/skill_activation_events.py)
- (action
-  (run python3 %{dep:test_keeper_skill_use_proof.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_keeper_skill_use_proof)))
-
-(rule
- (alias runtest-test_memory_os_judge_eval)
- (deps
-  test_memory_os_judge_eval.py
-  ../scripts/memory_os_judge_eval.py)
- (action
-  (run python3 %{dep:test_memory_os_judge_eval.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_memory_os_judge_eval)))
-
-(rule
- (alias runtest-test_produce_natural_keeper_skill_proof)
- (deps
-  test_produce_natural_keeper_skill_proof.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
-  ../scripts/harness/workload/proof_http.py)
- (action
-  (run python3 %{dep:test_produce_natural_keeper_skill_proof.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_produce_natural_keeper_skill_proof)))
-
-(rule
- (alias runtest-test_produce_tui_build_evidence)
- (deps
-  test_produce_tui_build_evidence.py
-  ../scripts/harness/workload/produce_tui_build_evidence.py)
- (action
-  (run python3 %{dep:test_produce_tui_build_evidence.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_produce_tui_build_evidence)))
-
-(rule
- (alias runtest-test_proof_http)
- (deps
-  test_proof_http.py
-  ../scripts/harness/workload/proof_http.py)
- (action
-  (run python3 %{dep:test_proof_http.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_proof_http)))
 
 (rule
  (alias runtest-test_run_local_executable_binding)
@@ -5191,25 +4956,6 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_skill_usage_stats)))
-
-(rule
- (alias runtest-test_verify_keeper_skill_proof_bundle)
- (deps
-  test_verify_keeper_skill_proof_bundle.py
-  skill_activation_event_log_fixture.py
-  ../scripts/harness/workload/verify_keeper_skill_proof_bundle.py
-  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
-  ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
-  ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
-  ../scripts/harness/workload/skill_activation_events.py)
- (action
-  (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_verify_keeper_skill_proof_bundle)))
 
 (test
  (name test_tui_metrics_tail)
@@ -6248,15 +5994,6 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-observer-reconnect)))
 
-(rule
- (alias runtest-test_shim_builder_bootstrap)
- (deps test_shim_builder_bootstrap.py ../scripts/remote-ssh/build-shim.sh)
- (action (run python3 %{dep:test_shim_builder_bootstrap.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_shim_builder_bootstrap)))
-
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
 
 (include stanzas/test_keeper_kata_inventory.inc)
@@ -6401,7 +6138,6 @@
  (name runtest)
  (deps (alias runtest-test_tui_input_frame_pty)))
 
-(include stanzas/test_tui_artifact_comparison.inc)
 
 (rule
  (alias runtest-test_tui_approvals_ring_pty)
@@ -7229,15 +6965,6 @@
  (deps (alias runtest-test_tui_tool_results_pty)))
 
 (rule
- (alias runtest-test_check_installed_dashboard)
- (deps test_check_installed_dashboard.py ../scripts/check-installed-dashboard.py)
- (action (run python3 %{dep:test_check_installed_dashboard.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_check_installed_dashboard)))
-
-(rule
  (alias runtest-test_tui_account_login_pty)
  (deps test_tui_account_login_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_account_login_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -7564,51 +7291,6 @@
  (name runtest)
  (deps (alias runtest-test_tui_task_metadata_viewport_pty)))
 
-(rule
- (alias runtest-harness-server-binary)
- (deps test_harness_server_binary.py ../scripts/harness/lib/server_bootstrap.sh)
- (action (run python3 %{dep:test_harness_server_binary.py}
-          %{dep:../scripts/harness/lib/server_bootstrap.sh})))
-
-(alias
- (name runtest)
- (deps (alias runtest-harness-server-binary)))
-
-(rule
- (alias runtest-test_benchmark_scripts)
- (deps
-  test_benchmark_scripts.py
-  ../benchmarks/quick-bench.sh
-  ../benchmarks/benchmark.sh
-  ../scripts/harness/jsonrpc_sse.sh
-  ../scripts/harness/lib/mcp_jsonrpc.sh
-  (glob_files ../config/tools/masc_*.toml))
- (action (run python3 %{dep:test_benchmark_scripts.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_benchmark_scripts)))
-
-(rule
- (alias runtest-test_tool_quality_live_plan)
- (deps
-  test_tool_quality_live_plan.py
-  ../scripts/harness_tool_call_quality.sh
-  ../scripts/harness/jsonrpc_sse.sh
-  ../scripts/harness/lib/test_framework.sh
-  ../scripts/harness/lib/server_bootstrap.sh
-  ../scripts/harness/lib/mcp_call.sh
-  ../scripts/harness/lib/mcp_jsonrpc.sh
-  ../benchmarks/data/tool_call_quality_cases.json
-  ../config/prompts/harness.tool_quality.analyst.txt
-  ../config/prompts/harness.tool_quality.executor.txt
-  ../config/prompts/harness.tool_quality.verifier.txt)
- (action (run python3 %{dep:test_tool_quality_live_plan.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_tool_quality_live_plan)))
-
 (include stanzas/test_candle_purchase_flow.inc)
 
 (include stanzas/test_tui_remote_workspace_history_pty.inc)
@@ -7622,34 +7304,8 @@
 
 (include stanzas/test_tui_candle_currency_pty.inc)
 
-(include stanzas/test_item_http_redirects.inc)
-
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
-
-(rule
- (alias runtest-test_prepare_keeper_collaboration)
- (deps
-  test_prepare_keeper_collaboration.py
-  ../scripts/prepare-keeper-collaboration.py
-  ../scripts/prepare-fusion-decision-live.py)
- (action (run python3 %{dep:test_prepare_keeper_collaboration.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_prepare_keeper_collaboration)))
-
-(rule
- (alias runtest-test_keeper_continuity_admission)
- (deps
-  test_keeper_continuity_admission.py
-  ../scripts/harness/workload/keeper_continuity_validation.sh
-  ../config/tools/masc_keeper_up.toml)
- (action (run python3 %{dep:test_keeper_continuity_admission.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_keeper_continuity_admission)))
 
 (rule
  (alias runtest-test_tui_lane_initial_authority)

@@ -120,7 +120,10 @@ class ReportCliTest(unittest.TestCase):
                     run = manifest["pairs"][0][arm]["run"]
                     if arm == "preflight":
                         run["output"].update(
-                            jev_preflight={"status": "judged", "decision": "needs_generation"},
+                            jev_preflight={
+                                "status": "judged",
+                                "decision": "needs_generation",
+                            },
                             generation_path="full_lane",
                             full_llm_skipped=False,
                         )
@@ -137,7 +140,9 @@ class ReportCliTest(unittest.TestCase):
                 run.update(status=status, selected_slot=None)
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(json.loads(result.stdout)["pairs"][0]["baseline_status"], status)
+                self.assertEqual(
+                    json.loads(result.stdout)["pairs"][0]["baseline_status"], status
+                )
 
     def test_mismatched_or_contradictory_evidence_is_refused(self) -> None:
         for mode in (

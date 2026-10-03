@@ -25,8 +25,8 @@
   (re_export ppx_deriving_yojson.runtime)))
 
 (executable
- (name test_local_llm)
- (modules test_local_llm)
+ (name local_llm_probe)
+ (modules local_llm_probe)
  (libraries agent_core_test_deps agent_core eio eio_main yojson))
 
 (executable
@@ -44,7 +44,7 @@
  (modules capability_resolution_dump)
  (libraries agent_core_test_deps llm_provider))
 
-(executable
+(test
  (name test_wire_parse_dump)
  (modules test_wire_parse_dump)
  (libraries llm_provider unix))

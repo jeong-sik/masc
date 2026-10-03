@@ -7,6 +7,16 @@ permissions:
   contents: read
 
 jobs:
+  suite-kind:
+    name: Test suite declaration lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify package discovery and declaration boundaries
+        run: bash scripts/lint/test-suites-are-declared-as-tests.sh --self-test
+      - name: Scan tracked Dune declarations
+        run: bash scripts/lint/test-suites-are-declared-as-tests.sh
+
   syntax:
     name: Source and config syntax
     runs-on: ubuntu-24.04

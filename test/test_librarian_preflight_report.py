@@ -254,6 +254,50 @@ class ReportCliTest(unittest.TestCase):
                 del invalid["pairs"][0][arm]["run"][key]
                 self.assertEqual(self.execute(invalid).returncode, 1)
 
+    def test_nonfailed_arms_reject_failure_fields(self) -> None:
+        for arm in ("baseline", "preflight"):
+            for status in ("succeeded", "cancelled"):
+                manifest = fixture()
+                run = manifest["pairs"][0][arm]["run"]
+                run["status"] = status
+                valid = self.execute(manifest)
+                self.assertEqual(valid.returncode, 0, valid.stderr)
+                self.assertIsNone(json.loads(valid.stdout)["pairs"][0][arm + "_failure"])
+                for field in ("code", "detail"):
+                    for value in (None, "stale failure"):
+                        with self.subTest(arm=arm, status=status, field=field, value=value):
+                            invalid = copy.deepcopy(manifest)
+                            invalid["pairs"][0][arm]["run"][field] = value
+                            result = self.execute(invalid)
+                            self.assertEqual(result.returncode, 1)
+                            self.assertEqual(result.stdout, "")
+                            self.assertIn("nonfailed run must not record code or detail", result.stderr)
+
+    def test_goal_context_variants_require_exact_fields(self) -> None:
+        for context in (
+            {"status": "no_task"},
+            {"status": "available", "task_id": "task-1", "goals": []},
+            {"status": "unavailable", "task_id": "task-1", "detail": "fixture unavailable"},
+        ):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                actual["goal_context"] = copy.deepcopy(context)
+            valid = self.execute(manifest)
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            for field, value in (("task_id", "task-1"), ("goals", []), ("detail", "stale error")):
+                if field in context:
+                    continue
+                with self.subTest(context=context, field=field):
+                    invalid = copy.deepcopy(manifest)
+                    for arm in ("baseline", "preflight"):
+                        actual = invalid["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                        actual["goal_context"][field] = value
+                    result = self.execute(invalid)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("goal context fields do not match status", result.stderr)
+
     def test_duplicate_keys_are_refused_before_normalization(self) -> None:
         raw = json.dumps(fixture())
         for old, replacement in [('"status": "succeeded"', '"status":"failed", "status":"succeeded"'),

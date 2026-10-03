@@ -9989,6 +9989,36 @@ let test_librarian_preflight_detail_reports_actual_route () =
      = Some (Tui_decode.Librarian_memory_unchanged (4,2)));
   Alcotest.(check bool) "unchanged snapshot cannot report additions" true
     (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
+  let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+      let awaiting = `Assoc ["status", `String "awaiting_answer"; "elapsed_s", `Null] in
+      `Assoc ["run", `Assoc (("selected_slot", slot) ::
+        ("output", `Assoc (("jev_preflight", awaiting) :: List.remove_assoc "jev_preflight" output)) ::
+        List.remove_assoc "output" (List.remove_assoc "selected_slot" fields))]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "awaiting without generation or slot is valid" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (not_entered `Null)));
+  Alcotest.(check bool) "not-entered must not invent a generation slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (not_entered (`String "codex.fake"))));
+  List.iter (fun (status, extra) ->
+    let with_model model =
+      match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+      | `Assoc ["run", `Assoc fields] ->
+        let output = match List.assoc "output" fields with
+          | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+        let preflight = `Assoc (["status", `String status; "elapsed_s", `Null] @ extra @ model) in
+        `Assoc ["run", `Assoc (("output", `Assoc (("jev_preflight", preflight)
+          :: List.remove_assoc "jev_preflight" output)) :: List.remove_assoc "output" fields)]
+      | _ -> Alcotest.fail "invalid fixture" in
+    Alcotest.(check bool) (status ^ " without model stays valid") true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (with_model [])));
+    Alcotest.(check bool) (status ^ " rejects invented model") true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (with_model ["model", `String "invented"]))))
+    [ "awaiting_answer", []; "failed", ["failure", `Assoc ["detail", `String "offline"]]
+    ; "skipped", ["reason", `String "disabled"]; "ineligible", ["reason", `String "input"]
+    ; "question_unavailable", ["reason", `String "missing"] ];
   List.iter (fun (decision, path, skipped) ->
     Alcotest.(check bool) "inconsistent or unknown route rejected" true
       (Result.is_error (Tui_decode.decode_lane_run_detail (make ~decision ~path ~skipped ()))))

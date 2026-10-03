@@ -1620,6 +1620,28 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
   check bool "closing Categories restores the fact reading" false
     (List.exists (contains "CATEGORIES") closed)
 
+let test_category_rail_bounds_large_label_preview () =
+  let name = "oversized_" ^ String.make 50_000 'a' in
+  let category = Option.get (Cat.category_of_string name) in
+  let filter = Types.Category_ordinary category in
+  let state = three_kinds_state ~extra_ordinary:[make_memory_fact category "bounded preview"] () in
+  state.memory_facts_category <- filter;
+  Masc_tui_hit.reset Masc_tui_press.press_marks;
+  let lines = ref [] in
+  let push line = lines := line :: !lines in
+  Render_memory.render_memory_facts_body ~cols:140 ~budget:7 state ~push
+    ~push_styled:(fun ~style line -> push (style ^ line)) ~push_selected:push
+    ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+  let lines, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (List.rev !lines) in
+  let rail = List.map (fun line -> Layout.take_cells (Masc_tui_theme.strip_sgr line)
+    Masc_tui_roster_pane.pane_cols) lines in
+  check bool "bounded preview exposes truncation and count in the visible rail" true
+    (List.exists (contains "… (1)") rail);
+  check bool "rendered rows fit the same terminal width" true
+    (List.for_all (fun line -> Layout.display_width line <= 140) lines);
+  check string "the category retained for detail is complete" name
+    (Types.memory_category_filter_label state.memory_facts_category)
+
 let test_category_rail_wrapped_range_and_overflow () =
   let long_cat_name = "custom_architecture_infrastructure_deployment_pipeline_specification" in
   let long_cat = Option.get (Cat.category_of_string long_cat_name) in
@@ -2442,6 +2464,8 @@ let () =
             test_category_rail_keeps_click_targets_and_frame_width
         ; test_case "Category rail wrapped range exposure and overflow" `Quick
             test_category_rail_wrapped_range_and_overflow
+        ; test_case "category rail bounds oversized previews" `Quick
+            test_category_rail_bounds_large_label_preview
         ; test_case "a failed facts read does not say loading" `Quick
             test_a_failed_facts_read_does_not_say_loading
         ; test_case "a failed facts refresh keeps the facts" `Quick

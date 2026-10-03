@@ -4364,9 +4364,18 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
         | Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
           Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
-      [path; memory; "JEV 판정 · " ^ decision] @ rejection
+      let document = String.concat "\n"
+        ([path; memory; "JEV 판정 · " ^ decision] @ rejection
       @ (if details then model @ elapsed @ probabilities @ [""; "원문 실행 증거"]
-         else ["d: 모델·확률·원문 펼치기"])
+         else ["d: 모델·확률·원문 펼치기"])) in
+      let document =
+        if String.length document <= lane_run_preview_source_max_bytes then document
+        else
+          let notice = Printf.sprintf "\n… truncated preflight, total %d bytes" (String.length document) in
+          let room = lane_run_preview_source_max_bytes - String.length notice in
+          let cut = String_util.utf8_char_boundary document room in
+          String.sub document 0 cut ^ notice in
+      String.split_on_char '\n' document
       |> List.concat_map (fun text ->
           Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
           |> List.map (fun line -> Theme.info (), line))

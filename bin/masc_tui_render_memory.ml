@@ -1288,7 +1288,7 @@ let memory_facts_content_height ~cols ~budget ~cursor state =
   in
   height
 
-let render_memory_facts_body_single ~cols ~budget (state : state)
+let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1341,7 +1341,7 @@ let render_memory_facts_body_single ~cols ~budget (state : state)
           facts_stats_row ~ordinary:ordinary_count ~source:source_count
             ~dropped:dropped_count ~sort_label
         in
-        let all_categories = memory_fact_categories state in
+        let all_categories = if show_category_strip then memory_fact_categories state else [] in
         (* Through [tab_strip], the one drawing every in-screen strip shares,
            the way the Themes filter draws its chips: the key that walks the
            entries first, then the entries with the one being read marked.
@@ -1361,7 +1361,8 @@ let render_memory_facts_body_single ~cols ~budget (state : state)
         let keys = "  c/C:category  " in
         let after = if state.memory_facts_categories_open then "  d:접기" else "  d:Category 펼치기" in
         let pills =
-          Ansi.dim ^ keys ^ Ansi.reset
+          if not show_category_strip then "  c/C:category · Enter:fact detail"
+          else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
               ~press:(fun filt text ->
@@ -1485,7 +1486,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let fact_cols = memory_facts_pane_cols state cols in
     let facts = ref [] in
     let collect text = facts := text :: !facts in
-    render_memory_facts_body_single ~cols:fact_cols ~budget state
+    render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text -> collect (Theme.selection ^ text ^ Ansi.reset))
@@ -1508,12 +1509,30 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
         | _ -> None
     in
+    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
+    let height = max 0 (budget - List.length header) in
     let categories = Category_all :: memory_fact_categories state in
-    let entries = List.concat_map (fun category ->
+    let selected =
+      categories |> List.find_mapi (fun index category ->
+        if category = state.memory_facts_category then Some index else None)
+      |> Option.value ~default:0 in
+    let category_scroll = Masc_tui_scroll.ensure_visible ~cursor:selected ~height:(max 1 height) 0 in
+    let entries =
+      categories
+      |> List.filteri (fun index _ -> index >= category_scroll && index < category_scroll + height)
+      |> List.concat_map (fun category ->
         let count = match count category with None -> "?" | Some count -> string_of_int count in
-        let label = memory_category_filter_label category ^ " (" ^ count ^ ")" in
-        Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line label)
-        |> List.map (fun text -> category, text)) categories in
+        let suffix = " (" ^ count ^ ")" in
+        (* Category names are validated ASCII. Bound bytes before wrapping:
+           the selected label gets the rail height; other previews get one row.
+           Enter's fact detail retains the complete category value. *)
+        let rows = if category = state.memory_facts_category then max 1 height else 1 in
+        let room = max 1 (rows * (width - 2) - String.length suffix) in
+        let name = memory_category_filter_label category in
+        let name = if String.length name <= room then name
+          else String.sub name 0 (room - 1) ^ "…" in
+        Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line (name ^ suffix))
+        |> List.map (fun text -> category, text)) in
     let selected_indices =
       entries
       |> List.mapi (fun index (category, _) -> index, category)
@@ -1523,8 +1542,6 @@ let render_memory_facts_body ~cols ~budget (state : state)
       | [] -> 0, 0
       | first :: _ -> first, List.hd (List.rev selected_indices) in
     let span = end_row - start_row + 1 in
-    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
-    let height = max 0 (budget - List.length header) in
     let scroll =
       if span <= height then
         let s = Masc_tui_scroll.ensure_visible ~cursor:end_row ~height:(max 1 height) 0 in

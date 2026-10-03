@@ -1174,6 +1174,7 @@ let sample_own_post : Masc.Board.post =
   ; post_kind = Masc.Board.Human_post
   ; meta_json = None
   ; visibility = Masc.Board.Public
+  ; audience = None
   ; created_at = 1_753_300_000.0
   ; content_updated_at = 1_753_300_000.0
   ; updated_at = 1_753_300_100.0

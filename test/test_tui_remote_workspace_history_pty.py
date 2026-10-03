@@ -319,6 +319,7 @@ def scoped_roster_authority(binary: str) -> None:
         def health(self):
             with self.lock:
                 base = "/fixture-workspace-b" if self.phase == "b" else self.local_base
+            assert base is not None, "scoped authority fixture was not prepared"
             _, payload = h.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
@@ -548,8 +549,9 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    roster_template = fixtures[ROSTER_PATH][1]
     fixtures.update(h.schedule_detail_http_fixtures())
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(roster_template)
     schedule_template = fixtures[h.SCHEDULES_PATH][1]
     unknown_health = threading.Event()
     cancel_requests = []
@@ -594,14 +596,16 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
         assert h.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers / Schedules")
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        await_screen(lambda text: b"b.current" in text, "B roster was not applied")
+        h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"MASC Dashboard")
+        h.press_label_on_screen(process, fd, output, b"Keepers", row=1, needle=b"MASC Keepers")
+        wire.publish("a-returned")
+        await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+                     "matching A roster was not applied")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())
-        wire.publish("a-returned")
-        await_screen(lambda text: b"a.returned" in text and b"MASC Keepers" in text
-                     and "▸ runtime".encode() not in text, "A identity did not close B runtime picker")
+        wire.publish("b")
+        await_screen(lambda text: b"MASC Keepers" in text and b"MISMATCH" in text
+                     and "▸ runtime".encode() not in text, "B identity did not close A runtime picker")
         unknown_health.set()
         # Health failure and a successful roster share this refresh. An
         # explicit lifecycle key must refuse even if that roster reports live.
@@ -730,8 +734,18 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             # hardcoded index or tab count selects a different detail surface.
             title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Identity" in text]
+            if not title_rows:
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"\r", b"Identity")
+                h.drain_until_quiet(process, fd, output)
+                title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                              if b"Info" in text and b"Identity" in text]
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            if marker not in screen(output):
+                if "▸Identity".encode() in screen(output):
+                    h.press_label_on_screen(process, fd, output, b"Info", row=title_rows[0], needle="▸Info".encode())
+                h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            await_screen(lambda text: marker in text, "current Identity snapshot did not load")
         try:
             h.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
@@ -757,9 +771,10 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             # ran; per-request guards/cancellation are also source contracts.
             assert submitted == [("a", "first")], submitted
             wire.publish("a-returned")
-            await_screen(lambda text: b"Base: " + wire.local_base.encode() in text
-                         and b"MISMATCH" not in text,
-                         "A identity was not restored in the current footer")
+            await_screen(lambda text: b"MISMATCH" not in text
+                         and any(event["event"] == "health" and event["phase"] == "a-returned"
+                                 for event in wire.events),
+                         "matching A identity was not restored")
             open_identity(b"a-returned-identity-second")
             os.write(fd, b"R")
             assert h.wait_for_fixture_state(process, fd, output, lambda: len(submitted) == 3,

@@ -264,8 +264,9 @@ let saved_rows = function
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
-  | Saved_partly { unverified; not_rechecked = _ } ->
+  | Saved_partly { unverified; not_rechecked } ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") unverified
+    @ List.map (fun runtime_id -> "  " ^ runtime_id ^ " (이번 저장에서 재검증하지 않음)") not_rechecked
 let saved_of_json json =
   let selected = match field "runtime_ids" json with
     | `List ids -> List.filter_map string ids

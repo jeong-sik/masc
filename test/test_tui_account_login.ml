@@ -279,16 +279,16 @@ let partly_checked_save () =
   let saved = match Login.saved t (receipt ()) with
     | Ok saved -> saved | Error message -> fail message in
   let rows () = List.map Login.row_text (Login.lines t) in
-  check bool "retained connections do not appear as failures" false
-    (List.exists (fun row -> contains row kept) (rows ()));
+  check bool "retained runtime is explicitly not rechecked" true
+    (List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") (rows ()));
   check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
   check bool "the notice says existing connections were retained" true (contains t.notice "기존 연결은 그대로 유지했습니다");
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
   let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
   ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
-  check bool "only an unmeasured runtime is listed" true
+  check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
-     List.mem ("  " ^ added ^ " (quota_exhausted)") r && not (List.exists (fun row -> contains row kept) r));
+     List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
     [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();

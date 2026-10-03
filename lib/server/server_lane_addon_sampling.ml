@@ -113,17 +113,18 @@ let response_content (response : L.api_response) =
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 
-let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
+let native_attempt ~sw ~net ~(runtime : Runtime_instance.t) ~provider (params : S.create_message_params) =
   let controls = unsupported_common params in
   let* () = if controls=[] then Ok () else Error (Unsupported_controls controls) in
   let* () = match params.temperature with
     | Some value when not (Float.is_finite value) -> Error (Invalid_request "sampling temperature must be finite")
     | Some _ | None -> Ok () in
-  let* providers = Runtime_agent_core_runner.resolve_runtime_providers_for_turn ~runtime_id ()
-    |> Result.map_error (fun detail -> Runtime_unavailable detail) in
-  let* provider = match providers with
-    | [provider] -> Ok provider
-    | [] | _ :: _ :: _ -> Error (Runtime_unavailable "runtime did not resolve one exact provider binding") in
+  let* () = Runtime_instance.validate_dispatch_credential ~provider_config:provider runtime
+    |> Result.map_error (fun error -> Runtime_unavailable
+      (Runtime_instance.dispatch_credential_error_to_string error)) in
+  let seed = Runtime_inference.seed_of_thinking_support
+      ~preserve_thinking:runtime.model.preserve_thinking runtime.model.thinking_support in
+  let provider = Runtime_agent_core_runner.apply_inference_seed ~seed provider in
   let has_image = List.exists (fun (message : S.sampling_message) ->
     match message.content with S.Image _ -> true | S.Text _ -> false) params.messages in
   let capabilities = Llm_provider.Backend_openai_request.capabilities_of_config provider in
@@ -131,13 +132,13 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
       Error (Runtime_unavailable "candidate cannot carry the requested image input")
     else Ok () in
   let config = {provider with Llm_provider.Provider_config.max_tokens=Some params.max_tokens;
-    temperature=(match params.temperature with
-      | Some value -> Some (Runtime_inference.resolve_temperature ~runtime_id ~fallback:(fun () -> value))
-      | None -> (match Runtime.temperature_of_runtime_id runtime_id with
-          | Some value -> Some value | None -> provider.temperature));
+    model_capabilities_override=Some capabilities;
+    temperature=(match runtime.model.temperature, params.temperature with
+      | Some value, _ | None, Some value -> Some value
+      | None, None -> provider.temperature);
     system_prompt=(match params.system_prompt with Some prompt -> Some prompt | None -> provider.system_prompt)} in
   let* clock = Eio_context.get_clock () |> Result.map_error (fun detail -> Runtime_unavailable detail) in
-  let body_timeout_s = match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+  let body_timeout_s = match runtime.model.turn_timeout_s with
     | None | Some 0. -> None
     | Some seconds -> Some seconds in
   let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
@@ -151,11 +152,11 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
     _meta=Some (`Assoc ["masc.lane_provider",`Assoc ["stop_reason",
       `String (L.stop_reason_to_string response.stop_reason)]])}
 
-let attempt ~sw ~net ~runtime_id params =
-  match Runtime.get_runtime_by_id runtime_id with
+let attempt ~sw ~net ~runtime_id ~runtime params =
+  match runtime with
   | None -> Error (Runtime_unavailable ("configured candidate is unavailable: " ^ runtime_id))
   | Some runtime -> match runtime.Runtime_instance.execution with
-      | Runtime_execution.Agent_core _ -> native_attempt ~sw ~net ~runtime_id params
+      | Runtime_execution.Agent_core provider -> native_attempt ~sw ~net ~runtime ~provider params
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
           let temperature = match params.S.temperature with None -> [] | Some _ -> [Temperature] in
@@ -168,7 +169,7 @@ let invoke ~sw ~net ~route ~request:_ params =
         "attempts",`List (List.rev failures)]))
     | runtime_id :: rest ->
         let runtime = Runtime.get_runtime_by_id runtime_id in
-        match attempt ~sw ~net ~runtime_id params with
+        match attempt ~sw ~net ~runtime_id ~runtime params with
         | Error failure ->
             (match failure with
              | Provider_error error -> note_provider_failure runtime error

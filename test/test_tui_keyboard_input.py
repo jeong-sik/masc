@@ -2200,6 +2200,7 @@ def run_terminal_scenario(
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
     launch_count: int = 1,
+    startup_frame_marker: bytes | None = None,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2359,15 +2360,20 @@ def run_terminal_scenario(
                     timeout=30.0,
                 )
                 if not starts_in_chat:
+                    # A narrow viewport can clip the workspace label. Such a
+                    # scenario names a visible surface marker and still waits
+                    # for its complete frame; terminal-control checks below
+                    # and after exit remain independent of label width.
+                    frame_marker = workspace_rendered if startup_frame_marker is None else startup_frame_marker
                     wait_for_output(
                         process,
                         master_fd,
                         output,
-                        workspace_rendered,
+                        frame_marker,
                         start=0,
                         timeout=3.0,
                     )
-                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                    frame_offset = output.find(frame_marker) + len(frame_marker)
                 else:
                     frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
@@ -3476,8 +3482,10 @@ def keeper_detail_overscroll_interaction(
                 b"\r",
                 b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
-            top = window(1)
-            if top not in beta:
+            # Each Keeper owns its detail content length. Beta can have a
+            # different total than alpha; only the reset position is shared.
+            beta_indicators = WINDOW_TEXT_RE.findall(CSI_RE.sub(b"", beta))
+            if not beta_indicators or int(beta_indicators[-1][0]) != 1:
                 raise AssertionError(
                     f"new Keeper detail did not reset to the top: {beta!r}"
                 )
@@ -6455,6 +6463,7 @@ def escape_to_keeper_detail(
     *,
     name: bytes,
     presses: int = 4,
+    destination: bytes | None = None,
 ) -> None:
     """Leave a keeper's chat for its detail, however many Escapes that takes.
 
@@ -6473,7 +6482,7 @@ def escape_to_keeper_detail(
     The bound is here so a surface that never leaves fails as a test rather
     than hangs. Arriving is the assertion; the number of presses is not.
     """
-    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    title = destination if destination is not None else b"Keepers \xe2\x96\xb8 \x1b[1m" + name
     for _ in range(presses):
         start = len(output)
         os.write(master_fd, b"\x1b")
@@ -9398,7 +9407,10 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
+        # Observe the roster before selecting beta: a refresh may reconcile
+        # its cursor while the palette's alpha chat is open.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"beta")
         os.write(master_fd, b"q")
 
     return interact
@@ -9728,12 +9740,11 @@ def run_tools_request_identity_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/tools?keeper=beta"] = inventory("beta", "keeper_beta_current")
     async_calls = 0
     async_lock = threading.Lock()
-    settled = {n: threading.Event() for n in range(1, 5)}
+    settled = {n: threading.Event() for n in range(1, 3)}
 
     def async_read() -> HttpResponse:
         nonlocal async_calls
-        # launch_tools_load enqueues Tools_loaded before this sequential GET.
-        # This is a response-settlement barrier, not an arbitrary sleep.
+        # Only the current inventory request launches this observation GET.
         with async_lock:
             async_calls += 1
             event = settled.get(async_calls)
@@ -9778,20 +9789,23 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 if async_calls != 1:
                     raise AssertionError("held alpha request settled before its fixture response")
             alpha_late.release.set()
-            await_event(settled[2], "late alpha response did not settle")
+            await_event(alpha_late.completed, "late alpha response did not return")
             assert_current(b"keeper_beta_current", columns=119)
 
             fixtures["/api/v1/dashboard/tools?keeper=beta"] = beta_refresh_error
             os.write(master_fd, b"r")
             await_event(beta_refresh_error.requested, "older beta refresh did not start")
             send_and_wait(process, master_fd, output, b"r", b"keeper_beta_newest")
-            await_event(settled[3], "newer beta refresh did not settle")
+            await_event(settled[2], "newer beta refresh did not settle")
             with async_lock:
-                if async_calls != 3:
+                if async_calls != 2:
                     raise AssertionError("held beta error settled before its fixture response")
             beta_refresh_error.release.set()
-            await_event(settled[4], "obsolete same-keeper error did not settle")
+            await_event(beta_refresh_error.completed, "obsolete same-keeper error did not return")
             assert_current(b"keeper_beta_newest", columns=120)
+            with async_lock:
+                if async_calls != 2:
+                    raise AssertionError("stale inventory launched an async observation read")
             captured = bytes(output)
             end = captured.rfind(FRAME_END) + len(FRAME_END)
             redraw = captured.rfind(FULL_REDRAW, 0, end)
@@ -13365,7 +13379,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Left / Esc:back" not in history_plain:
+    if "Left / Esc:back" not in history_plain or "H:close" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
@@ -13890,8 +13904,8 @@ def runtime_surface_interaction(
                 "primary",
                 "1/2 runtime-a",
                 "Resolved A / model-a",
-                "ready / reachable",
-                "CLI not probed",
+                "usa…nknown / reachable",
+                "usa…nknown / CLI not …",
                 # The lane fact says why this candidate is the one the lane
                 # walks: head, fallback #n, or single candidate.
                 "fallback #1",
@@ -13909,6 +13923,10 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime did not draw {needle!r}: {stale_plain!r}"
                     )
+            runtime_rows = screen_text(bytes(output[:stale_frame_end])).decode("utf-8").splitlines()
+            if not any("2/2 runtime-b" in row and "usa…nknown / CLI not …" in row
+                       for row in runtime_rows):
+                raise AssertionError("Runtime fallback lost its independent skipped probe")
             if "Probe label must not render" in stale_plain:
                 raise AssertionError(
                     f"Runtime used probe identity instead of resolved SSOT: {stale_plain!r}"
@@ -14018,7 +14036,7 @@ def runtime_surface_interaction(
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
             if b"Runtime lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
-            if b"ready / reachable" not in all_list:
+            if "usa…nknown / reachable".encode() not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,
@@ -15123,22 +15141,35 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
         raise AssertionError("briefing fixture must be a response tuple")
-    completed = 0
     slow_next = threading.Event()
     slow_started = threading.Event()
     release_slow = threading.Event()
     fail_next = threading.Event()
+    prompt_health = None
+    health_response = fixtures["/health?full=1"]
+    if not isinstance(health_response, tuple):
+        raise AssertionError("health fixture must be a response tuple")
+    health_requested_at = 0.0
+    prompt_started_at: dict[str, float] = {}
+
+    def answer_health() -> HttpResponse:
+        nonlocal health_requested_at
+        health_requested_at = time.monotonic()
+        return health_response
+
+    fixtures["/health?full=1"] = answer_health
 
     def answer_briefing() -> HttpResponse:
-        nonlocal completed
         if slow_next.is_set():
             slow_started.set()
             release_slow.wait(timeout=4.0)
-        else:
-            time.sleep(0.08)
-        completed += 1
         if fail_next.is_set():
             return (503, {"error": "refresh refused"})
+        if prompt_health is not None:
+            prompt_started_at.setdefault(prompt_health, health_requested_at)
+            payload = json.loads(json.dumps(briefing[1]))
+            payload["summary"]["workspace_health"] = prompt_health
+            return briefing[0], payload
         return briefing
 
     fixtures["/api/v1/dashboard/briefing"] = answer_briefing
@@ -15159,24 +15190,31 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        nonlocal prompt_health
         # The badge colours its status, so the raw PTY bytes split HTTP from [connected].
         connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
         wait_for_output(
             process, master_fd, output, connected, start=0, timeout=3.0
         )
-        first_completed = completed
+        refreshing = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]")
         prompt_start = len(output)
-        if not wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: completed >= first_completed + 2,
-            timeout=4.0,
-        ):
-            raise AssertionError("two prompt HTTP refreshes did not complete")
-        # Let the terminal drain the second answer before arming the slow one.
-        time.sleep(0.12)
-        read_available(master_fd, output)
+        # Overview health is applied only when the entire HTTP bundle lands.
+        # A briefing callback alone precedes the remaining surface reads and
+        # cannot establish prompt refresh completion.
+        for health in ("warning", "ok"):
+            prompt_health = health
+            wait_for_output(
+                process, master_fd, output,
+                b"Health: " + health.encode(), start=len(output), timeout=3.0,
+            )
+            elapsed = time.monotonic() - prompt_started_at[health]
+            print(f"prompt HTTP full refresh ({health}): {elapsed:.3f}s", flush=True)
+            if elapsed >= 0.5:
+                raise AssertionError(
+                    f"prompt fixture full refresh exceeded the 0.5s cadence: {elapsed:.3f}s"
+                )
         slow_next.set()
-        if b"refreshing..." in output[prompt_start:]:
+        if refreshing.search(output[prompt_start:]):
             raise AssertionError("a prompt refresh flashed the warning badge")
 
         if not wait_for_fixture_state(
@@ -15186,7 +15224,7 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         slow_start = len(output)
         wait_for_output(
             process, master_fd, output,
-            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]"),
+            refreshing,
             start=slow_start, timeout=2.0,
         )
         connected_start = len(output)
@@ -15228,6 +15266,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
     briefing_body = json.dumps(briefing_payload).encode()
     briefing_tag = 'W/"briefing-fixture"'
     reads = {"untagged": 0, "tagged": 0}
+    goal_reads = {"total": 0, "delayed": 0}
     slow_goals = threading.Event()
     goals_requested = threading.Event()
     slow_goals_done = threading.Event()
@@ -15246,11 +15285,16 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
 
     def answer_goals() -> HttpResponse:
-        goals_requested.set()
-        if slow_goals.is_set() and not slow_goals_done.is_set():
+        delay_this_read = slow_goals.is_set() and not slow_goals_done.is_set()
+        goal_reads["total"] += 1
+        if delay_this_read:
+            goal_reads["delayed"] += 1
             # Longer than three refresh ticks at refresh=0.5.
             time.sleep(1.6)
             slow_goals_done.set()
+        # Classify before counting and signal afterwards: any read admitted
+        # after the harness arms its delay must advance the captured baseline.
+        goals_requested.set()
         return empty_goals_fixture()
 
     fixtures["/api/v1/dashboard/briefing"] = HeadersHttpResponse(answer_briefing)
@@ -15287,11 +15331,14 @@ def run_http_conditional_read_regression(executable: str) -> None:
             process, master_fd, output, goals_requested, timeout=4.0
         ):
             raise AssertionError("Work did not request its goal tree")
+        goals_before_slow = goal_reads["total"]
         slow_goals.set()
         if not wait_for_fixture_state(
             process, master_fd, output, slow_goals_done.is_set, timeout=4.0
         ):
             raise AssertionError("the slow goal tree read did not finish")
+        if goal_reads["total"] <= goals_before_slow or goal_reads["delayed"] != 1:
+            raise AssertionError(f"Work did not own exactly one delayed goal read: {goal_reads!r}")
         reads_after_slow = reads["tagged"] + reads["untagged"]
         if not wait_for_fixture_state(
             process, master_fd, output,
@@ -20479,7 +20526,9 @@ def run_fusion_history_regression(executable: str) -> None:
     ])
 
     def interact(process, master_fd, slave_fd, output, base_path):
-        palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
+        # The surface title precedes the asynchronous list response. Wait
+        # for the historical entry that Enter will actually open.
+        palette_go(process, master_fd, output, b"go fusion", b"Fusion evidence for history-701")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
         read_available(master_fd, output)
         before_resize = len(output)

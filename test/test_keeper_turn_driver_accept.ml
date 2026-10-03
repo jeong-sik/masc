@@ -1553,6 +1553,7 @@ let test_keeper_tool_slot_callbacks_are_always_wired () =
   Alcotest.(check bool) "resume callback is wired" true (Option.is_some on_resume)
 
 let test_official_failure_observation_reaches_receipt () =
+  let open Masc in
   let error = Agent_core.Error.Provider
     (Llm_provider.Error.ProviderReportedError
        { provider = "antigravity_cli"; error_type = Some "turn_failed";
@@ -1581,6 +1582,7 @@ let test_official_failure_observation_reaches_receipt () =
     | _ -> Alcotest.fail "expected exactly one transmitted invocation"
 
 let test_official_success_observation_is_preserved () =
+  let open Masc in
   let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
   let observed = Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:"official.test" ~selected_model_raw:None ~capture () in

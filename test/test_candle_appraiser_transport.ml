@@ -319,7 +319,7 @@ let test_http_bad_request_waits_for_change () =
       (recorded_run ~base_path) in
     check (option string) "receipt identifies refusing binding" (Some slot) selected;
     check (list string) "actual HTTP dispatch survives" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request; `Payment_required]
+    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request]
 ;;
 
 let test_rate_limit_without_cli_remains_retryable () =
@@ -496,7 +496,7 @@ let test_http_permanent_refusal_then_cli_rest_retries () =
 
 (* Exercise the real HTTP refusal decoder and its durable appraiser receipt.
    Pulse eligibility depends on this classification, not the HTTP status text. *)
-let test_provider_refusal ~status ~rejected () =
+let test_provider_refusal ~status ~expected () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let body = {|{"error":{"message":"fixture refusal"}}|} in
     let server = F.start_server ~sw ~net ~clock
@@ -505,19 +505,26 @@ let test_provider_refusal ~status ~rejected () =
     publish ~base_path ~cli_slots:[]
       [ { F.id = slot; base_url = server.base_url } ];
     let calls = ref [] in
-    (match run_declared ~base_path (unavailable_cli calls) with
-     | Error (A.Invalid_response _) ->
-       check bool "refusal parks until an explicit event" true rejected
-     | Error (A.Transport_unavailable _) ->
-       check bool "availability remains pulse retryable" false rejected
-     | Ok _ -> fail "provider refusal produced an appraisal");
+    (match expected, run_declared ~base_path (unavailable_cli calls) with
+     | `Invalid_response, Error (A.Invalid_response _)
+     | `Execution_rejected, Error (A.Execution_rejected _)
+     | `Unavailable, Error (A.Transport_unavailable _) -> ()
+     | _, Error error ->
+       let kind = match error with
+         | A.Invalid_response _ -> "Invalid_response"
+         | A.Execution_rejected _ -> "Execution_rejected"
+         | A.Transport_unavailable _ -> "Transport_unavailable" in
+       failf "unexpected provider refusal classification %s: %s" kind (A.error_to_string error)
+     | _, Ok _ -> fail "provider refusal produced an appraisal");
     check int "one HTTP request was dispatched" 1 (F.post_count server);
     check (list string) "no undeclared CLI dispatch" [] !calls;
-    let code = if rejected then "candle_appraisal_rejected"
-      else "candle_appraisal_unavailable" in
+    let code, invalid = match expected with
+      | `Invalid_response -> "candle_appraisal_rejected", true
+      | `Execution_rejected -> "candle_appraisal_execution_rejected", false
+      | `Unavailable -> "candle_appraisal_unavailable", false in
     let output, selected = check_failure code (recorded_run ~base_path) in
     check (option string) "receipt retains the refusing slot" (Some slot) selected;
-    check_http_failure ~slot ~body ~invalid:rejected output)
+    check_http_failure ~slot ~body ~invalid output)
 ;;
 
 let test_invalid_http_then_valid_successor_keeps_both_slots () =
@@ -746,13 +753,13 @@ let () =
             `Quick
             test_invalid_http_then_valid_successor_keeps_both_slots
         ; test_case "provider rejects unchanged request" `Quick
-            (test_provider_refusal ~status:`Bad_request ~rejected:true)
+            (test_provider_refusal ~status:`Bad_request ~expected:`Execution_rejected)
         ; test_case "provider refuses authorization" `Quick
-            (test_provider_refusal ~status:`Forbidden ~rejected:true)
+            (test_provider_refusal ~status:`Forbidden ~expected:`Invalid_response)
         ; test_case "provider payment rest remains retryable" `Quick
-            (test_provider_refusal ~status:`Payment_required ~rejected:false)
+            (test_provider_refusal ~status:`Payment_required ~expected:`Unavailable)
         ; test_case "provider rate limit remains retryable" `Quick
-            (test_provider_refusal ~status:`Too_many_requests ~rejected:false)
+            (test_provider_refusal ~status:`Too_many_requests ~expected:`Unavailable)
         ; test_case
             "declared official CLI can answer after HTTP failure"
             `Quick

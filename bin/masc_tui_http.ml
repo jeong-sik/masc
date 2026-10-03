@@ -2274,7 +2274,7 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
     [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
     ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
@@ -2288,7 +2288,7 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
   in
   let payload =
     `Assoc
-      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
+      ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2308,12 +2308,13 @@ let post_goal_confirmation ~host ~port confirmation =
     local literal, so the TUI and the tool cannot disagree about what
     "drop" means. The server owns the phase rules; an invalid transition is
     its rejection to return, not the TUI's to pre-guess. *)
-let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
-    ~(action : Goal_phase.Public_action.t)
+let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
+    ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
     ~(note : string option) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      ([ ("goal_id", `String goal_id)
+      ([ expected_workspace_field expected_workspace
+       ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
       @
@@ -2330,7 +2331,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ board_workspace_field expected_workspace
+      [ expected_workspace_field expected_workspace
       ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
@@ -2343,7 +2344,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
 let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ expected_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)

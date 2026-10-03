@@ -42,7 +42,7 @@ let with_fixture f =
       f config profile seed)
 
 let microvm_profile =
-  "[keeper]\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"fixture-image\"\n"
+  "[keeper]\ninstructions = \"Maintain the fixture workspace.\"\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"fixture-image\"\n"
 
 let test_cleanup_reads_toml_owned_backend () =
   with_fixture (fun config profile seed ->
@@ -59,7 +59,8 @@ let test_cleanup_reads_toml_owned_backend () =
         (meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm);
       Alcotest.(check bool) "cleanup resolves declared backend" true
         (meta.microvm_backend = Some Keeper_microvm_backend.Apple_container)
-    | _ -> Alcotest.fail "cleanup did not read effective metadata")
+    | Error detail -> Alcotest.fail detail
+    | Ok None -> Alcotest.fail "cleanup did not read effective metadata")
 
 let test_cleanup_rejects_other_owner () =
   with_fixture (fun config profile seed ->
@@ -73,12 +74,29 @@ let test_cleanup_rejects_other_owner () =
 
 let test_cleanup_rejects_invalid_profile () =
   with_fixture (fun config profile seed ->
-    profile "cleanup-owner" "[keeper]\nsandbox_profile = \"invalid-profile\"\n";
+    profile "cleanup-owner" "[keeper]\ninstructions = \"Maintain the fixture workspace.\"\nsandbox_profile = \"invalid-profile\"\n";
     seed ~owner:"cleanup-owner" ~payload_name:"cleanup-owner";
     match Server_keeper_build_maintenance.read_cleanup_meta ~config
             ~keeper_name:"cleanup-owner" with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail "cleanup accepted an invalid profile")
+
+let test_cleanup_report_keeps_guest_skip_reason () =
+  let decode = Keeper_turn_sandbox_runtime.build_cleanup_report_of_string in
+  (match decode {|{"skip":"dune unavailable","entries":[]}|} with
+   | Error reason -> Alcotest.(check string) "guest refusal remains observable"
+       "Keeper guest cleanup skipped: dune unavailable" reason
+   | Ok _ -> Alcotest.fail "skipped cleanup was reported as successful");
+  (match decode {|{"entries":[{"action":"cleaned"},{"action":"clean failed"}]}|} with
+   | Ok report ->
+     Alcotest.(check int) "successful clean counted" 1 report.cleaned;
+     Alcotest.(check int) "failed clean counted" 1 report.failed
+   | Error reason -> Alcotest.fail reason);
+  List.iter (fun body ->
+    match decode body with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "malformed cleanup report accepted")
+    [ {|{"skip":false,"entries":[]}|}; "not JSON" ]
 
 let () =
   Alcotest.run "Keeper build maintenance admission"
@@ -86,4 +104,5 @@ let () =
       Alcotest.test_case "TOML resolves disk placeholders" `Quick test_cleanup_reads_toml_owned_backend;
       Alcotest.test_case "Owner identity must match" `Quick test_cleanup_rejects_other_owner;
       Alcotest.test_case "Profile errors refuse cleanup" `Quick test_cleanup_rejects_invalid_profile;
+      Alcotest.test_case "Guest skip reason is not empty success" `Quick test_cleanup_report_keeps_guest_skip_reason;
     ] ]

@@ -88,14 +88,15 @@ def run(executable: str, scenario: str) -> None:
         frame = bytes(output[start:end])
         screen = h.screen_text(frame)
         assert h.PLANNING_PATH in reads and detail_path in reads, reads
-        assert goal_id.encode() in screen and b"completed-runs = 4" in screen, screen
+        assert goal_id.encode() in screen, screen
+        assert b"Metric: completed-runs" in screen and b"Target: 4" in screen, screen
         assert expected in screen, screen
         if scenario == "stale":
             assert notice in screen, screen
             # Historical proof is drawn with the existing Note (dim) tone,
             # not the success colour of a current Proven verdict.
-            assert b"\x1b[2m" + notice in frame, frame
-            assert b"\x1b[2m" + evidence in frame, frame
+            assert b"\x1b[2m  " + notice in frame, frame
+            assert b"\x1b[2m  " + evidence in frame, frame
         else:
             assert notice not in screen, screen
         if scenario == "unreadable":

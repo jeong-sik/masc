@@ -144,8 +144,20 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
+    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+       default cluster, [<base>/.masc/clusters/<name>] otherwise), so the
+       local root must be composed the same way from the same cluster
+       selection: a plain [<base>/.masc] classifies every healthy
+       non-default-cluster connection as a mismatch and refuses all Keeper
+       messages. *)
+    let local_cluster_root =
+      let masc_root = Filename.concat local_base_path Common.masc_dirname in
+      match Env_config_core.cluster_name_opt () with
+      | None | Some "" | Some "default" -> masc_root
+      | Some cluster ->
+        Filename.concat (Common.clusters_dir_from_base_path ~base_path:local_base_path)
+          (Workspace_utils.sanitize_namespace_segment cluster) in
+    let local_masc_root = canonical_path local_cluster_root in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading
@@ -5676,6 +5688,7 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: (string * string) option;
+  mutable schedule_form_refusal: (string * string * float) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -6127,6 +6140,7 @@ type state = {
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  mutable msg_unconfirmed_workspace: workspace_input_identity option;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -6359,6 +6373,14 @@ let withdraw_identity_readings (state : state) =
   state.github_identity_view <- None;
   state.github_identity_view_error <- None
 
+let identity_login_pending_keepers (state : state) =
+  state.identity_login_expectations
+  |> List.filter_map (fun expectation ->
+       if server_authority_ready state
+          && identity_expectation_workspace_matches ~origin:expectation.ile_origin state
+       then Some expectation.ile_keeper else None)
+  |> List.sort_uniq String.compare
+
 let identity_logins_for_keeper (state : state) keeper_name =
   List.filter
     (fun login -> String.equal login.ils_keeper keeper_name)
@@ -6435,7 +6457,8 @@ let retire_identity_logins (state : state) ~keeper_name ~providers =
   state.identity_login_expectations <- List.filter
     (fun expectation ->
       not (String.equal expectation.ile_keeper keeper_name
-           && identity_provider_attached ~providers ~provider_id:expectation.ile_provider))
+           && (identity_provider_attached ~providers ~provider_id:expectation.ile_provider
+                || not (identity_provider_declared ~providers ~provider_id:expectation.ile_provider))))
     state.identity_login_expectations;
   state.identity_logins <-
     List.filter
@@ -8374,6 +8397,7 @@ let create_state
   keeper_schedules_error = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
   standalone_lanes = None;
@@ -8612,6 +8636,7 @@ let create_state
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
+  msg_unconfirmed_workspace = None;
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = ("", [], [], None);

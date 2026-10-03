@@ -130,14 +130,24 @@ def run(executable):
                           needle=b"Goal detail needs", final_cursor=b"\x1b[?25l")
         assert b"Actions:" not in screen(output), screen(output)
         for key in (b"c", b"x", b"o", b"a"):
-            h.press_and_settle(process, fd, output, key)
+            os.write(fd, key)
+            # Ignored actions leave an identical frame, which emits no bytes.
+            assert h.drain_until_quiet(process, fd, output)
         assert not posted, "hidden actions dispatched through the too-small frame"
         h.resize_and_wait(process, fd, output, rows=400, columns=80,
                           needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
         # An unrelated key cancels the arm; restore it on the readable frame.
         h.send_and_wait(process, fd, output, b"c", b"press c again")
         h.send_and_wait(process, fd, output, b"c", b"fixture intentionally refuses transition")
-        assert posted == [{"goal_id": GOAL_ID, "action": "request_complete"}], posted
+        workspace = Path(_base).resolve()
+        assert posted == [{
+            "expected_workspace": {
+                "base_path": str(workspace),
+                "masc_root": str(workspace / ".masc"),
+            },
+            "goal_id": GOAL_ID,
+            "action": "request_complete",
+        }], posted
         # Refresh removes the visible Goal and reconciles back to the list.
         # No hidden lifecycle or proof-confirmation command may run.
         fixtures[h.PLANNING_PATH] = h.planning_snapshot([])

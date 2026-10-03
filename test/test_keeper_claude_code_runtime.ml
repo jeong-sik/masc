@@ -113,7 +113,7 @@ type fixture_step =
   | Emit_and_read of string
   | Close_transport
 
-let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+let fixture_script ?system_marker ?prompt_marker ?(refuse_exec_after_auth = false) ?(forbid_mcp = false)
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
@@ -127,8 +127,11 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
      nothing. *)
   output_string output "case \" $* \" in *\" auth status \"*)\n";
   output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
-  if remove_after_auth
-  then output_string output "  rm -- \"$0\"\n";
+  (* A missing executable is Invalid_config. Keep the file present and
+     make exec fail with EACCES after the successful auth probe, so these
+     cases still exercise Spawn_failed and transient claim release. *)
+  if refuse_exec_after_auth
+  then output_string output "  chmod 600 -- \"$0\"\n";
   output_string output "  exit 0\n";
   output_string output "  ;;\nesac\n";
   Option.iter (fun marker ->
@@ -176,8 +179,8 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
-  let path = fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
+let with_fixture ?system_marker ?prompt_marker ?refuse_exec_after_auth ?forbid_mcp lines f =
+  let path = fixture_script ?system_marker ?prompt_marker ?refuse_exec_after_auth ?forbid_mcp lines in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
@@ -2188,14 +2191,15 @@ let test_spawn_failure_releases_claim () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let reports = ref 0 in
-       with_fixture ~remove_after_auth:true [] (fun cli_path ->
+       with_fixture ~refuse_exec_after_auth:true [] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
              ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
           | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
             ()
           | Error error -> fail (Agent_core.Error.to_string error)
-          | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
-         check int "prepared turn with missing CLI reports no input" 0 !reports;
+          | Ok _ -> fail "unexecutable CLI unexpectedly completed the Keeper turn");
+         check int "prepared turn whose exec fails reports no input" 0 !reports;
+         check bool "the CLI still exists after failed exec" true (Sys.file_exists cli_path);
          let state = load_state base_path in
          (match state.phase with
           | Ready -> ()
@@ -2294,14 +2298,40 @@ let test_subscription_spawn_failure_is_pre_dispatch () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       let missing_cli = Filename.concat base_path "missing-claude" in
-       run_direct_attempt
-         ~base_path
-         ~cli_path:missing_cli
-         ~goal:"subscription probe should fail"
-         ~tools:[]
-         ()
-       |> check_pre_dispatch_attempt "subscription probe spawn failure")
+       with_fixture [] (fun cli_path ->
+         Unix.chmod cli_path 0o600;
+         run_direct_attempt
+           ~base_path
+           ~cli_path
+           ~goal:"subscription probe should fail"
+           ~tools:[]
+           ()
+         |> check_pre_dispatch_attempt "subscription probe spawn failure"))
+;;
+
+(* The absent program is a different boundary from an exec failure of an
+   existing program: #40581 made it permanent configuration refusal. Keep
+   that contract and the no-effect fact alongside the spawn-failure cases. *)
+let test_missing_cli_is_invalid_config_before_dispatch () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let attempt =
+         run_direct_attempt
+           ~base_path
+           ~cli_path:(Filename.concat base_path "missing-claude")
+           ~goal:"missing CLI must not dispatch"
+           ~tools:[]
+           ()
+       in
+       (match attempt.result with
+        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+          check string "invalid configuration field" "claude_code" field
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> fail "a missing CLI completed the attempt");
+       check string "missing CLI has no effects" "no_effect_observed"
+         (Keeper_provider_attempt_effect.to_string attempt.effect_disposition))
 ;;
 
 let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
@@ -2317,7 +2347,7 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~remove_after_auth:true [] (fun cli_path ->
+       with_fixture ~refuse_exec_after_auth:true [] (fun cli_path ->
          run_direct_attempt
            ~base_path
            ~cli_path
@@ -3388,6 +3418,10 @@ let () =
             "subscription spawn failure is pre-dispatch"
             `Quick
             test_subscription_spawn_failure_is_pre_dispatch
+        ; test_case
+            "missing CLI is invalid config before dispatch"
+            `Quick
+            test_missing_cli_is_invalid_config_before_dispatch
         ; test_case
             "turn spawn failure is pre-dispatch with tools"
             `Quick

@@ -140,8 +140,10 @@ def run(executable: str) -> None:
         await_screen("Gate 1", "Tool holds 1", "Pending Gate Calls: 1",
                      "Held Tool Approvals: 1", "Standing Rules: 1", "YOLO Keepers: 1")
         refresh("stale")
-        await_screen("Gate stale", "Tool holds 1", "Pending Gate Calls: stale: previous reading",
-                     "Standing Rules: stale: previous reading", "YOLO Keepers: stale: previous reading",
+        # A failed Gate read withdraws its decision rows. It must report the
+        # failed source, while independently retained mode readings stay stale.
+        await_screen("Gate unavailable", "Tool holds 1", "Pending Gate Calls: gate load failed",
+                     "Standing Rules: gate load failed", "YOLO Keepers: stale: previous reading",
                      "partial coverage", "keeper_skill", absent=("no active pending",))
         evidence()
         refresh("queue-unavailable")

@@ -7,7 +7,7 @@ import test_tui_keyboard_input as h
 
 
 
-ERROR_PREFIX = b"runtime config load failed: fetch:"
+ERROR_PREFIX = b"fetch:"
 ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"
 
 

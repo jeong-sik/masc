@@ -231,7 +231,17 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         right = (columns - h.ACTING_PANE_NARROW_COLUMNS
                  if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
         if left:
-            region.assert_pane_edge(rows, left - 1, where)
+            if screen == "keeper-chat-roster":
+                # Chat puts an unframed portrait above the framed roster.
+                # Its title row is pixels, so locate the roster's own header
+                # before checking the same exact pane boundary.
+                roster_headers = [row for row, text in rows.items()
+                                  if "KEEPERS" in region.cells(text, 0, left)]
+                assert len(roster_headers) == 1, (where, roster_headers)
+                edge = region.cells(rows[roster_headers[0]], left - 1, left)
+                assert edge in region.BORDER_GLYPHS, (where, edge)
+            else:
+                region.assert_pane_edge(rows, left - 1, where)
         if right < columns:
             region.assert_pane_edge(rows, right, where)
         measured[(screen, columns)] = region.measure(

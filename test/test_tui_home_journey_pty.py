@@ -134,7 +134,7 @@ def automatic_gate_is_not_a_human_decision(executable):
         assert b"appr-blocked" in frame
         assert b"appr-queued" not in frame and b"appr-judging" not in frame
         select_destination(process, fd, output, b"appr-blocked")
-        h.send_and_wait(process, fd, output, b"\r", b"AUTO JUDGE BLOCKED")
+        h.send_and_wait(process, fd, output, b"\r", b"auto judge blocked")
         assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         # A separate explicit human handoff retains its own identity.

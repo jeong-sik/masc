@@ -54,6 +54,7 @@ def accepted_but_pending(executable, *, followed_by_held=False):
     fixtures[CONFIRM_PATH] = h.RequestHttpResponse(confirm)
     held_path = "/api/v1/keepers/tool-approval"
     held_rows = []
+    expected_workspace = {}
     held_item = cards.held("call-after-receipt", "new-held-decision")
 
     def answer_held(body):
@@ -61,10 +62,7 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         assert payload["name"] == held_item["keeper"]
         assert payload["tool_call_id"] == "call-after-receipt"
         assert payload["decision"] == "approve"
-        assert payload["expected_workspace"] == {
-            "base_path": "",
-            "masc_root": "",
-        }
+        assert payload["expected_workspace"] == expected_workspace
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 
@@ -73,6 +71,8 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         fixtures[held_path] = h.RequestHttpResponse(answer_held)
 
     def interact(process, fd, _slave, output, _base):
+        base = Path(_base).resolve()
+        expected_workspace.update(base_path=str(base), masc_root=str(base / ".masc"))
         h.wait_for_output(process, fd, output, b"[home-a]", start=0, timeout=10)
         cards.select_home(process, fd, output, b"[home-a]", destinations=3)
         opened = h.send_and_wait(process, fd, output, b"\r",

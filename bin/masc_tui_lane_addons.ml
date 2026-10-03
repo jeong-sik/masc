@@ -283,6 +283,19 @@ let overview_entries ?(mode=Current_installations) snapshot =
                   declaration.instance_id in
                 if has_worker then None else Some (`Declaration (index, declaration))))
 let overview_count ?(mode=Current_installations) snapshot = List.length (overview_entries ~mode snapshot)
+let selectable_overview_entries view snapshot =
+  let entries = overview_entries ~mode:view.overview_mode snapshot in
+  if view.presentation=Flow then
+    List.filter (function `Instance _ -> true | `Declaration _ -> false) entries
+  else entries
+let move_instance view delta =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      let count = List.length (selectable_overview_entries view snapshot) in
+      let instance_cursor = if count=0 then -1
+        else max 0 (min (count - 1) (view.instance_cursor + delta)) in
+      {view with instance_cursor; scroll=0}
 let overview_anchor = function
   | `Instance (instance : instance) -> Worker_anchor (instance.id, instance.incarnation)
   | `Declaration (_, declaration) -> Declaration_anchor declaration.source_path
@@ -356,8 +369,8 @@ let reconcile_snapshot view snapshot =
         then configuration_cursor else -1 in
       (* A vanished identity leaves no selection. Selecting a replacement is
          an explicit navigation action, never a side effect of a refresh. *)
-      let previous_entries = overview_entries ~mode:view.overview_mode previous in
-      let entries = overview_entries ~mode:view.overview_mode snapshot in
+      let previous_entries = selectable_overview_entries view previous in
+      let entries = selectable_overview_entries view snapshot in
       let instance_cursor =
         if previous_entries=[] && entries<>[] then 0
         else anchor (function
@@ -373,20 +386,26 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
         String.equal instance.id id && String.equal instance.incarnation incarnation) snapshot.instances
   | Overview ->
       (match view.focus with
-       | Configurations when view.presentation=Technical -> Option.bind (selected_declaration view) (fun declaration ->
+       | Configurations when view.presentation=Technical || Option.is_some view.document_key -> Option.bind (selected_declaration view) (fun declaration ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) ->
                instance.id=id && (match view.overview_mode with
                  | Current_installations -> not (retained instance)
                  | Retained_runs -> true)) snapshot.instances))
        | Timeline | Rows | Configurations | Connections | Instances ->
-           (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
+           (match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
             | Some (`Instance item) -> Some item | Some (`Declaration _) | None -> None)))
 let ordered_rows view snapshot =
   rows_in_screen view snapshot
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
+let toggle_flow view =
+  let presentation = if view.presentation=Flow then Summary else Flow in
+  let view = {view with presentation;
+    focus=(if view.screen=Overview then Instances else view.focus);
+    document_key=None; scroll=0} in
+  if view.screen=Overview && presentation=Flow then move_instance view 0 else view
 (* Presentation readings identify user-facing results. Supporting context
    records stay available in Records and raw details without becoming result
    navigation targets. Packages without readings retain their generic view. *)
@@ -408,7 +427,7 @@ let open_selected_instance view =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
+      match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
       | Some (`Declaration (index, _)) ->
           {view with focus=Configurations; configuration_cursor=index;
             presentation=Technical; scroll=0; selected=[]; document_key=None}
@@ -521,7 +540,7 @@ let selected_source_path view =
       let path = match view.focus, view.screen with
         | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
         | Instances, Overview ->
-            (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
+            (match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
              | Some (`Declaration (_, declaration)) -> Some declaration.source_path
              | Some (`Instance _) | None -> instance_path)
         | (Timeline | Connections | Instances | Rows), _ -> instance_path in
@@ -791,7 +810,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | None -> [unread_body_text ~failed_note view]
     | Some snapshot ->
         let selected = match view.screen with
-          | Overview -> at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor
+          | Overview -> at_cursor (selectable_overview_entries view snapshot) view.instance_cursor
           | Detail _ -> Option.map (fun item -> `Instance item)
               (detail_instance view snapshot) in
         let worker = match selected with
@@ -1040,7 +1059,7 @@ let overview_lines ~width view =
         let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers%s"
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
-        let entries = overview_entries ~mode:view.overview_mode snapshot in
+        let entries = selectable_overview_entries view snapshot in
         (* Keep the selected entry first: wrapped history/count context already
            spends rows before the list in a narrow terminal. *)
         let window = max 0 view.instance_cursor in

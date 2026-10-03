@@ -475,7 +475,7 @@ let test_goal_transition_uses_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"goal-transition-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let goal =
     match
       Goal_store.upsert_goal config
@@ -488,20 +488,34 @@ let test_goal_transition_uses_authenticated_actor () =
     | Ok (_, `updated _) -> fail "goal fixture unexpectedly updated an existing row"
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
-  let status, _ =
+  let workspace base root =
+    `Assoc [ "base_path", `String base; "masc_root", `String root ] in
+  let current = workspace
+      (Unix.realpath config.Masc.Workspace.base_path)
+      (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
+  let foreign_base = Filename.concat base_path "replacement" in
+  let foreign = workspace foreign_base (Filename.concat foreign_base ".masc") in
+  let fields =
+    [ "goal_id", `String goal.id
+    ; "action", `String "drop"
+    ; "note", `String "route actor audit"
+    ] in
+  let post fields =
     dispatch_json ~router ~token
       ~path:"/api/v1/tools/masc_goal_transition"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
-      ~body:
-        (Yojson.Safe.to_string
-           (`Assoc
-              [ "goal_id", `String goal.id
-              ; "action", `String "drop"
-              ; "note", `String "route actor audit"
-              ]))
-      ()
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
   in
-  check int "goal transition accepted" 200 status;
+  let post_with_workspace workspace =
+    post (("expected_workspace", workspace) :: fields) in
+  let missing_status, _ = post fields in
+  check int "unbound goal transition is refused" 400 missing_status;
+  List.iter (fun expected_workspace ->
+    let status, _ = post_with_workspace expected_workspace in
+    check int "foreign or invalid workspace cannot transition goal" 400 status)
+    [ foreign; `Null ];
+  let status, _ = post_with_workspace current in
+  check int "goal transition accepted in its own workspace" 200 status;
   let events_path =
     Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
   in
@@ -551,9 +565,9 @@ let test_board_write_routes_reject_foreign_workspace () =
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   with_board_store ~base_path @@ fun () ->
   let expected root = `Assoc
-      [ "base_path", `String (Unix.realpath config.Workspace.base_path)
+      [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
       ; "masc_root", `String root ] in
-  let current = expected (Unix.realpath (Workspace.masc_root_dir config)) in
+  let current = expected (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
   let post path workspace fields =
     dispatch_json ~router ~token ~path ~extra_headers:[]
       ~body:(Yojson.Safe.to_string (`Assoc (("expected_workspace", workspace) :: fields))) () in

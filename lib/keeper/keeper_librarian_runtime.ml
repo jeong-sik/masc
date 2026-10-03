@@ -409,9 +409,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
         (Exact_lane_preference_unavailable detail))
     |> Result.map Runtime_exact_lane_backpressure.order
   in
-  Ok
-    ( resolved.Runtime_exact_output_registry.selected_slots
-    , resolved.Runtime_exact_output_registry.cli_slots )
+  Ok resolved
 ;;
 
 let prepare_attempt ~requirement ~selected_slots messages =
@@ -579,8 +577,14 @@ type not_committed =
   ; walk_shows_size : bool
   }
 
-(* Only typed input-capacity evidence makes an execution failure about size.
-   A quota or an unclassified transport failure cannot narrow the source. *)
+(* One official-client slot's failure. A slot that names the limit it refused
+   at is answered by [fit_continuity], not here. Of the rest, an answer that
+   came back unusable is a refused output, which RFC-librarian-lifecycle §4.3
+   counts among the failures reading less answers; an id this module cannot
+   run is a configuration error; and a client that simply failed does not say
+   why -- its quota and its input limit arrive in the same constructor. A typed
+   character capacity is size evidence; an unclassified failure is not. Reading less on it would let a CLI quota storm
+   walk the width down to one atom. *)
 let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
@@ -623,19 +627,13 @@ let rec extraction_shows_size = function
    its caller with the size verdict above instead. *)
 let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
-    (* Every refusal belongs to its runtime; a later quota must not erase
-       an earlier measured limit. Fit to the largest actual CLI boundary,
-       so a more restrictive fallback cannot unnecessarily narrow input
-       that another measured slot can take. Ties retain walk order. *)
-    List.fold_left
-      (fun selected failure ->
-        match selected, Keeper_lane_cli_oneshot.input_capacity failure with
-        | None, observed -> observed
-        | Some _, None -> selected
-        | Some previous, Some observed ->
-          if observed.capacity.max_chars > previous.capacity.max_chars
-          then Some observed else selected)
-      None failures
+    List.fold_left (fun (observed : Keeper_lane_cli_oneshot.input_capacity option) failure ->
+      match observed, Keeper_lane_cli_oneshot.input_capacity failure with
+      | None, capacity -> capacity
+      | Some _, None -> observed
+      | Some previous, Some capacity ->
+        if capacity.capacity.max_chars > previous.capacity.max_chars
+        then Some capacity else observed) None failures
   | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
@@ -644,8 +642,9 @@ let extraction_cli_input_limit = function
 
 let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
-  let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
+  let* resolved = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
+  let cli_slots = resolved.Runtime_exact_output_registry.cli_slots in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
@@ -836,7 +835,9 @@ let execute_answer
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let* resolved = resolve_librarian_slots ~base_path ~keeper_id in
+  let selected_slots = resolved.Runtime_exact_output_registry.selected_slots in
+  let cli_slots = resolved.Runtime_exact_output_registry.cli_slots in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
@@ -887,8 +888,7 @@ let execute_answer
       ~validate:validate_flow
       attempt
   in
-  Runtime_exact_lane_backpressure.observe
-    ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots } flow;
+  Runtime_exact_lane_backpressure.observe ~resolved flow;
   match flow with
   | Ok success ->
     let selected_slot =
@@ -1296,23 +1296,33 @@ let run_best_effort
             ~destinations
             ~state
             ~questions =
+          let started_at = Time_compat.now () in
+          let started_at_ns = Mtime_clock.elapsed_ns () in
           let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
           Exact_lane_run_registry.register_running
             registry
             ~run_id:evaluation_id
             ~lane:Exact_lane_run_registry.Librarian
             ~actor:keeper_id
-            ~started_at:(Time_compat.now ())
+            ~started_at
             ~input:
               (Exact_lane_run_registry.Exact_input
                  (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
                     ~direction ~destinations ~state ~questions));
-          evaluation_id
+          evaluation_id, started_at_ns
         in
-        let complete_absorb_evaluation ~evaluation_id evaluation =
+        let absorb_evaluation_elapsed_s started_at_ns =
+          Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_at_ns) /. 1_000_000_000.
+        in
+        let complete_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) evaluation =
           let outcome =
             match evaluation.Keeper_librarian_absorb_gate.result with
-            | Ok _ -> Exact_lane_run_registry.Succeeded
+            | Ok _ ->
+              (match Keeper_librarian_absorb_gate.validate_evaluation_answer evaluation with
+               | Ok () -> Exact_lane_run_registry.Succeeded
+               | Error detail ->
+                 Exact_lane_run_registry.Failed
+                   { code = "absorb_gate_invalid_answer"; detail })
             | Error failure ->
               Exact_lane_run_registry.Failed
                 { code = "absorb_gate_provider_failure"
@@ -1324,7 +1334,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output:
                  (Keeper_librarian_absorb_gate.observation_to_yojson
@@ -1338,7 +1348,7 @@ let run_best_effort
                evaluation_id
                (Exact_lane_run_registry.completion_error_to_string error))
         in
-        let abort_absorb_evaluation ~evaluation_id result =
+        let abort_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) result =
           let outcome, output =
             match result with
             | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
@@ -1352,7 +1362,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output
            with

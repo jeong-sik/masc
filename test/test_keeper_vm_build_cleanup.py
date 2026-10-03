@@ -20,6 +20,12 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 cleaner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cleaner)
+SERVICE_SPEC = importlib.util.spec_from_file_location(
+    "vm_cleaner_service", SCRIPTS / "keeper-vm-cleaner.py"
+)
+assert SERVICE_SPEC is not None and SERVICE_SPEC.loader is not None
+service = importlib.util.module_from_spec(SERVICE_SPEC)
+SERVICE_SPEC.loader.exec_module(service)
 
 
 @unittest.skipUnless(
@@ -55,6 +61,44 @@ class GuestCleanup(unittest.TestCase):
         finally:
             process.terminate()
             process.wait(timeout=5)
+
+    def test_vanished_descriptor_keeps_later_checkout_owner_visible(self) -> None:
+        proc = self.root / "proc"
+        process = proc / str(os.getpid() + 1)
+        descriptors = process / "fd"
+        descriptors.mkdir(parents=True)
+        (process / "stat").write_text("1 (fixture) S\n")
+        (process / "cwd").symlink_to(self.root)
+        (process / "exe").symlink_to(self.root / "external-executable")
+        vanished = descriptors / "0"
+        retained = descriptors / "1"
+        vanished.symlink_to(self.root / "closed-file")
+        retained.symlink_to(self.build / "artifact")
+        readlink = os.readlink
+        iterdir = Path.iterdir
+
+        def read_descriptor(path):
+            if path == vanished:
+                raise FileNotFoundError(path)
+            return readlink(path)
+
+        def enumerate_paths(path):
+            if path == descriptors:
+                return iter([vanished, retained])
+            return iterdir(path)
+
+        with (
+            patch.object(
+                cleaner.GUEST,
+                "Path",
+                side_effect=lambda value: proc if value == "/proc" else Path(value),
+            ),
+            patch.object(cleaner.GUEST.os, "readlink", side_effect=read_descriptor),
+            patch.object(Path, "iterdir", enumerate_paths),
+        ):
+            report = cleaner.guest_sweep(self.root, 0, True)
+        self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
+        self.assertTrue((self.build / "artifact").exists())
 
     def test_native_dune_lock_preserves_output(self) -> None:
         with (self.build / ".lock").open("w") as lease:
@@ -96,6 +140,57 @@ class GuestCleanup(unittest.TestCase):
 
 
 class CleanerService(unittest.TestCase):
+    def test_stop_before_spawned_child_takes_lease_prevents_sweep(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            state = base / ".masc/maintenance/keeper-vm-cleaner"
+            stop = state / "stop-requested"
+
+            def command(action: str) -> int:
+                with patch.object(
+                    sys, "argv", ["keeper-vm-cleaner", action, "--base-path", str(base)]
+                ):
+                    return service.main()
+
+            # Model the admitted child before it has acquired service.lock.
+            self.assertEqual(command("stop"), 0)
+
+            def sweep(*_args, **_kwargs):
+                stop.touch()
+                return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+
+            with patch.object(service.subprocess, "run", side_effect=sweep) as run:
+                self.assertEqual(command("run"), 0)
+                run.assert_not_called()
+
+    def test_start_admission_holds_control_and_clears_old_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            state = base / ".masc/maintenance/keeper-vm-cleaner"
+            state.mkdir(parents=True)
+            stop = state / "stop-requested"
+            stop.touch()
+
+            def spawn(*_args, **_kwargs):
+                self.assertFalse(stop.exists())
+                with (
+                    (state / "control.lock").open("a") as other,
+                    self.assertRaises(BlockingIOError),
+                ):
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return subprocess.CompletedProcess([], 0)
+
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    ["keeper-vm-cleaner", "start", "--base-path", str(base)],
+                ),
+                patch.object(service, "running", side_effect=[False, True]),
+                patch.object(service.subprocess, "Popen", side_effect=spawn),
+            ):
+                self.assertEqual(service.main(), 0)
+
     def test_start_duplicate_stop_and_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

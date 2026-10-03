@@ -2942,9 +2942,22 @@ let render_keeper_message (state : state) =
                 | Tagged_row message -> siding_of_message message
                 | Tagged_block _ -> None
               in
+              let span_clock =
+                if opens then
+                  List.find_map
+                    (fun block ->
+                      if String.equal block.lb_request_id request_id then
+                        List.find_map
+                          (fun (entry : Message_layout.entry) -> entry.span_clock)
+                          block.lb_entries
+                      else None)
+                    blocks
+                else entry.span_clock
+              in
               ( tag
               , { entry with
-                  Message_layout.turn_rail =
+                  Message_layout.span_clock;
+                  turn_rail =
                     turn_rail_of ~siding ~edge
                       ~style:entry.Message_layout.style
                 } )

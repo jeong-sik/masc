@@ -59,7 +59,7 @@
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
  (deps fixtures/librarian_statements_golden.json)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
@@ -3189,7 +3189,7 @@
 (test
  (name test_keeper_portrait_read)
  (modules test_keeper_portrait_read)
- (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types masc_candle_store))
+ (libraries alcotest masc_test_deps masc masc_candle_store masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
 
 (test
  (name test_keeper_image_dimensions)
@@ -3295,7 +3295,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_fusion_model masc_tui_link_preview masc_tui_image_preview
  masc_tui_answering
  masc_tui_keys
  masc.fusion_core
@@ -3482,7 +3482,7 @@
 (test
  (name test_tui_command)
  (modules test_tui_command)
- (libraries alcotest masc_tui_command masc_tui_mcp yojson))
+ (libraries alcotest masc masc_tui_command masc_tui_mcp yojson))
 
 (test
  (name test_tui_fetched)
@@ -4090,6 +4090,15 @@
  (alias runtest-test_tui_connectors_entry)
  (deps test_tui_connectors_entry.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_connectors_entry.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_workspace_startup_read)
+ (deps test_tui_workspace_startup_read.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_workspace_startup_read.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_workspace_startup_read)))
 
 (alias
  (name runtest)
@@ -6974,7 +6983,7 @@
 (test
  (name test_dashboard_execution_render_window)
  (modules test_dashboard_execution_render_window)
- (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
+ (libraries alcotest eio eio.mock yojson unix masc.fs_compat masc masc.dashboard))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.

@@ -125,7 +125,8 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
       match List.find_opt (fun (run : Runs.run) ->
         run.actor = keeper_id && match run.status with
           | Runs.Completed _ -> true
-          | Runs.Running | Runs.Completion_persistence_failed _ -> false) (Runs.list_runs registry) with
+          | Runs.Running | Runs.Completion_persistence_failed _ -> false)
+          (Fixture.librarian_pass_runs registry ~keeper_id) with
       | None -> ()
       | Some run ->
         completed_before_cancellation := Runs.get registry ~run_id:run.run_id;
@@ -171,8 +172,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     commits_memory !memory_committed;
   Alcotest.(check bool) "Memory changes only after its actual commit"
     commits_memory (after_bytes <> before_bytes);
-  let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
-      (Runs.list_runs registry) with
+  let run = match Fixture.librarian_pass_runs registry ~keeper_id with
     | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "one Librarian run must be retained" in
   Alcotest.(check string) "the live registry retains the actual terminal outcome" expected_status
@@ -270,8 +270,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
        [ "Friday is the beta service's deployment day."
        ; "Tuesday is the alpha service's deployment day." ]
        (List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) current.facts));
-     let statuses = Runs.list_runs registry
-       |> List.filter (fun (r : Runs.run) -> r.actor = keeper_id)
+     let statuses = Fixture.librarian_pass_runs registry ~keeper_id
        |> List.map (fun (r : Runs.run) -> Runs.status_label r.status)
        |> List.sort String.compare in
      Alcotest.(check (list string)) "both attempts have terminal evidence"

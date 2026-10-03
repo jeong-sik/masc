@@ -631,6 +631,13 @@ type evaluation =
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
 
+let validate_evaluation_answer (evaluation : evaluation) =
+  match evaluation.result with
+  | Error failure -> Error (Typesafeai_client.failure_to_string failure)
+  | Ok evaluated ->
+    Result.map (fun _ -> ()) (decode evaluation.questions evaluated.response)
+;;
+
 type run_result =
   | Skipped of
       { reason : skip_reason
@@ -990,13 +997,17 @@ let run
          let result =
            try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
            | Eio.Cancel.Cancelled _ as exn ->
-             Option.iter
-               (fun abort ->
-                  Option.iter
-                    (fun id -> abort ~evaluation_id:id `Cancelled)
-                    evaluation_id)
-               on_evaluation_aborted;
-             raise exn
+             let backtrace = Printexc.get_raw_backtrace () in
+             (* The payload write precedes the registry's protected lock.
+                Settle the whole terminal callback in the cancelled context. *)
+             Eio.Cancel.protect (fun () ->
+               Option.iter
+                 (fun abort ->
+                    Option.iter
+                      (fun id -> abort ~evaluation_id:id `Cancelled)
+                      evaluation_id)
+                 on_evaluation_aborted);
+             Printexc.raise_with_backtrace exn backtrace
            | exn ->
              Option.iter
                (fun abort ->
@@ -1008,10 +1019,14 @@ let run
          in
          let evaluation = { direction; destinations; state; questions; result } in
          evaluations := evaluation :: !evaluations;
+         (* Terminal payload persistence precedes the registry's protected
+            lock. Finish the whole callback even if cancellation arrives
+            after the provider has returned. *)
          Option.iter
            (fun finish ->
               Option.iter
-                (fun id -> finish ~evaluation_id:id evaluation)
+                (fun id ->
+                   Eio.Cancel.protect (fun () -> finish ~evaluation_id:id evaluation))
                 evaluation_id)
            after_evaluate;
          publish (Incomplete (List.rev !evaluations));

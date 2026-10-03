@@ -446,6 +446,48 @@ let context_flow_uses_declared_connections () =
   let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
     configuration_cursor=0;instance_cursor=1} in
   let configured_lines = UI.lines ~width:160 configured in
+  let flow = UI.toggle_flow {configured with presentation=UI.Technical} in
+  check bool "entering Flow moves hidden configuration focus to visible instances" true
+    (flow.focus=UI.Instances && flow.presentation=UI.Flow);
+  check int "entering Flow preserves the visible instance selection" 1 flow.instance_cursor;
+  check (option string) "Flow actions target the visible selected worker" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance flow));
+  let moved_flow = {flow with instance_cursor=0} in
+  check (option string) "Flow navigation changes its action target" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance moved_flow));
+  check bool "leaving Flow keeps overview navigation on visible instances" true
+    (let summary = UI.toggle_flow flow in
+     summary.focus=UI.Instances && summary.presentation=UI.Summary);
+  let mixed = {snapshot with configuration=Some {configuration with
+    declarations=configuration.declarations @ [declaration "pending" "not-installed"]}} in
+  let mixed_flow = {flow with snapshot=Some mixed} in
+  let at_last = UI.move_instance mixed_flow 1 in
+  check int "Flow stops at the last visible worker" 1 at_last.instance_cursor;
+  check (option string) "Flow boundary keeps its visible action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance at_last));
+  let retained = {producer with id="retained-worker";incarnation="retained-incarnation";
+    phase=UI.Row.Detached} in
+  let with_history = {mixed_flow with snapshot=Some {mixed with
+    instances=retained :: mixed.instances}} in
+  check (option string) "current Flow ignores retained workers" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance with_history));
+  let history_flow = UI.toggle_flow (UI.toggle_history with_history) in
+  check (option string) "history Flow selects only its retained worker" (Some retained.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance history_flow));
+  check int "history Flow stops at its visible worker" 0
+    (UI.move_instance history_flow 1).instance_cursor;
+  let pending_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    instance_cursor=UI.overview_count mixed - 1} in
+  check int "entering Flow from an unresolved declaration selects a visible worker" 1
+    pending_flow.instance_cursor;
+  let empty_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    snapshot=Some {mixed with instances=[]}} in
+  check int "Flow with no workers has no selection" (-1) empty_flow.instance_cursor;
+  check (option string) "empty Flow cannot target an unresolved declaration" None
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance empty_flow));
+  check bool "detail Flow preserves its own focus" true
+    (let detail = UI.toggle_flow {flow with screen=UI.Detail (producer.id,producer.incarnation);
+      focus=UI.Connections} in detail.focus=UI.Connections);
   check (option string) "summary actions target the visibly selected worker despite hidden configuration focus" (Some consumer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
   check (option string) "technical installation actions target their selected declaration" (Some producer.id)
@@ -1221,7 +1263,7 @@ let declared_layers_use_exact_configured_owners () =
       "  project-input · snapshot /data/research.json -> a";
       "  project-input · snapshot /data/second.json -> b";
       "  [a]  |  [b]";"Layer 1";"  [judge]";
-      "    a: attached · last completed: 1 result row";
+      "    a: attached · last completed: 1 record";
       "    b: observing · no completed observation received";
       "    judge: failed: provider unavailable · last completed: 2 records";
       "No evidence sharing receipt in this session."];

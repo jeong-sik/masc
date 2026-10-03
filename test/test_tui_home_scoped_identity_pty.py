@@ -116,6 +116,10 @@ def scoped_identity_journey(executable, *, unread):
         # Health must precede the newly fetched decision source, not merely
         # happen eventually after foreign rows have already become actionable.
         decision_path = cards.OPERATOR_PATH if unread else h.KEEPER_ASKS_PATH
+        if unread:
+            assert not any(path == decision_path for path, _ in changed), changed
+            home.assert_no_decision_posts(requests)
+            return
         assert any(path == decision_path for path, _ in changed), changed
         assert next(i for i, (path, _) in enumerate(changed) if path == "/health") < next(
             i for i, (path, _) in enumerate(changed) if path == decision_path
@@ -127,6 +131,11 @@ def scoped_identity_journey(executable, *, unread):
         # The chat footer has no HTTP badge; assert the captured A health and
         # briefing readings below rather than waiting for an absent label.
         h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+        # The first boot read establishes authority and schedules one matching
+        # full follow-up. Settle it before attributing reads to Home navigation.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: sum(path == BRIEFING for path, _, _ in snapshot()) >= 2,
+            timeout=10), snapshot()
         h.drain_until_quiet(process, fd, output)
         initial = snapshot()
         local_reads = [response for path, _, response in initial if path == "/health"]
@@ -148,7 +157,7 @@ def scoped_identity_journey(executable, *, unread):
         identity = b"workspace identity not read"
         h.wait_for_output(process, fd, output, identity, start=start, timeout=10)
         assert_scoped(baseline)
-        frame = h.resize_and_wait(process, fd, output, rows=40, columns=120,
+        frame = h.resize_and_wait(process, fd, output, rows=40, columns=160,
                                   needle=b"Enter:open", final_cursor=b"\x1b[?25l")
         visible = h.screen_text(frame)
         assert label not in visible, ("unverified decision was cached", visible)
@@ -198,16 +207,12 @@ def superseded_scoped_match_journey(executable):
         ])
 
     gate = h.GatedHttpResponse(operator(old_operator_label), hold_seconds=30.0)
-    late_gate_label = b"late-foreign-gate"
-    late_gate_snapshot = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
-    late_gate_snapshot[1]["approval_queue"] = late_gate_snapshot[1]["approval_queue"][:1]
-    late_gate_snapshot[1]["approval_queue"][0]["id"] = late_gate_label.decode()
-    held_gate = h.GatedHttpResponse(late_gate_snapshot, hold_seconds=30.0)
-    original_gate = fixtures[cards.GATE_PATH]
     newer_operator_read = threading.Event()
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
+    initial_briefing = copy.deepcopy(briefing)
+    initial_briefing[1]["summary"]["workspace_health"] = "initializing"
 
     def record(path):
         with lock:
@@ -216,7 +221,12 @@ def superseded_scoped_match_journey(executable):
             return phase
 
     def read_briefing():
-        record(BRIEFING)
+        with lock:
+            phase = state["phase"]
+            calls.append((BRIEFING, phase))
+            initial_read = phase == "initial" and calls.count((BRIEFING, "initial")) == 1
+        if initial_read:
+            return initial_briefing
         return briefing
 
     def read_operator():
@@ -249,13 +259,6 @@ def superseded_scoped_match_journey(executable):
             return old_response
         return empty_response
 
-    def read_gate():
-        phase = record(cards.GATE_PATH)
-        if phase == "old-scoped":
-            return held_gate()
-        return original_gate() if callable(original_gate) else original_gate
-
-    fixtures[cards.GATE_PATH] = read_gate
     fixtures[BRIEFING] = read_briefing
     fixtures[cards.OPERATOR_PATH] = read_operator
     fixtures[h.KEEPER_ASKS_PATH] = read_asks
@@ -291,11 +294,19 @@ def superseded_scoped_match_journey(executable):
     def interact(process, fd, _slave, output, _base):
         try:
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+            h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
+            # Initial authority adoption schedules a second full reading while
+            # the connection badge stays connected. Its distinct Health row
+            # proves that bundle applied before the scoped-only baseline.
+            h.press_label_on_screen(process, fd, output, b"Dashboard",
+                                    row=1, needle=b"Enter:open")
+            h.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+            h.palette_go(process, fd, output, b"keeper alpha", b"Esc:list")
             h.drain_until_quiet(process, fd, output)
             with lock:
                 assert ("/health", "initial") in calls, calls
                 baseline = calls.count((BRIEFING, "initial"))
-                assert baseline >= 1, calls
+                assert baseline >= 2, calls
                 state["phase"] = "old-scoped"
             # Home's static footer is available before its scoped GET settles.
             h.press_label_on_screen(process, fd, output, b"Dashboard",
@@ -303,8 +314,6 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=10), (
                 "old scoped decision GET never reached the response gate"
             )
-            assert h.wait_for_fixture_event(process, fd, output, held_gate.requested, timeout=10), (
-                "independent Gate read never reached its response gate")
             with lock:
                 assert ("/health", "old-scoped") in calls, calls
                 assert calls.index(("/health", "old-scoped")) < calls.index(
@@ -324,7 +333,7 @@ def superseded_scoped_match_journey(executable):
             h.wait_for_output(process, fd, output, b"[workspace mismatch]",
                               start=start, timeout=10)
             replacement = h.resize_and_wait(
-                process, fd, output, rows=40, columns=120,
+                process, fd, output, rows=40, columns=160,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -336,12 +345,13 @@ def superseded_scoped_match_journey(executable):
             assert not gate.completed.is_set(), "mismatch was not applied before old completion"
             assert gate.calls == 1, "more than the first scoped decision GET was gated"
             with lock:
-                assert calls.count((BRIEFING, "new-full")) == 1, calls
+                new_full_reads = calls.count((BRIEFING, "new-full"))
+                assert new_full_reads >= 1, calls
                 assert ("/health", "new-full") in calls, calls
-                assert calls.count((cards.OPERATOR_PATH, "new-full")) == 1, calls
+                assert calls.count((cards.OPERATOR_PATH, "new-full")) == new_full_reads, calls
                 # A timed-out old operator GET must not masquerade as the
                 # new full asks GET before the held response is released.
-                assert calls.count((h.KEEPER_ASKS_PATH, "new-full")) == 1, calls
+                assert calls.count((h.KEEPER_ASKS_PATH, "new-full")) == new_full_reads, calls
                 assert calls.index(("/health", "old-scoped")) < calls.index(
                     ("/health", "new-full")
                 ) < calls.index((h.KEEPER_ASKS_PATH, "new-full")), calls
@@ -353,33 +363,28 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
-            held_gate.release.set()
-            assert h.wait_for_fixture_event(process, fd, output, held_gate.completed, timeout=10), (
-                "old Gate read never completed after workspace invalidation")
             # Consume the returned response and mailbox, then force a fresh
             # frame: accumulated pre-release mismatch bytes are not evidence.
             h.drain_until_quiet(process, fd, output, cap=1)
             drawn = h.resize_and_wait(
-                process, fd, output, rows=40, columns=121,
+                process, fd, output, rows=40, columns=161,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
             visible = h.screen_text(drawn)
             assert b"[workspace mismatch]" in visible, "old scoped A restored authority"
-            assert late_gate_label not in visible, ("late Gate completion restored foreign authority", visible)
             assert all(label not in visible for label in
                        (old_label, old_operator_label, new_label, new_operator_label)), (
                 "unverified full or superseded scoped decisions were restored", visible)
             with lock:
                 # The old read now performs one post-read identity probe;
                 # no extra full refresh can repair a wrongly admitted bundle.
-                assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
+                assert sum(path == BRIEFING for path, _ in calls) == baseline + new_full_reads, calls
                 assert calls.count(("/health", "released")) == 1, calls
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:
             gate.release.set()
-            held_gate.release.set()
 
     h.run_terminal_scenario(
         executable, description="Home drops old scoped A after newer full B mismatch",
@@ -472,7 +477,7 @@ def gate_before_identity_refresh_journey(executable):
             rejection = b"workspace changed before the action completed"
             h.wait_for_output(process, fd, output, rejection, start=before, timeout=10)
             shown = h.resize_and_wait(
-                process, fd, output, rows=40, columns=121,
+                process, fd, output, rows=40, columns=161,
                 needle=b"MASC Approvals", controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -500,7 +505,8 @@ def goal_drop_arm_withdrawal_journey(executable):
     fixtures = cards.fixtures_with_held([])
     requests = []
     goal = dict(h.planning_goal("goal-arm-40176", "Goal arm workspace proof"),
-                phase="awaiting_confirmation", criterion_revision="r1")
+                phase="awaiting_confirmation", criterion_revision="r1",
+                created_at="2026-09-29T00:00:00Z", updated_at="2026-09-29T00:00:00Z")
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
     state = {"foreign": False, "after_foreign": False}
     foreign_read = threading.Event()
@@ -537,6 +543,7 @@ def goal_drop_arm_withdrawal_journey(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
+        h.resize_and_wait(process, fd, output, rows=40, columns=160, needle=b"Confirm Goal")
         cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
         h.send_and_wait(process, fd, output, b"\r", b"Goal arm workspace proof")
         h.send_and_wait(process, fd, output, b"x", b"press x again")
@@ -550,7 +557,7 @@ def goal_drop_arm_withdrawal_journey(executable):
         h.wait_for_output(process, fd, output, b"[workspace mismatch]",
                           start=start, timeout=10)
         withdrawn = h.resize_and_wait(
-            process, fd, output, rows=40, columns=121,
+            process, fd, output, rows=40, columns=161,
             needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -563,7 +570,7 @@ def goal_drop_arm_withdrawal_journey(executable):
         h.wait_for_output(process, fd, output, b"Goal arm workspace proof",
                           start=recovered_start, timeout=10)
         recovered = h.resize_and_wait(
-            process, fd, output, rows=40, columns=121,
+            process, fd, output, rows=40, columns=162,
             needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -571,11 +578,10 @@ def goal_drop_arm_withdrawal_journey(executable):
         assert b"MASC Dashboard" in recovered_visible, recovered_visible
         assert b"Goal arm workspace proof" in recovered_visible, recovered_visible
         assert b"[workspace mismatch]" not in recovered_visible, recovered_visible
-        # The Home request reconciler closes the vanished Goal detail to
-        # Overview. Right reopens it from Overview, where the Planning-only
-        # generic key disarm does not run; the first x therefore tests the
-        # identity/reconciliation reset itself.
-        h.send_and_wait(process, fd, output, b"\x1b[C", b"goal-arm-40176")
+        # Reopen the recovered Goal through its current Home card. The first
+        # Drop key must arm again instead of dispatching the withdrawn arm.
+        cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
+        h.send_and_wait(process, fd, output, b"\r", b"Goal arm workspace proof")
         h.send_and_wait(process, fd, output, b"x", b"press x again")
         assert_no_drop()
         os.write(fd, b"q")

@@ -363,13 +363,24 @@ let test_explicit_prices_and_unpriced_items () =
     List.iter
       (fun shop ->
          write_config config shop;
+         let catalog =
+           call config "keeper-a" "keeper_candle_catalog" (`Assoc []) |> succeeded
+         in
+         check bool "empty optional shop keeps items unpriced" true
+           U.(member "items" catalog |> to_list
+              |> List.for_all (fun row -> member "price_status" row = `String "unpriced"));
+         rejected "unpriced_item" (buy config "keeper-a" "glasses");
+         check string "unpriced purchase cannot mutate the ledger" original (bytes config))
+      [ "\n[shop]\n"; "\n[shop.prices_milli]\n" ];
+    List.iter
+      (fun shop ->
+         write_config config shop;
          rejected "candle_disabled" (buy config "keeper-a" "glasses");
          check string "invalid policy cannot mutate the ledger" original (bytes config))
       [ "\n[shop.prices_milli]\nglasses = -1\n"
       ; "\n[shop.prices_milli]\nglasses = 1.5\n"
       ; "\n[shop.prices_milli]\nunknown_item = 100\n"
       ; "\n[shop.prices_milli]\nbare_face = 100\n"
-      ; "\n[shop]\n"
       ];
     write_config config "\n[shop.prices_milli]\nglasses = 0\n";
     ignore (buy config "keeper-a" "glasses" |> succeeded);

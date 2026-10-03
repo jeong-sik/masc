@@ -28,7 +28,7 @@ def queue_identity_journey(executable):
                                             fixture.first_post_received, timeout=5)
             h.send_and_wait(process, fd, output, b"identity-held-next",
                             h.composer_showing(b"identity-held-next"))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            h.send_and_wait(process, fd, output, b"\r", b"Enter:send (1 local)")
 
             def inspect_local(*, capture_id=False):
                 h.send_and_wait(process, fd, output, b"/queue",
@@ -58,23 +58,16 @@ def queue_identity_journey(executable):
             # temporary workspace paths. Save those exact readings for recovery.
             health = {key: fixture.fixtures[key]
                       for key in ("/health", "/health?full=1")}
+            unread_start = len(output)
             for key in health:
                 fixture.fixtures[key] = (503, {"error": "identity fixture unread"})
+            h.wait_for_output(process, fd, output, b"disconnected",
+                              start=unread_start, timeout=5)
 
-            # Home's identity clause proves the failed health reading was
-            # applied, rather than merely requested by a background fiber.
-            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
-                                    needle=b"workspace identity not read")
-            # Identity is applied before admission is released, so awaiting
-            # control cannot dispatch the queued request. Release promptly;
-            # subsequent navigation does not consume the fixture's hold limit.
-            fixture.release_first_acceptance.set()
-            h.wait_for_atomic_admissions(process, fd, output, fixture, 1)
-            h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
-            h.send_and_wait(process, fd, output, b"m",
-                            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+            # Keep the already-open conversation: an unread identity withdraws
+            # the roster, so selecting alpha anew would use unverified data.
+            # The refusal below proves the failed health read was applied
+            # before the held acceptance is released.
             draft = b"/steer unread-replacement"
             h.send_and_wait(process, fd, output, draft, h.composer_showing(draft))
             deadline_output = len(output)
@@ -82,6 +75,8 @@ def queue_identity_journey(executable):
             h.wait_for_output(process, fd, output,
                               b"Cannot steer: workspace identity is unverified",
                               start=deadline_output, timeout=5)
+            fixture.release_first_acceptance.set()
+            h.wait_for_atomic_admissions(process, fd, output, fixture, 1)
             assert draft in h.screen_text(bytes(output)), "unread steer lost its draft"
             assert not fixture.interrupt_requests, "unread /steer interrupted the preceding turn"
             assert len(fixture.received) == 1, "unread /steer posted a replacement"
@@ -105,8 +100,10 @@ def queue_identity_journey(executable):
             os.write(fd, b"\x15")
             h.drain_until_quiet(process, fd, output, cap=1)
             fixture.release.set()
-            h.wait_for_output(process, fd, output, b"reply-preceding-turn",
-                              start=0, timeout=10)
+            # Identity withdrawal cancels the old workspace reader. Settle the
+            # fixture's server turn, but do not demand that its late reply be
+            # presented without verified workspace authority.
+            assert fixture.turns()[1]["keepers"][0]["turn"] is None
             inspect_local()  # The retained request ID is verified at recovery admission.
             assert len(fixture.received) == 1, "queued input posted while identity was unread"
 

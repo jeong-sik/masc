@@ -144,8 +144,8 @@ class RemoteIdentity:
 def remote_portrait(binary: str, evidence: Path) -> None:
     manifest = json.loads((evidence / "manifest.json").read_text())
     keeper = manifest["keeper"]
-    before = (evidence / "before.png").read_bytes()
-    equipped = (evidence / "equipped.png").read_bytes()
+    before = (evidence / "before-icon.png").read_bytes()
+    equipped = (evidence / "equipped-icon.png").read_bytes()
     assert manifest["pixel_size"] == 160
     assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (160, 160)
     assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
@@ -153,13 +153,24 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[ROSTER_PATH] = roster
+    fixtures["/api/v1/gate/keepers"] = h.HeadersHttpResponse(lambda _headers: roster())
     requests: h.HttpRequests = []
     boot_path = f"/api/v1/keepers/{keeper}/boot"
     held_boot = h.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)
     boot_armed = threading.Event()
-    fixtures[boot_path] = lambda: held_boot() if boot_armed.is_set() else (200, {"ok": True})
     directive_path = f"/api/v1/keepers/{keeper}/directive"
-    fixtures[directive_path] = (200, {"ok": True})
+    lifecycle_started: list[str] = []
+
+    def boot_response():
+        lifecycle_started.append(boot_path)
+        return held_boot() if boot_armed.is_set() else (200, {"ok": True})
+
+    def directive_response():
+        lifecycle_started.append(directive_path)
+        return 200, {"ok": True}
+
+    fixtures[boot_path] = boot_response
+    fixtures[directive_path] = directive_response
     # Raw health answers deliberately bypass both harness identity fillers.
     # No native state exists here; this distinct path identifies the remote
     # server whose recorded wire is being replayed.
@@ -282,7 +293,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # original workspace, even though C names the same Keeper.
             # Keep the exact authority path in the footer for this boundary
             # proof; the earlier 99-column portrait pixel checks stay intact.
-            h.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
+            authority_columns = max(600, len(str(evidence)) + len(local_base) + 360)
+            h.resize_and_wait(process, fd, output, rows=70, columns=authority_columns, needle=b"Identity")
             boot_armed.set()
             os.write(fd, b"p")
             assert h.wait_for_fixture_event(process, fd, output, held_boot.requested,
@@ -303,7 +315,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             screen_is(lambda text: b"authority-c-current-roster" in text,
                       "C roster was not applied while B Boot was held")
-            lifecycle_offset = len(requests)
+            lifecycle_offset = len(lifecycle_started)
             held_boot.release.set()
             c_payload["keepers"][0]["runtime_blocker_summary"] = "authority-c-settled-roster"
             with roster.lock:
@@ -311,8 +323,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             roster.publish("c-settled")
             screen_is(lambda text: b"authority-c-settled-roster" in text,
                       "fresh C roster after release was not applied")
-            assert not [path for path, _ in requests[lifecycle_offset:]
-                if path in (boot_path, directive_path)],                 "a superseded B lifecycle plan sent a successor request to C"
+            assert not lifecycle_started[lifecycle_offset:], \
+                "a superseded B lifecycle plan sent a successor request to C"
             boot_armed.clear()
 
             # The automatic refresh (no cancelling input) changes authority
@@ -360,7 +372,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     h.run_terminal_scenario(binary,
         description="remote Keeper equipment changes actual terminal PNG pixels",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        refresh=0.5, preload_input=KITTY_REPLIES)
+        refresh=0.5, preload_input=KITTY_REPLIES, terminal_cols=160)
 
 
 def main() -> None:
@@ -374,7 +386,7 @@ def main() -> None:
             environment["RUNNER_TEMP"] = str(root)
             # Run only the existing real purchase/equip/router scenario.
             # Its export is reached after all product assertions succeed.
-            result = subprocess.run([fixture, "test", "router", "4"],
+            result = subprocess.run([fixture, "test", "router", "6"],
                 env=environment, capture_output=True, timeout=60, check=False)
             (evidence / "native-fixture.log").write_bytes(result.stdout + result.stderr)
             assert result.returncode == 0, (result.stdout + result.stderr).decode(errors="replace")

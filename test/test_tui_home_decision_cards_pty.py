@@ -229,14 +229,18 @@ def each_failed_source_keeps_other_cards(executable):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             h.wait_for_output(process, fd, output, known, start=0, timeout=10)
             note = b"Approvals and questions: " + failed_label + b" not fully read"
-            # Match the sole-source label through the end of its drawn row.
-            # The last changed row ends the frame without another row cursor.
-            settled = re.compile(
-                re.escape(note)
-                + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m"
-                + rb"(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)"
-            )
-            h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
+            # Compare the whole rendered row in the last completed frame.
+            # This accepts sparse frames without admitting transient notes
+            # with other unread-source labels or an unfinished frame.
+            def settled():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
+                return any(row.strip() == note for row in rows.values())
+
+            if not h.wait_for_fixture_state(process, fd, output, settled, timeout=10):
+                raise AssertionError(f"Home did not complete the sole-source row: {note!r}")
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),
                               final_cursor=b"\x1b[?25l")
@@ -355,14 +359,14 @@ def planning_link_failure_has_own_diagnostic(executable):
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output, b"go Work", b"go Work")
         h.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
-        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks: (links unavailable)")
         unavailable = h.screen_text(bytes(output))
         assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable
         assert b"task-777" not in unavailable, unavailable
         path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
         path.write_text(json.dumps({"version": 1, "links": []}))
-        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = h.screen_text(bytes(output))
         assert b"links unavailable" not in repaired, repaired
         home.assert_no_decision_posts(requests)
@@ -390,14 +394,14 @@ def planning_backlog_failure_recovers(executable):
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output, b"go Work", b"go Work")
         h.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
-        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (nothing here is a reading)")
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks: (nothing here is a reading)")
         failed = h.screen_text(bytes(output))
         assert b"links not read" not in failed, failed
-        assert b"Open tasks  (none)" not in failed, failed
+        assert b"Open tasks: (none)" not in failed, failed
         seed_operator_task(base)
         # An auxiliary archive error must not impersonate a primary failure.
         (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")
-        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = h.screen_text(bytes(output))
         assert b"nothing here is a reading" not in repaired, repaired
         assert b"links not read" not in repaired, repaired
@@ -515,11 +519,15 @@ def goal_opens_exact_detail(executable):
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
-    stored_goals = [
-        {key: value for key, value in row.items()
-         if key not in ("verification", "verifier_unreconciled")}
-        for row in (other, goal)
-    ]
+    # Persistence stores criteria; verification facts belong to the HTTP view.
+    stored_goals = [{
+        "id": row["id"], "criterion_revision": row["criterion_revision"],
+        "title": row["title"], "metric": row["metric"],
+        "target_value": row["target_value"], "due_date": None,
+        "priority": row["priority"], "phase": row["phase"],
+        "last_review_note": None, "last_review_at": None,
+        "created_at": row["created_at"], "updated_at": row["updated_at"],
+    } for row in (other, goal)]
     requests = []
 
     def interact(process, fd, _slave, output, base):

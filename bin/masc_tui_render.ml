@@ -1078,8 +1078,9 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
        add_summary_if_fits trend;
        let backlog_summary = Buffer.create 256 in
-       box_line backlog_summary cols
-         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
+       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog)
+       |> List.iter (box_line backlog_summary cols);
        if not cards_fit then add_summary_if_fits backlog_summary;
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
@@ -1740,8 +1741,17 @@ let schedule_list_freshness (state : state) =
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
     of the whole store this page is. *)
+let schedule_form_refusal_rows (state : state) ~cols =
+  match state.schedule_form_refusal with
+  | Some (action, detail, at)
+    when Unix.gettimeofday () -. at <= Masc_tui_types.last_action_window_s ->
+      Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+        (Terminal_text.single_line (action ^ ": " ^ detail))
+  | Some _ | None -> []
+
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let refusal_rows = schedule_form_refusal_rows state ~cols in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1754,6 +1764,28 @@ let render_schedule_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
+  let selected_row_exists, reserved_rows =
+    match state.schedules with
+    | Some snapshot when String.equal snapshot.scs_status "ok" ->
+        let warning = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+        let cancel = (if Option.is_some state.schedule_cancel_armed then 1 else 0)
+          + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
+        let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
+        selected, warning + cancel +
+          (if snapshot.scs_rows = [] then 3 else 3 + 2 + 2 + 1)
+    | Some _ | None -> false, 1
+  in
+  let room = max 0 (budget - reserved_rows) in
+  let refusal_rows =
+    if List.length refusal_rows <= room then refusal_rows
+    else if room = 0 then []
+    else
+      let cue = if selected_row_exists then "… Enter: full refusal diagnostic"
+        else "… refusal diagnostic truncated" in
+      List.init (room - 1) (fun index -> List.nth refusal_rows index)
+      @ [Message_layout.fit_width cue (max 1 (framed_inner_width cols))]
+  in
+  List.iter (c.push_styled ~style:(Theme.bad ())) refusal_rows;
   (match state.schedules with
    | None ->
        (match schedule_source_warning state with
@@ -1865,7 +1897,7 @@ let render_schedule_list (state : state) =
               next due and its divider, the column names and their rule, the
               two delivery rows, and the cancel rows. *)
            let content_height =
-             max 1 (budget - warning_rows - 3 - header_rows - 2 - cancel_rows)
+             max 1 (budget - List.length refusal_rows - warning_rows - 3 - header_rows - 2 - cancel_rows)
            in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
@@ -2291,6 +2323,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
   let wire text = String.concat "\n"
       (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
   let warnings =
+    List.map (fun line -> Theme.bad (), line) (schedule_form_refusal_rows state ~cols)
+    @
     (* The latest action refusal is the row the result handler reveals.
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
@@ -7731,7 +7765,10 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | goal_lines -> (Ansi.dim, "") :: goal_lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
-  let content_height = max 1 (rows - 5) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows
+      ~count:(List.length lines) ~preview_keep:None ~overflow_takes_row:true
+  in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -7740,16 +7777,11 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height (List.length lines));
   box_bottom buf cols;
-  (* A position, not a key. Packed into the hints string it was read as a key
-     item and dropped from the back before any of them, so the one screen that
-     exists for reading a ruling in full never said which part of it was on
-     screen -- at a hundred, a hundred and thirty and a hundred and sixty
-     columns alike. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  (* Keep the evidence window with the reading, independently of footer keys. *)
+  scroll, None
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement
@@ -9190,7 +9222,7 @@ let runtime_probe_badge = function
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge state runtime probe =
-  runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge probe
+  runtime_route_badge state runtime, runtime_probe_badge probe
 
 let runtime_probe_detail = function
   | None -> []
@@ -9226,7 +9258,7 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status:(route, probe) ~detail =
   let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
   let inner_width = max 1 (framed_inner_width cols - 2) in
   let candidate_heading =
@@ -9238,6 +9270,17 @@ let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~s
     min status_width
       (max 1 (inner_width - Message_layout.display_width candidate_heading
               - Masc_tui_table.cell_gap))
+  in
+  (* Keep both independent readings visible when the status column folds.
+     Folding their concatenation would let a long route hide the probe. *)
+  let separator = " / " in
+  let available = max 0 (status_width - Message_layout.display_width separator) in
+  let probe_width = min (Message_layout.display_width probe) (available / 2) in
+  let route_width = min (Message_layout.display_width route) (available - probe_width) in
+  let probe_width = available - route_width in
+  let status =
+    Message_layout.fit_middle route_width route ^ separator
+    ^ Message_layout.fit_width probe probe_width
   in
   let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
   let width = function
@@ -9758,7 +9801,7 @@ let render_runtime (state : state) =
   let table_cells = runtime_table_cells ~cols ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
-      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));
+      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:("", "") ~detail:""));
   c.push_divider ();
   (match state.runtime_surface_error with
    | None -> ()

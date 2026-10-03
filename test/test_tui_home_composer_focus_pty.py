@@ -61,8 +61,9 @@ def mouse_home_retains_composer(executable):
         cards.assert_selected(output, destination)
         # Refresh must keep Home navigation focus. It must not become a
         # character appended to the saved draft or reopen the composer.
-        h.send_and_wait(process, fd, output, b"r", b"Enter:open")
+        os.write(fd, b"r")
         h.drain_until_quiet(process, fd, output)
+        assert b"Enter:open" in h.screen_text(bytes(output))
         cards.assert_selected(output, destination)
         assert draft not in h.screen_text(bytes(output))
         home.assert_no_decision_posts(requests)

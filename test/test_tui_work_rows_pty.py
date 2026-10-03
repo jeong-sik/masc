@@ -2,8 +2,9 @@
 import json
 import os
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
+
 import test_tui_keyboard_input as h
 
 
@@ -188,6 +189,8 @@ def run(executable):
                 if b"".join(parts) != task_id.encode():
                     raise AssertionError(f"opaque ID reconstructed incorrectly: {parts!r}, {task_id!r}")
                 h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+                h.resize_and_wait(process, master_fd, output, rows=40, columns=width,
+                                  needle=b"row 2]", final_cursor=b"\x1b[?25l")
                 if index == 0:
                     h.send_and_wait(process, master_fd, output, b"j", b"row 2]")
             h.send_and_wait(process, master_fd, output, b"k", b"row 1]")

@@ -43,6 +43,8 @@ def run(executable):
                 process, master, output, b"Librarian", start=0, timeout=3.0
             )
             h.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
+            # Leave the row filter before q can invoke navigation-mode quit.
+            h.send_and_wait(process, master, output, b"\x1b" + h.FULL_REDRAW, b"MASC Lanes")
             os.write(master, b"q")
         finally:
             health.release.set()

@@ -173,7 +173,12 @@ let acquire_until ?wait ~clock ~deadline_at t =
         ~finally:(fun () -> note (Wait_settled_at (Eio.Time.now clock)))
         (fun () ->
            match
-             Eio.Time.with_timeout clock remaining (fun () -> Ok (Eio.Promise.await promise))
+             (* Keep the caller's absolute deadline. Re-arming [remaining]
+                here adds any time spent requesting the slot or scheduling
+                the timer fiber back onto the admission window. *)
+             Eio.Fiber.first
+               (fun () -> Eio.Time.sleep_until clock deadline_at; Error `Timeout)
+               (fun () -> Ok (Eio.Promise.await promise))
            with
            | Ok () -> Ok ()
            | Error `Timeout ->

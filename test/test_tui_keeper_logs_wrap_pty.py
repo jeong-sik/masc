@@ -161,7 +161,8 @@ def run(executable):
 
     h.run_terminal_scenario(executable, description="Keeper log facts wrap without skipping rows",
                            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
-                           prepare_workspace=prepare, terminal_cols=40)
+                           prepare_workspace=prepare, terminal_cols=40,
+                           startup_frame_marker=b"MASC Dashboard")
 
 
 if __name__ == "__main__":

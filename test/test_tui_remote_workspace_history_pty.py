@@ -888,7 +888,7 @@ def schedule_editor_workspace_change(binary: str) -> None:
                 release.touch()
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"modify: Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
-                    "post-editor identity change was not visibly refused"
+                    f"post-editor identity change was not visibly refused: {screen(output)!r}"
                 assert not [p for p, _ in posts if p == "/api/v1/tools/masc_schedule_update"], \
                     "the edited A schedule was posted to cloned workspace B"
                 os.write(fd, b"q")
@@ -1103,10 +1103,15 @@ def connector_workspace_withdrawal(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_channels(marker):
+            h.drain_until_quiet(process, fd, output)
             title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Channels" in text]
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
+            # The selected detail tab survives a workspace withdrawal. If
+            # Channels already shows the fresh reading, clicking it again
+            # produces no changed cells for send_and_wait to observe.
+            if marker not in screen(output):
+                h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
             await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
                          "fresh connector targets are not visible")
         try:
@@ -1122,8 +1127,9 @@ def connector_workspace_withdrawal(binary: str) -> None:
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"a-Discord" not in text,
                          "workspace B did not withdraw A's connector projection")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"b.current" in text, "B roster not ready")
+            # Authority withdrawal already returns detail to the roster.
+            await_screen(lambda text: b"MASC Keepers" in text and b"b.current" in text,
+                         "B roster not ready")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"b-Discord")
@@ -1136,8 +1142,8 @@ def connector_workspace_withdrawal(binary: str) -> None:
                          "returning authority did not retire the held connector write")
             released.set()
             assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            await_screen(lambda text: b"a.returned" in text, "returned roster not ready")
+            await_screen(lambda text: b"MASC Keepers" in text and b"a.returned" in text,
+                         "returned roster not ready")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"a-returned-Discord")
@@ -1405,8 +1411,14 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"\r")
             chat = h.wait_for_http_request(process, fd, output, requests,
                 path="/api/v1/keepers/chat/stream")
-            assert created == [("a-returned", {"title": "workspace-a-fresh-task"})], created
+            expected_workspace = {"base_path": str(Path(_base).resolve()),
+                                  "masc_root": str(Path(_base).resolve() / ".masc")}
+            assert created == [("a-returned", {
+                "expected_workspace": expected_workspace,
+                "title": "workspace-a-fresh-task"})], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha",
+                                      destination=b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             release_initialize.set()
@@ -1464,7 +1476,8 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 result = {}
                 headers = (("Mcp-Session-Id", "resource-session-" + phase),)
             elif method == "resources/list":
-                result = {"resources": [{"uri": uri, "name": "resource-" + phase,
+                result = {"resources": [{"uri": uri,
+                    "name": "resource-" + phase + "-read-" + str(calls.count((phase, method))),
                     "mimeType": "text/plain"}]}
             elif method == "resources/read":
                 result = {"contents": [{"uri": uri, "mimeType": "text/plain",
@@ -1498,12 +1511,22 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, b"r", b"resource-b")
+                # Recovery may already have drawn B. Prove the explicit refresh
+                # reached B, then read a completed forced frame of that state.
+                refreshes = calls.count(("b", "resources/list"))
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: calls.count(("b", "resources/list")) > refreshes,
+                    timeout=WAIT_SECONDS), "B resource refresh was not requested"
+                refreshed_name = f"resource-b-read-{refreshes + 1}".encode()
+                h.wait_for_output(process, fd, output, refreshed_name,
+                    start=0, timeout=WAIT_SECONDS)
+                h.send_and_wait(process, fd, output, h.FULL_REDRAW, refreshed_name)
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
                     assert [(phase, method) for phase, method in calls
-                            if method == "resources/list"] == [("b", "resources/list")], calls
+                            if method == "resources/list"] == [("b", "resources/list")] * (refreshes + 1), calls
                 os.write(fd, b"q")
             finally:
                 release.set()
@@ -1578,7 +1601,8 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
         writes = []
         def health():
             reply = wire.health()
-            if armed.is_set(): probes.set()
+            if armed.is_set():
+                probes.set()
             return reply
         def post(path, body):
             writes.append((path, body))
@@ -1598,7 +1622,8 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
                 h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
                 h.send_and_wait(process, fd, output, b"private-A-message", h.composer_showing(b"private-A-message"))
             armed.set()
-            if operation != "boot-recovery": wire.publish("b")
+            if operation != "boot-recovery":
+                wire.publish("b")
             os.write(fd, b"\r" if operation == "chat" else b"p")
             assert h.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
             assert h.wait_for_fixture_state(process, fd, output,
@@ -1606,6 +1631,14 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
             h.drain_until_quiet(process, fd, output)
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
+            if operation == "chat":
+                # A refused dispatch preserves the composer and its draft;
+                # q there is text, not the global exit key. Leave through Esc
+                # and verify the roster destination before requesting exit.
+                assert b"private-A-message" in screen(output), "refused chat lost its draft"
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                assert "▸ chat".encode() not in screen(output), screen(output)
+                assert writes == [], "leaving the refused draft dispatched chat"
             os.write(fd, b"q")
         h.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,

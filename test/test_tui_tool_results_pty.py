@@ -88,6 +88,12 @@ def run_observer_results(executable: str) -> None:
     # makes a result that only appears on the next poll fail the scenario.
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures.update(h.observer_http_fixtures())
+    initial_briefing = h.overview_event_briefing()
+    initial_briefing["summary"]["workspace_health"] = "initializing"
+    fixtures["/api/v1/dashboard/briefing"] = h.SequencedHttpResponse([
+        (200, initial_briefing),
+        (200, h.overview_event_briefing()),
+    ])
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     releases = [threading.Event() for _ in range(5)]
     connected = threading.Event()
@@ -173,6 +179,12 @@ def run_observer_results(executable: str) -> None:
                               needle=b"MASC Dashboard")
             if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
                 raise AssertionError("observer stream never opened")
+            # Adopting workspace authority opens the observer and schedules
+            # another full refresh. Wait for that follow-up bundle to render
+            # before navigating: otherwise its queued chat reload can race
+            # the result event and add an unrelated call-log read.
+            h.wait_for_output(process, master_fd, output, b"Health: ok",
+                              start=0, timeout=5)
             h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, master_fd, output, b"alpha")
             h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")

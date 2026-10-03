@@ -67,7 +67,7 @@ def approval_typing(binary: str, decision: str) -> None:
         fd: int,
         _slave: int,
         output: bytearray,
-        _base: str,
+        base: str,
     ) -> None:
         try:
             open_chat(process, fd, output)
@@ -95,9 +95,9 @@ def approval_typing(binary: str, decision: str) -> None:
             assert payload["tool_call_id"] == "typing-call"
             assert payload["decision"] == decision
             assert payload["expected_workspace"] == {
-                "base_path": "",
-                "masc_root": "",
-            }
+                "base_path": base,
+                "masc_root": str(Path(base, ".masc")),
+            }, payload
             assert len([body for path, body in requests if path == APPROVAL]) == 1
         finally:
             show_approval.set()

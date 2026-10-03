@@ -68,6 +68,8 @@ The [unabridged v0.49.0 release notes](https://github.com/jeong-sik/masc/blob/v0
 
 - The conflict repair folded the remaining inherited fragments into this release: #40299, #40607, #40616, #40662, #40675, #40678, #40690, #40693, #40808, #40809, #40818, #40857, #40926, #40971, #40975, #40995. Their full text is preserved in the detailed notes.
 
+- The subsequent main integration includes the source-check cleanup in #40987 and #40990; their notes are preserved in the detailed record.
+
 ## [0.48.0] - 2026-09-29
 
 ### Fresh state required

@@ -16,15 +16,7 @@ import zlib
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "lib/keeper/keeper_librarian_absorb_gate.ml",
-    "lib/keeper/keeper_librarian_absorb_gate.mli",
-    "lib/keeper/keeper_librarian_runtime.ml",
-    "lib/typesafeai/typesafeai_config.ml",
-    "lib/typesafeai/typesafeai_config.mli",
-    "lib/typesafeai/typesafeai_types.ml",
-    "lib/typesafeai/typesafeai_types.mli",
-)
+
 
 
 PANE_BORDER = "\u2502".encode()

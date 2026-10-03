@@ -10,7 +10,7 @@ from pathlib import Path
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
+
 TASK_ID = "task-metadata-501"
 FOLLOWED_TASK_ID = "task-followed-502"
 FOLLOWED_TITLE = "FOLLOWEDHEAD short task"

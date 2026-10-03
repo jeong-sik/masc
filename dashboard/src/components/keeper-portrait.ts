@@ -25,8 +25,6 @@ import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 // The renderer's accepted edge lengths (lib/keeper_portrait,
 // Keeper_portrait_draw.min_size / max_size). The server refuses anything
 // outside them rather than clamping, so the client stays inside.
-// keeper-portrait-bounds-parity.test.ts reads the OCaml values and fails when
-// these copies drift from them.
 export const PORTRAIT_MIN_PX = 16
 export const PORTRAIT_MAX_PX = 512
 

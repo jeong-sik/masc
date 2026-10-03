@@ -5,7 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+
 
 ERROR = b"repository load failed: HTTP 503: fixture repository unavailable"
 

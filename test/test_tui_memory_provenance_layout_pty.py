@@ -5,7 +5,7 @@ import sys
 import test_tui_keyboard_input as h
 import test_tui_memory_fact_detail_pty as detail
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_memory.ml")
+
 # Force overflow at both 80 and 30 columns in the short frame, while the
 # full reading grows by the observed overflow, retaining the entire record.
 CLAIM = "CLAIMHEAD\n\n" + "단어 " * 200 + "\nCLAIMTAIL"

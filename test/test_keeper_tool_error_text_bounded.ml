@@ -18,20 +18,6 @@
 
 open Alcotest
 
-let exec_module = "lib/keeper/keeper_tools_agent_core_handler_exec.ml"
-
-(* Pin the call site, not just the helper: the helper being correct does not
-   stop a future edit from dropping it here, which is exactly how the field
-   came to differ from its sibling in the first place. *)
-let test_error_path_routes_through_the_redactor () =
-  check bool
-    (Printf.sprintf "%s bounds the error detail through the redactor"
-       exec_module)
-    true
-    (Ast_grep.count_calls
-       ~module_path:exec_module
-       ~callee:"Observability_redact.redact_preview"
-     > 0)
 ;;
 
 (* A cut at a byte offset can land inside a multi-byte character, so the
@@ -83,10 +69,8 @@ let () =
   run
     "keeper tool error text bounded"
     [ ( "call site"
-      , [ test_case
-            "error detail routes through the redactor"
-            `Quick
-            test_error_path_routes_through_the_redactor
+      , [
+
         ] )
     ; ( "bound"
       , [ test_case

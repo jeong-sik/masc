@@ -148,12 +148,18 @@ let verified_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; refresh_failed} in
   t.phase<-finished false;
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
+  check int "failed refresh returns result to summary" 0 t.result_scroll;
   check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
   check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved Login.Saved_verified);
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Ok (`Assoc []));
+  check int "invalid refreshed inventory returns result to summary" 0 t.result_scroll;
   check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
+  t.result_scroll <- 3;
   Login.refresh_saved t Login.Saved_verified (Ok inventory);
+  check int "successful refresh returns result to summary" 0 t.result_scroll;
   check bool "successful refresh retains saved screen" true (t.phase=finished false)
 let missing_model_context () =
   List.iter (fun client ->

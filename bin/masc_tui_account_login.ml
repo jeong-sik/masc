@@ -243,7 +243,7 @@ let inventory ?view t json =
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t message =
-  t.recovery <- Refresh_configuration; t.phase <- Failed; t.result_scroll <- 0;
+  t.recovery <- Refresh_configuration; t.result_scroll <- 0; t.phase <- Failed;
   (* The reason leads; the key to press is also in the hints. *)
   t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
@@ -253,7 +253,7 @@ let refresh_retry t result =
   t.recovery <- Refresh_configuration;
   match refreshed with
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
-  | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
+  | Error _ -> t.result_scroll <- 0; t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let saved_notice = function
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
   | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
@@ -298,6 +298,7 @@ let saved t json =
   | Some saved -> t.result_scroll <- 0; t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
+  t.result_scroll <- 0;
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
   t.cursor <- 0;
   t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
@@ -388,7 +389,7 @@ let receipt t json =
      | `String ("running" | "failed" | "cancelled" | "interrupted"), _, None
        when field "account_ref" json=`Null || Option.is_some selected ->
        t.account_ref <- selected;
-       t.phase <- Failed; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
+       t.result_scroll <- 0; t.phase <- Failed; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
      | _ -> Error "로그인 결과를 확인하지 못했습니다.")
   | _ -> Error "다른 계정의 로그인 결과입니다."
 let event ~generation t message =
@@ -403,10 +404,10 @@ let event ~generation t message =
     t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading;
     t.notice <- (match authentication with Authenticated -> "계정 인증을 확인했습니다." | Login_completed | Credential_captured -> "로그인 자료를 받았습니다."); Discover
   | Login_failed (id, reference) ->
-    t.login_id <- Some id; t.account_ref <- reference; t.phase <- Failed;
+    t.login_id <- Some id; t.account_ref <- reference; t.result_scroll <- 0; t.phase <- Failed;
     t.draft <- ""; t.input_pending <- false;
     t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하거나 e로 다시 로그인하세요."; Nothing
-  | Login_error -> t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
+  | Login_error -> t.result_scroll <- 0; t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
 let append_draft t text =
   let value = t.draft ^ text in
   if String.is_valid_utf_8 value && String.length value <= 65536 then t.draft <- value

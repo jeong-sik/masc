@@ -296,6 +296,11 @@ let decode_keeper_usage_window json =
         | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
       in
       let* kuw_generated_at = required_number_field json "generated_at" in
+      let* () =
+        match Ptime.of_float_s kuw_generated_at with
+        | Some _ -> Ok ()
+        | None -> Error "keeper usage generated_at is outside the supported timestamp range"
+      in
       let* kuw_window_minutes = required_int_field json "window_minutes" in
       let* rows = required_list_field json "keepers" in
       let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in

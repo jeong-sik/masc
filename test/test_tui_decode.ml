@@ -12162,6 +12162,29 @@ let test_keeper_usage_cache_failures_remain_visible () =
   Alcotest.(check bool) "unknown cache is rejected" true
     (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
 
+let test_keeper_usage_rejects_unrenderable_generated_at () =
+  let decode timestamp =
+    Masc.Tui_decode_usage.decode_keeper_usage_window
+      (`Assoc [ "cache", `Assoc [ "state", `String "fresh" ];
+                "generated_at", `Float timestamp; "window_minutes", `Int 1440;
+                "keepers", `List [] ])
+  in
+  List.iter (fun timestamp ->
+    match decode timestamp with
+    | Error reason -> Alcotest.(check bool) "failure names generated_at" true
+        (String_util.contains_substring reason "generated_at")
+    | Ok _ -> Alcotest.fail "unrenderable generated_at was accepted")
+    [ Float.nan; Float.infinity; Float.neg_infinity; 1e300; -1e300 ];
+  List.iter (fun timestamp ->
+    match decode timestamp with
+    | Ok (Keeper_usage_window { kuw_generated_at; _ }) ->
+        Alcotest.(check (float 0.)) "representable timestamp is preserved"
+          timestamp kuw_generated_at;
+        ignore (Unix.gmtime kuw_generated_at)
+    | Ok _ -> Alcotest.fail "a timestamp became a loading placeholder"
+    | Error reason -> Alcotest.fail reason)
+    [ -1.; 0.; 1790985600. ]
+
 let test_keeper_usage_unread_turns_remain_partial () =
   let decode unread =
     let json = Yojson.Safe.from_string (Printf.sprintf
@@ -13075,6 +13098,8 @@ let () =
     ( "keeper usage cache"
     , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
           test_keeper_usage_cache_failures_remain_visible;
+        Alcotest.test_case "Keeper usage rejects unrenderable generated_at" `Quick
+          test_keeper_usage_rejects_unrenderable_generated_at;
         Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
           test_keeper_usage_unread_turns_remain_partial ] );
     ( "play invites"

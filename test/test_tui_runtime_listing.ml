@@ -891,6 +891,21 @@ let test_exact_replacement_search_exposes_model_effort_and_same_group () =
      Alcotest.(check (list string)) "search chooses a configured model with declared effort"
        ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
    | None -> Alcotest.fail "replacement picker is closed");
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "750k context")
+    (fun index -> String.make 1 "750k context".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search matches the visible formatted context"
+       ["account.luna-medium"] (List.map (fun runtime -> runtime.Tui_decode.ro_id) picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  state.runtime_catalog <- [{ selected with ro_id = "account.current" }];
+  open_runtime_lane_pick state pick;
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check string) "loaded catalogue has no eligible replacement"
+       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note picker)
+   | None -> Alcotest.fail "replacement picker is closed");
   Alcotest.(check string) "first means first within the declared group"
     "librarian_exact first in group account.current"
     (slot_plan_text (plan_slot_edit state First_slot));

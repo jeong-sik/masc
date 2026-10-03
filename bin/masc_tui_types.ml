@@ -10819,7 +10819,10 @@ let runtime_surface_listing_chrome ~cols state =
        | Some { se_target = Media_failover_slots; _ } ->
          Some (List.length (slot_editor_rows state))
        | Some { se_target = Exact_lane_slots _; _ } | None -> None)
-    ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
+    ~picker_rows:(Option.map (fun picker ->
+      List.length picker.rlp_choices * (match picker.rlp_pick with
+        | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
+        | _ -> 1))
       (runtime_picker_projection state))
     ()
 

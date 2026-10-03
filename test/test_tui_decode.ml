@@ -9972,12 +9972,19 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
-  let not_entered = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+  let not_entered slot = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
     | `Assoc ["run", `Assoc fields] ->
-      `Assoc ["run", `Assoc (("selected_slot", `String "codex.fake") :: List.remove_assoc "selected_slot" fields)]
+      let output = match List.assoc "output" fields with
+        | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+      let awaiting = `Assoc ["status", `String "awaiting_answer"; "elapsed_s", `Null] in
+      `Assoc ["run", `Assoc (("selected_slot", slot) ::
+        ("output", `Assoc (("jev_preflight", awaiting) :: List.remove_assoc "jev_preflight" output)) ::
+        List.remove_assoc "output" (List.remove_assoc "selected_slot" fields))]
     | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "awaiting without generation or slot is valid" true
+    (Result.is_ok (Tui_decode.decode_lane_run_detail (not_entered `Null)));
   Alcotest.(check bool) "not-entered must not invent a generation slot" true
-    (Result.is_error (Tui_decode.decode_lane_run_detail not_entered));
+    (Result.is_error (Tui_decode.decode_lane_run_detail (not_entered (`String "codex.fake"))));
   List.iter (fun (status, extra) ->
     let with_model model =
       match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with

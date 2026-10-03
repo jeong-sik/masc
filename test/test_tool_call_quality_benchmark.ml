@@ -13,7 +13,7 @@ let fixture_runs repo_root =
    sandbox deps) are unreachable via [Sys.getcwd ()]. dune exports the real
    workspace source root as DUNE_SOURCEROOT; resolve fixtures against it and
    fall back to cwd for direct (non-dune) invocation. Mirrors
-   test_disk_hygiene_script.ml / test_ci_run_tests_script.ml. *)
+   test_disk_hygiene_script.ml. *)
 let repo_source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
 

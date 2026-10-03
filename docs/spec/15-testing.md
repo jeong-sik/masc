@@ -99,7 +99,7 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc alcotest ...)` 의존으로 묶음
 2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
 3. **agent core bridge tests**: `agent_core` 의존
-4. **Script tests**: CI/harness 스크립트의 동작을 검증하는 테스트 (`test_ci_hardening_source.ml`, `test_ci_run_tests_script.ml`)
+4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·PTY fixture 자체 테스트는 전체 기능 검증에 포함하지 않는다.
 
 ---
 

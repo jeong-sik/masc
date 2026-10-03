@@ -9982,7 +9982,7 @@ let runtime_picker_label_for = function
 let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
-      { Masc_tui_pick_list.closed with query = Some "" }
+      Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
     | _ -> Masc_tui_pick_list.closed in
   state.runtime_lane_pick <- Some (pick, list)
 

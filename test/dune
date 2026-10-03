@@ -7931,6 +7931,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_continuity_admission)))
+(include stanzas/test_librarian_preflight_report.inc)
 
 (rule
  (alias runtest-test_tui_lane_initial_authority)

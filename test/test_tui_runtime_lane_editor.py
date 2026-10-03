@@ -1132,7 +1132,15 @@ def run_replace_and_promote(executable: str) -> None:
             h.send_and_wait(process, fd, output, b"s", b"Model order")
             h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] gpt-6-sol low")
             h.send_and_wait(process, fd, output, b"r", b"Replace selected candidate")
-            h.send_and_wait(process, fd, output, b"luna medium", b"gpt-6-luna medium")
+            # Filtering can leave the selected row unchanged, so only the
+            # filter redraw is new output. Verify the retained selection on
+            # the current screen before confirming the replacement.
+            h.send_and_wait(process, fd, output, b"luna medium",
+                            b"filter: luna medium" + FILTER_CURSOR + b" 1 of 1")
+            screen = h.screen_text(bytes(output))
+            if (b"> [CLI replacement] gpt-6-luna medium" not in screen
+                    or b"Selected: account.luna-medium" not in screen):
+                raise AssertionError(f"filtered replacement is not selected: {screen!r}")
             h.send_and_wait(process, fd, output, b"\r", b"Reloading saved candidate order")
         finally:
             release.set()
@@ -1154,13 +1162,19 @@ def run_replace_and_promote(executable: str) -> None:
             raise AssertionError("promotion lost or reordered other candidates")
         h.send_and_wait(process, fd, output, b"a", b"Add fallback candidate")
         h.resize_and_wait(process, fd, output, rows=40, columns=131,
-                          needle=b"Account", controls=(h.FULL_REDRAW,))
+                          needle=b"Account", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         screen = h.screen_text(bytes(output))
-        if screen.count(b"context") <= 3:
-            raise AssertionError("a tall terminal still shows only three model choices")
-        if b"model-e default" not in screen or b"gpt-6-luna medium" not in screen:
-            raise AssertionError("expanded model choices are not visible")
-        h.send_and_wait(process, fd, output, b"\x1b", b"Model order")
+        # Candidate labels identify the expanded choices even when the
+        # adjacent context metadata is clipped by the terminal width.
+        choices = [f"model-{name} default".encode() for name in "abcde"] + [
+            b"gpt-6-sol low", b"gpt-6-sol high", b"gpt-6-luna medium",
+        ]
+        missing = [choice for choice in choices if choice not in screen]
+        if missing:
+            raise AssertionError(f"expanded model choices are not visible: {missing!r}")
+        h.send_and_wait(process, fd, output, b"\x1b", b"> 1/2  [CLI] gpt-6-luna medium")
+        screen_lacks(process, fd, output, b"Add fallback candidate", timeout=3.0)
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 

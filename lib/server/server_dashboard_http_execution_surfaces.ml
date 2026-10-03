@@ -1365,7 +1365,10 @@ let execution_http_request ~state request =
 
 let execution_cached_http_representation ~(config : Workspace.config)
       ~(parameters : execution_parameters) (request : Httpun.Request.t) =
-  let { fixture; actor; full_mode; force } = parameters in
+  let { fixture = requested_fixture; actor; full_mode; force } = parameters in
+  let fixture =
+    Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture ()
+  in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
     let selected = with_execution_publication_lock (fun () ->
@@ -1515,7 +1518,8 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
   let config = context.config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
-  let { fixture; actor; full_mode; force } = context.parameters in
+  let { fixture = requested_fixture; actor; full_mode; force } = context.parameters in
+  let fixture = Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture () in
   let light = not full_mode in
   let query =
     execution_query_json
@@ -1526,7 +1530,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~default_light_request:(fixture = None && actor = None && not full_mode && not force)
       ~force
   in
-  let compute ?actor ?fixture ~light () =
+  let compute ?actor ~light () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
       ~mode:Offloaded_readonly
@@ -1538,7 +1542,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       (fun ~config ~sw ->
          Dashboard_execution.json
            ?actor
-           ?fixture
+           ?fixture:requested_fixture
            ~light
            ~config
            ~sw
@@ -1664,7 +1668,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                `Int generation; query ])
     in
     let compute_with_generation () =
-      compute ?actor ?fixture ~light ()
+      compute ?actor ~light ()
       (* The request wrapper below re-projects every non-fixture response and
          serves the cached payload's bytes only when that changes nothing, so
          the parameterized fill projects here first -- same rule as the
@@ -1695,7 +1699,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
 
 let dashboard_execution_http_response ~sw ~clock context =
   let response = cached_dashboard_execution_http_response ~sw ~clock context in
-  match context.parameters.fixture with
+  match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
   | Some _ -> response
   | None ->
     let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in

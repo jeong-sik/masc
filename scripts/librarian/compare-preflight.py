@@ -513,10 +513,11 @@ def main() -> int:
     try:
         manifest = cast(Json, json.loads(path.read_text(), object_pairs_hook=unique_object))
         report = compare(manifest)
+        rendered = json.dumps(report, indent=2, allow_nan=False)
     except (OSError, ValueError) as error:
         print(f"preflight measurement refused: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(report, indent=2, allow_nan=False))
+    print(rendered)
     return 0
 
 

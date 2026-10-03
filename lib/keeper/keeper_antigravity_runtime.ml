@@ -420,7 +420,11 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                    ; vendor_total_tokens = Some usage.total_tokens
                    })
               on_usage_report
-          | Runtime_antigravity.Turn_finished { text = _ } ->
+          | Runtime_antigravity.Turn_finished { text } ->
+            Option.iter (fun remainder ->
+              emit (Agent_core.Types.ContentBlockDelta
+                {index=0; delta=Agent_core.Types.TextDelta remainder}))
+              (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
             emit
               (Agent_core.Types.MessageDelta
                  { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

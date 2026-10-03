@@ -9,4 +9,5 @@
   masc_tui_keeper_portrait
   masc_tui_message_layout
   masc_tui_portrait_view
-  masc_tui_terminal_palette))
+  masc_tui_terminal_palette)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))

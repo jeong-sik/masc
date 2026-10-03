@@ -128,6 +128,12 @@ val gate_hitl_json : unit -> Yojson.Safe.t
     surfaced inside {!runtime_resolution_json}. *)
 
 val runtime_inventory_json : unit -> Yojson.Safe.t
+(** HTTP runtime rows expose [provider_admission]: [declared_max] and
+    [enforced_for_runtime] describe this runtime's admission policy; [snapshot]
+    is current process-local endpoint/credential scheduler state, or [null]
+    if none has been observed. A bypassing config can share an identity with
+    another config's scheduler. Shared snapshots across rows must not be summed.
+    Official-client runtime rows expose [provider_admission=null]. *)
 (** Returns the materialized runtime.toml inventory loaded by
     {!Runtime.init_default}. This is the dashboard-compatible projection for
     the legacy [/api/v1/providers] route; it does not execute providers or

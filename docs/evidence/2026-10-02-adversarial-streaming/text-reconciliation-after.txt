@@ -1,0 +1,53 @@
+PASS raw multi-step suffix excludes inserted paragraphs
+PASS different final starts a new paragraph
+PASS earlier final not duplicated by later commentary prefix
+PASS n..n+3 completed raw mask=0
+PASS n..n+3 remaining suffix mask=0
+PASS n..n+3 already delivered earlier final mask=0
+PASS n..n+3 completed raw mask=1
+PASS n..n+3 remaining suffix mask=1
+PASS n..n+3 already delivered earlier final mask=1
+PASS n..n+3 completed raw mask=2
+PASS n..n+3 remaining suffix mask=2
+PASS n..n+3 already delivered earlier final mask=2
+PASS n..n+3 completed raw mask=3
+PASS n..n+3 remaining suffix mask=3
+PASS n..n+3 already delivered earlier final mask=3
+PASS n..n+3 completed raw mask=4
+PASS n..n+3 remaining suffix mask=4
+PASS n..n+3 already delivered earlier final mask=4
+PASS n..n+3 completed raw mask=5
+PASS n..n+3 remaining suffix mask=5
+PASS n..n+3 already delivered earlier final mask=5
+PASS n..n+3 completed raw mask=6
+PASS n..n+3 remaining suffix mask=6
+PASS n..n+3 already delivered earlier final mask=6
+PASS n..n+3 completed raw mask=7
+PASS n..n+3 remaining suffix mask=7
+PASS n..n+3 already delivered earlier final mask=7
+PASS n..n+3 completed raw mask=8
+PASS n..n+3 remaining suffix mask=8
+PASS n..n+3 already delivered earlier final mask=8
+PASS n..n+3 completed raw mask=9
+PASS n..n+3 remaining suffix mask=9
+PASS n..n+3 already delivered earlier final mask=9
+PASS n..n+3 completed raw mask=10
+PASS n..n+3 remaining suffix mask=10
+PASS n..n+3 already delivered earlier final mask=10
+PASS n..n+3 completed raw mask=11
+PASS n..n+3 remaining suffix mask=11
+PASS n..n+3 already delivered earlier final mask=11
+PASS n..n+3 completed raw mask=12
+PASS n..n+3 remaining suffix mask=12
+PASS n..n+3 already delivered earlier final mask=12
+PASS n..n+3 completed raw mask=13
+PASS n..n+3 remaining suffix mask=13
+PASS n..n+3 already delivered earlier final mask=13
+PASS n..n+3 completed raw mask=14
+PASS n..n+3 remaining suffix mask=14
+PASS n..n+3 already delivered earlier final mask=14
+PASS n..n+3 completed raw mask=15
+PASS n..n+3 remaining suffix mask=15
+PASS n..n+3 already delivered earlier final mask=15
+PASS bounded n+m: 1..128 messages, 8 boundary patterns, 70144 assertions
+TOTAL PASS 70195

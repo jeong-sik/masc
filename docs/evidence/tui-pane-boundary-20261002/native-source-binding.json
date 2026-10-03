@@ -1,0 +1,9 @@
+{
+  "binary_commit": "309cae280bd14bc390454781e8f2adb0164b13f8",
+  "binary_sha256": "68b82214a337203b4b41ca014bbb36e1a3f26ff2abd2a33bf4908369cb16b987",
+  "verified_at": "2026-10-02T08:08:06.229495+00:00",
+  "source_trees": {
+    "bin": "93930b11e37dd6eb20789b29af30d394627be753",
+    "lib": "9a99d08e026633209996318eedf01cdeb6463dd7"
+  }
+}

@@ -40,7 +40,20 @@ type observation =
 let invalid_output = function
   | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> true
-  | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded | Exact.Provider_response_refused _ -> false
+  | Exact.Provider_response_refused { refusal; _ } ->
+    (* A frozen request refused for its input or binding cannot recover from a
+       maintenance pulse. Keep it pending until an explicit event, just like
+       rejected model output. Availability failures can recover without an edit. *)
+    (match refusal with
+     | Exact.Request_body_refused | Exact.Auth_failed
+     | Exact.Authorization_refused
+     | Exact.Invalid_request | Exact.Not_found
+     | Exact.Context_overflow | Exact.Input_capacity -> true
+     | Exact.Refusal_body_not_received | Exact.Rate_limited
+     | Exact.Overloaded | Exact.Payment_required
+     | Exact.Server_error | Exact.Network_error
+     | Exact.Timeout -> false)
+  | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded -> false
 let observation_json = function
   | Dispatch slot -> `Assoc ["kind", `String "dispatch"; "slot", `String slot]
   | Response r -> `Assoc ["kind", `String "response"; "slot", `String r.slot; "output", r.output]
@@ -141,7 +154,7 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
           (match failure with Exact.Flow_candidate_execution_failed f -> failed f.candidate f.cause
            | Exact.Flow_candidate_rejected rejection ->
              if retryable_candidate rejection then retryable := true); Ok ()) ~validate attempt in
-      Runtime_exact_lane_backpressure.observe flow;
+      Runtime_exact_lane_backpressure.observe ~resolved flow;
       (match flow with
        | Ok success -> Ok (success.accepted, (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id)
        | Error (Exact.Flow_execution_terminal {cause;_}) ->

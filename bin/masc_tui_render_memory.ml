@@ -112,11 +112,12 @@ let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
-(* Snapshot sizes describe the stored knowledge available through search and
-   paged artifacts. They are not the much smaller recall index injected into
-   a turn; the prompt inspector carries that turn's actual block bytes. *)
-let recall_tokens bytes =
-  Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
+(* Stored JSON bytes are not model input and cannot establish a token count.
+   The Context inspector carries observed per-turn prompt block bytes. *)
+let storage_size bytes =
+  if bytes >= 1024 * 1024 then Printf.sprintf "%.1f MiB" (float bytes /. 1048576.)
+  else if bytes >= 1024 then Printf.sprintf "%.1f KiB" (float bytes /. 1024.)
+  else Printf.sprintf "%d B" bytes
 ;;
 (* One break, and no more. The block sits under the list and is paid for out
    of the same frame, so a reading never takes more than two rows. At a
@@ -204,9 +205,9 @@ type memory_context_projection =
 
 let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · stored %s tok · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · stored %s · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
-      (recall_tokens k.mkh_snapshot_bytes)
+      (storage_size k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
@@ -358,9 +359,9 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s tok · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
-      (recall_tokens k.mkh_source_snapshot_bytes)
+      (storage_size k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
   in
   let vision_line =
@@ -380,9 +381,11 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
     List.map
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
-          (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
-           | `Warn -> "warn"
-           | `Error -> "error")
+          ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
+            then "history " else "")
+           ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
+              | `Warn -> "warn"
+              | `Error -> "error"))
           a.ma_label
           (Terminal_text.single_line a.ma_message))
       k.mkh_alerts
@@ -413,7 +416,8 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
   let rows =
     if detail
     then
-      [ current_line; facts_line; source_line ]
+      [ current_line; facts_line; source_line;
+        "  Turn recall bytes: open Keeper chat /context; Librarian status is memory processing, not Keeper execution." ]
       @ clause_rows ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
@@ -425,7 +429,7 @@ let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory
          changes without a save succeeding. The action rows follow only when
          [memory_row_visibility] lets them through. *)
       let status_row =
-        Printf.sprintf "  %s · %s · %s" k.mkh_keeper_id
+        Printf.sprintf "  %s · memory %s · %s" k.mkh_keeper_id
           (memory_state_label (memory_state k)) memory_saved
       in
       let when_shown kind clauses = if shown_by_default kind then clauses else [] in
@@ -467,7 +471,8 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
   let server_error =
     List.exists
       (fun alert ->
-        match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
+        if Masc.Tui_decode_memory_health.memory_alert_is_history alert.ma_code then false
+        else match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Error -> true
         | `Warn -> false)
       k.mkh_alerts
@@ -490,9 +495,9 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
-      Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
+      Printf.sprintf "r%d i%d %s" k.mkh_source_revision
         k.mkh_source_invalidations
-        (recall_tokens k.mkh_source_snapshot_bytes)
+        (storage_size k.mkh_source_snapshot_bytes)
     else no_value
   in
   let delta =
@@ -513,7 +518,7 @@ let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_hea
       ; mrow_updated = memory_updated_text k.mkh_updated_at
       ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
       ; mrow_size =
-          ordinary_reading (fun () -> recall_tokens k.mkh_snapshot_bytes)
+          ordinary_reading (fun () -> storage_size k.mkh_snapshot_bytes)
       ; mrow_source = source
       ; mrow_delta = delta
       }
@@ -561,7 +566,12 @@ let format_row_badge badge =
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
-      Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
+      match badge with
+      | Badge_category (Memory_category.Custom _) ->
+          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
+          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
+      | Badge_category _ | Badge_source | Badge_dropped ->
+          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
@@ -900,10 +910,11 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
          ; Printf.sprintf "%d ordinary + %d source"
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf "stored %s tok"
-             (recall_tokens
+         ; Printf.sprintf "stored %s"
+             (storage_size
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"
+         ; "storage, not turn input"
          ]
   in
   let readings =

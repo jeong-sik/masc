@@ -2830,7 +2830,8 @@ let test_dynamic_category_roundtrip () =
   List.iter (fun raw ->
     check bool ("malformed category rejected: " ^ raw) true
       (Types.category_of_string raw = None))
-    [""; "_topic"; "topic_"; "two__words"; "topic-name"; "topic\n"; "1topic"; "Topic"]
+    [""; "_topic"; "topic_"; "two__words"; "topic-name"; "topic\n"; "1topic"; "Topic";
+     "all"; "source"; "dropped"]
 ;;
 
 let () =

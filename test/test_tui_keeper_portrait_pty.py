@@ -1018,6 +1018,10 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
             wait_refreshes(process, fd, output)
+            # Health requests can overlap; wait until the TUI applies revocation.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"No keeper selected" in frame(output), timeout=10), \
+                "unread authority was not applied"
             # A manual read during revocation must not create a new token
             # that would admit an answering but unverified endpoint.
             os.write(fd, b"o" if sandbox_logs else b"r")

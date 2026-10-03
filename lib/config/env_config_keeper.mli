@@ -1,8 +1,10 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
-    All [MASC_KEEPER_*] env vars in this module can also be set
-    declaratively in [<resolved config root>/runtime.toml].
-    Precedence: process env > TOML > hardcoded default.
+    Settings marked [Toml_and_env] in {!Keeper_runtime_setting_registry}
+    also accept values from [<resolved config root>/runtime.toml]. Their
+    accessors read the boot override store after startup has loaded it;
+    they do not reread the TOML file. Other settings are [Env_only].
+    Precedence: process env > boot-loaded TOML > hardcoded default.
 
     Surface flows through [include Env_config_keeper] in
     {!Env_config}, so callers reach values either as
@@ -61,8 +63,8 @@ module KeeperSpawn : sig
 end
 
 module KeeperMetrics : sig
-  val max_file_bytes : int
-  val max_rotated_files : int
+  val max_file_bytes : unit -> int
+  val max_rotated_files : unit -> int
 end
 
 (** {1 Keeper wire capture} *)
@@ -111,8 +113,8 @@ end
 (** {1 Keeper runtime} *)
 
 module KeeperRuntime : sig
-  val debug : bool
-  val snapshot_sec : int
+  val debug : unit -> bool
+  val snapshot_sec : unit -> int
 end
 
 (** {1 Keeper Memory OS} *)
@@ -203,14 +205,14 @@ end
 (** {1 Work-as-Heartbeat (Phase 1)} *)
 
 module WorkAsHeartbeat : sig
-  val enabled : bool
+  val enabled : unit -> bool
 end
 
 (** {1 Keeper keepalive loop} *)
 
 module KeeperKeepalive : sig
-  val interval_sec : int
-  val sleep_chunk_sec : float
+  val interval_sec : unit -> int
+  val sleep_chunk_sec : unit -> float
 
   val rate_limit_backoff_floor_sec : float
   (** How long a path rests after a provider throttle ([429], capacity, or a

@@ -1,9 +1,8 @@
 (** Test suite for Phase 1: Work-as-heartbeat config defaults,
     keepalive cycle actions, and Phase 0 percentile function.
 
-    Note: env_config values are top-level let bindings, evaluated once at
-    program start. Runtime putenv does NOT affect them. Tests verify defaults
-    (no env override in test dune env-vars). *)
+    Runtime TOML settings are read through accessors after boot overrides are
+    installed. These cases verify defaults in an unset test environment. *)
 
 open Alcotest
 
@@ -16,7 +15,7 @@ module KK = Masc.Keeper_keepalive
 let test_wah_enabled_default () =
   (* MASC_KEEPER_WORK_AS_HEARTBEAT not set in test env → default true *)
   check bool "work-as-heartbeat enabled by default"
-    true Cfg.WorkAsHeartbeat.enabled
+    true (Cfg.WorkAsHeartbeat.enabled ())
 
 let keeper_setting env_name =
   match
@@ -32,17 +31,17 @@ let keeper_setting env_name =
 let test_keepalive_registry_defaults_match_runtime () =
   let interval = keeper_setting "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
   check string "interval registry default matches runtime"
-    (string_of_int Cfg.KeeperKeepalive.interval_sec)
+    (string_of_int (Cfg.KeeperKeepalive.interval_sec ()))
     interval.default_display
 ;;
 
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 
 let test_keepalive_interval_default () =
-  check int "default interval 300s" 300 Cfg.KeeperKeepalive.interval_sec
+  check int "default interval 300s" 300 (Cfg.KeeperKeepalive.interval_sec ())
 
 let test_keepalive_interval_positive () =
-  let v = Cfg.KeeperKeepalive.interval_sec in
+  let v = Cfg.KeeperKeepalive.interval_sec () in
   check bool "interval is positive" true (v > 0)
 
 let test_keeper_turn_record_freshness_tracks_cadence () =
@@ -147,13 +146,13 @@ let test_keepalive_interval_has_one_resolved_ssot () =
   check
     int
     "heartbeat loop interval resolves from the configured interval"
-    Cfg.KeeperKeepalive.interval_sec
+    (Cfg.KeeperKeepalive.interval_sec ())
     (Masc.Keeper_heartbeat_snapshot.keepalive_interval_sec ())
 ;;
 
 let test_keepalive_sleep_chunk_default () =
   check (float 0.01) "default sleep chunk 0.5s" 0.5
-    Cfg.KeeperKeepalive.sleep_chunk_sec
+    (Cfg.KeeperKeepalive.sleep_chunk_sec ())
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 

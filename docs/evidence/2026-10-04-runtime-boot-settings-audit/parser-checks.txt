@@ -1,0 +1,15 @@
+OCaml parser-only check; no typecheck, native execution, Dune build or CI.
+PASS lib/config/env_config_keeper.ml
+PASS lib/config/env_config_keeper.mli
+PASS lib/config/keeper_runtime_setting_registry.ml
+PASS lib/keeper/keeper_keepalive_signal.ml
+PASS lib/keeper/keeper_meta_store.ml
+PASS lib/keeper/keeper_owner.ml
+PASS lib/keeper/keeper_types_profile.mli
+PASS lib/keeper/keeper_types_support.ml
+PASS lib/runtime_settings.ml
+PASS lib/telemetry_unified_source/telemetry_unified_source_meta.ml
+PASS test/test_keeper_owner.ml
+PASS test/test_runtime_toml_overrides.ml
+PASS test/test_setting_registry_default_parity.ml
+PASS test/test_work_as_heartbeat.ml

@@ -750,7 +750,7 @@ let test_settings_projection_uses_typed_effective_values () =
   in
   let snapshot = find "MASC_KEEPER_SNAPSHOT_SEC" in
   check string "snapshot projection uses clamped runtime value"
-    (string_of_int Env_config_keeper.KeeperRuntime.snapshot_sec)
+    (string_of_int (Env_config_keeper.KeeperRuntime.snapshot_sec ()))
     (snapshot |> member "effective_value" |> to_string);
   check bool "snapshot projection has no normalization error" true
     (snapshot |> member "effective_error" = `Null);
@@ -1039,10 +1039,132 @@ let test_preview_precondition_matches_save () =
       (Result.is_error validate = Result.is_error save))
 ;;
 
+(* Exercise the startup loader after the modules and runtime-parameter registry
+   have already been initialized. A settings row alone would not catch an eager
+   constant that reports the TOML source but still drives the old behavior. *)
+let with_boot_consumer_env f =
+  let rec clear = function
+    | [] -> f ()
+    | name :: rest -> with_env name None (fun () -> clear rest)
+  in
+  clear
+    [ "MASC_CONFIG_DIR"; "MASC_KEEPER_METRICS_MAX_BYTES"
+    ; "MASC_KEEPER_METRICS_MAX_ROTATED"; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
+    ; "MASC_KEEPER_SNAPSHOT_SEC"; "MASC_KEEPER_WORK_AS_HEARTBEAT"
+    ; "MASC_KEEPER_SLEEP_CHUNK_SEC"; "MASC_KEEPER_DEBUG"
+    ]
+
+let boot_consumer_toml =
+  "[metrics]\nmax_bytes = 17\nmax_rotated = 2\n\
+   [heartbeat]\ninterval_sec = 37\nsnapshot_sec = 45\n\
+   work_as_heartbeat = false\nsleep_chunk_sec = 1.25\n\
+   [debug]\nenabled = true\n"
+
+let load_boot_consumers base_path =
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok count -> count
+  | Error failure ->
+    failf "startup load failed: %s"
+      (Keeper_runtime_config.load_failure_to_string failure)
+
+let check_boot_setting ~doc ~env ~status ~effective =
+  let open Yojson.Safe.Util in
+  let row =
+    Keeper_runtime_config.settings_projection_to_yojson doc
+    |> to_list
+    |> List.find (fun row -> String.equal (row |> member "env" |> to_string) env)
+  in
+  check string (env ^ " application") status
+    (row |> member "application_status" |> to_string);
+  check string (env ^ " runtime value") effective
+    (row |> member "effective_value" |> to_string)
+
+let test_boot_toml_reaches_runtime_consumers () =
+  with_boot_consumer_env @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  check int "metrics read before boot" 10_485_760
+    (Env_config.KeeperMetrics.max_file_bytes ());
+  check int "cadence read before boot" 300
+    (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
+  check int "snapshot read before boot" 300
+    (Runtime_params.get Runtime_settings.keeper_snapshot_sec);
+  check bool "presence read before boot" true
+    (Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled);
+  check bool "debug read before boot" false (Keeper_types_profile.keeper_debug ());
+  write_toml base_path boot_consumer_toml;
+  check int "seven boot overrides" 7 (load_boot_consumers base_path);
+  let doc = parse_or_fail boot_consumer_toml in
+  List.iter
+    (fun (env, effective) -> check_boot_setting ~doc ~env ~effective ~status:"applied")
+    [ "MASC_KEEPER_METRICS_MAX_BYTES", "17"
+    ; "MASC_KEEPER_METRICS_MAX_ROTATED", "2"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "37"
+    ; "MASC_KEEPER_SNAPSHOT_SEC", "45"
+    ; "MASC_KEEPER_WORK_AS_HEARTBEAT", "false"
+    ; "MASC_KEEPER_SLEEP_CHUNK_SEC", "1.25"
+    ; "MASC_KEEPER_DEBUG", "true"
+    ];
+  check int "heartbeat consumer uses TOML cadence" 37
+    (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
+  check int "snapshot consumer uses TOML cadence" 45
+    (Runtime_params.get Runtime_settings.keeper_snapshot_sec);
+  check bool "presence consumer uses TOML switch" false
+    (Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled);
+  check bool "debug alias reads boot configuration" true (Keeper_types_profile.keeper_debug ());
+  check (float 0.0001) "interruptible sleep reads boot configuration" 1.25
+    (Env_config.KeeperKeepalive.sleep_chunk_sec ());
+  let path = Filename.concat base_path "metrics.jsonl" in
+  let original = String.make 18 'x' in
+  Fs_compat.save_file path original;
+  Fs_compat.save_file (path ^ ".1") "older metrics";
+  Keeper_types_support.append_jsonl_line path (`Assoc ["boot", `Bool true]);
+  check string "17-byte threshold rotates the real file" original
+    (Fs_compat.load_file (path ^ ".1"));
+  check string "TOML retention shifts the older backup" "older metrics"
+    (Fs_compat.load_file (path ^ ".2"));
+  check string "new metric is written to a fresh file" "{\"boot\":true}\n"
+    (Fs_compat.load_file path);
+  write_toml base_path "[metrics]\nmax_bytes = 99\n";
+  check_boot_setting ~doc:(parse_or_fail "[metrics]\nmax_bytes = 99\n")
+    ~env:"MASC_KEEPER_METRICS_MAX_BYTES" ~status:"pending_restart" ~effective:"17";
+  check int "editing the file alone does not change the boot snapshot" 17
+    (Env_config.KeeperMetrics.max_file_bytes ())
+
+let test_boot_toml_preserves_environment_priority () =
+  with_boot_consumer_env @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" (Some "100") @@ fun () ->
+  with_env "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" (Some "11") @@ fun () ->
+  write_toml base_path boot_consumer_toml;
+  check int "environment preempts two boot overrides" 5 (load_boot_consumers base_path);
+  let doc = parse_or_fail boot_consumer_toml in
+  List.iter
+    (fun (env, effective) ->
+      check_boot_setting ~doc ~env ~effective ~status:"preempted_by_env")
+    [ "MASC_KEEPER_METRICS_MAX_BYTES", "100"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "11"
+    ];
+  check int "heartbeat consumer preserves explicit environment" 11
+    (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
+  let path = Filename.concat base_path "metrics.jsonl" in
+  let original = String.make 18 'x' in
+  Fs_compat.save_file path original;
+  Keeper_types_support.append_jsonl_line path (`Assoc ["env", `Bool true]);
+  check bool "environment threshold prevents premature rotation" false
+    (Sys.file_exists (path ^ ".1"));
+  check string "metric appends to existing file" (original ^ "{\"env\":true}\n")
+    (Fs_compat.load_file path)
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
-      , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
+      , [ test_case "boot TOML reaches actual runtime consumers" `Quick
+            test_boot_toml_reaches_runtime_consumers
+        ; test_case "boot TOML preserves environment priority in consumers" `Quick
+            test_boot_toml_preserves_environment_priority
+        ; test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies the whole wire_capture table" `Quick

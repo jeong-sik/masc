@@ -259,7 +259,7 @@ let interruptible_sleep
       duration
   : sleep_outcome
   =
-  let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
+  let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec () in
   let wakeup_may_interrupt =
     match wake_policy with
     | Interrupt_on_wakeup -> true

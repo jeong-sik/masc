@@ -901,14 +901,13 @@ export class LspConnection {
 // ── Helpers ───────────────────────────────────────────────────────
 
 /**
- * `textDocument.uri` must be an absolute `file:` URI. Prefixing a
- * repo-relative path with `file://` does not produce one — the first path
- * segment lands in the authority slot — so the server rejected every such
- * document as outside its workspace and answered with an empty result.
+ * Keep the absolute path in the URI path component. Encode each segment so
+ * literal %, # and ? in filenames cannot become escapes, fragments or queries.
  */
 function toFileUri(workspaceRoot: string, filePath: string): string {
   const root = workspaceRoot.endsWith('/') ? workspaceRoot.slice(0, -1) : workspaceRoot
-  return filePath.startsWith('/') ? `file://${filePath}` : `file://${root}/${filePath}`
+  const absolutePath = filePath.startsWith('/') ? filePath : `${root}/${filePath}`
+  return `file://${absolutePath.split('/').map(encodeURIComponent).join('/')}`
 }
 
 function workspaceRootOfInitializeResult(result: unknown): string | null {

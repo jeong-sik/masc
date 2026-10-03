@@ -1,0 +1,162 @@
+diff --git a/bin/masc_tui_render.ml b/bin/masc_tui_render.ml
+index ba8a2e494d..5167ccb2cc 100644
+--- a/bin/masc_tui_render.ml
++++ b/bin/masc_tui_render.ml
+@@ -5534,19 +5534,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+             | None -> Masc_tui_theme.Glyph.no_value));
+       add_empty ();
+ 
+-      (* The short Overview names only the reading's state. Info retains
+-         every diagnostic and exact supply amount, wrapped and scrollable. *)
+-      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+-      if candle_lines <> [] then (
+-        add_section "Candle details";
+-        List.iter
+-          (fun line ->
+-            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+-              (Terminal_text.single_line line)
+-            |> List.iter (fun line -> add_line ("  " ^ line)))
+-          candle_lines;
+-        add_empty ());
+-
+       (* Timestamps section *)
+       add_section "Timestamps";
+       (match k.k_identity with
+@@ -10740,14 +10727,6 @@ let usage_lines ~cols (state : state) =
+                     ; "" ])
+               kuw_rows)
+   in
+-  let transport =
+-    match state.transport with
+-    | None -> [ " Transport · not observed" ]
+-    | Some reading ->
+-        [ " Transport · queue pressure "
+-          ^ Masc.Transport_metrics.queue_pressure_kind_to_string
+-              reading.th_queue_pressure ]
+-  in
+   let wrap_evidence lines =
+     (* Wrap before the scroll window is counted. Coverage and missing samples
+        remain reachable rows on narrow terminals. *)
+@@ -10771,7 +10750,15 @@ let usage_lines ~cols (state : state) =
+   (* Plan cards already have a cell-sized border and wrapped contents. *)
+   | Usage_plan -> scopes
+   | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
+-  | Usage_keepers -> wrap_evidence (keepers @ [ "" ] @ transport)
++  | Usage_keepers ->
++      let currency = match Masc_tui_candle.summary_lines state.candle_observation with
++        | [] -> []
++        | lines ->
++            [ " " ^ Ansi.bold ^ "Candle · workspace supply" ^ Ansi.reset ]
++            @ List.map (fun line -> "   " ^ Terminal_text.single_line line) lines
++            @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
++      in
++      wrap_evidence (currency @ keepers)
+ 
+ let render_metrics (state : state) =
+   let terminal_rows, cols = get_terminal_size () in
+diff --git a/scripts/capture-tui-audit.py b/scripts/capture-tui-audit.py
+index d9fb43f6e8..5a7378d676 100644
+--- a/scripts/capture-tui-audit.py
++++ b/scripts/capture-tui-audit.py
+@@ -39,6 +39,7 @@ def main():
+     parser.add_argument('--ttyd', default='ttyd', help='ttyd executable name on PATH or explicit path')
+     parser.add_argument('--board-only', action='store_true')
+     parser.add_argument('--rows', type=int, default=32)
++    parser.add_argument('--workspace-currency', action='store_true')
+     parser.add_argument('--author', default='wkbl-layout-reviewer-with-long-name')
+     args = parser.parse_args()
+     out = ROOT / args.out
+@@ -94,6 +95,12 @@ def main():
+     fixtures.update(h.row_budget_http_fixtures())
+     fixtures["/api/v1/gate/keepers?detailed=true"] = h.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
+     fixtures["/api/v1/runtime/config/raw"] = (503, {"error": "runtime config load failed: fixture configuration unavailable"})
++    if args.workspace_currency:
++        _, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
++        roster["candle"] = {"status": "ready", "issued_milli": "100000", "burned_milli": "10000", "circulating_milli": "90000"}
++        for keeper in roster["keepers"]:
++            keeper["candle_balance_milli"] = "12500"
++            keeper["candle_account_revision"] = "a" * 64
+     fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
+     goal = h.planning_goal('goal-audit-ready', 'Audit goal')
+     goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
+@@ -150,7 +157,7 @@ def main():
+             }''')
+             text = page.evaluate(SCREEN_JS)
+             if not all(marker in text for marker in markers):
+-                raise RuntimeError(f'fixture readiness changed before capture: {stem}')
++                raise RuntimeError(f'fixture readiness changed before capture: {stem}: {text}')
+             text_path, image_path = out / (stem + '.txt'), out / (stem + '.png')
+             text_path.write_text('\n'.join(line.rstrip() for line in text.splitlines()) + '\n')
+             page.locator('.xterm-screen').screenshot(path=str(image_path))
+@@ -201,6 +208,16 @@ def main():
+                                     board_list(page)
+                                 elif not c.goto_surface(page, query, title):
+                                     raise RuntimeError((query, c.screen_text(page)))
++                                if name == 'usage' and args.workspace_currency:
++                                    for _ in range(3):
++                                        if 'Candle · workspace supply' in page.evaluate(SCREEN_JS):
++                                            break
++                                        expected = ('Candle · workspace supply'
++                                                    if 'Quota scope trend' in page.evaluate(SCREEN_JS)
++                                                    else 'Quota scope trend')
++                                        page.keyboard.press('v')
++                                        wait_ready(page, [expected])
++                                    ready = ['Candle · workspace supply', 'Candle circulating: 90.000']
+                                 shot(page, f'{name}-{width}', ready)
+                                 if name == 'keepers':
+                                     page.keyboard.press('Home')
+diff --git a/test/test_tui_candle_currency_pty.py b/test/test_tui_candle_currency_pty.py
+index 11d33add39..354a3b6fa5 100644
+--- a/test/test_tui_candle_currency_pty.py
++++ b/test/test_tui_candle_currency_pty.py
+@@ -498,6 +498,41 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
+             prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
+ 
+ 
++def currency_is_scoped_to_workspace_usage(binary: str) -> None:
++    fixtures = h.keeper_runtime_http_fixtures()
++    fixture = fixtures[ROSTER_PATH]
++    assert isinstance(fixture, tuple)
++    status, roster = fixture
++    assert status == 200 and isinstance(roster, dict)
++    roster["candle"] = dict(READY)
++    for keeper in roster["keepers"]:
++        keeper["candle_balance_milli"] = BALANCE_MILLI
++        keeper["candle_account_revision"] = "a" * 64
++
++    def interact(process, fd, _slave, output, _base):
++        h.tab_until(process, fd, output, b"MASC Keepers")
++        h.select_keeper_row(process, fd, output, b"alpha")
++        h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
++        await_screen(process, fd, output,
++                     lambda text: balance_contains(text, BALANCE), "personal balance in Info")
++        h.send_and_wait(process, fd, output, b"\x1b[F", b"Timestamps")
++        assert not any(line in screen(output) for line in SUMMARY), "workspace supply leaked into personal Info"
++        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
++        h.send_and_wait(process, fd, output, b":go Usage\r", b"MASC Usage")
++        h.send_and_wait(process, fd, output, b"v", b"Trend")
++        h.send_and_wait(process, fd, output, b"v", "Candle · workspace supply".encode())
++        await_screen(process, fd, output,
++                     lambda text: all(line in text for line in SUMMARY), "workspace supply in Usage")
++        assert b"Transport \xc2\xb7 queue pressure" not in screen(output), "transport telemetry leaked into keeper usage"
++        h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
++        h.send_and_wait(process, fd, output, b"\x1b[F", b"Queue pressure:")
++        assert b"Queue pressure: steady" in screen(output), "transport telemetry lost its reading"
++        os.write(fd, b"q")
++
++    h.run_terminal_scenario(binary, description="personal balances and workspace supply have separate screens",
++                            interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=24)
++
++
+ if __name__ == "__main__":
+     binary = str(Path(sys.argv[1]).resolve())
+     artifact_root = os.environ.get("RUNNER_TEMP")
+@@ -511,6 +546,7 @@ if __name__ == "__main__":
+         }, indent=2) + "\n")
+     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
+         run(binary, phase, captures)
++    currency_is_scoped_to_workspace_usage(binary)
+     currency_follows_workspace_authority(binary, captures)
+     short_overview_keeps_its_baseline(binary)
+-    print("Candle currency TUI: PASS (9 real PTY scenarios)")
++    print("Candle currency TUI: PASS (10 real PTY scenarios)")

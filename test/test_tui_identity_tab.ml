@@ -159,6 +159,12 @@ let test_oauth_polling_survives_unread_authority () =
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[unreadable "slack" "temporarily unavailable"];
   check Alcotest.bool "unreadable provider retains intent" true (pending ());
+  (* A provider removed mid-consent can never attach; the poll must not
+     outlive its declaration. *)
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared "github" "GitHub"];
+  check Alcotest.bool "removed provider retires intent" false (pending ());
+  remember ();
   Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
     ~providers:[declared ~tools:[] "slack" "Slack"];
   check Alcotest.bool "other Keeper cannot retire intent" true (pending ());

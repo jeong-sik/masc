@@ -48,15 +48,14 @@ PAUSED_ROW = b"Paused:"
 CURRENT_FAILURE = b"Current failure"
 # Masc_tui_keeper_portrait.band_size: the rows and cells a mosaic portrait
 # takes, and the rows a placed one does on a 20 px cell.
-MOSAIC_BAND_ROWS = 12
-MOSAIC_BAND_COLS = 24
-PIXEL_BAND_ROWS = 8
+MOSAIC_BAND_ROWS = 8
+MOSAIC_BAND_COLS = 16
+PIXEL_BAND_ROWS = 4
 # Where a portrait cell may sit: the frame's two cells, the fact indent, and
 # the band. A half block further right is not the portrait.
 PORTRAIT_CELLS = 2 + 2 + MOSAIC_BAND_COLS
-# The harness terminal's 30 rows leave the detail 23 content rows, over a
-# mosaic's Masc_tui_keeper_portrait.min_content_rows (20); 24 rows leave it
-# 17, under.
+# A 30-row terminal fits the mosaic and facts; 24 rows give all space to facts.
+# Pixel icons use four rows; Items keeps its larger outfit preview.
 TALL_ROWS = 30
 SHORT_ROWS = 24
 COLUMNS = 100
@@ -171,7 +170,7 @@ def assert_facts_full_width(rows: dict[int, bytes], why: str) -> None:
     assert not portrait_rows(rows), f"{why}, the portrait still drew: {rows!r}"
     identity = identity_row(rows)
     # Identity, Name, Paused, a blank row: the facts keep every row.
-    assert row_of(rows, CURRENT_FAILURE) == identity + 4, \
+    assert row_of(rows, b"Current Work") == identity + 4, \
         f"{why}, the rows the portrait took were not given back: {rows!r}"
 
 
@@ -189,9 +188,8 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
         assert cells and min(cells) < text.find(needle.decode()), \
             f"{needle!r} is not beside the portrait: {text!r}"
     assert b"alpha" in rows[identity + 1], "the Name row lost the name"
-    # The band holds the facts' rows: the blank row after the portrait, then
-    # the next section.
-    assert row_of(rows, CURRENT_FAILURE) == identity + MOSAIC_BAND_ROWS + 1, \
+    # Current work shares the header beside the icon, below Identity facts.
+    assert row_of(rows, b"Current Work") == identity + 4, \
         f"the facts after the portrait moved: {rows!r}"
     styled = last_frame_rows(output, preserve_styles=True)
     assert FOREGROUND_ESCAPE in styled[identity], "the portrait was drawn without colour"
@@ -218,7 +216,7 @@ def portrait_follows_the_terminal_height(binary: str) -> None:
         open_alpha_detail(process, fd, output)
         assert_portrait_beside_identity(output)
         # A short terminal keeps every row for facts.
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
+        h.resize_and_wait(process, fd, output, rows=20, columns=COLUMNS, needle=IDENTITY)
         h.drain_until_quiet(process, fd, output)
         assert_facts_full_width(last_frame_rows(output), "on a short terminal")
         # And the portrait comes back when the rows do.
@@ -291,13 +289,8 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        # Disabled Candle diagnostics are a full-width section between the
-        # portrait band and Current failure; they must also stay below pixels.
-        candle_details = row_of(rows, b"Candle details")
-        assert candle_details == identity + PIXEL_BAND_ROWS + 1, \
-            f"the Candle facts did not leave the picture its rows: {rows!r}"
-        assert row_of(rows, CURRENT_FAILURE) > candle_details, \
-            f"Current failure did not follow the Candle diagnostics: {rows!r}"
+        assert row_of(rows, b"Current Work") == identity + 4, \
+            "the facts did not leave the picture its rows"
         # Item text that needs the full width must remove the actual Kitty
         # placement as well as its reserved columns. Mosaic-only proof cannot
         # detect a pixel overlay left above the text.

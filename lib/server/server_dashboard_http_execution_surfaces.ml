@@ -686,16 +686,22 @@ let with_execution_metadata ~config ?cache_key ~query json =
     json
 ;;
 
-let execution_default_light_response_json ~config =
+(* The reuse gates serve a body's bytes only while re-projecting it changes
+   nothing, so the default-light body is built through the same projection
+   the gates read back -- keeper-row overlays, the Candle summary, and the
+   observation sequence stamp it sets. The producer's own fill carries all
+   three already (its snapshot is projected and its sequence copied); a fill
+   that reaches this surface any other way -- a test fixture, a future
+   publisher -- becomes a fixed point of the gate here instead of silently
+   losing prepared-bytes reuse.
+
+   Built outside the publication lock: the projection reads configuration
+   and the Candle ledger from the filesystem, and the lock guards
+   publication state, not I/O -- the rule
+   {!prepare_execution_snapshot_broadcast} states below. The callers under
+   the lock choose what to do; this builds what they chose. *)
+let build_default_light_response_json ~config =
   Server_dashboard_http_cache.cached_surface_json execution_cache
-  (* The reuse gate below serves these bytes only while re-projecting them
-     changes nothing, so the body is built through the same projection the
-     gate reads back -- keeper-row overlays, the Candle summary, and the
-     observation sequence stamp it sets. The producer's own fill carries all
-     three already (its snapshot is projected and its sequence copied); a
-     fill that reaches this surface any other way -- a test fixture, a
-     future publisher -- becomes a fixed point of the gate here instead of
-     silently losing prepared-bytes reuse. *)
   |> Dashboard_projection_cache.with_current_keeper_observations ~config
   |> with_execution_metadata
        ~config
@@ -724,10 +730,14 @@ let rec refresh_execution_default_light_http_body_with
           Eio.Promise.resolve preparation.settle ())
         !owned)
     (fun () ->
+      (* The lock answers which of the three things this call is -- reuse,
+         wait, or prepare -- and admits the preparation; the body itself is
+         built after it, because building reads the Candle ledger from the
+         filesystem and the lock guards publication state, not I/O. *)
       let action =
         with_execution_publication_lock (fun () ->
           if not (execution_surface_has_fresh_success_unlocked ()) then
-            `Return (execution_default_light_response_json ~config)
+            `Build_fresh
           else
             match !execution_default_light_http with
             | Ready payload when execution_http_source_matches ~config payload.source ->
@@ -749,17 +759,16 @@ let rec refresh_execution_default_light_http_body_with
               in
               owned := Some preparation;
               execution_default_light_http := Preparing preparation;
-              `Prepare (preparation, execution_default_light_response_json ~config))
+              `Prepare preparation)
       in
       match action with
+      | `Build_fresh -> build_default_light_response_json ~config
       | `Return json -> json
       | `Await settled ->
         Eio.Promise.await settled;
         refresh_execution_default_light_http_body_with ~prepare ~config ()
-      | `Prepare (preparation, response_json) ->
-        let response_json =
-          Dashboard_projection_cache.with_current_keeper_observations ~config response_json
-        in
+      | `Prepare preparation ->
+        let response_json = build_default_light_response_json ~config in
         let etag, encoded =
           Domain_pool_ref.submit_cpu_or_inline (fun () ->
             let body = Yojson.Safe.to_string response_json in
@@ -774,9 +783,11 @@ let rec refresh_execution_default_light_http_body_with
                  && execution_surface_has_fresh_success_unlocked () ->
             execution_default_light_http :=
               Ready { source = preparation.source; response_json; encoded; etag };
-            response_json
-          | Empty | Preparing _ | Ready _ ->
-            execution_default_light_response_json ~config))
+            `Published response_json
+          | Empty | Preparing _ | Ready _ -> `Build_fresh)
+        |> function
+        | `Published json -> json
+        | `Build_fresh -> build_default_light_response_json ~config)
 ;;
 
 let refresh_execution_default_light_http_body ~config =
@@ -1368,7 +1379,10 @@ let execution_http_request ~state request =
 
 let execution_cached_http_representation ~(config : Workspace.config)
       ~(parameters : execution_parameters) (request : Httpun.Request.t) =
-  let { fixture; actor; full_mode; force } = parameters in
+  let { fixture = requested_fixture; actor; full_mode; force } = parameters in
+  let fixture =
+    Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture ()
+  in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
     let selected = with_execution_publication_lock (fun () ->
@@ -1518,7 +1532,8 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
   let config = context.config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
-  let { fixture; actor; full_mode; force } = context.parameters in
+  let { fixture = requested_fixture; actor; full_mode; force } = context.parameters in
+  let fixture = Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture () in
   let light = not full_mode in
   let query =
     execution_query_json
@@ -1529,7 +1544,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~default_light_request:(fixture = None && actor = None && not full_mode && not force)
       ~force
   in
-  let compute ?actor ?fixture ~light () =
+  let compute ?actor ~light () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
       ~mode:Offloaded_readonly
@@ -1541,7 +1556,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       (fun ~config ~sw ->
          Dashboard_execution.json
            ?actor
-           ?fixture
+           ?fixture:requested_fixture
            ~light
            ~config
            ~sw
@@ -1667,21 +1682,25 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                `Int generation; query ])
     in
     let compute_with_generation () =
-      compute ?actor ?fixture ~light ()
+      compute ?actor ~light ()
       (* The request wrapper below re-projects every non-fixture response and
          serves the cached payload's bytes only when that changes nothing, so
          the parameterized fill projects here first -- same rule as the
          default-light body above. Without it a fill whose keepers came from
          the fixture-seeded cache rather than a projected snapshot carries no
          observation stamp, and every repeat request recomputes instead of
-         reusing the bytes it already prepared. *)
-      |> Dashboard_projection_cache.with_current_keeper_observations ~config
+         reusing the bytes it already prepared. An explicit fixture is the
+         exception both places: its Candle, portraits and balances are
+         synthetic by contract, and the wrapper skips its gate for fixture
+         requests -- so the fill leaves them alone too. One projection, not
+         two: each one takes a fresh Candle ledger read, and a second pass
+         over an already-projected body only re-observed what the first had
+         stamped. *)
+      |> (match fixture with
+          | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
+          | Some _ -> fun json -> json)
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
-      |> fun json ->
-      match fixture with
-      | Some _ -> json
-      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config json
     in
     let payload =
       Dashboard_cache.get_or_compute_payload_with_timeout
@@ -1702,7 +1721,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
 
 let dashboard_execution_http_response ~sw ~clock context =
   let response = cached_dashboard_execution_http_response ~sw ~clock context in
-  match context.parameters.fixture with
+  match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
   | Some _ -> response
   | None ->
     let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in

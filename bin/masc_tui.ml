@@ -1533,6 +1533,7 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 
+
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
@@ -3564,11 +3565,16 @@ let launch_keeper_items state ~mailbox keeper_name =
   | Workspace_identity_match, Some identity ->
   (* The read-state Item endpoint owns account authority. Public roster
      currency observations require CanAdmin and may legitimately be absent;
-     only current Keeper presence is required before this authenticated read. *)
+     only current Keeper presence is required before this authenticated read.
+     A partial roster's silence is not absence: past the cap the roster says
+     nothing about a locally known Keeper, and [Unobserved] is exactly that
+     silence -- the authoritative read proceeds and the endpoint itself
+     answers for a Keeper that is truly gone. A complete roster's [Absent]
+     and this Keeper's own decode failure remain refusals. *)
   match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-  | Unobserved | Invalid _ | Absent ->
+  | Invalid _ | Absent ->
     state.item_account_error <- Some "Keeper is not observed in the current roster"
-  | Present _ ->
+  | Present _ | Unobserved ->
   let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -3956,7 +3962,7 @@ let launch_lane_subscriptions state ~mailbox request =
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
 
-let launch_lane_addons state ~mailbox request =
+let launch_lane_addons ?initial_detail state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
@@ -3976,6 +3982,11 @@ let launch_lane_addons state ~mailbox request =
     draft = None;action_menu=None;last_action;action_receipt;presentation } in
   state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
+  let broadcast_path=Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-lane-broadcast.jsonl" in
+  let broadcast_scope=Masc_tui_types.broadcast_workspace_scope
+    ~local_base_path:state.local_base_path state.server_identity in
+  let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let get_json ~path =
@@ -4045,16 +4056,50 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
           | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
-        let* receipt = request_result (post_json
+        let broadcast=match request,body with
+          | Addons.Evidence _,`Assoc fields -> List.assoc_opt "broadcast" fields=Some (`Bool true)
+          | _ -> false in
+        let credential=Masc_tui_http.bind_credential () in
+        let* scope = if not broadcast then Ok None
+          else if not broadcast_workspace_verified then Error (`Request
+            "Verify the server workspace before sharing evidence via Broadcast")
+          else (match broadcast_scope with
+            | Some scope -> Ok (Some scope)
+            | None -> Error (`Request "Verify the server workspace before sharing evidence via Broadcast")) in
+        let* principal = match scope with
+          | None -> Ok None
+          | Some _ -> (request_result (Result.bind
+              (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+              (fun () -> Masc_tui_http.lane_broadcast_principal_bound ~credential ~host ~port))
+              |> Result.map Option.some) in
+        let* body = match principal,scope with
+          | None,_ -> Ok body
+          | Some principal,Some scope -> request_result (Masc_tui_lane_broadcast_pending.prepare
+              ~path:broadcast_path ~scope ~credential:principal body)
+          | Some _,None -> Error (`Request "Broadcast workspace scope is unavailable") in
+        let post ~path ~body = if broadcast then
+            Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+              (fun () -> Masc_tui_http.post_json_bound ~credential ~host ~port ~path ~body)
+          else post_json ~path ~body in
+        let* receipt = request_result (post
           ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body)) in
+        let diagnostic = match principal,scope with
+          | None,_ -> None
+          | Some principal,Some scope ->
+              (match Masc_tui_lane_broadcast_pending.acknowledge
+                ~path:broadcast_path ~scope ~credential:principal ~request:body receipt with
+               | Ok () -> None
+               | Error detail -> Some (Addons.Request_failure
+                   ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail)))
+          | Some _,None -> Some (Addons.Request_failure "Broadcast workspace scope is unavailable") in
         (match inspect () with
-         | Ok snapshot -> Ok (reply ~snapshot ~receipt ~inventory_read:`Read ())
-         | Error detail -> Ok (reply ~receipt ~inventory_read:(`Failed detail) ()))
+         | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
+         | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))
   in
   launch_workspace_request state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
-    ~deliver:(fun result -> Lane_addons_loaded (generation, result))
+    ~deliver:(fun result -> Lane_addons_loaded (generation, initial_detail, result))
     perform)
 
 let launch_browser_history state ~mailbox ~reload =
@@ -9942,6 +9987,9 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* A decision receipt states what one workspace's Keeper answered; the
+     next workspace's screens must not carry it. *)
+  state.home_decision_receipt <- None;
   state.task_detail_id <- None;
   state.task_detail_scroll <- 0;
   state.task_history <- None;
@@ -10486,7 +10534,18 @@ let apply_http_surfaces state ~mailbox results =
           | Config_params -> launch_runtime_params_load state ~mailbox
           | Config_runtime | Config_models | Config_themes ->
               launch_runtime_config_load state ~mailbox
-          | Config_prompts | Config_presets | Config_voice -> ())
+          | Config_prompts | Config_voice -> ()
+          (* Presets read through the workspace request, so a pane opened
+             before the identity reading settled failed as unverified; the
+             pane has no periodic reload to recover it. *)
+          | Config_presets -> launch_presets_load state ~mailbox)
+     (* Resources lists read through the workspace request too, and the
+        cadence pass deliberately never relists this surface -- without a
+        replay here the pane stays failed until a manual refresh. *)
+     | Resources ->
+         Masc_tui_resources_requests.launch_list state ~host:server_peer_host
+           ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+           ~check:(capture_workspace_check state ~mailbox)
      | _ -> ());
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -12901,9 +12960,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
-  | Lane_addons_loaded (generation, result) ->
+  | Lane_addons_loaded (generation, initial_detail, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
+        if Option.fold ~none:false ~some:(fun (id, incarnation) ->
+          view.screen <> Masc_tui_lane_addons.Detail (id, incarnation)) initial_detail
+        then {view with loading=false} else
         match result with
         | Error (`Inventory detail) ->
             {view with loading=false;error=None;snapshot_read_error=Some detail}
@@ -12915,6 +12977,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             let view = match reply.lar_snapshot with
               | None -> view
               | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+            let view = match reply.lar_receipt with
+              | None -> view
+              | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in
+            let view = match initial_detail, reply.lar_snapshot, reply.lar_diagnostic with
+              | Some _, Some _, None when view.row_cursor < 0 -> Masc_tui_lane_addons.select_initial_result view
+              | _ -> view in
             let snapshot_read_error = match reply.lar_inventory_read with
               | `Unchanged -> view.snapshot_read_error
               | `Read -> None
@@ -19450,7 +19518,19 @@ and is loaded on demand through keeper_skill.
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
-                         update (Addons.open_selected_instance view)
+                         if view.loading then update {view with scroll=0;
+                           error=lane_addons_input_failure "Wait for the current Lane read before opening a worker."}
+                         else (
+                         let next = Addons.open_selected_instance view in
+                         update next;
+                         (match next.screen, Addons.selected_instance next with
+                          | Addons.Detail _, Some item ->
+                              let request = match view.overview_mode with
+                                | Addons.Retained_runs -> Addons.Slice ["run_id",item.run_id]
+                                | Addons.Current_installations -> Addons.Inspect in
+                              launch_lane_addons ~initial_detail:(item.id,item.incarnation)
+                                state ~mailbox:async_messages request
+                          | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -19488,7 +19568,15 @@ and is loaded on demand through keeper_skill.
                               let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=lane_addons_input_failure detail}))
-                     | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "r" ->
+                         let request = match view.screen, view.overview_mode, Addons.selected_instance view with
+                           | Addons.Detail _, Addons.Retained_runs, Some item ->
+                               Addons.Slice ["run_id",item.run_id]
+                           | Addons.Overview, _, _
+                           | Addons.Detail _, Addons.Current_installations, _
+                           | Addons.Detail _, Addons.Retained_runs, None -> Addons.Inspect in
+                         launch_lane_addons state ~mailbox:async_messages request
+                     | "h" when view.screen=Addons.Overview -> update (Addons.toggle_history view)
                      | "S" ->
                          if not view.loading then (
                            let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
@@ -19518,7 +19606,6 @@ and is loaded on demand through keeper_skill.
                      | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
                      | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
                      | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
-                     | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
                      | "\t" | "tab" when view.screen<>Addons.Overview ->
                          update {view with scroll=0;focus = (match view.focus with
                            | Addons.Timeline | Addons.Instances -> Addons.Connections
@@ -19554,7 +19641,7 @@ and is loaded on demand through keeper_skill.
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
                      | "e" when view.selected <> [] ->
                          let keepers = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
-                         (match Addons.open_evidence ~keepers view with
+                         (match Addons.open_evidence ~request_id:(Random_id.uuid_v7 ()) ~keepers view with
                           | Ok next -> update next
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | _ -> ()))

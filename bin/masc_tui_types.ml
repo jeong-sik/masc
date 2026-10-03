@@ -144,8 +144,20 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
+    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+       default cluster, [<base>/.masc/clusters/<name>] otherwise), so the
+       local root must be composed the same way from the same cluster
+       selection: a plain [<base>/.masc] classifies every healthy
+       non-default-cluster connection as a mismatch and refuses all Keeper
+       messages. *)
+    let local_cluster_root =
+      let masc_root = Filename.concat local_base_path Common.masc_dirname in
+      match Env_config_core.cluster_name_opt () with
+      | None | Some "" | Some "default" -> masc_root
+      | Some cluster ->
+        Filename.concat (Common.clusters_dir_from_base_path ~base_path:local_base_path)
+          (Workspace_utils.sanitize_namespace_segment cluster) in
+    let local_masc_root = canonical_path local_cluster_root in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading
@@ -154,6 +166,21 @@ let workspace_identity_of_refresh ~local_base_path reading =
          && String.equal local_masc_root server_masc_root
     then Workspace_identity_match
     else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+(* A Broadcast retry belongs to the verified workspace store, not to the
+   TCP port that happened to serve it. Include the server's resolved MASC
+   root because two stores under one base path cannot share a request ID. *)
+let broadcast_workspace_scope ~local_base_path identity =
+  match identity with
+  | Some reading when reading.Tui_decode.sid_state_ready <> Some false ->
+    let local = canonical_path local_base_path in
+    let server = canonical_path reading.sid_base_path in
+    let root = canonical_path reading.sid_masc_root in
+    if local <> "" && String.equal local server && root <> ""
+    then Some (Yojson.Safe.to_string (`List [`String server; `String root]))
+    else None
+  | Some _ | None -> None
 ;;
 
 (* Retained input belongs to the complete observed server workspace. Local
@@ -6377,10 +6404,15 @@ let remember_identity_login (state : state) login =
    | _ -> ())
 
 let retire_identity_logins (state : state) ~keeper_name ~providers =
+  (* The poll ends when consent lands (attached) or when it never can
+     (provider no longer declared). A provider removed mid-consent left its
+     intent polling for the life of the process before this read the
+     inventory's absence as an answer. *)
   state.identity_login_intents <- List.filter
     (fun (_, keeper, provider_id) ->
       not (String.equal keeper keeper_name
-           && identity_provider_attached ~providers ~provider_id))
+           && (identity_provider_attached ~providers ~provider_id
+               || not (identity_provider_declared ~providers ~provider_id))))
     state.identity_login_intents;
   state.identity_logins <-
     List.filter

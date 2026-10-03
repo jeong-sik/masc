@@ -930,7 +930,7 @@ let render_under_timeout ~clock ~timeout_s render =
 
 let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
-  match dashboard_fixture_name ?fixture () with
+  match execution_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
   | _ ->
     (* Guard: abort render if it exceeds render_timeout_s.

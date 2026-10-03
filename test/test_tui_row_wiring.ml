@@ -35,6 +35,13 @@ let reads_in ~module_path ~binding_name ~fields =
 let reads ~binding_name ~fields =
   reads_in ~module_path:(renderer_for binding_name) ~binding_name ~fields
 
+(* The call-site twin of {!reads_in}: a callee a binding must reach, named
+   with its module because the guard is about that file's binding. #40827
+   wrote the guard before the helper and main has not compiled this suite
+   since. *)
+let calls_in ~module_path ~binding_name ~callee =
+  Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+
 (* A row two surfaces share is drawn by the primitives, not by either of
    them, so the guard over it names that file. *)
 let reads_prim ~binding_name ~fields =

@@ -104,13 +104,18 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      - name: Installer behavior (terminal wizard and upgrades)
+      # Linux coverage lives in full-check.yml; one macOS target also checks
+      # the wizard/removal paths against stock Bash and BSD utilities.
+      - name: Installer behavior on macOS
+        if: matrix.arch == 'macos-arm64'
         run: |
-          python3 test/test_installer_wizard.py
-          python3 test/test_installer_upgrade.py
-          python3 test/test_installer_uninstall.py
-          python3 test/test_package_macos_runtime.py
-          python3 test/test_installer_dependencies.py
+          installer_python=$(command -v python3)
+          export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+          "$installer_python" test/test_installer_wizard.py
+          "$installer_python" test/test_installer_upgrade.py
+          "$installer_python" test/test_installer_uninstall.py
+          "$installer_python" test/test_package_macos_runtime.py
+          "$installer_python" test/test_installer_dependencies.py
 
       # Linux builds inside a container (see the Build step), so only the
       # macOS jobs need a toolchain on the runner itself.

@@ -17,12 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_input_reader.ml",
-    "bin/masc_tui_input_reader.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render_schedule.ml",
-)
+
 
 
 def positive_int(value: str) -> int:

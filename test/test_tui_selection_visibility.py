@@ -5,7 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ('bin/masc_tui.ml', 'bin/masc_tui_render.ml', 'lib/tui_decode_runtime_probe.ml', 'lib/tui_decode_runtime_probe.mli')
+
 
 
 def run_models(executable: str) -> None:

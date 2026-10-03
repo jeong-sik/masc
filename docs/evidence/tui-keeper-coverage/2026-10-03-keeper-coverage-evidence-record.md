@@ -1,5 +1,8 @@
 # Keeper unread-row visibility
 
+Historical pre-stack candidate evidence only. The recorded hashes and frames precede current decoder/rendering integration, including suppression of comparison bars for partial windows. No current-head binary, PTY run or browser replay has been produced; the old PASS results do not cover these repairs.
+
+
 ## 공통 헤더
 
 - 날짜(ISO8601): 2026-10-03T06:34:24.781724+00:00

@@ -6,11 +6,7 @@ import sys
 import unicodedata
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_command.ml", "bin/masc_tui.ml", "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_chat.ml", "bin/masc_tui_observation_layout.ml",
-    "bin/masc_tui_ansi.ml", "bin/masc_tui_theme.ml", "bin/masc_tui_footer.ml",
-)
+
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
 
 

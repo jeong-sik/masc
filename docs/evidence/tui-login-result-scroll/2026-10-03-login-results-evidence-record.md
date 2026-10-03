@@ -1,5 +1,8 @@
 # Login result visibility evidence
 
+These execution results and captures are historical. Their manifest source hashes identify the earlier candidate, before the refresh-reset repair and later integration. No current-head binary, PTY or browser replay was produced.
+
+
 ## 공통 헤더
 
 - 날짜(ISO8601): `2026-10-03T05:59:15.750821+00:00`

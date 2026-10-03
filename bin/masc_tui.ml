@@ -20901,7 +20901,7 @@ and is loaded on demand through keeper_skill.
                   | Masc_tui_types.Media_route_slot -> Tui_decode.Exact_output_unsupported in
                 Masc_tui_types.open_runtime_lane_pick state
                   (Masc_tui_types.Pick_exact_lane_replacement (lane, row.sr_slot, group));
-                launch_runtime_catalog_load state ~mailbox;
+                launch_runtime_catalog_load state ~mailbox:async_messages;
                 Masc_tui_types.dismiss_runtime_lane_notice state
             | _ -> ())
        | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "x" | "J" | "K" | "1" | "esc")

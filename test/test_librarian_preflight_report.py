@@ -68,7 +68,8 @@ def fixture() -> dict[str, Any]:
                             "rendered_prompt_variables": {
                                 "keeper_id": "fixture-keeper", "facts_budget": "max=100; current ordinary=1",
                                 "keeper_instructions": "", "historical_task_contexts": "[]", "continuity": "null",
-                                "working_context": "{}", "working_contexts_rule": "fixture rule", "goal_context": '{"status":"no_task"}',
+                                "working_context": '{"sources":[],"previous":null,"unavailable":[]}',
+                                "working_contexts_rule": "fixture rule", "goal_context": '{"status":"no_task"}',
                                 "current_memory": "frozen memory", "conversation_history": "frozen source",
                                 "turn_tool_observations": "", "counterpart_observations": "", "source": "frozen source",
                             },
@@ -120,6 +121,64 @@ class ReportCliTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+    def test_actor_must_match_each_frozen_keeper(self) -> None:
+        for arms in (("baseline",), ("preflight",), ("baseline", "preflight")):
+            with self.subTest(arms=arms):
+                manifest = fixture()
+                for arm in arms:
+                    manifest["pairs"][0][arm]["run"]["actor"] = "other-keeper"
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("actor must match the frozen keeper_id", result.stderr)
+
+    def test_disabled_baseline_requires_explicit_null_domain_rejection(self) -> None:
+        for value in ("missing", "No-change output failed domain validation", False, {}):
+            with self.subTest(value=value):
+                manifest = fixture()
+                output = manifest["pairs"][0]["baseline"]["run"]["output"]
+                if value == "missing":
+                    del output["preflight_domain_rejection"]
+                else:
+                    output["preflight_domain_rejection"] = value
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("baseline must explicitly record null domain rejection", result.stderr)
+
+    def test_evaluated_pair_requires_empty_frozen_context(self) -> None:
+        for key, value in (
+            ("continuity", '{"previous_working_state":null}'),
+            ("continuity", "{}"),
+            ("continuity", "not json"),
+            ("working_context", "{}"),
+            ("working_context", '{"sources":[],"previous":null,"unavailable":["fixture unavailable"]}'),
+            ("working_context", '{"sources":[{"reference":"s1","content":{"text":"fixture"}}],"previous":null,"unavailable":[]}'),
+            ("working_context", '{"sources":[],"previous":[],"unavailable":[]}'),
+            ("working_context", '{"sources":[],"previous":null,"unavailable":[],"sources":[]}'),
+            ("working_context", "not json"),
+        ):
+            with self.subTest(key=key, value=value):
+                manifest = fixture()
+                for arm in ("baseline", "preflight"):
+                    variables = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["rendered_prompt_variables"]
+                    variables[key] = value
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("preflight measurement refused:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_empty_context_uses_parsed_json_not_spelling(self) -> None:
+        manifest = fixture()
+        for arm in ("baseline", "preflight"):
+            variables = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]["rendered_prompt_variables"]
+            variables["continuity"] = " \n null \n "
+            variables["working_context"] = '{ "unavailable": [], "previous": null, "sources": [] }'
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["recorded_generation_skips"], 1)
 
     def test_complete_input_is_required_even_when_both_arms_match(self) -> None:
         valid = fixture()["pairs"][0]["baseline"]["run"]["input"]["payload"]

@@ -56,9 +56,11 @@ def run(executable, no_color):
                 visible = screen(output)
                 if not all_runtimes:
                     default_block = visible.split("[runtime].default", 1)[1].split("ROUTE / PROBE", 1)[0]
-                    readable = "".join(default_block.split())
-                    assert LANE_ID in readable and RUNTIME_ID in readable, (columns, default_block)
-                    assert "…" not in default_block, (columns, default_block)
+                    route_block, marker, _ = default_block.partition("f replaces")
+                    assert marker, (columns, default_block)
+                    readable = "".join(route_block.split())
+                    assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)
+                    assert "…" not in route_block, (columns, route_block)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
                 status = "ready / reach" if columns == 30 else "ready / reachable"
                 candidate_rows = [row for row in visible.splitlines()

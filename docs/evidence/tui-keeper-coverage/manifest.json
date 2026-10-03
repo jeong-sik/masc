@@ -33,5 +33,9 @@
     "result": "FAIL done=15 absent at80x24",
     "issue": 40947,
     "subsequent_surfaces": "not reached"
+  },
+  "source_evidence_boundary": {
+    "applies_to_current_pr_head": false,
+    "note": "Historical pre-stack candidate captures only. Parent integration changed decoder, rendering and PTY fixtures, including suppressing partial-window comparison bars. Existing hashes and PASS results do not verify the current combined source. No new binary, PTY or browser replay was performed."
   }
 }

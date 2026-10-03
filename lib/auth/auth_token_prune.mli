@@ -32,3 +32,14 @@ val run :
     [Retire] reports each completed deletion as [Retired]. A deletion error is
     [Failed], which can follow partial file removal; later entries are still
     attempted. The caller must count only [Retired] as completed retirement. *)
+
+
+module For_testing : sig
+  val run_after_snapshot :
+    base_path:string -> now:float -> after_snapshot:(unit -> unit) ->
+    (entry list, Masc_domain.masc_error) result
+  (** Run the real retirement path, invoking [after_snapshot] once after its
+      snapshot is admitted and before any retirement. The call-scoped callback
+      permits deterministic filesystem failure injection without exposing
+      private retirement authority or changing a process-wide hook. *)
+end

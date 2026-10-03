@@ -431,6 +431,7 @@ describe('RuntimeMonitor', () => {
 
   it.each([
     { binding: 1000000, provider: 400000, model: 272000, expected: 1000000, source: 'binding' },
+    { binding: 128000, provider: 400000, model: 272000, expected: 128000, source: 'binding' },
     { binding: null, provider: 400000, model: 272000, expected: 400000, source: 'provider' },
     { binding: undefined, provider: undefined, model: 272000, expected: 272000, source: 'model' },
     { binding: null, provider: 400000, model: null, expected: 400000, source: 'provider' },

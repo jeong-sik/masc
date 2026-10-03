@@ -1,5 +1,5 @@
 (** Optional observer lifecycle through the public dispatch surface. The fake
-    package supplies barriers; no model response or Docker daemon is involved. *)
+    package supplies barriers; no provider or Docker daemon is involved. *)
 open Alcotest
 open Masc
 module Runtime = struct
@@ -90,7 +90,7 @@ let make_backend ?observe_step () =
       | Some _ | None -> Error "owner mismatch")
   } in state, backend
 
-let manifest ?refresh_policy dir mode =
+let manifest ?refresh_policy ?(max_reply_bytes=4096) dir mode =
   let path = Filename.concat dir (mode ^ ".toml") in
   write path (Printf.sprintf {|id = %S
 revision = "fixture-1"
@@ -102,8 +102,8 @@ contributions = ["observe"]
 cpus = 0.5
 memory_bytes = 67108864
 pids = 16
-max_reply_bytes = 4096
-|} mode ^ Option.fold ~none:"" ~some:(fun policy ->
+max_reply_bytes = %d
+|} mode max_reply_bytes ^ Option.fold ~none:"" ~some:(fun policy ->
       "\n[interface]\nrefresh_policy = " ^ Printf.sprintf "%S" policy ^ "\n") refresh_policy);
   path
 
@@ -260,6 +260,103 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       (`Assoc (("phase", Types.phase_to_json Types.Attached) :: List.remove_assoc "phase" fields)));
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
+
+let test_runtime_sampling_recovery_precedes_bounded_historical_reads () =
+  let cases = List.concat_map (fun (request_id, outcome_first) ->
+    List.concat_map (fun terminal_journal ->
+      List.map (fun placement -> request_id, outcome_first, terminal_journal, placement, false)
+        [`Missing; `Canonical; `Fallback]) [true; false])
+    ["request-1", false; "request-8", true]
+    @ ["request-1", true, true, `Canonical, true] in
+  List.iter (fun (request_id, outcome_first, terminal_journal, placement, escaped) ->
+    with_fixture (fun env _sw config dir state ->
+      let clock = Eio.Stdenv.clock env in
+      let max_reply_bytes = 4 * 1024 * 1024 in
+      let original = unwrap (dispatch config Runtime.Attach [
+        "manifest_path", `String (manifest ~max_reply_bytes dir "recovery-fixture");
+        "run_id", `String "recovery-run"; "binding", `Assoc ["sources", `List []]])
+        |> text "instance_id" in
+      await clock (fun () -> int "observation_seq" (instance config original) = 1);
+      detach config original;
+      await_phase clock config original "detached";
+      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+      let saved = unwrap (Store.bindings store) |> List.find (fun value -> text "instance_id" value = original)
+        |> Yojson.Safe.Util.to_assoc in
+      (* Fixed retained identities make both hash orders deterministic. The
+         rest of the binding came through real attach/persist/detach. *)
+      let instance_id = "recovery-worker" in
+      let fields = ("instance_id", `String instance_id) :: ("incarnation", `String instance_id)
+        :: List.remove_assoc "instance_id" (List.remove_assoc "incarnation" saved) in
+      unwrap (Store.save_binding store ~instance_id (`Assoc fields));
+      unwrap (Store.remove_binding store ~instance_id:original);
+      let request = unwrap (Store.write_blob store (Yojson.Safe.to_string (`Assoc [
+        "kind", `String "model_request"; "instance_id", `String instance_id;
+        "request_id", `String request_id]))) in
+      let answer = if escaped then String.make (3 * 1024 * 1024 / 2) '\n'
+        else String.make (3 * 1024 * 1024) 'x' in
+      let bytes = Yojson.Safe.to_string (`Assoc ["kind", `String "model_outcome";
+        "instance_id", `String instance_id; "request", Types.evidence_to_json request;
+        "status", `String "answered"; "response", `Assoc ["role", `String "assistant";
+          "model", `String "recovered-model"; "content", `Assoc ["type", `String "text";
+            "text", `String answer]]]) in
+      let outcome = Store.blob_reference bytes in
+      check bool "both sorted reference orders are exercised" outcome_first (Stdlib.compare outcome request < 0);
+      let record state outcome = ["request_id", `String request_id;
+        "instance_id", `String instance_id; "state", `String state;
+        "request", Types.evidence_to_json request; "outcome", outcome] in
+      unwrap (Store.save_sampling_request store ~instance_id ~request_id (`Assoc (record "pending" `Null)));
+      let terminal = `Assoc (("outcome_bytes", `String bytes) :: record "finished" (Types.evidence_to_json outcome)) in
+      let save = if terminal_journal then Store.save_sampling_outcome else Store.save_sampling_request in
+      unwrap (save store ~instance_id ~request_id terminal);
+      if escaped then check bool "JSON escaping makes the journal larger than the query allowance" true
+        (String.length (Yojson.Safe.to_string terminal) > max_reply_bytes);
+      let hash = Store.digest bytes in
+      let canonical = Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json") in
+      let existing = match placement with
+        | `Missing -> None
+        | `Canonical -> ignore (unwrap (Store.write_blob store bytes)); Some canonical
+        | `Fallback ->
+            Unix.mkdir canonical 0o700;
+            ignore (unwrap (Store.write_sampling_blob store bytes));
+            Unix.rmdir canonical;
+            Some (Filename.concat (Store.root store) ("sampling-evidence/" ^ hash ^ ".json")) in
+      let before = Option.map Unix.stat existing in
+      let selected = instance_id ^ "/1/answer" in
+      let output : Types.output = {rows=[{id=selected;lane_id=instance_id ^ "/result";
+        kind=Types.Value;title="Retained answer";observed_at=1.;subject_id="answer";
+        clock=None;actor=None;fields=[];evidence=[request;outcome];related_ids=[]}];coverage=[]} in
+      (match Store.append_observation store ~instance_id ~seq:1 ~sources:(`Assoc []) output with
+       | Ok () -> () | Error error -> fail (Store.observation_write_error_to_string error));
+      let calls_before = Hashtbl.fold (fun _ calls total -> total + calls) state.calls 0 in
+      Runtime.For_testing.reset ();
+      (* This is the public function wired before configuration startup and
+         into the maintenance pulse, not the iterator test recovery helper. *)
+      unwrap (Runtime.recover_sampling ~config);
+      check string "runtime recovery preserves exact outcome bytes" bytes (unwrap (Store.read_blob store outcome));
+      (match existing, before with
+       | Some path, Some before ->
+           let after = Unix.stat path in
+           check bool "runtime recovery does not replace an intact blob" true
+             (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino)
+       | None, None -> () | _ -> fail "inconsistent fixture inode snapshot");
+      let query () = unwrap (Lane_addon_sampling.retained_receipts
+        ~store:(Store.create ~root:(Store.root store)) ~instance_id ~max_bytes:max_reply_bytes output) in
+      let receipts = query () in
+      check Alcotest.int "bounded query sees the recovered receipt" 1 (List.length receipts);
+      check string "bounded query keeps the complete answer" answer
+        (List.hd receipts |> member "terminal" |> member "response" |> member "content" |> text "text");
+      Runtime.For_testing.reset ();
+      unwrap (Runtime.recover_sampling ~config);
+      check bool "another restart and bounded query keep the same receipt" true (query () = receipts);
+      let history = unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list in
+      check bool "real runtime history exposes the prior producer row" true
+        (List.exists (fun row -> text "id" row = selected) history);
+      let frozen = unwrap (dispatch config Runtime.Evidence ["instance_id", `String instance_id;
+        "row_ids", `List [`String selected]]) in
+      check string "historical evidence retains its original instance" instance_id (text "instance_id" frozen);
+      ignore (unwrap (Store.publish_for_keeper ~base_path:config.base_path store frozen));
+      check Alcotest.int "recovery does not restart the observer or invoke a model" calls_before
+        (Hashtbl.fold (fun _ calls total -> total + calls) state.calls 0))) cases
 
 let test_request_refusals_preserve_runtime_failure_distinction () =
   with_fixture (fun _env _sw config dir _state ->
@@ -1356,6 +1453,8 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "startup recovery precedes bounded historical sampling reads" `Quick
+    test_runtime_sampling_recovery_precedes_bounded_historical_reads;
   test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
     test_mcp_attribution_does_not_authorize_private_lane;

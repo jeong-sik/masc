@@ -28,6 +28,12 @@ type fleet_backend = {
 val register_fleet_backend : fleet_backend -> unit
 val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
 val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+val recover_sampling : config:Workspace.config -> (unit, string) result
+(** Recover and compact journaled outcomes for retained instances without
+    starting observers or invoking providers. Called before configuration startup
+    and by the existing maintenance pulse. Uses each persisted producer limit;
+    it does not enlarge or replenish any query's aggregate read allowance.
+    One failed instance is reported without preventing recovery of the others. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access ->
   config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result

@@ -755,6 +755,28 @@ let find m args = let* id = text args "instance_id" in
 let read_retained_bindings m =
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
   normalized_retained_bindings bindings
+let recover_sampling ~config = Eio_context.run_on_owner_domain (fun () ->
+  let m = manager config in
+  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  List.fold_left (fun previous binding ->
+    let result =
+      let* binding = normalize_retained_binding ~bindings binding in
+      let* fields = object_ binding in
+      let* instance_id = text fields "instance_id" in
+      let* package = match List.assoc_opt "package" fields with
+        | Some json -> object_ json | None -> Error "missing persisted sampling package" in
+      let* resources = match List.assoc_opt "resources" package with
+        | Some json -> object_ json | None -> Error "missing persisted sampling resources" in
+      let* max_reply_bytes = match List.assoc_opt "max_reply_bytes" resources with
+        | Some (`Int value) when value > 0 -> Ok value
+        | _ -> Error "missing positive persisted sampling reply bound" in
+      offload (fun () -> Lane_addon_store.recover_sampling_requests m.store
+        ~instance_id ~max_reply_bytes)
+      |> Result.map_error (fun detail -> instance_id ^ ": " ^ detail) in
+    (match result with
+     | Ok () -> ()
+     | Error detail -> Log.Misc.warn "Lane sampling recovery incomplete: %s" detail);
+    match previous with Error _ -> previous | Ok () -> result) (Ok ()) bindings)
 let without_live_bindings m bindings =
   List.filter (function
     | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
@@ -1833,8 +1855,9 @@ let start_configuration_service ~config ~sw ~clock =
       let name = "lane-addon-configuration"
       let should_act _ = !active
       let on_beat _ =
+        let recovery = recover_sampling ~config in
         let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
-        match resolution.status with
+        let configuration = match resolution.status with
         | Config_dir_resolver.Invalid_env_status ->
             let issue = `Assoc ["source_path", `String directory; "id", `Null;
               "message", `String (String.concat "; " resolution.warnings)] in
@@ -1843,7 +1866,8 @@ let start_configuration_service ~config ~sw ~clock =
               "issues", `List [issue]; "declarations", `List []];
             Ok ()
         | Ready | Warn | Missing_status ->
-            Result.map (fun _ -> ()) (reconcile_configuration ~config ~directory)
+            Result.map (fun _ -> ()) (reconcile_configuration ~config ~directory) in
+        match configuration with Error _ -> configuration | Ok () -> recovery
     end) in
     (* Configuration is maintenance work. Reuse the existing maintenance
        cadence on an independent Pulse, outside Keeper sweeps and turns. *)

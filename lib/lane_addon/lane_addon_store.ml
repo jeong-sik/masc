@@ -499,6 +499,87 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
 let load_sampling_request_bounded =
   load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
+let sampling_recovery_record_limit ~max_reply_bytes =
+  (* Shared record fields (request_id, instance_id, route, package) already fit
+     the producer's bounded model_request. These are the extra terminal fields.
+     An outer JSON string can expand each outcome byte to at most \uXXXX. *)
+  let reference = evidence_to_json (blob_reference "") in
+  let extra = String.length (Yojson.Safe.to_string (`Assoc [
+    "state", `String "finished"; "request", reference; "outcome", reference;
+    "outcome_bytes", `String ""])) in
+  let expansion = 1 + String.length "\\u0000" in
+  if max_reply_bytes > (max_int - extra) / expansion then max_int
+  else (expansion * max_reply_bytes) + extra
+
+let recover_sampling_requests t ~instance_id ~max_reply_bytes =
+  if max_reply_bytes <= 0 then Error "sampling recovery requires a positive reply envelope"
+  else protect (fun () ->
+    let max_record_bytes = sampling_recovery_record_limit ~max_reply_bytes in
+    let recover relative name =
+      let path = Filename.concat t.root (Filename.concat relative name) in
+      let* raw = bounded_file ~max_bytes:max_record_bytes path in
+      let json = Yojson.Safe.from_string raw in
+      let* fields = match json with
+        | `Assoc fields -> Ok fields | _ -> Error "invalid sampling recovery record" in
+      let* request_id = match List.assoc_opt "request_id" fields with
+        | Some (`String id) when id <> "" -> Ok id
+        | _ -> Error "sampling recovery request identity is missing" in
+      let* () = if List.assoc_opt "instance_id" fields = Some (`String instance_id)
+          && name = digest request_id ^ ".json" then Ok ()
+        else Error "sampling recovery record identity mismatch" in
+      let* inline = sampling_inline_outcome json in
+      match List.assoc_opt "state" fields, List.assoc_opt "outcome" fields, inline with
+      | Some (`String "pending"), Some `Null, None -> Ok ()
+      | Some (`String "finished"), Some outcome, inline ->
+          let* reference = evidence_of_json outcome in
+          let* _ = retained_address reference in
+          (match inline with
+           | None -> Ok ()
+           | Some (_, bytes) ->
+               let* () = if String.length bytes <= max_reply_bytes then Ok ()
+                 else Error "sampling outcome exceeds producer reply envelope" in
+               let* request = match List.assoc_opt "request" fields with
+                 | Some value -> evidence_of_json value
+                 | None -> Error "sampling recovery request reference is missing" in
+               let* _ = retained_address request in
+               let* () = match Yojson.Safe.from_string bytes with
+                 | `Assoc terminal when
+                     List.assoc_opt "kind" terminal = Some (`String "model_outcome")
+                     && List.assoc_opt "instance_id" terminal = Some (`String instance_id)
+                     && List.assoc_opt "request" terminal = Some (evidence_to_json request) -> Ok ()
+                 | _ -> Error "sampling outcome contradicts its recovery record" in
+               let hash = digest bytes in
+               let verify relative =
+                 let* existing = bounded_file ~max_bytes:max_reply_bytes
+                   (Filename.concat t.root relative) in
+                 if blob_reference existing = reference then Ok ()
+                 else Error "sampling outcome blob digest mismatch" in
+               let* () = match verify (blob_path hash) with
+                 | Ok () -> Ok ()
+                 | Error _ -> (match verify (recovery_blob_path hash) with
+                     | Ok () -> Ok ()
+                     | Error _ -> write_sampling_blob t bytes |> Result.map (fun _ -> ())) in
+               write t (Filename.concat relative name)
+                 (Yojson.Safe.to_string (`Assoc (List.remove_assoc "outcome_bytes" fields))))
+      | _ -> Error "invalid sampling recovery state" in
+    let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
+    let scan relative ~skip =
+      let path = Filename.concat t.root relative in
+      match Fs_compat.exact_path_kind path with
+      | Fs_compat.Exact_missing -> Ok ()
+      | _ ->
+          let handle = Unix.opendir path in
+          Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
+            let rec next () = match Unix.readdir handle with
+              | name when Filename.check_suffix name ".json" && not (skip name) ->
+                  let* () = recover relative name in next ()
+              | _ -> next ()
+              | exception End_of_file -> Ok () in
+            next ()) in
+    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
+    scan (sampling_directory instance_id) ~skip:(fun name ->
+      Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
+
 let record_path t instance_id seq =
   Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
 let decode_record bytes =

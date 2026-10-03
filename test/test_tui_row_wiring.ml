@@ -35,6 +35,13 @@ let reads_in ~module_path ~binding_name ~fields =
 let reads ~binding_name ~fields =
   reads_in ~module_path:(renderer_for binding_name) ~binding_name ~fields
 
+(* The call-site twin of {!reads_in}: a callee a binding must reach, named
+   with its module because the guard is about that file's binding. #40827
+   wrote the guard before the helper and main has not compiled this suite
+   since. *)
+let calls_in ~module_path ~binding_name ~callee =
+  Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+
 (* A row two surfaces share is drawn by the primitives, not by either of
    them, so the guard over it names that file. *)
 let reads_prim ~binding_name ~fields =
@@ -681,7 +688,7 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
-  (* Starvation depends on ordinary absence and failed Librarian runs, while a
+  (* Starvation depends on ordinary absence and the current Librarian pass, while a
      source-bound snapshot changes the truthful row label from memoryless to
      source-only. Keep all three axes in the renderer. *)
   List.iter
@@ -692,10 +699,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
          > 0))
     [ "mkh_snapshot_present"
     ; "mkh_source_snapshot_present"
-    ; "mkh_librarian_failures"
+    ; "mkh_librarian"
     ];
   Alcotest.(check bool) "the title names the starving count" true
-    (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_memory"
+       ~callee:"current_memory_starving_count" > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
     (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true

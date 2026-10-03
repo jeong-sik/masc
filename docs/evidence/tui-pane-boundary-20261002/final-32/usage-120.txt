@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  17:09:57  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Plan    Trend    Keepers    v:next view
+
+   Candle · workspace supply
+     Candle issued: 100.000
+     Candle burned: 10.000
+     Candle circulating: 90.000
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Keeper usage (24h) · unavailable: keeper usage load failed: HTTP 503: fixture endpoint unavailable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  p:Usage / Telemetry  v:Plan / Trend / Keepers  w:1d / 7d / 14d  Esc:Dashboard  r:refresh  Tab:next  q:quit
+ › to alpha   (i to write)

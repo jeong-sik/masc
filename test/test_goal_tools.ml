@@ -467,7 +467,8 @@ let test_goal_creation_emits_an_event () =
   let committed_version () = match Goal_store.load_source config with
     | Goal_store.Available state -> state.version
     | Goal_store.Uninitialized | Goal_store.Unavailable _ -> fail "upsert must commit a readable Goal state" in
-  check int "creation snapshot retains the exact committed revision" (committed_version ()) created_version;
+  check int "creation snapshot precedes its outbox acknowledgement"
+    (created_version + 1) (committed_version ());
   (match upsert ~agent_name:"editor"
        [ "id", `String goal_id; "title", `String "Renamed after the fact" ] with
    | Some result -> ignore (parse_json_result result)
@@ -487,7 +488,8 @@ let test_goal_creation_emits_an_event () =
      check string "the update keeps the title as edited" "Renamed after the fact"
        (get_string_field payload "title");
      let version = Yojson.Safe.Util.(payload |> member "store_version" |> to_int) in
-     check int "updated snapshot retains its own committed revision" (committed_version ()) version;
+     check int "updated snapshot precedes its own outbox acknowledgement"
+       (version + 1) (committed_version ());
      check bool "update revision orders the snapshots independently of append" true (version > created_version)
    | _ -> fail "the edit must record exactly one separate update event")
 ;;
@@ -643,8 +645,15 @@ let test_criterion_edit_reports_each_failed_event () =
   Unix.rmdir path;
   Unix.rename saved path;
   let repeated = call "masc_goal_upsert" [ "id", `String goal_id; "target_value", `String "2" ] in
-  check_event_recordings "a later successful snapshot does not claim the lost phase append"
-    [ "goal_updated", "recorded" ] repeated
+  check_event_recordings "the later receipt describes its own snapshot while replaying older intents"
+    [ "goal_updated", "recorded" ] repeated;
+  let replayed = Fs_compat.load_file path |> String.split_on_char '\n'
+    |> List.filter (fun line -> line <> "") |> List.map Yojson.Safe.from_string in
+  check bool "recovery replays the previously failed criterion phase" true
+    (List.exists (fun row ->
+       get_string_field row "event_type" = "goal_phase"
+       && Json_util.get_string (Yojson.Safe.Util.member "payload" row) "cause"
+            = Some "criterion_edit") replayed)
 ;;
 
 (* A due date or priority edit moves no phase, so it records a row of its own

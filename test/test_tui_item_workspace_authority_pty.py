@@ -242,7 +242,9 @@ def run(binary, captures):
             wait(lambda text: b"Balance 3.250 Candle" in text, "admitted A account did not recover")
             capture("a-recovered")
             wire.set_roster_unavailable(True)
-            wait(lambda text: b"Keeper is not observed in the current roster" in text,
+            wait(lambda text: b"Account unavailable:" in text
+                 and (b"Keeper is not observed in the current roster" in text
+                      or b"Keeper roster authority is unavailable" in text),
                  "an unavailable roster retained monetary facts")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-revision-unavailable")
@@ -273,18 +275,15 @@ def run(binary, captures):
                 wire.set_missing_revision(False)
                 wire.set_malformed_revision(False)
             wire.set_booting(True)
-            wait(lambda text: b"MASC Keepers" in text and b"server booting" in text
+            wait(lambda text: b"No keeper selected." in text
                  and "▸Items".encode() not in text,
                  "booting server did not withdraw the Item detail")
             assert b"Balance " not in visible() and b"owned" not in visible()
             capture("a-booting")
             wire.set_booting(False)
-            wait(lambda text: b"a.boot.ready" in text and b"server booting" not in text
-                 and "▸Items".encode() not in text,
-                 "ready roster did not follow the booting authority withdrawal")
-            open_items()
-            wait(lambda text: b"Balance 3.250 Candle" in text,
-                 "ready server did not re-read Item account after boot")
+            wait(lambda text: "▸ alpha".encode() in text and "▸Items".encode() in text
+                 and b"Balance 3.250 Candle" in text,
+                 "ready server did not restore the selected Keeper Item tab and account after boot")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")

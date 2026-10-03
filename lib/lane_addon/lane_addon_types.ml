@@ -17,12 +17,14 @@ type output_selection = All_lanes | Selected_lanes of string list
 type output_ports = (string * output_selection) list
 type resources = { cpus : float; memory_bytes : int64; pids : int; max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
+type model_access = Model_disabled | Host_sampling
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
   image : string; command : string list; directory : string;
   action_tool : string option;
   outputs : output_ports;
   refresh_policy : refresh_policy;
+  model_access : model_access;
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option; resources : resources;
@@ -155,6 +157,7 @@ let package_to_json (p : package) =
     "action_tool", optional string p.action_tool;
     "outputs", output_ports_to_json p.outputs;
     "refresh_policy", `String (match p.refresh_policy with Every_hint -> "every_hint" | Source_changes -> "source_changes");
+    "model_access", `String (match p.model_access with Model_disabled -> "disabled" | Host_sampling -> "host_sampling");
     "binding_schema", optional Fun.id p.binding_schema;
     "presentation", Lane_addon_presentation.to_json p.presentation;
     "skills_directory", (match p.skills_directory with None -> `Null

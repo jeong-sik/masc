@@ -160,7 +160,7 @@ let subscription_model_efforts =
        effort parameter set (checked 2026-09-23), as the other Claude rows. *)
   ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ; "ultra" ]
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]

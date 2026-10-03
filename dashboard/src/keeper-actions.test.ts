@@ -43,6 +43,7 @@ import {
   activeKeeperName,
   keeperActionErrors,
   keeperChatHistoryErrors,
+  keeperChatHistoryHydration,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -226,6 +227,7 @@ describe('hydrateKeeperChatHistory', () => {
   beforeEach(() => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
+    keeperHydrating.value = {}
     _resetChatHydrationForTests()
     fetchKeeperChatHistory.mockReset()
   })
@@ -341,6 +343,90 @@ describe('hydrateKeeperChatHistory', () => {
       status: 'failed',
       failureReason: 'HTTP 502',
     })
+  })
+
+  function historyRow(id: string) {
+    return [{ id, role: 'user' as const, content: id, ts: 1_780_000_000 }]
+  }
+
+  function deferredHistory() {
+    let resolve!: (history: ReturnType<typeof historyRow>) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<ReturnType<typeof historyRow>>((ok, fail) => {
+      resolve = ok
+      reject = fail
+    })
+    return { promise, resolve, reject }
+  }
+
+  it('keeps the latest failure when an older history succeeds', async () => {
+    const older = deferredHistory()
+    const latest = deferredHistory()
+    fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+    const first = hydrateKeeperChatHistory(' echo ')
+    const second = hydrateKeeperChatHistory('echo', { force: true })
+    latest.reject(new Error('latest history failed'))
+    await second
+    const latestError = keeperChatHistoryErrors.value.echo
+    expect(latestError).toContain('latest history failed')
+    older.resolve(historyRow('stale-history'))
+    await first
+    expect(keeperChatHistoryErrors.value.echo).toBe(latestError)
+    expect(keeperChatHistoryHydration.value.echo).toBe('failed')
+    expect(keeperThreads.value.echo ?? []).toHaveLength(0)
+    expect(fetchKeeperToolCalls).not.toHaveBeenCalled()
+    fetchKeeperChatHistory.mockResolvedValueOnce([])
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not let an older failure retire a newer success', async () => {
+    const older = deferredHistory()
+    const latest = deferredHistory()
+    fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+    const first = hydrateKeeperChatHistory('echo')
+    const second = hydrateKeeperChatHistory('echo', { force: true })
+    latest.resolve(historyRow('latest-history'))
+    await second
+    older.reject(new Error('stale history failed'))
+    await first
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['resolve', 'reject'] as const)('keeps the latest request pending after an older %s', async outcome => {
+    const older = deferredHistory()
+    const latest = deferredHistory()
+    fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+    const first = hydrateKeeperChatHistory('echo')
+    const second = hydrateKeeperChatHistory('echo', { force: true })
+    if (outcome === 'resolve') older.resolve(historyRow('stale-history'))
+    else older.reject(new Error('stale history failed'))
+    await first
+    expect(keeperHydrating.value.echo).toBe(true)
+    expect(keeperChatHistoryHydration.value.echo).toBeUndefined()
+    expect(keeperChatHistoryErrors.value.echo).toBeUndefined()
+    expect(keeperThreads.value.echo ?? []).toHaveLength(0)
+    latest.resolve(historyRow('latest-history'))
+    await second
+    expect(keeperHydrating.value.echo).toBe(false)
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['latest-history'])
+  })
+
+  it('does not merge a stale history after the latest success', async () => {
+    const older = deferredHistory()
+    const latest = deferredHistory()
+    fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+    const first = hydrateKeeperChatHistory('echo')
+    const second = hydrateKeeperChatHistory('echo', { force: true })
+    latest.resolve(historyRow('latest-history'))
+    await second
+    older.resolve(historyRow('stale-history'))
+    await first
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['latest-history'])
+    expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
   })
 
   it('allows a retry after a failed fetch', async () => {

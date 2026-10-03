@@ -136,6 +136,53 @@ class ReportCliTest(unittest.TestCase):
                 text=True,
             )
 
+    def test_incremental_manifest_preserves_all_pairs_and_canonical_digest(self) -> None:
+        manifest = fixture()
+        pairs = []
+        for index in range(5):
+            pair = copy.deepcopy(manifest["pairs"][0])
+            pair["sample_id"] = str(index)
+            for arm in ("baseline", "preflight"):
+                pair[arm]["run"]["run_id"] = arm + str(index)
+            pairs.append(pair)
+        manifest["pairs"] = pairs
+        manifest["unused"] = {"integer": 2 ** 80, "float": -0.0, "text": "한글🙂", "array": [None, True]}
+        for keys in (list(manifest), list(reversed(manifest))):
+            with self.subTest(keys=keys):
+                reordered = {key: manifest[key] for key in keys}
+                result = self.execute(reordered)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual([p["sample_id"] for p in report["pairs"]], [str(i) for i in range(5)])
+                self.assertEqual(report["recorded_generation_skips"], 5)
+                expected = hashlib.sha256(json.dumps(
+                    manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+                self.assertEqual(report["manifest_sha256"], expected)
+
+    def test_incremental_json_boundary_and_syntax(self) -> None:
+        # Place a number across the initial read boundary, including a partial exponent.
+        for offset in range(5):
+            prefix = '{"padding":"' + ("x" * (65510 + offset)) + '","number":'
+            raw = prefix + "1.25e+100," + json.dumps(fixture())[1:]
+            result = self.execute_raw(raw)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = hashlib.sha256(json.dumps(
+                json.loads(raw), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(json.loads(result.stdout)["manifest_sha256"], expected)
+        raw = json.dumps(fixture())
+        for malformed in (
+            raw + "{}", raw[:-1], raw[:-1] + ",}",
+            raw.replace('"pairs": [', '"pairs": null, "pairs": [', 1),
+            raw.replace('"pairs": [', '"pairs": {', 1),
+            raw.replace('"run_id": "base-1"', '"run_id": "base-1", "run_id": "duplicate"', 1),
+            raw.replace('"environment":', '"unused": [0,], "environment":', 1),
+        ):
+            with self.subTest(malformed=malformed[:60]):
+                result = self.execute_raw(malformed)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("Traceback", result.stderr)
+
     def test_chunked_hash_matches_canonical_json(self) -> None:
         manifest = fixture()
         # Cross chunk boundaries with escaped, Unicode and surrogate code points.
@@ -222,6 +269,36 @@ class ReportCliTest(unittest.TestCase):
                 invalid = copy.deepcopy(manifest)
                 invalid["pairs"][0]["baseline"]["run"]["output"][field] = bad
                 self.assertEqual(self.execute(invalid).returncode, 1)
+
+    def test_success_requires_persisted_revision(self) -> None:
+        for revision in (0, 1):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                manifest["pairs"][0][arm]["run"]["output"]["after"]["revision"] = revision
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 0 if revision == 1 else 1, result.stderr)
+
+    def test_success_rejects_fully_recorded_failed_gate(self) -> None:
+        failed_gate = {
+            "status": "failed", "reason": "fixture evaluator failed", "applied_absorptions": [],
+            "left": [], "conveyed": [], "unjudged": [], "unjudgeable": [],
+            "conveyed_boundary": 0.5, "copy_checks": [], "evaluations": [],
+        }
+        for status in ("succeeded", "failed", "cancelled"):
+            manifest = fixture()
+            for arm in ("baseline", "preflight"):
+                run = manifest["pairs"][0][arm]["run"]
+                run["status"] = status
+                run["output"]["absorb_gate"] = copy.deepcopy(failed_gate)
+                if status != "succeeded":
+                    for key in ("after", "before", "exact_output", "absorption", "claims_not_applied"):
+                        del run["output"][key]
+                if status == "failed":
+                    run.update(code="absorb_judgment_failed", detail="fixture evaluator failed")
+            result = self.execute(manifest)
+            self.assertEqual(result.returncode, 1 if status == "succeeded" else 0, result.stderr)
+            if status == "succeeded":
+                self.assertEqual(result.stdout, "")
 
     def test_slots_and_domain_fallback_remain_visible(self) -> None:
         manifest = fixture()

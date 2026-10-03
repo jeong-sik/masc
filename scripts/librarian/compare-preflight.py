@@ -18,9 +18,10 @@ import math
 import re
 import statistics
 import sys
-from collections.abc import Iterator
+import tempfile
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import TypeAlias, cast
+from typing import BinaryIO, TextIO, TypeAlias, cast
 
 Json: TypeAlias = None | bool | int | float | str | list["Json"] | dict[str, "Json"]
 
@@ -463,8 +464,9 @@ def completed_memory_output(output: dict[str, Json]) -> None:
     after = obj(output.get("after"), "completed after")
     if after.get("commit") not in ("rewritten", "unchanged"):
         raise ValueError("unknown completed Memory commit")
-    for key in ("revision", "fact_count"):
-        count(after.get(key), "after " + key)
+    if count(after.get("revision"), "after revision") < 1:
+        raise ValueError("completed Memory revision must be at least one")
+    count(after.get("fact_count"), "after fact_count")
     number(after.get("updated_at"), "after updated_at")
     change = obj(after.get("change"), "completed change")
     for key in ("added_count", "removed_count", "retained"):
@@ -488,12 +490,9 @@ def completed_memory_output(output: dict[str, Json]) -> None:
     status = gate.get("status")
     if status == "skipped":
         text(gate.get("reason"), "skipped absorb gate reason")
-    elif status in ("judged", "failed"):
+    elif status == "judged":
         number(gate.get("conveyed_boundary"), "conveyed_boundary")
-        if status == "judged":
-            count(gate.get("requests"), "absorb gate requests")
-        else:
-            text(gate.get("reason"), "absorb gate failure")
+        count(gate.get("requests"), "absorb gate requests")
         for key in ("unjudged", "unjudgeable"):
             absorptions(gate.get(key), "absorbed")
         for key in ("left", "conveyed"):
@@ -581,17 +580,7 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     return run, payload, output, elapsed
 
 
-def compare(manifest: Json) -> dict[str, Json]:
-    data = obj(manifest, "manifest")
-    source_head = sha(data.get("source_head"), "source_head", 40)
-    config_hash = sha(data.get("config_sha256"), "config_sha256")
-    environment = text(data.get("environment"), "environment")
-    kind = text(data.get("evidence_kind"), "evidence_kind")
-    if kind not in ("fixture", "native", "live"):
-        raise ValueError("evidence_kind must distinguish fixture, native and live")
-    pairs = data.get("pairs")
-    if not isinstance(pairs, list) or not pairs:
-        raise ValueError("pairs must be a nonempty list")
+def compare(data: dict[str, Json], pairs: Iterable[Json], manifest_hash: Callable[[], str]) -> dict[str, Json]:
     sample_ids: set[str] = set()
     run_ids: set[str] = set()
     records: list[Json] = []
@@ -714,12 +703,22 @@ def compare(manifest: Json) -> dict[str, Json]:
                 "full_llm_skipped": skipped,
             }
         )
+        # Release each pair before requesting the next decoded value.
+        del item, pair, run, baseline, preflight, before, after, baseline_output, preflight_output
+    if not records:
+        raise ValueError("pairs must be a nonempty list")
+    source_head = sha(data.get("source_head"), "source_head", 40)
+    config_hash = sha(data.get("config_sha256"), "config_sha256")
+    environment = text(data.get("environment"), "environment")
+    kind = text(data.get("evidence_kind"), "evidence_kind")
+    if kind not in ("fixture", "native", "live"):
+        raise ValueError("evidence_kind must distinguish fixture, native and live")
     return {
         "declared_source_head": source_head,
         "declared_config_sha256": config_hash,
         "declared_environment": environment,
         "declared_evidence_kind": kind,
-        "manifest_sha256": digest(manifest),
+        "manifest_sha256": manifest_hash(),
         "pairs": records,
         "paired_median_delta_s": statistics.median(deltas),
         "recorded_generation_skips": skips,
@@ -730,14 +729,150 @@ def compare(manifest: Json) -> dict[str, Json]:
     }
 
 
+class JsonValueReader:
+    """Frame root members/pairs; the standard decoder owns JSON value syntax."""
+
+    def __init__(self, source: TextIO):
+        self.source = source
+        self.buffer = ""
+        self.position = 0
+        self.eof = False
+        self.decoder = json.JSONDecoder(object_pairs_hook=unique_object)
+
+    def compact(self) -> None:
+        self.buffer = self.buffer[self.position:]
+        self.position = 0
+
+    def read_more(self, size: int) -> None:
+        parts = [self.buffer]
+        while size:
+            part = self.source.read(min(size, 64 * 1024))
+            if not part:
+                self.eof = True
+                break
+            parts.append(part)
+            size -= len(part)
+        self.buffer = "".join(parts)
+
+    def peek(self) -> str:
+        while True:
+            while self.position < len(self.buffer):
+                char = self.buffer[self.position]
+                if char not in " \t\r\n":
+                    return char
+                self.position += 1
+            if self.eof:
+                return ""
+            self.compact()
+            self.read_more(64 * 1024)
+
+    def take(self, expected: str) -> None:
+        if self.peek() != expected:
+            raise ValueError("expected JSON delimiter " + expected)
+        self.position += 1
+
+    def value(self) -> Json:
+        self.peek()
+        self.compact()
+        while True:
+            try:
+                value, end = self.decoder.raw_decode(self.buffer)
+            except json.JSONDecodeError:
+                if self.eof:
+                    raise
+            else:
+                # A number at a buffer edge may continue (1 -> 1e20).
+                if end == len(self.buffer) and not self.eof:
+                    self.read_more(1)
+                if end == len(self.buffer) or self.buffer[end] in " \t\r\n,:]}":
+                    self.position = end
+                    return cast(Json, value)
+                if self.eof:
+                    raise ValueError("invalid JSON value boundary")
+                del value
+            # Geometric growth bounds decoder retries for one large value.
+            self.read_more(max(64 * 1024, len(self.buffer)))
+
+
+def manifest_pairs(reader: JsonValueReader, data: dict[str, Json], spool: BinaryIO,
+                   fields: dict[str, tuple[int, int]]) -> Iterator[Json]:
+    reader.take("{")
+    if reader.peek() != "}":
+        while True:
+            key = string(reader.value(), "manifest key")
+            if key in fields:
+                raise ValueError("duplicate JSON object key " + repr(key))
+            reader.take(":")
+            start = spool.tell()
+            fields[key] = (start, 0)
+            if key == "pairs":
+                reader.take("[")
+                spool.write(b"[")
+                first = True
+                if reader.peek() != "]":
+                    while True:
+                        value = reader.value()
+                        if not first:
+                            spool.write(b",")
+                        first = False
+                        spool.writelines(canonical_chunks(value))
+                        reader.compact()
+                        yield value
+                        del value
+                        if reader.peek() == "]":
+                            break
+                        reader.take(",")
+                reader.take("]")
+                spool.write(b"]")
+            else:
+                value = reader.value()
+                if key in ("source_head", "config_sha256", "environment", "evidence_kind"):
+                    data[key] = value
+                spool.writelines(canonical_chunks(value))
+                del value
+            fields[key] = (start, spool.tell() - start)
+            if reader.peek() == "}":
+                break
+            reader.take(",")
+    reader.take("}")
+    if reader.peek():
+        raise ValueError("extra data after manifest")
+    if "pairs" not in fields:
+        raise ValueError("pairs must be a nonempty list")
+
+
+def spooled_manifest_hash(spool: BinaryIO, fields: dict[str, tuple[int, int]]) -> str:
+    result = hashlib.sha256()
+    result.update(b"{")
+    for index, key in enumerate(sorted(fields)):
+        if index:
+            result.update(b",")
+        for chunk in canonical_chunks(key):
+            result.update(chunk)
+        result.update(b":")
+        start, remaining = fields[key]
+        spool.seek(start)
+        while remaining:
+            chunk = spool.read(min(remaining, 64 * 1024))
+            if not chunk:
+                raise OSError("canonical manifest spool ended early")
+            result.update(chunk)
+            remaining -= len(chunk)
+    result.update(b"}")
+    return result.hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
     path = cast(Path, args.manifest)
     try:
-        manifest = cast(Json, json.loads(path.read_text(), object_pairs_hook=unique_object))
-        report = compare(manifest)
+        with path.open(encoding="utf-8") as source, tempfile.TemporaryFile() as spool:
+            data: dict[str, Json] = {}
+            fields: dict[str, tuple[int, int]] = {}
+            pairs = manifest_pairs(JsonValueReader(source), data, spool, fields)
+            report = compare(data, pairs, lambda: spooled_manifest_hash(spool, fields))
         rendered = json.dumps(report, indent=2, allow_nan=False)
     except (OSError, ValueError) as error:
         print(f"preflight measurement refused: {error}", file=sys.stderr)

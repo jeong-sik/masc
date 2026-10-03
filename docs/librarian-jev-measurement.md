@@ -57,15 +57,28 @@ before normalization, including within these two JSON variables; the manifest
 digest describes canonical JSON, not the original file's whitespace or key order.
 Keep all selected sample IDs in the manifest to avoid selection bias.
 
-Canonical hashing processes string fragments incrementally, retaining the same
-canonical JSON digest without a whole-document serialization or UTF-8 byte copy.
-The CLI still loads the entire manifest, and prompt rendering also materializes
-one rendered prompt. This is not a streaming run-export reader. A synthetic
-one-pair Linux CLI measurement with 136,600,000 ASCII history bytes per arm
-(273,204,700-byte manifest) reduced peak RSS from 817,728 to 550,908 KiB; both
-runs exited zero with identical manifest hashes. This does not establish an OOM
-threshold or bound arbitrary multi-pair inputs. Full incremental input processing
-remains unresolved; no input-size cap or skipped samples hide this limitation.
+The CLI reads the same manifest incrementally, decoding one pair at a time with
+Python's standard JSON decoder. It does not add a file-reference format or a
+parser dependency. All selected samples remain in order, including failures.
+Metadata may appear before or after the pairs. Duplicate keys and malformed or
+trailing JSON are refused before any report is printed.
+
+Canonical pair bytes are written to a private temporary file. After validation,
+the reporter hashes its root members in sorted order, reading those bytes back
+in chunks. This preserves the canonical manifest digest regardless of input key
+order without keeping all decoded pairs. Input retention depends on the largest
+pair or metadata value and decoder lookahead, not the sum of all pair inputs.
+Prompt rendering still materializes one prompt. Sample/run identities and the
+reported summaries remain in memory, so report-sized state still grows with the
+sample count. This is pair-bounded input processing, not constant-memory parsing
+of an arbitrarily large individual value.
+
+The tradeoff is temporary disk space proportional to canonical manifest size,
+plus serialization and disk I/O. Temporary-file failures refuse the report;
+there is no input-size cap or silent sample omission. Preserve enough temporary
+storage for the selected export set. A synthetic Linux CLI scaling measurement
+uses 136,600,000 ASCII conversation bytes per arm; the raw evidence records
+baseline and current RSS and verifies complete report equality for each batch.
 
 ```sh
 python3 scripts/librarian/compare-preflight.py frozen-manifest.json > report.json

@@ -4202,7 +4202,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
-let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) ?(completed_reply=false) ?(media_only=false) () =
+let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) ?(completed_reply=false) ?(media_only=false) ?(with_reply_pool=false) () =
   init_runtime_default_for_tests ();
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4216,6 +4216,10 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
       remove_tree base_path)
     (fun () ->
        Eio.Switch.run @@ fun sw ->
+       let reply_pool = if with_reply_pool then
+         Some (Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env))
+         else None in
+       Executor_pool_ref.For_testing.with_pool_option reply_pool @@ fun () ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
        (* Delegate preflight reads the keeper's declared lane from its TOML;
@@ -5307,7 +5311,9 @@ let () =
         ; test_case "completed delegate returns full owned exact-turn reply" `Quick
             (fun () ->
               test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ();
-              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ~media_only:true ())
+              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ~media_only:true ();
+              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ~with_reply_pool:true ();
+              test_agent_delegate_submits_owner_operation_without_waiting ~completed_reply:true ~media_only:true ~with_reply_pool:true ())
         ; test_case "peer artifacts reach the recipient Owner queue" `Quick
             (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:true)
         ; test_case

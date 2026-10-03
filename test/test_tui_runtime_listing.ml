@@ -1217,9 +1217,9 @@ let test_the_picker_keys_and_rows_go_through_the_shared_list () =
   List.iter
     (fun binding_name ->
       Alcotest.(check int)
-        (binding_name ^ " draws the label the filter matches") 1
+        (binding_name ^ " draws the model title on the summary row") 1
         (calls ~module_path:"bin/masc_tui_render.ml" ~binding_name
-           "Masc_tui_types.runtime_picker_label_for"))
+           "Masc_tui_types.runtime_model_picker_title"))
     [ "render_lanes_overview"; "render_runtime" ]
 
 (* The Keeper runtime picker (Keepers, [U]): the declared lanes first, then

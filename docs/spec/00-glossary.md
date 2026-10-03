@@ -50,6 +50,15 @@ status: reference
   → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
   [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
 
+**Official Client Failure Observation (공식 클라이언트 전송 후 실패 관찰)**
+: 공식 클라이언트 Lane에서 관찰하는 runtime 관측값의 실패 쪽 규칙
+  (`Keeper_turn_driver.official_client_observation`). 성공 관측값은 그대로
+  통과하고, 실패는 공식 클라이언트가 프롬프트 전송을 보고한 뒤에만 관찰값이
+  된다. 전송 보고가 없는 실패는 이 관찰값으로 잡히지 않으므로, 실패 관찰값이
+  없다는 것은 성공을 뜻하지 않는다. 관찰값은 `runtime_id`와 `model_id`를
+  이름 짓고, `prompt_sent_at`을 기준 시각으로 둔다.
+  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
@@ -1055,6 +1064,19 @@ status: reference
   관측을 되돌려 써서, 쉬는 슬롯을 형제 뒤로 강등한다(`Demotion`의 후보 강등과 같은
   불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
+: Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
+  그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,
+  `Runtime.replace_exact_output_lane_slot`) 자리를 옮기는 편집
+  (`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로). 교체는
+  쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹에
+  속하고 이 lane 어디에도 선언되지 않은 runtime id여야 하며, 나머지
+  후보의 순서는 보존된다. 그룹을 넘는 교체와 없는 id는 거절되고, lane에
+  후보를 더하는 것은 별개 편집이다. 이 편집은 **Runtime Candidate Order**
+  선언을 바꾸는 것이지, 그 순서로 이미 도는 turn을 바꾸는 게 아니다.
+  → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
+  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
 
 **Max Prompt Bytes (최대 프롬프트 바이트)**
 : MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한

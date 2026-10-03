@@ -36,6 +36,22 @@ val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
+val save_sampling_request : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+(** Independently retain the terminal request/outcome link before replacing the
+    primary request index. Terminal records include exact [outcome_bytes] before
+    blob publication; recovery verifies the digest and restores a missing blob. *)
+val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
+  f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
+(** Stream recovery records with bounded per-record reads and constant directory
+    memory. Terminal recovery links are visited first, then unresolved requests.
+    The callback can stop immediately with [Error]; directory and decoding errors
+    are explicit. Call from a system thread. No ordering is guaranteed. *)
+
+(** Discover requests after cancellation or restart, including pending rows that
+    have no terminal evidence. Records are atomically replaced, never removed. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
@@ -83,6 +99,7 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val save_action : sync_parent:(string -> unit) -> t -> instance_id:string ->
     request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

@@ -63,3 +63,37 @@ It verifies requested isolation flags, not kernel enforcement or provider
 execution. Native CI remains pending. The production runtime still needs its
 installation-owned route/callback and durable request evidence bridge; merely
 setting the manifest mode does not wire a provider.
+
+## Retained host model requests
+
+`Lane_addon_sampling.create` wraps a host-owned invocation callback for one
+declared package, exact worker instance and explicit route. It retains the
+sampling request before calling the callback and passes that immutable request
+reference to the host. It then retains the actual response or error as a separate
+record linked to the request. Provider credentials/configuration are outside
+the callback's sampling payload and are not serialized by this boundary.
+
+Successful sampling responses carry request/outcome references under
+`_meta["masc.lane_sampling"]`. Host errors remain neutral `host_error` outcomes;
+the string-error callback cannot establish whether an error was a policy refusal
+or a provider failure. Unexpected invocation exceptions are `outcome_unknown`.
+Error responses expose that status inline because a container cannot read the
+host's evidence store. Cancellation propagates after a returned outcome has
+been validated and indexed; interrupted invocations retain their pending request.
+If terminal retention fails after invocation, package replies expose only a neutral
+status. Host recovery indexes preserve the request and any terminal outcome; their
+retained evidence is authoritative about whether the call returned. The first
+terminal index includes exact outcome bytes before blob publication, allowing
+recovery to restore an interrupted blob write without repeating the model call.
+
+The package's existing byte envelope bounds request and outcome retention.
+A request that cannot be retained is not invoked. Host filesystem writes are
+offloaded from the Eio owner domain. When an error response or its inline
+evidence references exceed the package envelope, the boundary returns a compact
+bounded refusal without repeating the unbounded payload, preserving durable
+terminal storage and index recovery. The worker stdio scenario inspects durable
+request bytes inside the invocation callback, reads actual response/error records,
+and exercises pre-invocation bounds and post-invocation retention uncertainty.
+The model response remains synthetic fixture data and native execution is pending
+CI. Installing provider routes in the production runtime and carrying these
+references into package output publication are still required.

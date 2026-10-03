@@ -339,9 +339,10 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
     ignore (get (Actions.discover ~binary ~sw ~net ~base_path:base selected)));
   let before=In_channel.with_open_bin runtime In_channel.input_all in
   let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
-  let request id context=`Assoc ["revision",`String revision;
-    "connections",`List [`Assoc ["source",selected;"models",`List [`Assoc [
-      "id",`String id;"context",`Int context;"streaming",`Bool true]]]];
+  let request ?image id context=`Assoc ["revision",`String revision;
+    "connections",`List [`Assoc ["source",selected;"models",`List [`Assoc ([
+      "id",`String id;"context",`Int context;"streaming",`Bool true]
+      @ (match image with None -> [] | Some value -> ["supports_image_input", value]))]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
   let row context=`Assoc ["id",`String "reported-muse";"context",context] in
   let reported=row (`Int 8192) in
@@ -364,6 +365,23 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
      "context absent",[row `Null],"reported-muse",8192;
      "context nonpositive",[row (`Int 0)],"reported-muse",8192;
      "ambiguous catalog ID",[reported;reported],"reported-muse",8192];
+  List.iter (fun (name, capability, requested) ->
+    let model = match reported with `Assoc fields ->
+      `Assoc (fields @ (match capability with None -> []
+        | Some value -> ["supports_image_input", `Bool value]))
+      | _ -> fail "fixture model is not an object" in
+    save catalog_path (Yojson.Safe.to_string (`List [model]));
+    Alcotest.check Alcotest.bool (name ^ " refuses capability tampering") true
+      (Actions.save ~binary ~base_path:base
+        (request ~image:requested "reported-muse" 8192) = Error Actions.Invalid_request);
+    Alcotest.check Alcotest.string (name ^ " preserves configuration") before
+      (In_channel.with_open_bin runtime In_channel.input_all);
+    Alcotest.check Alcotest.bool (name ^ " avoids native verification") false
+      (Sys.file_exists (Filename.concat base "save-calls")))
+    ["false cannot become true", Some false, `Bool true;
+     "true cannot become false", Some true, `Bool false;
+     "unknown cannot become asserted", None, `Bool true;
+     "malformed capability", Some true, `String "true"];
   save catalog_path (Yojson.Safe.to_string (`List [reported]));
   ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 8192)));
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true

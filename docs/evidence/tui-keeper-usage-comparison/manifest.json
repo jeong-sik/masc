@@ -20,5 +20,9 @@
     "snapshot_sha256": "44aa11a888e207051b9a39b6d7a547bb0b83c5b27738923fd6bd340f6373075c",
     "candidate_replay": "PASS"
   },
-  "production_install_verified": false
+  "production_install_verified": false,
+  "source_evidence_boundary": {
+    "applies_to_current_pr_head": false,
+    "note": "Historical candidate capture before unread-turn coverage and comparison-bar repairs. The pictured partial rows may show bars; current source excludes them. Binary/frame/source hashes do not verify the corrected head; no new native/PTY/browser execution is claimed."
+  }
 }

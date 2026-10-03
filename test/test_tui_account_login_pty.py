@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml", "bin/masc_tui_sgr_text.ml")
+
 LOGIN = "/api/v1/setup/accounts/login"
 SESSION = "a" * 64
 ACCOUNT = "b" * 64

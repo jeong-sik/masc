@@ -1,9 +1,10 @@
-# Fusion result composition: first implementation
+# Fusion package composition
 
 Fusion can be represented as a composite Lane: a shared question and evidence
 fan out to panel seats, converge at a judge, optionally pass through review,
 and produce an advisory result. The [interactive composer](lane-addons-composer.html)
-shows that structure inside one editable block.
+shows isolated panel/Judge packages as horizontal workers and vertical connections.
+The existing host Fusion result path can also be inspected as a composite block.
 
 ## Implemented boundary
 
@@ -14,7 +15,7 @@ run identity, status, failure, evidence state and the exact-run Board post.
 It publishes `status` and `result` ports for generic downstream lane_output
 composition. The existing image workflow discovers it without a new dispatcher.
 
-This changes result composition, not where model computation runs.
+This projection path changes result composition, not where its computation runs.
 Fusion still owns panel/judge calls, durable async request identity, terminal
 settlement, Board projection and continuation delivery in the host.
 The package has no credentials or compute/action port.
@@ -75,20 +76,62 @@ source removal. Unverified attribution and foreign callers cannot retrieve it.
 
 The standalone HTML supports adding, duplicating, renaming and removing blocks,
 connecting compatible outputs, fan-in/fan-out, automatic topological layer layout,
-undo and validated JSON import/export. Fusion is one external block whose panel
+undo and validated JSON import/export. The default example connects one shared
+input to two isolated `fusion-compute` panels, a `fusion-compute` Judge and a
+`fusion-report` worker. The computation workers publish the actual `result` port;
+the editor uses `computation` as its compatible connection type.
+The editor can also open a `fusion-report` output JSON or its successful MCP
+`structuredContent` response. Received report bodies and input gaps are shown
+as plain text. A report's run, analysis and producing installation can be
+compared with declared inputs; a match describes the draft wiring only. Editing
+or importing another draft recalculates that comparison. This viewer does not
+verify evidence, query a server, install a worker or create sharing/read receipts.
+An independently opened Evidence receipt exposes its owner, exact selected row
+IDs and intended Keeper/Broadcast delivery state. The viewer associates it with
+a report only when the row ID is selected and its native Lane name matches the
+receipt's owner exactly. An unowned package row or another observation stays
+unassociated. This compares file coordinates only; it does not verify payload
+digests or turn delivery acceptance into Keeper reading or use.
+The existing host Fusion example is one external block whose panel
 roles and simple/refine structure can be inspected and edited internally.
 Fusion's other host topologies are accepted by the result projector but are
 not editable in this first UI.
 
-The example output type `insights` in the composer is a design-level connection
+The example output types `insights` and `computation` are design-level connection
 type. It is not a new server schema or the package's actual `status/result`
 port schema. Importing a graph does not install or run it.
 
 The missing-source preview uses synthetic data only. It propagates source
 references and missing inputs without claiming model execution, Board publication,
-Broadcast delivery or Keeper reads. Broadcast/report blocks remain proposed roles.
+Broadcast delivery or Keeper reads. Explicit host Evidence sharing and the Fusion report package are implemented in
+source. The editor’s automatic Broadcast connection remains a proposed flow;
+its preview never sends a message or records an agent reading it.
 
 ## Validation and remaining work
+
+The explicit Docker package qualifier executes a generated declaration plan
+through separate panel, Judge and report containers. It compares baked source
+bytes, image identity, declared resource limits and isolation flags, then checks
+MCP responses and retained fixture request/outcome references in the report.
+For independent panels, two fixture barriers hold model replies until every
+panel has requested sampling. Docker inspection records all those containers
+running before any reply is released. Their answers then converge through the
+Judge and report. This proves package-level concurrent sampling without timing
+or sleep guesses.
+The fixture transport has a deadline that kills and reaps its attach process
+if a package stops replying. This lets failed parallel qualification reach
+owned-container cleanup; it does not set a product sampling timeout.
+Only containers bearing its own run label are removed. It does not invoke the
+native MASC factory, resolve real named ports, use the native scheduler, call a
+provider, Broadcast or a Keeper. Images must already be built from the current
+checked-in package Dockerfiles; it does not run automatically in CI.
+
+```sh
+python3 test/qualify_lane_composition_containers.py \
+  --plan <generated-declarations.json> \
+  --compute-image <proof-compute-image> --report-image <proof-report-image> \
+  --output-dir <evidence-directory>
+```
 
 - Five stdio feature scenarios verify exact-run origin, immutable capture
   evidence, lifecycle and coverage, exporter identity and generic downstream
@@ -107,9 +150,9 @@ Broadcast delivery or Keeper reads. Broadcast/report blocks remain proposed role
 Docker/host installation, current-head CI and production model/worker behavior
 are separate evidence stages. None are claimed by the local stdio/browser checks.
 The native acquisition bridge is implemented with CI validation pending.
-The next runtime work is the credential/runtime boundary for moving compute into isolation, and
-durable Board/Broadcast/read integration. Generic composite/subflow execution
-is not introduced by this slice.
+The isolated computation and explicit artifact-sharing source paths are described
+below. Native/container execution and actual Keeper decision use still require
+proof. Generic composite/subflow execution is not introduced by these packages.
 
 Source authority: `lib/fusion_core/fusion_run_registry.ml`,
 `lib/server/server_dashboard_fusion_run_projection.ml`,
@@ -123,9 +166,9 @@ The `fusion-report` package adds an executable projection after `fusion-results`
 native Fusion run → captured status/result → report → host Evidence delivery.
 Its named `report` port contains the retained analysis body and exact input
 lineage. The package keeps analysis completion, input completeness and delivery
-as separate states. Report generation is implemented; model computation inside
-an isolated Fusion package and graph-driven Broadcast execution remain follow-up
-work under issue #40183.
+as separate states. Report generation and isolated computation are implemented
+in source; graph-driven automatic Broadcast execution remains follow-up work
+under issue #40183.
 
 The report port includes a shared input-context row and the individual reports
 that reference it. That context retains the whole input coverage, exact producer
@@ -199,3 +242,59 @@ destinations, retained evidence, and absence of automatic resend. The PTY
 scenario checks selection, cancellation, explicit submission and visible receipt
 using controlled HTTP data. All native/PTY execution remains pending current-head
 CI; no live fleet Broadcast or model use is claimed.
+
+## Installation declaration preview
+
+The editor's isolated template can generate four real TOML declarations: two
+`fusion-compute` panels, a `fusion-compute` Judge and a `fusion-report` worker.
+Enter shared run/analysis/question and server manifest paths in common settings.
+Select each worker to enter installation identity, declared model route,
+instructions and provider output limit. The source block requires both the
+server file path and that retained JSON envelope's exact `source_id`.
+
+The preview compiles compatible edges into same-run `snapshot_file` and
+`lane_output` bindings with the producer's `result` port. Missing routes/paths,
+duplicate input or installation identities, incompatible ports and cycles are
+errors. The preview offers one download per declaration; it does not install,
+build images, call a model or publish messages. Broadcast/agent blocks remain
+manual delivery plans and generate no declarations or automatic sends.
+
+Saved JSON uses version 2 and includes common settings and worker bindings.
+Import and undo restore the same saved state used for TOML generation. A version
+1 graph without this installation contract is rejected rather than combined
+with stale settings. Other conceptual templates remain editable but are not
+silently translated into unsupported packages.
+
+`test/test_lane_composition_export.mjs` checks the actual HTML template,
+serialized settings roundtrip and negative cases. Python parsed the generated
+TOML and passed its exact bindings through four shipped package MCP subprocesses
+with fixture host answers. Actual Chromium interactions additionally verify field edits, TOML download,
+Undo, saved JSON import and a 390px layout. Source hashes, screenshots and results
+are in [browser evidence](../evidence/lane-composer-browser-20260930/summary.json).
+JSON-schema-engine, native host acquisition, Docker and live model verification
+remain separate and unproven.
+
+## Isolated computation and shared evidence
+
+`fusion-compute` runs as an isolated package with `panel` or `judge` role. It
+requests model access through its declared host sampling route; the worker has
+no provider network or injected host credentials. The host persists the exact
+model request before invocation, then retains the actual answer, failure or
+uncertain outcome. A Judge consumes explicitly bound completed upstream ports.
+Missing observations return waiting coverage without a model call. Its result
+propagates ancestral source and model references so final `fusion-report`
+artifacts include panel and Judge evidence.
+
+The `source_changes` runtime compares completed input identities for automatic
+producer refreshes. Acquisition time does not create a new Lane-port generation;
+producer identity, output, mapping, status and coverage remain part of the input.
+Explicit Observe always runs. Native source/composition scenarios force an
+overlapping notification and check one call, explicit retry and a new generation.
+
+The manual container qualification uses the real runtime and host factory, four
+workers installed together, and synthetic loopback HTTP model replies. It checks
+panel overlap, original request/outcome artifacts, container isolation, explicit
+local-fixture Broadcast receipts and Keeper artifact bytes after detach. Native
+execution is unverified; the previous probe CI failed during compilation because
+its direct MCP protocol dependency was omitted. That dependency is repaired
+locally. The operator has stopped CI; no fresh run or push is claimed here.

@@ -21,7 +21,7 @@ type connection = {
   container_id : string;
 }
 type backend = {
-  start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
+  start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
     on_created:(connection -> unit) -> (connection, string) result;
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
@@ -83,6 +83,15 @@ let fleet_backend = ref None
 let register_fleet_backend backend = fleet_backend := Some backend
 let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
+let sampling_factory = ref None
+let register_sampling_factory factory = sampling_factory := Some factory
+let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
+  match package.model_access with
+  | Model_disabled -> Ok None
+  | Host_sampling ->
+      let* factory = match !sampling_factory with Some factory -> Ok factory
+        | None -> Error "host sampling runtime is unavailable" in
+      factory ~sw ~store ~instance_id ~package ~binding |> Result.map Option.some
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
@@ -357,7 +366,7 @@ let wake_dependents m producer =
   | None -> ()
   | Some owner -> entries m |> List.iter (fun e ->
       if e.running && not e.stopping && e.run_id = producer.run_id
-        && List.mem owner.id e.input_installations then wake e)
+        && List.mem owner.id e.input_installations then wake ~request:Refresh_sources e)
 let failed m e message =
   if not e.stopping then e.phase <- Failed message;
   match persist m e with Ok () -> wake_dependents m e | Error error ->
@@ -594,7 +603,7 @@ let run ~sw backend m e =
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
           if e.stopping then stop_entry ~sw ~backend m e in
-        match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~on_created:created with
+        match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~binding:e.binding ~on_created:created with
         | Error message ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
               (Option.map (fun c -> c.container_id) e.connection) (Some message);
@@ -638,11 +647,9 @@ let run ~sw backend m e =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id) in
                       if e.stopping then Ok () else
-                      let fingerprint =
-                        if e.package.refresh_policy=Source_changes
-                          && Lane_addon_sources.snapshot_files_only e.refresh_interest
-                        then Some (Lane_addon_store.digest (Yojson.Safe.to_string sources))
-                        else None in
+                      let* fingerprint = match e.package.refresh_policy with
+                        | Source_changes -> Lane_addon_sources.refresh_fingerprint e.refresh_interest sources
+                        | Every_hint -> Ok None in
                       if request=Refresh_sources && previous_phase=Attached
                         && Option.is_some fingerprint && fingerprint=e.last_committed_sources
                       then (
@@ -679,7 +686,9 @@ let backend ~store () = match !override with
        adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
-      start = (fun ~sw ~instance_id ~package ~on_created ->
+      start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
+        let* sampling_handler = prepare_sampling_handler
+          ~sw ~store ~instance_id ~package ~binding in
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
@@ -693,7 +702,7 @@ let backend ~store () = match !override with
         | Some clock ->
             Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
-              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
+              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
       image_ready = (fun ~package ->
@@ -989,6 +998,11 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in
+  (* Construction only validates the registered host boundary. Discard this
+     root-switch closure: backend.start constructs the actual callback with
+     the worker switch, so provider work cannot outlive its worker. *)
+  let* _prepared = prepare_sampling_handler ~sw ~store:m.store
+    ~instance_id:e.instance_id ~package ~binding in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
   wake e; run ~sw (backend ~store:m.store ()) m e;
@@ -1550,16 +1564,16 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
              | Ok result -> Ok result
              | Error message ->
                  let* frozen = freeze () in Ok (frozen, Delivery_failed message) in
-           let delivery = match receipt with
-             | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
-                 "status", `String (match destination with To_broadcast -> "committed"
+           let recipient_fields = match destination with
+             | To_keeper name -> ["keeper_name", `String name]
+             | To_broadcast | Preserve_only -> [] in
+           let delivery_fields = match receipt with
+             | Delivery_receipt receipt -> ["status", `String (match destination with To_broadcast -> "committed"
                    | To_keeper _ | Preserve_only -> "accepted"); "receipt", receipt]
-             | Delivery_failed message -> `Assoc ["destination",`String destination_name;
-                 "status", `String "failed"; "error", `String message]
-             | Delivery_pending_commit message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "pending_commit";"detail",`String message]
-             | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "outcome_unknown";"error",`String message] in
+             | Delivery_failed message -> ["status", `String "failed"; "error", `String message]
+             | Delivery_pending_commit message -> ["status",`String "pending_commit";"detail",`String message]
+             | Delivery_outcome_unknown message -> ["status",`String "outcome_unknown";"error",`String message] in
+           let delivery = `Assoc (("destination",`String destination_name) :: recipient_fields @ delivery_fields) in
            let delivery = match broadcast_request_id, delivery with
              | Some request_id, `Assoc fields -> `Assoc (("request_id",`String request_id) :: fields)
              | _ -> delivery in
@@ -1856,7 +1870,7 @@ module For_testing = struct
     container_id : string;
   }
   type nonrec backend = backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
+    start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
@@ -1874,5 +1888,5 @@ module For_testing = struct
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;
     Hashtbl.iter (fun _ stop -> stop ()) fleet_services; Hashtbl.clear fleet_services;
-    fleet_backend := None; delivery_handler := None; skill_export_handler := None
+    fleet_backend := None; delivery_handler := None; sampling_factory := None; skill_export_handler := None
 end

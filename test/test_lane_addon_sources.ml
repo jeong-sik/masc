@@ -139,6 +139,49 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
     let missing_observation = member "observations" missing |> list |> List.hd in
     check bool "missing document does not become content" true (member "html" missing_observation = `Null)))
 
+let test_completed_port_refresh_identity_preserves_status_and_output () = with_store (fun dir store ->
+  let binding = binding [`Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
+    "installation_id",`String "producer";"selection",`String "latest_completed"]] in
+  let row : Types.row = {id="row";lane_id="owner/result";kind=Types.Value;title="Answer";
+    observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
+  let status : Types.coverage = {source_id="owner";incarnation="owner";cursor=Some "1";
+    complete=true;detail=None} in
+  let producer = ref ({installation_id="producer";instance_id="owner";run_id="run";
+    configuration_revision="config-1";package_revision="package-1";outputs=[];
+    observation_seq=1;output={rows=[row];coverage=[status]};status} : Sources.lane_output) in
+  let interest = require (Sources.refresh_interest binding) in
+  let acquire () = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+    ~resolve_lane_output:(fun ~installation_id:_ -> Ok !producer) ~binding) in
+  let fingerprint value = require (Sources.refresh_fingerprint interest value) in
+  let first = acquire () in
+  let first_key = fingerprint first in
+  check bool "completed ports have a stable automatic identity" true (Option.is_some first_key);
+  let later = match first with
+    | `List [`Assoc fields] -> `List [`Assoc (List.map (fun (key,value) ->
+        if key="observations" then key,`List (List.map (function
+          | `Assoc observation -> `Assoc (("observed_at",`Float 999.) :: List.remove_assoc "observed_at" observation)
+          | _ -> fail "invalid acquired observation") (list value)) else key,value) fields)]
+    | _ -> fail "invalid acquired source array" in
+  check bool "a later host acquisition is the same input" true (fingerprint later=first_key);
+  let changed label update =
+    let original = !producer in producer := update original;
+    check bool label false (fingerprint (acquire ())=first_key);
+    producer := original in
+  changed "new producer generation is different" (fun source -> {source with observation_seq=2});
+  changed "replacement owner is different" (fun source -> {source with instance_id="replacement"});
+  changed "mapping revision is different" (fun source -> {source with configuration_revision="config-2"});
+  changed "worker failure is different even with retained rows" (fun source ->
+    {source with status={status with complete=false;detail=Some "worker failed"}});
+  changed "original output timestamps remain part of input" (fun source ->
+    {source with output={source.output with rows=[{row with observed_at=2.}]}});
+  let file_interest = require (Sources.refresh_interest (`Assoc ["sources",`List [file_source "file" "/fixture/input.json"]])) in
+  check bool "file input timestamps are preserved" false
+    (require (Sources.refresh_fingerprint file_interest first)=require (Sources.refresh_fingerprint file_interest later));
+  let live_interest = require (Sources.refresh_interest (`Assoc ["sources",`List [`Assoc [
+    "source_id",`String "screen";"kind",`String "msx_capture"]]])) in
+  check bool "live capture cannot suppress notification by port identity" true
+    (require (Sources.refresh_fingerprint live_interest first)=None))
+
 let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun dir store ->
   let row id lane_id : Types.row = {id;lane_id;kind=Types.Value;title="Observed";
     observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
@@ -579,6 +622,8 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
             (require (Store.read_blob store reference))) ['a';'b';'c']))
 
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "completed input identity preserves output, mapping and failure" `Quick
+    test_completed_port_refresh_identity_preserves_status_and_output;
   test_case "Fusion envelope overflow creates no orphan and preserves existing evidence" `Quick
     test_fusion_envelope_overflow_does_not_retain_or_remove_blobs;
   test_case "Fusion captures retain earlier state across terminal updates" `Quick

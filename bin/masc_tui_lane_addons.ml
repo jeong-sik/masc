@@ -235,6 +235,11 @@ let detail_instance view snapshot =
 let row_owner instances (row : Row.row) =
   List.find_opt (fun (instance : instance) ->
     String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) instances
+let row_is_result (instance : instance) (row : Row.row) =
+  match instance.display.readings with
+  | [] -> true
+  | readings -> List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
+      String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id)) readings
 let rows_in_screen view snapshot =
   let rows = List.mapi (fun index row -> index, row) snapshot.output.rows in
   match view.screen with
@@ -304,7 +309,15 @@ let put_document view (document : Document.session) =
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name}
 let selected_row view = Option.bind view.snapshot (fun snapshot ->
-  List.find_map (fun (index, row) -> if index = view.row_cursor then Some row else None)
+  List.find_map (fun (index, row) ->
+    let selectable = match view.screen, view.presentation, view.focus with
+      | Detail _, Summary, (Timeline | Instances) ->
+          Option.fold ~none:false ~some:(fun item -> row_is_result item row)
+            (detail_instance view snapshot)
+      | (Overview | Detail _), Flow, _ -> false
+      | Overview, (Summary | Technical), _ | Detail _, Technical, _
+      | Detail _, Summary, (Rows | Connections | Configurations) -> true in
+    if index = view.row_cursor && selectable then Some row else None)
     (rows_in_screen view snapshot))
 let reconcile_snapshot view snapshot =
   let locate key items wanted =
@@ -374,17 +387,21 @@ let ordered_rows view snapshot =
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
+(* Presentation readings identify user-facing results. Supporting context
+   records stay available in Records and raw details without becoming result
+   navigation targets. Packages without readings retain their generic view. *)
+let ordered_result_rows view snapshot =
+  let rows = ordered_rows view snapshot in
+  match view.screen, detail_instance view snapshot with
+  | Detail _, Some item ->
+      List.filter (fun (_, row) -> row_is_result item row) rows
+  | Overview, _ | Detail _, _ -> rows
 let select_initial_result view =
   match view.snapshot, selected_instance view with
-  | Some snapshot, Some item ->
-      let rows = ordered_rows view snapshot in
-      let declared = List.find_opt (fun (_, (row : Row.row)) ->
-        List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
-          String.equal row.lane_id (item.id ^ "/" ^ reading.lane_id)) item.display.readings) rows in
-      let row_cursor = match declared, rows with
-        | Some (index, _), _ -> index
-        | None, (index, _) :: _ -> index
-        | None, [] -> -1 in
+  | Some snapshot, Some _ ->
+      let row_cursor = match ordered_result_rows view snapshot with
+        | (index, _) :: _ -> index
+        | [] -> -1 in
       {view with row_cursor}
   | _ -> view
 let open_selected_instance view =
@@ -472,19 +489,28 @@ let evidence_receipt_lines json =
       let count = match member "row_count" json with Some (`Int n) -> Printf.sprintf "%d row%s" n (if n=1 then "" else "s") | _ -> "rows" in
       let frozen = "Evidence preserved: " ^ count
         ^ (match text (member "sha256" evidence) with Some sha -> " · sha256 " ^ sha | None -> "") in
+      let selection = Option.fold ~none:[] ~some:(fun id -> ["Evidence owner: " ^ id])
+          (text (member "instance_id" json))
+        @ (match member "row_ids" json with
+           | Some (`List ids) -> List.filter_map (fun id ->
+               Option.map (fun id -> "Selected row: " ^ id) (text (Some id))) ids
+           | Some _ | None -> []) in
       let delivery = match member "delivery" json with
         | None -> ["Not shared."]
         | Some delivery ->
             let destination = match text (member "destination" delivery) with
-              | Some "broadcast" -> "Broadcast" | _ -> "Keeper delivery" in
+              | Some "broadcast" -> "Broadcast"
+              | _ -> "Keeper delivery" ^ Option.fold ~none:"" ~some:(fun name -> " to " ^ name)
+                  (text (member "keeper_name" delivery)) in
             (match text (member "status" delivery), text (member "error" delivery) with
              | Some "failed", Some error -> [destination ^ " failed: " ^ error ^ " · the bundle stays preserved"]
              | Some "pending_commit", _ -> [destination ^ " queued · workspace commit is pending; retry uses the same request"]
              | Some "outcome_unknown", _ -> [destination ^ " outcome unknown · evidence preserved; verify before resending"]
              | Some "committed", _ -> [destination ^ " committed · Keeper reads and actions are unverified"]
+             | Some "accepted", _ -> [destination ^ " accepted · Keeper reads and actions are unverified"]
              | Some status, _ -> [destination ^ " " ^ status]
              | None, _ -> [destination ^ " status unknown"]) in
-      frozen :: delivery
+      frozen :: selection @ delivery
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
     Option.bind snapshot.configuration (fun config ->
@@ -609,7 +635,7 @@ let move_observation view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      let rows = ordered_rows view snapshot in
+      let rows = ordered_result_rows view snapshot in
       let rec find position = function
         | [] -> -1
         | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
@@ -632,7 +658,10 @@ let move_record view delta =
 let move_lane view delta =
   match view.snapshot, selected_row view with
   | Some snapshot, Some row ->
-      let lanes = rows_in_screen view snapshot
+      let rows = match view.focus with
+        | Timeline | Instances -> ordered_result_rows view snapshot
+        | Rows | Connections | Configurations -> ordered_rows view snapshot in
+      let lanes = rows
         |> List.map (fun (_, (row : Row.row)) -> row.lane_id)
         |> List.sort_uniq String.compare in
       let rec find index = function [] -> 0 | lane :: rest ->
@@ -641,7 +670,7 @@ let move_lane view delta =
       (match List.nth_opt lanes index with
        | None -> view
        | Some lane ->
-           let candidates = List.filter (fun (_, (candidate : Row.row)) -> candidate.lane_id=lane) (ordered_rows view snapshot) in
+           let candidates = List.filter (fun (_, (candidate : Row.row)) -> candidate.lane_id=lane) rows in
            let target = match List.find_opt (fun (_, (candidate : Row.row)) -> candidate.observed_at>=row.observed_at) candidates with
              | Some _ as target -> target
              | None -> List.nth_opt candidates (List.length candidates-1) in
@@ -953,6 +982,36 @@ let result_lines (instance : instance) (row : Row.row) =
       Masc_tui_text_block.lines rendered
       |> List.map (fun line -> "  " ^ line)) readings
 
+let installation_identity (instance : instance) = instance.installation_id
+
+let installation_name (instance : instance) =
+  match installation_identity instance with
+  | Some id -> id
+  | None -> instance.id
+
+let instance_heading _snapshot (item : instance) =
+  match installation_identity item with
+  | None -> item.title
+  | Some name -> name ^ " · " ^ item.title
+
+let empty_result_lines (item : instance) =
+  match item.phase with
+  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls item]
+  | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
+      if item.observation_seq=0 then ["No completed observation received yet."]
+      else if item.rows_count=0 then
+        ["Last completed observation contains no result rows.";
+         "Check input coverage and 2 Links for declared inputs."]
+      else ["No result rows in this received view."; "r:refresh · D:raw details"]
+
+let snapshot_coverage_lines coverage =
+  if coverage=[] then [] else
+    [""; "Received snapshot coverage · all Add-ons"]
+    @ List.map (fun (source : Row.coverage) ->
+        source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL")
+        ^ " · cursor " ^ Option.value ~default:"unknown" source.cursor
+        ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail) coverage
+
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
     (Masc.Tui_terminal_text.sanitize_terminal_text text) in
@@ -1025,9 +1084,9 @@ let overview_lines ~width view =
                         let name = match item.source_path with
                           | Some path -> path | None -> "undeclared" in
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
-                let count_text = if item.observation_seq=0 then "no observations yet"
-                  else Printf.sprintf "%d observations" item.observation_seq in
-                let lead = marker ^ item.title ^ " · " ^
+                let count_text = if item.observation_seq=0 then "awaiting first observation"
+                  else Printf.sprintf "%d records" item.rows_count in
+                let lead = marker ^ instance_heading snapshot item ^ " · " ^
                   (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
                   " · " ^ count_text in
                 let controls = "    Enter:open  " ^ instance_controls item in
@@ -1069,15 +1128,22 @@ let detail_lines ~width view =
   | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
   | Some item, Some snapshot ->
       let tab focus label = if view.focus=focus then "[" ^ label ^ "]" else label in
-      let header = item.title ^ " · " ^ phase_label item.phase in
+      let header = instance_heading snapshot item ^ " · " ^ phase_label item.phase in
       let tabs = String.concat "  " [
         tab Timeline "1 Results"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
-      let rows = List.map snd (ordered_rows view snapshot) in
+      let record_rows = List.map snd (ordered_rows view snapshot) in
+      let rows = List.map snd (ordered_result_rows view snapshot) in
       let selected = selected_row view in
       let body = match view.focus with
       | Timeline | Instances ->
-          if rows=[] then ["No observations yet. o:observe this Add-on."]
+          let selected = Option.bind selected (fun selected ->
+            List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
+          if rows=[] then Option.to_list item.display.description
+            @ (if record_rows=[] then empty_result_lines item
+               else ["No declared result rows in this received view.";
+                     "Supporting records remain available in 4 Records."])
+            @ snapshot_coverage_lines snapshot.output.coverage
           else Option.to_list item.display.description
             @ [""; "Results"]
             @ (match selected with
@@ -1095,10 +1161,7 @@ let detail_lines ~width view =
                  @ [""])
             @ ["Activity timeline"]
             @ timeline_lines ~width ~instances:[item] ?selected rows
-            @ (if snapshot.output.coverage=[] then [] else [""; "Coverage for this slice"])
-            @ List.map (fun (source : Row.coverage) ->
-                source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL") ^
-                " · cursor " ^ Option.value ~default:"unknown" source.cursor) snapshot.output.coverage
+            @ snapshot_coverage_lines snapshot.output.coverage
       | Connections ->
           let sources = match Masc.Lane_addon_sources.parse item.binding with
             | Error detail -> ["Input binding: " ^ detail]
@@ -1127,7 +1190,7 @@ let detail_lines ~width view =
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
       | Rows ->
-          if rows=[] then ["No observations yet."]
+          if record_rows=[] then empty_result_lines item
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")
@@ -1136,7 +1199,7 @@ let detail_lines ~width view =
              Yojson.Safe.pretty_to_string (`Assoc row.fields)]
             @ List.map (fun (e : Row.evidence) ->
               "Evidence " ^ e.uri ^ " · sha256 " ^
-              Option.value ~default:"unknown" e.sha256) row.evidence) rows in
+              Option.value ~default:"unknown" e.sha256) row.evidence) record_rows in
       List.concat_map wrap (["?:help  Esc:back  Tab:section  j/k:move  D:raw"; header; tabs; ""]
         @ diagnostic_lines view @ body)
   | Some _, None -> ["Reading Add-ons…"]
@@ -1167,12 +1230,24 @@ let flow_inputs binding =
     | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _
     | S.Fusion_run _ -> None) sources)
 
-let installation_identity (instance : instance) = instance.installation_id
+let flow_external_inputs binding =
+  let module S = Masc.Lane_addon_sources in
+  let* sources = S.parse binding in
+  Ok (List.filter_map (function
+    | S.Lane_output _ -> None
+    | S.Snapshot_file {id;path} -> Some (id ^ " · snapshot " ^ path)
+    | S.Fusion_run {id;run_id} -> Some (id ^ " · Fusion run " ^ run_id)
+    | S.Msx_capture {id} -> Some (id ^ " · MSX capture")
+    | S.Dos_capture {id} -> Some (id ^ " · DOS capture")
+    | S.Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
+        Some (Printf.sprintf "%s · Browser %s · tab %d · target %s · %s · request %s"
+          id (S.browser_selection_lane selection) tab_id target_id environment request_id)) sources)
 
-let installation_name (instance : instance) =
-  match installation_identity instance with
-  | Some id -> id
-  | None -> instance.id
+let flow_worker_state (worker : instance) =
+  let result = if worker.observation_seq=0 then "no completed observation received"
+    else Printf.sprintf "last completed: %d record%s" worker.rows_count
+      (if worker.rows_count=1 then "" else "s") in
+  phase_label worker.phase ^ " · " ^ result
 
 let configured_producers ~identity workers id =
   List.filter (fun producer -> live_entry producer && identity producer=Some id) workers
@@ -1244,18 +1319,29 @@ let flow_lines ?(embedded=false) view =
          let complete = Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration in
          let notices = (if complete then [] else ["Installation inventory incomplete; dependency identities may be unresolved"])
            @ List.concat_map (fun (d : declaration) -> List.map (fun issue -> d.source_path ^ ": " ^ issue) d.issues) declarations in
+         let external_inputs = List.concat_map (fun worker ->
+           match flow_external_inputs worker.binding with
+           | Error detail -> ["  " ^ name worker ^ ": invalid source binding · " ^ detail]
+           | Ok sources -> List.map (fun source ->
+               "  " ^ source ^ " -> " ^ name worker
+               ^ (if historical then " · stored binding" else "")) sources) workers in
+         let source_lines = [""; "Bound external inputs · declared sources"]
+           @ (if external_inputs=[] then ["  No external source bindings in this view"]
+              else external_inputs)
+           @ [""; "Add-on layers · worker state and latest completed result summary"] in
          let layers, unresolved = if historical then [], [] else declared_layers ~identity workers in
          let layer_lines = if historical then
              ["Stored bindings · producer incarnations are not reconstructed as current layers"]
            else List.concat (List.mapi (fun index nodes ->
              [(if index=0 then "" else "    ↓"); "Layer " ^ string_of_int index;
-              "  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]) layers)
+              "  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]
+             @ List.map (fun node -> "    " ^ name node.worker ^ ": " ^ flow_worker_state node.worker) nodes) layers)
              @ List.concat_map (fun node ->
                  ["Layer unavailable: " ^ name node.worker]
                  @ (match node.problems with
                     | [] -> ["  Cyclic or unresolved upstream dependency"]
                     | problems -> List.map (fun detail -> "  " ^ detail) problems)) unresolved in
-         notices @ layer_lines
+         notices @ source_lines @ layer_lines
          @ (if workers=[] then ["No current workers to place. Review installation issues or install an Add-on."] else [])
          @ [""; "Declared inputs and outputs"]
          @ List.concat_map (fun instance ->
@@ -1278,7 +1364,11 @@ let flow_lines ?(embedded=false) view =
                     | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
            @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
   @ [""; "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
-     "Delivery acceptance and agent reading are separate recorded stages.";
+     "Delivery acceptance and agent reading are separate recorded stages."]
+  @ (match Option.map evidence_receipt_lines view.receipt with
+     | Some (_ :: _ as receipt) -> ["Last evidence sharing receipt · this session"] @ receipt
+     | Some [] | None -> ["No evidence sharing receipt in this session."])
+  @ [
      (if embedded then "f:open full flow  D:technical details  J/K:scroll"
       else "f:back to observations  D:technical details  J/K:scroll")]
 

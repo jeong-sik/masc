@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
 import tempfile
 import tomllib
@@ -53,7 +53,7 @@ def exchange(package, calls, bindings=None):
             "name": "lane_observe", "arguments": {"binding": BINDING if bindings is None else bindings[index],
                                                    "sources": sources}}})
     with tempfile.TemporaryDirectory() as directory:
-        process = subprocess.run([sys.executable, str(ADDONS / package / "server.py")], cwd=directory,
+        process = run_stdio([sys.executable, str(ADDONS / package / "server.py")], cwd=directory,
                                  input="".join(json.dumps(item) + "\n" for item in requests),
                                  capture_output=True, text=True, check=True, timeout=10)
     if process.stderr:
@@ -275,7 +275,7 @@ class ValueDifference(unittest.TestCase):
                 self.assertFalse(baseline["isError"])
                 self.assertTrue(refused["isError"])
                 self.assertNotIn("structuredContent", refused)
-                self.assertIn("finite numbers", refused["content"][0]["text"])
+                self.assertEqual(refused["content"][0]["text"], "JSON data must contain only finite numbers")
                 self.assertFalse(recovered["isError"])
                 output = recovered["structuredContent"]
                 self.assertEqual(output, json.loads(recovered["content"][0]["text"]))
@@ -285,6 +285,15 @@ class ValueDifference(unittest.TestCase):
                 self.assertEqual(fields["previous"]["producer"]["observation_seq"], 1)
                 self.assertEqual(fields["current"]["producer"]["observation_seq"], 3)
                 self.assertTrue(output["coverage"][0]["complete"])
+
+    def test_nonfinite_input_is_refused_before_observation(self):
+        for bad in (float("inf"), float("nan")):
+            with self.subTest(bad=bad):
+                replies = exchange("value-difference", [[supplied(1, bad)], [supplied(2, 7)]])[2:]
+                self.assertTrue(replies[0]["isError"])
+                self.assertNotIn("structuredContent", replies[0])
+                self.assertEqual(replies[0]["content"][0]["text"], "JSON data must contain only finite numbers")
+                self.assertFalse(replies[1]["isError"])
 
     def test_non_numeric_or_ambiguous_input_cannot_produce_a_difference(self):
         for bad in (True, "7", None):

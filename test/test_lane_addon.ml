@@ -28,6 +28,7 @@ let rec remove_tree path =
   end else Sys.remove path
 
 type fake = {
+  bindings : (string, Yojson.Safe.t) Hashtbl.t;
   calls : (string, int) Hashtbl.t;
   stops : (string, int) Hashtbl.t;
   modes : (string, string) Hashtbl.t;
@@ -43,13 +44,14 @@ let fake_output : Types.output = {
 }
 
 let make_backend ?observe_step () =
-  let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
+  let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
+      Hashtbl.add state.bindings instance_id binding;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
         action_schema = (fun () -> None);
@@ -189,6 +191,9 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       |> text "id" in
     let args = ["instance_id", `String id; "row_ids", `List [`String selected]] in
     let frozen = unwrap (dispatch config Runtime.Evidence args) in
+    check string "preservation receipt identifies its worker" id (text "instance_id" frozen);
+    check bool "preservation receipt identifies its exact row selection" true
+      (member "row_ids" frozen = `List [`String selected]);
     let evidence = member "evidence" frozen in
     let bytes = In_channel.with_open_bin (text "path" evidence) In_channel.input_all in
     check string "frozen bytes match evidence digest" (text "sha256" evidence) (Store.digest bytes);
@@ -204,6 +209,8 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       (`Assoc (("keeper_name", `String "keeper") :: args))) in
     check string "unavailable delivery stays explicit" "failed"
       (unavailable |> member "delivery" |> text "status");
+    check string "failed delivery still identifies the requested Keeper" "keeper"
+      (unavailable |> member "delivery" |> text "keeper_name");
     check bool "failed delivery retains evidence" true
       (Sys.file_exists (unavailable |> member "evidence" |> text "path"));
     let delivered = ref [] in
@@ -213,6 +220,11 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     let accepted = unwrap (Runtime.dispatch ~caller:"operator" ~config ~operation:Runtime.Evidence
       (`Assoc (("keeper_name", `String "keeper") :: args))) in
     check Alcotest.int "one explicitly requested delivery" 1 (List.length !delivered);
+    check string "accepted delivery identifies its actual destination" "keeper"
+      (accepted |> member "delivery" |> text "keeper_name");
+    check bool "published acceptance preserves the selected row coordinates" true
+      (member "instance_id" accepted = member "instance_id" frozen
+       && member "row_ids" accepted = member "row_ids" frozen);
     check string "acceptance keeps deferred receipt" "deferred"
       (accepted |> member "delivery" |> member "receipt" |> text "status");
     let sender, keeper, prompt = List.hd !delivered in
@@ -362,6 +374,8 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     let id = text "instance_id" accepted in
     let clock = Eio.Stdenv.clock env in
     await clock (fun () -> Hashtbl.mem state.modes id);
+    check bool "worker startup receives the exact validated installation binding" true
+      (Hashtbl.find_opt state.bindings id=Some (`Assoc ["sources",`List [];"limit",`Int 2]));
     detach config id;
     await_phase clock config id "detached")
 
@@ -1200,6 +1214,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
           (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
     check string "admitted intention remains queued while authoritative commit is rejected" "pending_commit"
       (member "delivery" result |> text "status");
+    check bool "Broadcast does not invent a single Keeper destination" true
+      (member "delivery" result |> member "keeper_name" = `Null);
     check bool "rejected workspace commit cannot transfer client retry ownership" true
       (member "delivery" result |> member "receipt" = `Null);
     let evidence = member "evidence" result in
@@ -1235,6 +1251,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
       (`Assoc (args @ ["keeper_name",`String "fixture-recipient"])) |> unwrap in
     check string "a recipient exception is uncertain, not a proven rejection" "outcome_unknown"
       (member "delivery" uncertain |> text "status");
+    check string "uncertain receipt retains its intended Keeper" "fixture-recipient"
+      (member "delivery" uncertain |> text "keeper_name");
     check bool "uncertain delivery preserves evidence" true
       (Sys.file_exists (member "evidence" uncertain |> text "path"));
     detach config id; await_phase clock config id "detached")

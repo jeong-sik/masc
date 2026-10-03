@@ -2539,6 +2539,57 @@ let test_conformant_tool_description_is_unique_on_wire () =
     cases
 ;;
 
+let test_conformant_request_drops_combinator_type_information () =
+  List.iter (fun keyword ->
+    let variants = `List
+      [ `Assoc [ "type", `String "string" ]
+      ; `Assoc [ "type", `String "null" ] ] in
+    let combined = `Assoc [ keyword, variants ] in
+    let tool = `Assoc
+      [ "name", `String "combined"; "description", `String "Schema projection."
+      ; "input_schema", `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc
+              [ "value", combined
+              ; "annotated", `Assoc
+                  [ "type", `String "string"; "description", `String "Keep siblings."
+                  ; keyword, variants ]
+              ; "values", `Assoc
+                  [ "type", `String "array"; "items", combined ] ] ] ] in
+    let parameters conformance =
+      let config = Provider_config.make
+          ~kind:OpenAI_compat ~model_id:"codec-combinator-projection"
+          ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+          ~max_tokens:128
+          ~model_capabilities_override:
+            { Capabilities.default_capabilities with
+              tool_schema_conformance = conformance }
+          () in
+      Backend_openai_request.build_request ~config
+        ~messages:[msg User [Text "use the tool"]] ~tools:[tool] ()
+      |> Yojson.Safe.from_string |> member "tools" |> to_list |> List.hd
+      |> member "function" |> member "parameters" |> member "properties"
+    in
+    let rich = parameters Capabilities.default_capabilities.tool_schema_conformance in
+    check_bool (keyword ^ " rich property retains variants") true
+      (member keyword (member "value" rich) = variants);
+    check_bool (keyword ^ " rich items retain variants") true
+      (member keyword (member "items" (member "values" rich)) = variants);
+    let projected = parameters Capabilities.Conformant_subset_required in
+    check_bool (keyword ^ " sole constraint becomes an empty schema") true
+      (member "value" projected = `Assoc []);
+    check_bool (keyword ^ " nested items become an empty schema") true
+      (member "items" (member "values" projected) = `Assoc []);
+    let annotated = member "annotated" projected in
+    check_bool (keyword ^ " removed alongside sibling fields") true
+      (member keyword annotated = `Null);
+    check_string "sibling type remains" "string"
+      (member "type" annotated |> to_string);
+    check_string "sibling description remains" "Keep siblings."
+      (member "description" annotated |> to_string))
+    ["oneOf"; "anyOf"; "allOf"]
+;;
+
 let test_tool_image_followups_preserve_batch_order () =
   let open Yojson.Safe.Util in
   let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
@@ -3149,6 +3200,10 @@ let () =
             "conformant request has unique descriptions at every depth"
             `Quick
             test_conformant_tool_description_is_unique_on_wire
+        ; Alcotest.test_case
+            "conformant request drops combinator-only type information"
+            `Quick
+            test_conformant_request_drops_combinator_type_information
         ; Alcotest.test_case
             "top-level unsupported schema keywords are dropped"
             `Quick

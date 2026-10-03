@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 400, in currency_follows_workspace_authority
+    h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority",
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        refresh=0.5, terminal_cols=160)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keyboard_input.py", line 2389, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 310, in interact
+    assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

@@ -3565,10 +3565,13 @@ let launch_keeper_items state ~mailbox keeper_name =
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some _
+    when state.keeper_roster = Keeper_control.Roster_unobserved ->
+    state.item_account_error <- Some "Keeper roster authority is unavailable"
   | Workspace_identity_match, Some identity ->
   (* The read-state Item endpoint owns account authority. Public roster
      currency observations require CanAdmin and may legitimately be absent;
-     only current Keeper presence is required before this authenticated read.
+     a current roster reading is required before this authenticated read.
      A partial roster's silence is not absence: past the cap the roster says
      nothing about a locally known Keeper, and [Unobserved] is exactly that
      silence -- the authoritative read proceeds and the endpoint itself
@@ -13944,6 +13947,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && item_authority_ready state
+         && state.keeper_roster <> Keeper_control.Roster_unobserved
          (* The same reading the dispatch guard makes: a partial roster's
             silence is not absence, so a read this TUI legitimately launched
             for an Unobserved Keeper is accepted here too. A complete

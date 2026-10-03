@@ -1,14 +1,14 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
 type jsonl_snapshot = { entry_count : int; reference : evidence }
-type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
+type t = { root : string; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
   let rec trim_separator root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = false; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -25,13 +25,14 @@ let sync_parent_directory parent =
 let rec durable_directory t ~sync_parent directory =
   let parent = Filename.dirname directory in
   if directory = t.root then (
-    (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
+    (try Unix.mkdir directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
          if (Unix.stat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence root is not a directory"));
-    (* Flush only the new root entry, never walk preexisting ancestors.
-       Keep the obligation on failure so a retry in this store cannot skip it. *)
-    if t.root_parent_pending then (sync_parent parent; t.root_parent_pending <- false))
+    (* An existing root may be a rename/mkdir whose parent sync failed in
+       another store handle or process. Establish that entry's durability
+       before creating children, without walking external ancestors. *)
+    sync_parent parent)
   else if parent <> directory then (
     durable_directory t ~sync_parent parent;
     (try Unix.mkdir directory 0o700 with
@@ -255,7 +256,7 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
-    let scan relative ~skip =
+    let scan relative ~repair_primary ~skip =
       let path = Filename.concat t.root relative in
       match Fs_compat.exact_path_kind path with
       | Fs_compat.Exact_missing -> Ok ()
@@ -278,13 +279,31 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                             else write_blob t bytes |> Result.map (fun _ -> ())
                         | _ -> Ok ())
                     | _ -> Ok () in
+                  (* The independent outcome journal remains authoritative
+                     when primary publication failed. Once that directory is
+                     available again, restore its terminal row before visiting
+                     the request. A still-unavailable primary cannot hide the
+                     durable outcome. Only its exact stored identity can choose
+                     the repair path. *)
+                  let* () = if not repair_primary then Ok () else
+                    match json with
+                    | `Assoc fields ->
+                        (match List.assoc_opt "instance_id" fields,
+                               List.assoc_opt "request_id" fields,
+                               List.assoc_opt "state" fields with
+                         | Some (`String owner), Some (`String request_id), Some (`String "finished")
+                           when owner = instance_id && name = digest request_id ^ ".json" ->
+                             ignore (save_sampling_request t ~instance_id ~request_id json);
+                             Ok ()
+                         | _ -> Error "sampling terminal journal identity is invalid")
+                    | _ -> Error "sampling terminal journal is not an object" in
                   let* () = f json in
                   next ()
               | _ -> next ()
               | exception End_of_file -> Ok () in
             next ()) in
-    let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
-    scan (sampling_directory instance_id) ~skip:(fun name ->
+    let* () = scan (sampling_outcome_directory instance_id) ~repair_primary:true ~skip:(fun _ -> false) in
+    scan (sampling_directory instance_id) ~repair_primary:false ~skip:(fun name ->
       Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable

@@ -1510,7 +1510,15 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, b"r", b"resource-b")
+                # Recovery may already have drawn the identical B list. Wait
+                # for this refresh request, then verify retained visible state;
+                # a differential frame need not repeat an unchanged name.
+                h.read_available(fd, output)
+                if ("b", "resources/list") not in calls:
+                    os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: ("b", "resources/list") in calls
+                    and b"resource-b" in screen(output), timeout=WAIT_SECONDS)
                 h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":

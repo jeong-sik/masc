@@ -448,7 +448,22 @@ let test_execution_preparation_reuse_and_scope () =
     List.iter (fun query ->
       Alcotest.(check bool) "scoped request bypasses default bytes" true
         (Option.is_none (read ~target:("/api/v1/dashboard/execution?" ^ query) "gzip")))
-      [ "full=true"; "force=true"; "fixture=sample"; "agent=alice" ];
+      [ "full=true"; "force=true"; "agent=alice" ];
+    (* Only the advertised execution fixture changes this surface. Unknown
+       fixture names retain the default request namespace. *)
+    let fixture_flag = "MASC_DASHBOARD_FIXTURES_ENABLED" in
+    let previous_fixture_flag = Sys.getenv_opt fixture_flag in
+    Fun.protect
+      ~finally:(fun () -> match previous_fixture_flag with
+        | Some value -> Unix.putenv fixture_flag value
+        | None -> Unix.unsetenv fixture_flag)
+      (fun () ->
+        Unix.putenv fixture_flag "true";
+        Alcotest.(check bool) "recognized fixture bypasses default bytes" true
+          (Option.is_none (read ~target:"/api/v1/dashboard/execution?fixture=execution_smoke" "gzip"));
+        Alcotest.(check bool) "unknown fixture keeps the default namespace" true
+          (Option.is_some (read ~target:"/api/v1/dashboard/execution?fixture=sample" "gzip")));
+
     Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
     Alcotest.(check bool) "mutation discards all representations" true
       (Option.is_none (read "gzip")))

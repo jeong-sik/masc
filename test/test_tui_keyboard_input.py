@@ -15152,12 +15152,17 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         if slow_next.is_set():
             slow_started.set()
             release_slow.wait(timeout=4.0)
-        else:
-            time.sleep(0.08)
         completed += 1
         if fail_next.is_set():
             return (503, {"error": "refresh refused"})
-        return briefing
+        status, payload = briefing
+        payload = copy.deepcopy(payload)
+        # Home renders this source reason only when the full refresh bundle
+        # is applied. A server callback count is earlier than that boundary.
+        payload["keepers_listing"] = {
+            "state": "unreadable", "detail": f"badge-pass-{completed}"
+        }
+        return status, payload
 
     fixtures["/api/v1/dashboard/briefing"] = answer_briefing
     # The badge reports a full failure only when every requested surface fails.
@@ -15184,14 +15189,16 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         )
         first_completed = completed
         prompt_start = len(output)
-        if not wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: completed >= first_completed + 2,
-            timeout=4.0,
-        ):
-            raise AssertionError("two prompt HTTP refreshes did not complete")
-        # Let the terminal drain the second answer before arming the slow one.
-        time.sleep(0.12)
+        applied_marker = f"badge-pass-{first_completed + 2}".encode()
+        wait_for_output(
+            process, master_fd, output, applied_marker,
+            start=prompt_start, timeout=4.0,
+        )
+        marker_end = end_of_needle(output, applied_marker, prompt_start)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=marker_end, timeout=3.0,
+        )
         read_available(master_fd, output)
         slow_next.set()
         if b"refreshing..." in output[prompt_start:]:

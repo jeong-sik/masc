@@ -274,8 +274,15 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        assert row_of(rows, b"Current Work") == identity + 4, \
-            "the facts did not leave the picture its rows"
+        # Disabled Candle is an observed Identity fact, including its long
+        # reason. It wraps beside the icon and shifts Current Work down.
+        current_work = row_of(rows, b"Current Work")
+        assert current_work > identity + PIXEL_BAND_ROWS, \
+            "Current Work overlapped the disabled Candle identity facts"
+        identity_facts = b" ".join(rows[row] for row in range(identity, current_work))
+        normalized = b" ".join(identity_facts.split())
+        expected_reason = b" ".join(("disabled: " + reason).encode().split())
+        assert expected_reason in normalized, "disabled Candle reason was clipped beside the picture"
         # Item text that needs the full width must remove the actual Kitty
         # placement as well as its reserved columns. Mosaic-only proof cannot
         # detect a pixel overlay left above the text.

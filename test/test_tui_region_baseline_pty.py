@@ -231,7 +231,12 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         right = (columns - h.ACTING_PANE_NARROW_COLUMNS
                  if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
         if left:
-            region.assert_pane_edge(rows, left - 1, where)
+            # Chat portraits precede the roster frame; measure the actual
+            # KEEPERS title row rather than the portrait caption at row 3.
+            title_row = (next(row for row, text in rows.items()
+                              if "KEEPERS" in region.cells(text, 0, left))
+                         if screen == "keeper-chat-roster" else 3)
+            region.assert_pane_edge(rows, left - 1, where, title_row=title_row)
         if right < columns:
             region.assert_pane_edge(rows, right, where)
         measured[(screen, columns)] = region.measure(

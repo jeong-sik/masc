@@ -43,6 +43,8 @@ def run(executable):
                 process, master, output, b"Librarian", start=0, timeout=3.0
             )
             h.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
+            # Close row search before q; printable keys belong to the search.
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
             os.write(master, b"q")
         finally:
             health.release.set()

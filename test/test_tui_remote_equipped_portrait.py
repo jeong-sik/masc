@@ -144,11 +144,19 @@ class RemoteIdentity:
 def remote_portrait(binary: str, evidence: Path) -> None:
     manifest = json.loads((evidence / "manifest.json").read_text())
     keeper = manifest["keeper"]
-    before = (evidence / "before.png").read_bytes()
-    equipped = (evidence / "equipped.png").read_bytes()
+    endpoint_before = (evidence / "before.png").read_bytes()
+    endpoint_equipped = (evidence / "equipped.png").read_bytes()
     assert manifest["pixel_size"] == 160
-    assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (160, 160)
-    assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
+    assert rgba_png(endpoint_before)[:2] == rgba_png(endpoint_equipped)[:2] == (160, 160)
+    assert rgba_png(endpoint_before) != rgba_png(endpoint_equipped), "HTTP fixture did not change the portrait"
+    # Info renders an 80-pixel icon in four 20-pixel terminal rows. The
+    # native fixture exports that projection from the same equipped records;
+    # endpoint portraits retain their independent 160-pixel HTTP proof.
+    before = (evidence / "before-icon.png").read_bytes()
+    equipped = (evidence / "equipped-icon.png").read_bytes()
+    assert manifest["icon_pixel_size"] == 80
+    assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (80, 80)
+    assert rgba_png(before) != rgba_png(equipped), "icon fixture did not change the equipped portrait"
     roster = Roster((evidence / "before-roster.json").read_bytes(),
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = h.keeper_runtime_http_fixtures()
@@ -352,7 +360,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                     "display": "Keeper Info Current failure",
                     "marker": REFRESH_APPLIED.decode(),
                 },
-                "pixel_dimensions": [160, 160],
+                "pixel_dimensions": [80, 80],
+                "endpoint_pixel_dimensions": [160, 160],
                 "before_rgba_sha256": hashlib.sha256(rgba_png(first)[2]).hexdigest(),
                 "equipped_rgba_sha256": hashlib.sha256(rgba_png(changed)[2]).hexdigest(),
                 "fresh_refresh_matches": rgba_png(stable) == rgba_png(equipped),

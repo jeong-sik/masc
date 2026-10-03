@@ -81,6 +81,17 @@ def number(value: Any, field: str) -> float:
     return converted
 
 
+def decode_json(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        raise
+    except RecursionError as error:
+        raise InvalidInput("JSON nesting exceeds the decoder limit") from error
+    except ValueError as error:
+        raise InvalidInput("JSON value exceeds the decoder limits") from error
+
+
 def finite_json(value: Any, field: str) -> None:
     """Validate retained JSON without copying or normalizing its payload."""
     pending = [value]
@@ -252,7 +263,7 @@ class SamplingClient:
             if not line:
                 raise InvalidInput("Host closed stdio before answering sampling")
             try:
-                decoded = json.loads(line.decode("utf-8"))
+                decoded = decode_json(line.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as error:
                 raise InvalidInput("Malformed host sampling response") from error
             except ValueError as error:
@@ -304,14 +315,7 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         request_id = None
         method = None
         try:
-            text_line = line.decode("utf-8")
-            try:
-                decoded = json.loads(text_line)
-            except json.JSONDecodeError:
-                raise
-            except ValueError as error:
-                raise InvalidInput("JSON value exceeds the decoder limits") from error
-            request = object_value(decoded, "request")
+            request = object_value(decode_json(line.decode("utf-8")), "request")
             # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
             supplied_id = request.get("id")
             if not (supplied_id is None or isinstance(supplied_id, (str, int, float))

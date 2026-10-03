@@ -19,7 +19,6 @@ let deliver config host (notice : Goal_store.pending_notification) =
     | Goal_store.Pending_recipients _ -> Ok (Some notice)
     | Awaiting_recipients ->
         let* recipients = host.snapshot ~config in
-        let recipients = List.filter (fun recipient -> recipient <> notice.sender) recipients in
         Goal_store.snapshot_notification_recipients config notice ~recipients |> store_result in
   match current with
   | None -> Ok ()

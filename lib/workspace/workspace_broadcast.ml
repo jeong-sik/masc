@@ -1141,11 +1141,15 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     | Immediate_fleet | Deferred_passive_fleet -> Ok () in
   let lookup () =
     let* found = find_broadcast_message ~request_id config ~from_agent ~content in
-    match found, fleet_delivery with
-    | Some (message, _), Deferred_passive_fleet
-      when message.mention <> None || message.mention_delivery <> Mention_passive ->
-        Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
-    | _ -> Ok found in
+    match fleet_delivery with
+    | Immediate_fleet | Deferred_fleet -> Ok found
+    | Deferred_passive_fleet ->
+        match found with
+        | None -> Ok None
+        | Some (message, _) ->
+            if message.mention <> None || message.mention_delivery <> Mention_passive then
+              Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
+            else Ok found in
   let replay message delivery =
     (* Each Keeper's transcript projects by the persisted request ID. Replaying
        fills recipients missed by cancellation/restart and deduplicates those

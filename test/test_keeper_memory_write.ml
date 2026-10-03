@@ -1389,7 +1389,7 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
           Alcotest.(check (list string)) "unverified-only search supplies no claim" []
             (match_texts result);
           Alcotest.(check bool) "unverified-only search is not a definitive miss" true
-            (json_field "no_match" result = `Null);
+            (Yojson.Safe.Util.member "no_match" result = `Null);
           Alcotest.(check string) "current and all expose incomplete verification" "incomplete"
             (string_field "status" (json_field "source_verification" result));
           Alcotest.(check bool) "deferred identity does not leak withheld claim" false
@@ -1400,7 +1400,7 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~args:(`Assoc ["query", `String "no matching astronomy"; "limit", `Int 10])
             |> Yojson.Safe.from_string in
         Alcotest.(check bool) "unselected unreadable sources do not make a lookup incomplete" true
-          (json_field "source_verification" unrelated = `Null
+          (Yojson.Safe.Util.member "source_verification" unrelated = `Null
            && json_field "no_match" unrelated = `Bool true);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in

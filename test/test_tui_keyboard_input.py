@@ -9407,9 +9407,10 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        # The palette targets alpha without moving the beta roster cursor.
-        # Esc returns to that roster selection, not the chat target's row.
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
+        # A roster refresh can reconcile its cursor to the active chat target.
+        # Verify the return surface, then deliberately select the next Keeper.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"beta")
         os.write(master_fd, b"q")
 
     return interact

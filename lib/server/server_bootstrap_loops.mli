@@ -7,6 +7,11 @@
     caller's [Switch].  Public surface is intentionally tiny — most of
     the work lives in private helpers in the [.ml]. *)
 
+val register_lane_fleet_backend : unit -> unit
+(** Register the production Lane Broadcast recipient snapshot and transcript
+    projector without starting Keeper loops. Used by normal server startup and
+    isolated host qualification, both with the same delivery implementation. *)
+
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; fusion_delivery :

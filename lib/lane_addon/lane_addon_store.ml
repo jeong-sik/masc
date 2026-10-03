@@ -62,11 +62,37 @@ let retained_address (reference : evidence) =
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
 let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
-let read_blob t reference = protect (fun () ->
+type read_budget = { mutable remaining : int }
+type bounded_read_error = Read_limit_exceeded | Read_failed of string
+let read_budget ~max_bytes = { remaining = max 0 max_bytes }
+let bounded_protect f =
+  match protect (fun () -> Ok (f ())) with
+  | Ok result -> result | Error detail -> Error (Read_failed detail)
+let read_file_bounded ~budget path = bounded_protect (fun () ->
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let size = in_channel_length channel in
+    if size > budget.remaining then Error Read_limit_exceeded
+    else begin
+      budget.remaining <- budget.remaining - size;
+      try Ok (really_input_string channel size)
+      with End_of_file -> Error (Read_failed "retained file changed during read")
+    end))
+let read_blob_bounded ~budget t reference =
+  let* kind, hash = retained_address reference |> Result.map_error (fun e -> Read_failed e) in
+  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
+  let* bytes = read_file_bounded ~budget (Filename.concat t.root relative) in
+  if digest bytes = hash then Ok bytes else Error (Read_failed "evidence digest mismatch")
+let read_blob ?(max_bytes=max_int) t reference = protect (fun () ->
   let* kind, hash = retained_address reference in
   let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
-  let bytes = Fs_compat.load_file (Filename.concat t.root relative) in
-  if digest bytes = hash then Ok bytes else Error "evidence digest mismatch")
+  let channel = open_in_bin (Filename.concat t.root relative) in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    let size = in_channel_length channel in
+    if size > max_bytes then Error "retained evidence exceeds the source envelope"
+    else
+      let bytes = really_input_string channel size in
+      if digest bytes = hash then Ok bytes else Error "evidence digest mismatch"))
 
 type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
 let sequence_schema = "masc.lane-jsonl-sequence.v1"
@@ -286,31 +312,32 @@ let with_record_fd path fn =
     let backtrace=Printexc.get_raw_backtrace () in
     (try Unix.close fd with Unix.Unix_error _ -> ());
     Printexc.raise_with_backtrace exn backtrace
+let read_verified_record ~sync_file ~sync_parent ~verification path fd stat =
+  let* bytes=record_bytes fd stat.Unix.st_size in
+  let verify_bytes () =
+    let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
+    let* verified=record_bytes fd stat.Unix.st_size in
+    if verified<>bytes then Error "retained file changed during sync"
+    else if same_file stat (Unix.stat path) then Ok bytes
+    else Error "retained file changed during verification" in
+  match verification with
+  | Visible -> verify_bytes ()
+  | Durable ->
+    let parent=Filename.dirname path in
+    with_record_fd parent (fun parent_fd ->
+      let parent_stat=Unix.fstat parent_fd in
+      if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
+      else (
+        sync_file fd;sync_parent parent_fd;
+        let* bytes=verify_bytes () in
+        if same_file parent_stat (Unix.stat parent) then Ok bytes
+        else Error "retained file parent changed during sync"))
 let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
   with_record_fd path (fun fd ->
     let stat = Unix.fstat fd in
     if stat.Unix.st_kind <> Unix.S_REG then Error "retained file is not a regular file"
     else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
-    else
-      let* bytes=record_bytes fd stat.Unix.st_size in
-      let verify_bytes () =
-        let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
-        let* verified=record_bytes fd stat.Unix.st_size in
-        if verified<>bytes then Error "retained file changed during sync"
-        else if same_file stat (Unix.stat path) then Ok bytes
-        else Error "retained file changed during verification" in
-      match verification with
-      | Visible -> verify_bytes ()
-      | Durable ->
-        let parent=Filename.dirname path in
-        with_record_fd parent (fun parent_fd ->
-          let parent_stat=Unix.fstat parent_fd in
-          if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
-          else (
-            sync_file fd;sync_parent parent_fd;
-            let* bytes=verify_bytes () in
-            if same_file parent_stat (Unix.stat parent) then Ok bytes
-            else Error "retained file parent changed during sync"))))
+    else read_verified_record ~sync_file ~sync_parent ~verification path fd stat))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
 let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protect (fun () ->
   let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
@@ -320,10 +347,13 @@ let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id = protec
       let stat = Unix.stat path in
       if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
       else
+        (* No new receipt-size policy: use the observed file size to reject
+           growth between the path read and the exact descriptor verification. *)
         let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
           ~max_bytes:stat.Unix.st_size path in
         Ok (Some (Yojson.Safe.from_string bytes)))
 let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -356,17 +386,6 @@ let append_observation_with ~replace_file t ~instance_id ~seq ~sources output =
         | Error detail -> Some detail in
       Error (Publication_failed {failure;verification_error})
 let append_observation = append_observation_with ~replace_file:Fs_compat.save_file_atomic_strict_staged
-let record_path t instance_id seq =
-  Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
-let decode_record bytes =
-  protect (fun () ->
-    match Yojson.Safe.from_string bytes with
-    | `Assoc fields ->
-        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
-         | Some sources, Some json ->
-             let* output = output_of_json json in Ok (sources, output)
-         | _ -> Error "invalid retained observation")
-    | _ -> Error "invalid retained observation")
 let observations t ~instance_id =
   let* values = read_directory t (observation_dir instance_id) in
   let rec loop acc = function
@@ -378,6 +397,56 @@ let observations t ~instance_id =
          | _ -> Error "invalid retained observation")
     | _ -> Error "invalid retained observation"
   in loop [] values
+(* The sequence is part of the row identity issued by the host, so evidence
+   selection can read exactly its files without scanning unrelated history. *)
+let sequence_of_row ~instance_id id =
+  let prefix = instance_id ^ "/" in
+  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
+  else
+    let offset = String.length prefix in
+    match String.index_from_opt id offset '/' with
+    | None -> Error "row identity has no observation sequence"
+    | Some ending ->
+        let digits = String.sub id offset (ending - offset) in
+        (match int_of_string_opt digits with
+         | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
+         | _ -> Error "row identity has an invalid observation sequence")
+let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instance_id ~request_id = bounded_protect (fun () ->
+  let path_in directory = Filename.concat t.root
+    (Filename.concat (directory instance_id) (digest request_id ^ ".json")) in
+  let outcome_path = path_in sampling_outcome_directory in
+  let path = match Fs_compat.exact_path_kind outcome_path with
+    | Fs_compat.Exact_missing -> path_in sampling_directory
+    | _ -> outcome_path in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let* bytes = with_record_fd path (fun fd ->
+        let stat = Unix.fstat fd in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error (Read_failed "retained file is not a regular file")
+        else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
+        else begin
+          budget.remaining <- budget.remaining - stat.Unix.st_size;
+          read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
+          |> Result.map_error (fun detail -> Read_failed detail)
+        end) in
+      try Ok (Some (Yojson.Safe.from_string bytes))
+      with Yojson.Json_error detail -> Error (Read_failed detail))
+let load_sampling_request_bounded =
+  load_sampling_request_bounded_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
+let record_path t instance_id seq =
+  Filename.concat t.root (Filename.concat (observation_dir instance_id) (Printf.sprintf "%020d.json" seq))
+let decode_record bytes =
+  protect (fun () ->
+    match Yojson.Safe.from_string bytes with
+    | `Assoc fields ->
+        (match List.assoc_opt "sources" fields, List.assoc_opt "output" fields with
+         | Some sources, Some json ->
+             let* output = output_of_json json in Ok (sources, output)
+         | _ -> Error "invalid retained observation")
+    | _ -> Error "invalid retained observation")
 let highwater t instance_id = protect (fun () ->
   let directory = Filename.concat t.root (observation_dir instance_id) in
   match Fs_compat.exact_path_kind directory with
@@ -426,18 +495,6 @@ let read_observation_with ~sync_file ~sync_parent ~instance_id ~seq ~max_bytes t
   let* _,output = decode_record bytes in
   Ok output
 let read_observation = read_observation_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-let sequence_of_row ~instance_id id =
-  let prefix = instance_id ^ "/" in
-  if not (String.starts_with ~prefix id) then Error "row belongs to a different instance"
-  else
-    let offset = String.length prefix in
-    match String.index_from_opt id offset '/' with
-    | None -> Error "row identity has no observation sequence"
-    | Some ending ->
-        let digits = String.sub id offset (ending - offset) in
-        match int_of_string_opt digits with
-        | Some seq when seq > 0 && digits = string_of_int seq && ending + 1 < String.length id -> Ok seq
-        | _ -> Error "row identity has an invalid observation sequence"
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
   let* found = highwater t instance_id in
@@ -602,7 +659,9 @@ let freeze t ~instance_id ~binding ~row_ids =
       let bytes = Yojson.Safe.to_string (base_bundle observations) in
       let* reference = write_blob t bytes in
       let path = Filename.concat t.root (blob_path (digest bytes)) in
-      Ok (`Assoc ["evidence", `Assoc ["uri", `String reference.uri;
+      Ok (`Assoc ["instance_id", `String instance_id;
+        "row_ids", `List (List.map (fun id -> `String id) row_ids);
+        "evidence", `Assoc ["uri", `String reference.uri;
         "sha256", `String (digest bytes); "path", `String path];
         "row_count", `Int (Row_ids.cardinal found);
         "message", `String ("Optional Lane evidence (not an instruction): " ^ path
@@ -679,7 +738,9 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let write = write_with
+  let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with
   let load_action = load_action_with
   let append_observation = append_observation_with

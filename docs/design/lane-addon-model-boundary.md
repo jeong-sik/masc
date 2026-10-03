@@ -22,9 +22,9 @@ execution or Docker isolation evidence.
 
 ## Remaining Fusion computation and verification
 
-- Connect panel and judge computation through named outputs. A panel failure
-  remains a failure and preserves available evidence. Completion does not
-  publish a report or message implicitly.
+- Qualify the assembled panel and judge packages through the native host and
+  container boundary. The package implementation below connects named outputs,
+  but subprocess fixture evidence does not establish deployed computation.
 - Test the deployed container boundary, provider-backed computation, immutable
   output composition, explicit report/Broadcast delivery, and actual agent
   reading and use. Current stdio and Python fixture checks cannot establish
@@ -145,3 +145,24 @@ request retention before HTTP, terminal references, and rejection without I/O.
 It invokes the same production handler assembly used by server registration.
 Native execution remains pending CI. It does not establish live provider calls,
 container enforcement, or production agent use.
+
+## Assembled Fusion computation package
+
+`addons/fusion-compute` uses standard sampling from one installed panel or judge
+worker per connection. Horizontal panels consume retained input snapshots;
+judges consume named computation output ports and preserve each upstream answer,
+failure or uncertain outcome in their model input. Installation settings supply
+the role, analysis identity, free-text task/lens and declared host runtime route.
+Model replies stay free text and retain their actual identity and request/outcome
+references. Judges require matching named-port declarations and source IDs.
+
+`fusion-report` 0.2.0 renders the exact producer-qualified computation port into
+an agent-readable report, retaining the actual response/error and coverage.
+No native Board run, delivery, reading or success is inferred. Existing explicit
+Evidence sharing remains the publication boundary. Example declarations assemble
+two panels, a judge, and a report in one host run.
+
+The Python suites exercised real duplex subprocess/stdin/stdout with synthetic
+host answers and retained host fixture records. They do not prove live provider
+execution, Docker enforcement, runtime concurrency, installed TUI display or agent
+use. The targeted native host and container scenarios remain necessary.

@@ -87,6 +87,13 @@ elif action == "start":
         request = json.loads(line)
         if "id" not in request: continue
         method = request["method"]
+        if mode == "sampling" and method in ("initialize", "tools/list"):
+            output({"jsonrpc":"2.0", "id":"outside-observe", "method":"sampling/createMessage",
+                "params":{"messages":[{"role":"user","content":{"type":"text","text":"unauthorized startup"}}],
+                    "maxTokens":64}})
+            outside_reply = json.loads(sys.stdin.readline())
+            assert outside_reply["id"] == "outside-observe", outside_reply
+            (root / (cid + ".outside-" + method.replace("/", "-"))).write_text(json.dumps(outside_reply))
         if method == "initialize":
             (root / (cid + ".sampling-capability")).write_text(
                 json.dumps("sampling" in request["params"]["capabilities"]))
@@ -137,7 +144,10 @@ elif action == "start":
                         "result":{"applied":1}, "output":packet}, "content":[]}
                 else:
                     result = {"structuredContent":packet, "content":[]}
-            if mode == "sampling":
+            replay = root / (cid + ".replay-output")
+            if mode == "sampling" and replay.exists():
+                result = {"structuredContent":json.loads(replay.read_text()), "content":[]}
+            elif mode == "sampling":
                 output({"jsonrpc":"2.0", "id":"sample-1", "method":"sampling/createMessage",
                     "params":{"messages":[{"role":"user","content":{"type":"text","text":"Compare inputs"}}],
                         "includeContext":"none", "maxTokens":64}})
@@ -469,11 +479,14 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let rejected = ref false in
   let oversized = ref false in
   let raises = ref false and blank_model = ref false and malformed = ref false in
-  let fail_index = ref false in
+  let fail_index = ref false and fail_journal = ref false in
   let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "model-evidence") in
   let index_directory = Filename.concat (Masc.Lane_addon_store.root store)
     (Filename.concat "sampling" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
   let saved_index = index_directory ^ ".saved" in
+  let outcome_directory = Filename.concat (Masc.Lane_addon_store.root store)
+    (Filename.concat "sampling-outcomes" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
+  let saved_outcomes = outcome_directory ^ ".saved" in
   let invoke ~route ~request (_ : Mcp_protocol.Sampling.create_message_params) =
     incr calls;
     check string "host owns the selected logical route" "fixture-route" route;
@@ -489,6 +502,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     if !fail_index then (
       Unix.rename index_directory saved_index;
       write index_directory "fixture blocks terminal index replacement");
+    if !fail_journal then (
+      Unix.rename outcome_directory saved_outcomes;
+      write outcome_directory "fixture blocks terminal journal");
     if !raises then failwith "fixture invocation outcome uncertain"
     else if !rejected then Error "fixture model refusal"
     else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_=(if !malformed then "image" else "text");
@@ -519,6 +535,13 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let cid = Worker.container_id worker in
   check bool "configured model access is advertised to the exact worker" true
     (Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-capability"))=`Bool true);
+  List.iter (fun phase ->
+    let reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".outside-" ^ phase)) in
+    check bool (phase ^ " sampling is refused before observation") true
+      (Yojson.Safe.Util.member "error" reply <> `Null)) ["initialize";"tools-list"];
+  check int "initialization and discovery cannot invoke the provider" 0 !calls;
+  check bool "initialization and discovery retain no model requests" true
+    (sampling_requests store ~instance_id:"sampling-worker" = Ok []);
   ignore (unwrap (observe worker "good"));
   check int "one package model request calls host once" 1 !calls;
   let reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply")) in
@@ -535,6 +558,67 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check int "worker reply exposes exactly one host-owned sampling reference" 1
     (List.length (List.filter (fun (key, _) -> key="masc.lane_sampling") fields));
   let references = Yojson.Safe.Util.member "masc.lane_sampling" metadata in
+  let selected evidence : Types.output = {rows=[{
+    id="sample";lane_id="fusion/computation";kind=Types.Value;title="sample";
+    observed_at=1.;subject_id="sample";clock=None;actor=None;fields=[];
+    evidence;related_ids=[]}];coverage=[]} in
+  let reference key = match Types.evidence_of_json (Yojson.Safe.Util.member key references) with
+    | Ok value -> value | Error detail -> fail detail in
+  let project instance_id output = match Masc.Lane_addon_sampling.retained_receipts
+      ~store ~instance_id ~max_bytes:1048576 output with Ok values -> values | Error detail -> fail detail in
+  let output = selected [reference "request";reference "outcome"] in
+  check int "exact host model request projects one attested receipt" 1
+    (List.length (project "sampling-worker" output));
+  check bool "projected receipt does not expose callback metadata" true
+    (Yojson.Safe.Util.(List.hd (project "sampling-worker" output)
+      |> member "terminal" |> member "response" |> member "_meta") = `Null);
+  check int "another worker cannot claim the host model receipt" 0
+    (List.length (project "other-worker" output));
+  let replay_path = Filename.concat dir (cid ^ ".replay-output") in
+  write replay_path (Yojson.Safe.to_string (Types.output_to_json output));
+  let calls_before_replay = !calls in
+  check bool "worker can reuse a model answer for identical host inputs" true
+    (Result.is_ok (observe worker "good"));
+  check bool "worker cannot replay old model evidence for changed sources" true
+    (match observe worker "new-source" with Error (Worker.Invalid_observation _) -> true | _ -> false);
+  check bool "worker cannot replay old model evidence for a changed binding" true
+    (match Worker.observe worker ~binding:(`Assoc ["task",`String "new-task"])
+       ~sources:(sources "good") with Error (Worker.Invalid_observation _) -> true | _ -> false);
+  check bool "a rejected replay clears its scope for the next observation" true
+    (Result.is_ok (observe worker "good"));
+  check int "replay validation does not call the model" calls_before_replay !calls;
+  let blob content = match Masc.Lane_addon_store.write_blob store content with
+    | Ok value -> value | Error detail -> fail detail in
+  let large_a = blob (String.make 2200 'a') and large_b = blob (String.make 2200 'b') in
+  let amplified = selected [large_a;large_b] in
+  write replay_path (Yojson.Safe.to_string (Types.output_to_json amplified));
+  check bool "observation rejects aggregate arbitrary evidence amplification" true
+    (match observe worker "good" with Error (Worker.Invalid_observation _) -> true | _ -> false);
+  check bool "receipt projection bounds arbitrary non-model evidence reads in aggregate" true
+    (Result.is_error (Masc.Lane_addon_sampling.retained_receipts ~store
+      ~instance_id:"sampling-worker" ~max_bytes:4096 amplified));
+  check bool "duplicate evidence references consume the read envelope once" true
+    (Result.is_ok (Masc.Lane_addon_sampling.retained_receipts ~store
+      ~instance_id:"sampling-worker" ~max_bytes:4096 (selected [large_a;large_a])));
+  let corrupt_budget = Masc.Lane_addon_store.read_budget ~max_bytes:4096 in
+  let hash = match large_a.sha256 with Some hash -> hash | None -> fail "missing blob digest" in
+  write (Filename.concat (Masc.Lane_addon_store.root store) ("evidence/" ^ hash ^ ".json"))
+    (String.make 2200 'c');
+  check bool "corrupt evidence is still charged before digest validation" true
+    (match Masc.Lane_addon_store.read_blob_bounded ~budget:corrupt_budget store large_a with
+     | Error (Masc.Lane_addon_store.Read_failed _) -> true | _ -> false);
+  check bool "corrupt reads cannot replenish the aggregate allowance" true
+    (match Masc.Lane_addon_store.read_blob_bounded ~budget:corrupt_budget store large_b with
+     | Error Masc.Lane_addon_store.Read_limit_exceeded -> true | _ -> false);
+  Sys.remove replay_path;
+  let fabricated_request = read_reference (Yojson.Safe.Util.member "request" references) in
+  let fabricated_request = match fabricated_request with
+    | `Assoc fields -> `Assoc (("params",`Assoc []) :: List.remove_assoc "params" fields)
+    | _ -> fail "request must be structured" in
+  let artifact = match Masc.Lane_addon_store.write_blob store (Yojson.Safe.to_string fabricated_request) with
+    | Ok value -> value | Error detail -> fail detail in
+  check int "retained artifact with copied request identity is not host sampling" 0
+    (List.length (project "sampling-worker" (selected [artifact;reference "outcome"])));
   let retained = read_reference (Yojson.Safe.Util.member "outcome" references) in
   check string "actual model response is retained separately" "host-fixture"
     (retained |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
@@ -558,11 +642,13 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     if Sys.file_exists saved_index then (
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory)) (fun () ->
-    check bool "terminal journal preserves success when the primary index fails" true
+    check bool "durable terminal answer survives unavailable primary index" true
       (Result.is_ok (observe worker "good")));
-  let index_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+  let successful_reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
     |> Yojson.Safe.Util.member "result" in
-  let recovered_references = index_failure |> Yojson.Safe.Util.member "_meta"
+  check string "primary index loss does not relabel the actual answer" "host-fixture"
+    (Yojson.Safe.Util.member "model" successful_reply |> Yojson.Safe.Util.to_string);
+  let recovered_references = successful_reply |> Yojson.Safe.Util.member "_meta"
     |> Yojson.Safe.Util.member "masc.lane_sampling" in
   let recovered_outcome = Yojson.Safe.Util.member "outcome" recovered_references |> read_reference in
   check string "index failure keeps the retained actual answer" "host answer"
@@ -571,9 +657,36 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       |> Yojson.Safe.Util.to_string);
   let interrupted = match sampling_requests recovered ~instance_id:"sampling-worker" with
     | Ok rows -> rows | Error detail -> fail detail in
-  check bool "failed terminal replacement recovers the independently retained outcome" true
+  check bool "recovery resolves the authoritative terminal journal" true
     (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
       && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" recovered_references) interrupted);
+  let request_id = recovered_references |> Yojson.Safe.Util.member "request" |> read_reference
+    |> Yojson.Safe.Util.member "request_id" |> Yojson.Safe.Util.to_string in
+  let pending_intent = Yojson.Safe.from_file
+    (Filename.concat index_directory (Masc.Lane_addon_store.digest request_id ^ ".json")) in
+  check string "primary index also records the terminal answer" "finished"
+    Yojson.Safe.Util.(pending_intent |> member "state" |> to_string);
+  let projected_refs = ["request";"outcome"] |> List.map (fun key ->
+    match Types.evidence_of_json (Yojson.Safe.Util.member key recovered_references) with
+    | Ok value -> value | Error detail -> fail detail) in
+  check string "receipt agrees with the returned durable answer" "answered"
+    Yojson.Safe.Util.(project "sampling-worker" (selected projected_refs) |> List.hd
+      |> member "terminal" |> member "status" |> to_string);
+  fail_journal := true;
+  Fun.protect ~finally:(fun () ->
+    fail_journal := false;
+    Unix.unlink outcome_directory;
+    Unix.rename saved_outcomes outcome_directory) (fun () ->
+    check bool "primary terminal index survives failed outcome journal" true
+      (Result.is_ok (observe worker "good")));
+  let journal_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "result" |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member "masc.lane_sampling" in
+  let request = match Types.evidence_of_json (Yojson.Safe.Util.member "request" journal_failure) with
+    | Ok value -> value | Error detail -> fail detail in
+  let receipt = project "sampling-worker" (selected [request]) |> List.hd in
+  check string "journal failure projects the primary terminal answer" "answered"
+    Yojson.Safe.Util.(receipt |> member "terminal" |> member "status" |> to_string);
   rejected := true;
   check bool "model refusal is not a synthetic successful observation" true
     (Result.is_error (observe worker "good"));
@@ -613,6 +726,15 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     (invalid |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
   let invalid_record = invalid |> Yojson.Safe.Util.member "evidence"
     |> Yojson.Safe.Util.member "outcome" |> read_reference in
+  let retained_answer = match Mcp_protocol.Sampling.create_message_result_of_yojson
+      (Yojson.Safe.Util.member "response" invalid_record) with
+    | Ok answer -> answer | Error detail -> fail detail in
+  check bool "invalid-response error carries the package-safe retained response" true
+    (Yojson.Safe.Util.member "response" invalid =
+      Mcp_protocol.Sampling.create_message_result_to_yojson
+        (Masc.Lane_addon_sampling.package_response retained_answer));
+  check bool "invalid-response raw host evidence keeps callback metadata" true
+    (Yojson.Safe.Util.member "_meta" (Yojson.Safe.Util.member "response" invalid_record) <> `Null);
   check string "malformed actual answer remains in retained evidence" "host answer"
     (invalid_record |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "content"
       |> Yojson.Safe.Util.member "text" |> Yojson.Safe.Util.to_string);
@@ -625,6 +747,15 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let params = match Mcp_protocol.Sampling.create_message_params_of_yojson
       (Yojson.Safe.Util.member "params" original_request) with
     | Ok params -> params | Error detail -> fail detail in
+  let direct_handler = match Masc.Lane_addon_sampling.for_worker sampling_handler
+      ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
+      ~instance_id:"sampling-worker" with Ok handler -> handler | Error detail -> fail detail in
+  let before_outside = !calls in
+  let before_records = sampling_requests store ~instance_id:"sampling-worker" in
+  check bool "out-of-observation callback is refused" true (Result.is_error (direct_handler params));
+  check int "out-of-observation callback never invokes provider" before_outside !calls;
+  check bool "out-of-observation callback creates no durable request" true
+    (before_records = sampling_requests store ~instance_id:"sampling-worker");
   let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
     resources={(package dir "sampling").resources with max_reply_bytes=1}} in
   let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
@@ -632,9 +763,11 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     | Ok handler -> handler | Error detail -> fail detail in
   let before = !calls in
   check bool "unretained oversized request is refused before invocation" true
-    (Result.is_error ((match Masc.Lane_addon_sampling.for_worker bounded
+    (Result.is_error (Masc.Lane_addon_sampling.with_observation bounded
+      ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
+      Result.map (fun _ -> {Types.rows=[];coverage=[]}) ((match Masc.Lane_addon_sampling.for_worker bounded
         ~package:tiny_package ~instance_id:"bounded-model" with
-        | Ok handler -> handler | Error detail -> fail detail) params));
+        | Ok handler -> handler | Error detail -> fail detail) params))));
   check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
     |> Yojson.Safe.Util.member "argv" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
@@ -658,6 +791,7 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       (Filename.concat "sampling" (Store.digest instance_id)) in
     let saved_index = index_directory ^ ".saved" in
     let cancelled = ref false in
+    let observed_broker = ref None in
     (try Eio.Cancel.sub (fun cc ->
       let invoke ~route:_ ~request:_ _ =
         if fail_index then (
@@ -667,12 +801,20 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
         answer in
       let broker = match Sampling.create ~store ~package ~instance_id ~route:"fixture-route" ~invoke () with
         | Ok value -> value | Error detail -> fail detail in
+      observed_broker := Some broker;
       let handler = match Sampling.for_worker broker ~package ~instance_id with
         | Ok value -> value | Error detail -> fail detail in
-      ignore (handler params);
+      ignore (Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
+        ~on_error:Fun.id (fun () ->
+          match handler params with
+          | Ok _ -> Ok {Types.rows=[];coverage=[]} | Error detail -> Error detail));
       fail "known sampling completion swallowed cancellation")
      with Eio.Cancel.Cancelled Cancel_after_model -> cancelled := true);
     check bool "original cancellation is re-raised after retention" true !cancelled;
+    let broker = match !observed_broker with Some broker -> broker | None -> fail "missing broker" in
+    check bool "cancellation clears the host observation scope" true
+      (Result.is_ok (Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
+        ~on_error:Fun.id (fun () -> Ok {Types.rows=[];coverage=[]})));
     if fail_index then (
       (* Discover the immutable fallback even while the primary index is broken. *)
       let found = ref false in
@@ -683,19 +825,21 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
       check bool "broken index is still an explicit error" true (Result.is_error result);
       Unix.unlink index_directory;
       Unix.rename saved_index index_directory);
-    let index = match sampling_requests store ~instance_id with
+    let request_record = match sampling_requests store ~instance_id with
       | Ok [value] -> value | Ok _ -> fail "missing exact sampling request" | Error detail -> fail detail in
-    let state = match index with
-      | `Assoc fields -> (match List.assoc_opt "state" fields with
-          | Some (`String value) -> value | _ -> fail "missing state")
-      | _ -> fail "invalid sampling index" in
-    check string "cancelled call still has a finished recovery index" "finished" state;
-    let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" index) with
+    check string "cancelled call still has a finished recovery index" "finished"
+      Yojson.Safe.Util.(request_record |> member "state" |> to_string);
+    let bounded_index = Store.load_sampling_request_bounded
+      ~budget:(Store.read_budget ~max_bytes:65536) store ~instance_id
+      ~request_id:Yojson.Safe.Util.(request_record |> member "request_id" |> to_string) in
+    check bool "bounded projection resolves the same durable terminal as recovery" true
+      (bounded_index = Ok (Some request_record));
+    let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" request_record) with
       | Ok value -> value | Error detail -> fail detail in
     let outcome = match Store.read_blob store reference with
       | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
     check bool "retained outcome links the exact original request" true
-      (Yojson.Safe.Util.member "request" outcome = Yojson.Safe.Util.member "request" index);
+      (Yojson.Safe.Util.member "request" outcome = Yojson.Safe.Util.member "request" request_record);
     match answer with
     | Ok expected -> check bool "exact returned answer remains readable" true
         (Yojson.Safe.Util.member "response" outcome = S.create_message_result_to_yojson expected)
@@ -706,6 +850,17 @@ let test_known_sampling_outcome_survives_cancellation () = with_fixture (fun _en
      "host-error",Error "actual host refusal",false;
      "cancelled-index-failure",Ok {S.role=Assistant;content=Text {type_="text";text="exact answer"};
        model="actual-model";stop_reason=Some "endTurn";_meta=None},true])
+
+let run_sampling_observation broker handler params =
+  let reply = ref None in
+  let result = Masc.Lane_addon_sampling.with_observation broker
+    ~binding:(`Assoc []) ~sources:(`List []) ~on_error:Fun.id (fun () ->
+      reply := Some (handler params);
+      Ok {Types.rows=[];coverage=[]}) in
+  match result, !reply with
+  | Error detail, _ -> Error detail
+  | Ok _, Some reply -> reply
+  | Ok _, None -> fail "sampling observation did not execute callback"
 
 let test_sampling_response_bound_and_directory_durability () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
@@ -748,7 +903,8 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
     let broker = match Sampling.create ~store ~package:p ~instance_id:"w" ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) () with Ok value -> value | Error detail -> fail detail in
     let handler = match Sampling.for_worker broker ~package:p ~instance_id:"w" with
-      | Ok value -> value | Error detail -> fail detail in handler params in
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
   let first = match run p with Ok value -> value | Error detail -> fail detail in
   let size = String.length (Yojson.Safe.to_string (S.create_message_result_to_yojson first)) in
   let bounded = {p with resources={p.resources with max_reply_bytes=size-1}} in
@@ -783,6 +939,99 @@ let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _
     ~f:(fun _ -> incr count; Ok ()) with Ok () -> () | Error detail -> fail detail);
   check int "complete scan still visits every retained request" 128 !count)
 
+let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "large-model-evidence") in
+  let max_bytes = 4 * 1024 * 1024 in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=max_bytes}} in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text=String.make (3 * 1024 * 1024) 'x'};
+    model="large-model";stop_reason=None;_meta=None} in
+  let broker = require (Sampling.create ~store ~package ~instance_id:"large-worker"
+    ~route:"fixture" ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) ()) in
+  let handler = require (Sampling.for_worker broker ~package ~instance_id:"large-worker") in
+  let params = require (S.create_message_params_of_yojson (`Assoc [
+    "messages",`List [`Assoc ["role",`String "user";"content",`Assoc [
+      "type",`String "text";"text",`String "large answer fixture"]]];"maxTokens",`Int 1])) in
+  let output = require (Sampling.with_observation broker ~binding:(`Assoc [])
+    ~sources:(`List []) ~on_error:Fun.id (fun () ->
+      Result.map (fun returned ->
+        let refs = Option.get returned.S._meta |> Yojson.Safe.Util.member "masc.lane_sampling" in
+        let evidence = List.map (fun key -> require (Types.evidence_of_json
+          (Yojson.Safe.Util.member key refs))) ["request";"outcome"] in
+        {Types.rows=[{id="answer";lane_id="fusion/computation";kind=Types.Value;
+          title="large";observed_at=1.;subject_id="analysis";clock=None;actor=None;
+          fields=[];evidence;related_ids=[]}];coverage=[]}) (handler params))) in
+  let receipts = require (Sampling.retained_receipts ~store ~instance_id:"large-worker"
+    ~max_bytes output) in
+  check int "request and row share one terminal read within the 4 MiB envelope" 1 (List.length receipts);
+  check bool "projection preserves the complete 3 MiB answer" true
+    (Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response")
+     = S.create_message_result_to_yojson answer))
+
+let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "receipt-store") in
+  let instance_id = "receipt-worker" and request_id = "request-1" in
+  let request = require (Store.write_blob store (Yojson.Safe.to_string (`Assoc [
+    "kind",`String "model_request";"instance_id",`String instance_id;
+    "request_id",`String request_id]))) in
+  let outcome = require (Store.write_blob store (Yojson.Safe.to_string (`Assoc [
+    "kind",`String "model_outcome";"instance_id",`String instance_id;
+    "request",Types.evidence_to_json request;"status",`String "answered"]))) in
+  let record state outcome = `Assoc ["instance_id",`String instance_id;
+    "request_id",`String request_id;"request",Types.evidence_to_json request;
+    "state",`String state;"outcome",outcome] in
+  require (Store.save_sampling_request store ~instance_id ~request_id (record "pending" `Null));
+  let terminal = record "finished" (Types.evidence_to_json outcome) in
+  let directory = Filename.concat (Filename.concat (Store.root store) "sampling-outcomes")
+    (Store.digest instance_id) in
+  Unix.mkdir (Filename.dirname directory) 0o700;
+  Unix.mkdir directory 0o700;
+  let path = Filename.concat directory (Store.digest request_id ^ ".json") in
+  let bytes = Yojson.Safe.to_string terminal in
+  let fail_sync _ = raise (Unix.Unix_error (Unix.EIO,"fsync",path)) in
+  let publication = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+    ~sync_parent:fail_sync path bytes in
+  check bool "terminal was renamed but publication durability failed" true
+    (match publication with Error {Fs_compat.stage=Fs_compat.After_rename;_} -> true | _ -> false);
+  check bool "uncertain terminal bytes are visible" true (Sys.file_exists path);
+  let load ~budget ~sync_file ~sync_parent = Store.For_testing.load_sampling_request_bounded
+    ~budget ~sync_file ~sync_parent store ~instance_id ~request_id in
+  let rejected label = function
+    | Error (Store.Read_failed _) -> ()
+    | Error Store.Read_limit_exceeded -> fail (label ^ ": unexpected byte limit")
+    | Ok _ -> fail (label ^ ": visible terminal authorized without durable verification") in
+  let budget = Store.read_budget ~max_bytes:(String.length bytes) in
+  rejected "file sync" (load ~budget ~sync_file:fail_sync
+    ~sync_parent:(fun _ -> fail "failed file sync must not reach parent sync"));
+  check bool "failed verification retains the aggregate read charge" true
+    (match load ~budget ~sync_file:Unix.fsync ~sync_parent:Unix.fsync with
+     | Error Store.Read_limit_exceeded -> true | _ -> false);
+  rejected "parent sync" (load ~budget:(Store.read_budget ~max_bytes:(String.length bytes))
+    ~sync_file:Unix.fsync ~sync_parent:fail_sync);
+  let repaired = load ~budget:(Store.read_budget ~max_bytes:(String.length bytes))
+    ~sync_file:Unix.fsync ~sync_parent:Unix.fsync in
+  check bool "successful durable verification exposes the exact terminal" true
+    (repaired = Ok (Some terminal));
+  check bool "oversized journal fails with the typed limit before syncing" true
+    (match load ~budget:(Store.read_budget ~max_bytes:(String.length bytes - 1))
+      ~sync_file:(fun _ -> fail "oversized journal must not sync") ~sync_parent:Unix.fsync with
+     | Error Store.Read_limit_exceeded -> true | _ -> false);
+  let output : Types.output = {rows=[{id="answer";lane_id="analysis";kind=Types.Value;
+    title="answer";observed_at=1.;subject_id="answer";clock=None;actor=None;
+    fields=[];evidence=[request];related_ids=[]}];coverage=[]} in
+  let receipts = require (Masc.Lane_addon_sampling.retained_receipts ~store ~instance_id
+    ~max_bytes:1048576 output) in
+  check int "durably repaired terminal can project its answer" 1 (List.length receipts);
+  check string "projection carries the retained outcome" "answered"
+    Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "status" |> to_string))
+
 let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let module Sampling = Masc.Lane_addon_sampling in
@@ -795,7 +1044,8 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
     let broker = match Sampling.create ~store ~package:p ~instance_id ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
     let handler = match Sampling.for_worker broker ~package:p ~instance_id with
-      | Ok value -> value | Error detail -> fail detail in handler params in
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
   let answer meta : S.create_message_result = {role=Assistant;content=Text {type_="text";text="answer"};
     model="model";stop_reason=None;_meta=Some meta} in
   (match invoke "unsafe-json" (Ok (answer (`Intlit "not-json"))) with
@@ -831,7 +1081,8 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
     let broker = match Sampling.create ~store ~package:bounded_p ~instance_id ~route:"r"
       ~invoke:(fun ~route:_ ~request:_ _ -> answer) () with Ok value -> value | Error detail -> fail detail in
     let handler = match Sampling.for_worker broker ~package:bounded_p ~instance_id with
-      | Ok value -> value | Error detail -> fail detail in handler params in
+      | Ok value -> value | Error detail -> fail detail in
+    run_sampling_observation broker handler params in
   let overflow_result = invoke_bounded "overflow-error" (Error secret) in
   check bool "inline error response exceeding envelope is refused" true (Result.is_error overflow_result);
   (match overflow_result with
@@ -865,12 +1116,20 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with
     | Ok value -> value | Error detail -> fail detail in
   let hash = match reference.sha256 with Some hash -> hash | None -> fail "missing digest" in
+  let bytes = match Store.read_blob store reference with Ok bytes -> bytes | Error detail -> fail detail in
+  let request_id = Yojson.Safe.Util.(row |> member "request_id" |> to_string) in
+  let first_terminal = match row with `Assoc fields -> `Assoc (("outcome_bytes",`String bytes)::fields)
+    | _ -> fail "invalid terminal row" in
+  (match Store.save_sampling_request store ~instance_id:"journal-failure" ~request_id first_terminal with
+   | Ok () -> () | Error detail -> fail detail);
   Unix.unlink (Filename.concat (Store.root store) ("evidence/" ^ hash ^ ".json"));
   ignore (match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail);
   check bool "recovery reconstructs outcome from first durable terminal record" true
     (Result.is_ok (Store.read_blob store reference)))
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;
+  test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;

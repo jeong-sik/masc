@@ -1958,6 +1958,31 @@ let runtime_parameter_policy_json (rt : Runtime_instance.t) =
     ]
 ;;
 
+let runtime_admission_json (rt : Runtime_instance.t) =
+  match rt.execution with
+  | Runtime_execution.Agent_core config ->
+    let snapshot = Llm_provider.Provider_admission.snapshot_for ~config in
+    `Assoc
+      [ "scope", `String "process_endpoint_credential"
+      ; "declared_max", Json_util.int_opt_to_json config.max_concurrent_requests
+      ; "enforced_for_runtime", `Bool (Option.is_some config.max_concurrent_requests)
+      ; "snapshot",
+        (match snapshot with
+         | None -> `Null
+         | Some snapshot ->
+           `Assoc
+             [ "max_slots", `Int snapshot.max_slots
+             ; "active", `Int snapshot.active
+             ; "available", `Int snapshot.available
+             ; "queue_length", `Int snapshot.queue_length
+             ])
+      ]
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Muse_serve _ -> `Null
+;;
+
 let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let is_official_client_runtime =
@@ -2040,6 +2065,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt
+    ; "provider_admission", runtime_admission_json rt
     ; ( "verification"
       , if is_official_client_runtime
         then

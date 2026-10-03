@@ -1,0 +1,23 @@
+{
+  "started_at": "2026-09-30T10:42:23.212575+00:00",
+  "head": "3e22dc273c42e555efb4e38e6cf06b8da49323e3",
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel",
+  "command": [
+    "_build/default/test/test_executor_pool_cancellation.exe"
+  ],
+  "source_sha256": {
+    "lib/core/executor_pool_ref.ml": "be205df02e6383ea02aec4708191d2a216554f0e08d8a0045fd895ae4d2cc07a",
+    "lib/core/executor_pool_ref.mli": "940171c9fb21699adebef1d0ff20f116e642ddcba2c7d7607aed663046f74deb",
+    "test/test_executor_pool_cancellation.ml": "3b4e8915f225ef753572ea9f452843692b2e92adea08ca24026ba1f0799f94d8",
+    "test/test_dashboard_cache.ml": "5dfaedcf991adebfcfa1567984ad7115707c1c3e409fee85eefea79b4dd226a8"
+  },
+  "environment": {
+    "MASC_CONFIG_DIR": "unset",
+    "MASC_BASE_PATH": "unset",
+    "MASC_SKIP_DEPS_CHECK": "1"
+  },
+  "limitation": "Installed vendor pins differ; guard skipped for focused local tests only.",
+  "exit_code": 0,
+  "finished_at": "2026-09-30T10:42:23.221065+00:00",
+  "log_sha256": "be487485423c41ea2496990a890fad734562d43c26d2bfa80d70341e531d2e14"
+}

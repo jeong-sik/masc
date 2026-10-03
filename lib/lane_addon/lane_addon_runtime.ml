@@ -366,7 +366,7 @@ let wake_dependents m producer =
   | None -> ()
   | Some owner -> entries m |> List.iter (fun e ->
       if e.running && not e.stopping && e.run_id = producer.run_id
-        && List.mem owner.id e.input_installations then wake e)
+        && List.mem owner.id e.input_installations then wake ~request:Refresh_sources e)
 let failed m e message =
   if not e.stopping then e.phase <- Failed message;
   match persist m e with Ok () -> wake_dependents m e | Error error ->
@@ -647,11 +647,9 @@ let run ~sw backend m e =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id) in
                       if e.stopping then Ok () else
-                      let fingerprint =
-                        if e.package.refresh_policy=Source_changes
-                          && Lane_addon_sources.snapshot_files_only e.refresh_interest
-                        then Some (Lane_addon_store.digest (Yojson.Safe.to_string sources))
-                        else None in
+                      let* fingerprint = match e.package.refresh_policy with
+                        | Source_changes -> Lane_addon_sources.refresh_fingerprint e.refresh_interest sources
+                        | Every_hint -> Ok None in
                       if request=Refresh_sources && previous_phase=Attached
                         && Option.is_some fingerprint && fingerprint=e.last_committed_sources
                       then (
@@ -1566,16 +1564,16 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
              | Ok result -> Ok result
              | Error message ->
                  let* frozen = freeze () in Ok (frozen, Delivery_failed message) in
-           let delivery = match receipt with
-             | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
-                 "status", `String (match destination with To_broadcast -> "committed"
+           let recipient_fields = match destination with
+             | To_keeper name -> ["keeper_name", `String name]
+             | To_broadcast | Preserve_only -> [] in
+           let delivery_fields = match receipt with
+             | Delivery_receipt receipt -> ["status", `String (match destination with To_broadcast -> "committed"
                    | To_keeper _ | Preserve_only -> "accepted"); "receipt", receipt]
-             | Delivery_failed message -> `Assoc ["destination",`String destination_name;
-                 "status", `String "failed"; "error", `String message]
-             | Delivery_pending_commit message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "pending_commit";"detail",`String message]
-             | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
-                 "status",`String "outcome_unknown";"error",`String message] in
+             | Delivery_failed message -> ["status", `String "failed"; "error", `String message]
+             | Delivery_pending_commit message -> ["status",`String "pending_commit";"detail",`String message]
+             | Delivery_outcome_unknown message -> ["status",`String "outcome_unknown";"error",`String message] in
+           let delivery = `Assoc (("destination",`String destination_name) :: recipient_fields @ delivery_fields) in
            let delivery = match broadcast_request_id, delivery with
              | Some request_id, `Assoc fields -> `Assoc (("request_id",`String request_id) :: fields)
              | _ -> delivery in
@@ -1890,6 +1888,5 @@ module For_testing = struct
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;
     Hashtbl.iter (fun _ stop -> stop ()) fleet_services; Hashtbl.clear fleet_services;
-    fleet_backend := None; delivery_handler := None; skill_export_handler := None;
-    sampling_factory := None
+    fleet_backend := None; delivery_handler := None; sampling_factory := None; skill_export_handler := None
 end

@@ -71,7 +71,9 @@ let encode_bounded ~max_bytes json =
     | `Null -> consume 4
     | `Bool true -> consume 4
     | `Bool false -> consume 5
-    | (`Int _ | `Float _) as scalar -> consume (String.length (Yojson.Safe.to_string scalar))
+    | `Float value when not (Float.is_finite value) ->
+        invalid_arg "sampling evidence contains a non-finite number"
+    | (`Int _ | `Float _) as scalar -> consume (String.length (Yojson.Safe.to_string ~std:true scalar))
     | `List items ->
         consume 2; sequence value items
     | `Assoc fields ->
@@ -81,7 +83,7 @@ let encode_bounded ~max_bytes json =
     | first :: rest -> write first; List.iter (fun item -> consume 1; write item) rest in
   try
     value json;
-    let bytes = Yojson.Safe.to_string json in
+    let bytes = Yojson.Safe.to_string ~std:true json in
     ignore (Yojson.Safe.from_string bytes);
     Ok bytes
   with

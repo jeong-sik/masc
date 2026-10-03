@@ -48,7 +48,7 @@ def snapshot() -> dict:
             "fields": {"fixture": "concurrent-lanes"}, "evidence": [],
             "related_ids": [f"{owner}/1/event-1", "outside-current-slice"] if index == 3 else []})
     instance = {"instance_id": owner, "run_id": "shared-world", "addon_id": "scene-fixture",
-        "title": "World observer", "revision": "1", "phase": {"kind": "attached"},
+        "title": "World observer", "revision": "1", "runtime_presence": "live", "phase": {"kind": "attached"},
         "observation_seq": 1, "rows_count": len(rows), "incarnation": owner,
         "configuration": None, "action_schema": None,
         "binding": {"sources": [{"source_id": "frames", "kind": "lane_output",
@@ -225,19 +225,69 @@ def run_installation_detail(executable: str) -> None:
     print("Lane Add-on Installation detail: PASS")
 
 
+def run_declared_layers(executable: str, captures: Path | None) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    captured = snapshot()
+    template = captured["instances"][0]
+    workers, declarations = [], []
+    for name, upstream in (("a", []), ("b", []), ("c", ["a"]), ("d", ["a", "b"]), ("e", ["c", "d"])):
+        owner = "layer-" + name
+        path = "/fixture/lane-addons/" + name + ".toml"
+        workers.append({**template, "instance_id": owner, "incarnation": owner, "title": name,
+            "configuration": {"id": name, "source_path": path}, "rows_count": 0,
+            "package": {"outputs": {"events": {"all_lanes": True}}, "skills_directory": None},
+            "binding": {"sources": [{"source_id": "from-" + producer, "kind": "lane_output",
+                "installation_id": producer, "output_id": "events", "selection": "latest_completed"}
+                for producer in upstream]}})
+        declarations.append({"id": name, "source_path": path, "instance_id": owner,
+            "desired_revision": "1", "applied_revision": "1"})
+    captured["instances"], captured["rows"] = workers, []
+    captured["configuration"]["declarations"] = declarations
+    fixtures["/api/v1/lane-addons"] = (200, captured)
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"5 declared")
+        terminal.send_and_wait(process, master, output, b"\r", b"No observations yet")
+        terminal.resize_and_wait(process, master, output, rows=48, columns=140,
+            needle=b"No observations yet", controls=(terminal.FULL_REDRAW,))
+        layers = terminal.send_and_wait(process, master, output, b"2", b"Layer 2")
+        screen = terminal.screen_text(terminal.frame_containing(layers, b"Layer 2"))
+        for needle in (b"[a]  |  [b]", b"[c]  |  [d]", b"[e]", b"own receipts"):
+            if needle not in screen:
+                raise AssertionError(f"fan-out/join layers omitted {needle!r}: {screen!r}")
+        if b"Librarian" in screen or b"Workspace Curator" in screen:
+            raise AssertionError("connection view substituted general architecture for declared wiring")
+        print("TUI_CAPTURE declared-layers " + repr(screen), flush=True)
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / "09-declared-layers.pty").write_bytes(bytes(output))
+        terminal.send_and_wait(process, master, output, b"1", b"No observations yet")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"5 declared")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable, description="declared parallel layers and joined output",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("layer browsing sent a write")
+    print("Lane declared parallel layers / joined output / truthful scope: PASS")
+
+
 def run_grouped_history(executable: str, captures: Path | None) -> None:
     fixtures = terminal.overview_event_http_fixtures()
     captured = snapshot()
     active = captured["instances"][0]
     active["title"] = "Current reporter"
-    active["configuration"] = {"source_path": "/fixture/lane-addons/report.toml"}
+    active["configuration"] = {"id": "report", "source_path": "/fixture/lane-addons/report.toml"}
     old_runs = []
     old_rows = []
     for index in range(9):
         owner = f"retained-{index}"
         old_runs.append({**active, "instance_id": owner, "incarnation": owner,
             "title": "Repeated counters", "run_id": f"retained world/{index}", "phase": {"kind": "detached"},
-            "configuration": {"source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
+            "configuration": {"id": "a" if index % 2 == 0 else "b", "source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
         old_rows.append({**captured["rows"][0], "id": owner + "/1/result", "lane_id": owner + "/browser",
             "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
@@ -496,3 +546,4 @@ if __name__ == "__main__":
     run_navigation_consistency(os.path.abspath(args.executable))
     run_declared_report(os.path.abspath(args.executable), args.capture_dir)
     run_grouped_history(os.path.abspath(args.executable), args.capture_dir)
+    run_declared_layers(os.path.abspath(args.executable), args.capture_dir)

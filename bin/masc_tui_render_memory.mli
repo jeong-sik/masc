@@ -68,7 +68,8 @@ val facts_title :
     goes further ({!Masc_tui_ansi.detail_heading}). *)
 
 val storage_size : int -> string
-(** Observed snapshot bytes rendered as B/KiB/MiB; never a model-token estimate. *)
+(** Observed rendered-knowledge bytes as B/KiB/MiB. Token mode separately
+    marks its conversion as an estimate. *)
 
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string

@@ -5827,6 +5827,8 @@ type state = {
   mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
+  mutable memory_unit: Masc_tui_memory_usage.display_unit;
+  mutable memory_input: (string, Masc_tui_memory_usage.t) Masc_tui_fetched.t;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
      table; [Some name] draws that keeper's fact listing over it. The
      category filter holds a category string exactly as the server spelled
@@ -8476,6 +8478,8 @@ let create_state
   memory_health_inflight = false;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
+  memory_unit = Masc_tui_memory_usage.Tokens;
+  memory_input = Masc_tui_fetched.initial;
   memory_facts_keeper = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;

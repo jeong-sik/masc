@@ -95,6 +95,67 @@ class CandleEvidenceAudits(unittest.TestCase):
         write_json(bundle/'metadata.json', metadata)
         self.run_audit(script, bundle, bundle, error='executable hash disagrees')
 
+    def test_survey_binary_is_bound_to_independent_artifact_record(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        self.run_audit(script, bundle, bundle)
+        metadata = json.loads((bundle/'metadata.json').read_text())
+        metadata['build']['executable_sha256'] = '0'*64
+        write_json(bundle/'metadata.json', metadata)
+        for filename in ('freeze.json', 'frozen-audit.json'):
+            record = json.loads((bundle/filename).read_text())
+            record['executable_sha256'] = '0'*64
+            write_json(bundle/filename, record)
+        self.run_audit(script, bundle, bundle, error='executable hash disagrees with CI artifact')
+        # Restore the measured hash, then make all bundle-local source
+        # declarations agree on a different commit. The CI record still owns
+        # the source identity, independently of those declarations.
+        artifact = json.loads((bundle/'artifact-verification.json').read_text())
+        executable = next(entry for entry in artifact['files']
+                          if entry['file'] == 'candle_appraiser_eval_cli.exe')
+        plan = json.loads((bundle/'plan.json').read_text())
+        plan['source_commit'] = '0'*40
+        write_json(bundle/'plan.json', plan)
+        metadata['plan'] = plan
+        metadata['build'].update(commit='0'*40, binary_commit='0'*40,
+                                 executable_sha256=executable['sha256'])
+        write_json(bundle/'metadata.json', metadata)
+        for filename, source_key in [('freeze.json', 'binary_commit'),
+                                     ('frozen-audit.json', 'source_commit')]:
+            record = json.loads((bundle/filename).read_text())
+            record[source_key] = '0'*40
+            record.update(executable_sha256=executable['sha256'],
+                          plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest())
+            write_json(bundle/filename, record)
+        self.run_audit(script, bundle, bundle, error='CI artifact source commit mismatch')
+
+    def test_runtime_api_model_matches_declared_measurement(self):
+        for name, source, script_name in [('candidate', CANDIDATE, 'audit-candidate.py'),
+                                           ('survey', SURVEY, 'audit-provenance.py')]:
+            with self.subTest(bundle=name):
+                bundle = self.root/name
+                hydrate(source, bundle)
+                runtime_path = bundle/'.masc/config/runtime.toml'
+                self.run_audit(source/script_name, bundle, bundle)
+                raw = runtime_path.read_text().replace('"api-name" = "glm-5.3-flash"',
+                                                       '"api-name" = "another-model"')
+                runtime_path.write_text(raw)
+                plan = json.loads((bundle/'plan.json').read_text())
+                plan['runtime_config_sha256'] = hashlib.sha256(raw.encode()).hexdigest()
+                write_json(bundle/'plan.json', plan)
+                metadata = json.loads((bundle/'metadata.json').read_text())
+                metadata['plan'] = plan
+                write_json(bundle/'metadata.json', metadata)
+                if source == SURVEY:
+                    for filename in ('freeze.json', 'frozen-audit.json'):
+                        record = json.loads((bundle/filename).read_text())
+                        record.update(plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest(),
+                                      runtime_config_sha256=plan['runtime_config_sha256'])
+                        write_json(bundle/filename, record)
+                self.run_audit(source/script_name, bundle, bundle,
+                               error='prepared API model disagrees with declared runtime')
+
     def test_comparison_binds_each_plan_to_frozen_and_effective_prompt(self):
         candidate = self.root/'candidate'
         baseline = self.root/'baseline'

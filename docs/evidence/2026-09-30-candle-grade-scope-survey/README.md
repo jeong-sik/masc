@@ -35,4 +35,6 @@ Four cases show visibly divided judgments:03(trivial/small),07(small/medium),08(
 
 The raw result and registry files are compressed without removing any row. The payload archive retains every original hash-addressed file. `SHA256SUMS` covers the bundle. To rerun the structural audit, extract the payload archive, decompress the two JSONL files, reconstruct the frozen workspace from plan/cases/runtime/prompts, and run `audit-provenance.py WORKSPACE EVIDENCE`. No model call is needed to verify this evidence.
 
+The auditor binds the executable hash and source commit to `artifact-verification.json`, retained from the same [CI run 36582657889](https://github.com/jeong-sik/masc/actions/runs/36582657889) used by the candidate measurement. Its model check also binds the frozen runtime slot to the configured API model. These checks validate the retained declarations against that separate artifact record; they do not redownload or execute the historical binary.
+
 The auditor verifies retained prompt bytes and their effective use, but does not certify a source commit for those bytes. `prompt_commit` in the historical freeze records is an unverified declaration; agreement between those declarations is not a commit-to-blob proof. The audit report explicitly marks that source attribution unverified.

@@ -1133,6 +1133,38 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   let after = Unix.stat blob_path in
   check bool "intact recovery blob is not replaced" true
     (before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino);
+  let recover ~sync_file ~sync_parent ~visited =
+    Store.For_testing.iter_sampling_requests ~sync_file ~sync_parent store
+      ~instance_id:"journal-failure" ~max_bytes:65536
+      ~f:(fun _ -> incr visited; Ok ()) in
+  let synced = ref [] and visited = ref 0 in
+  let sync label fd = synced := !synced @ [label]; Unix.fsync fd in
+  (match recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited with
+   | Ok () -> () | Error detail -> fail detail);
+  check (list string) "intact recovery establishes file and parent durability" ["file"; "parent"] !synced;
+  check int "only durable evidence reaches recovery callback" 1 !visited;
+  List.iter (fun failing ->
+    visited := 0;
+    let sync label fd =
+      if label = failing then raise (Unix.Unix_error (Unix.EIO, "fsync", label))
+      else Unix.fsync fd in
+    check bool "failed durability is not successful recovery" true
+      (Result.is_error (recover ~sync_file:(sync "file") ~sync_parent:(sync "parent") ~visited));
+    check int "unsynced evidence is not delivered" 0 !visited) ["file"; "parent"];
+  let external_path = Filename.concat dir "external-outcome.json" in
+  write external_path bytes;
+  let saved_blob = blob_path ^ ".saved" in
+  Unix.rename blob_path saved_blob;
+  Unix.symlink external_path blob_path;
+  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
+    check bool "matching external symlink is not owned recovery evidence" true
+      (Result.is_error (sampling_requests store ~instance_id:"journal-failure")));
+  visited := 0;
+  Fun.protect ~finally:(fun () -> Unix.unlink blob_path; Unix.rename saved_blob blob_path) (fun () ->
+    check bool "a symlink swap during file sync cannot satisfy recovery" true
+      (Result.is_error (recover ~visited ~sync_parent:Unix.fsync ~sync_file:(fun fd ->
+        Unix.fsync fd; Unix.rename blob_path saved_blob; Unix.symlink external_path blob_path)));
+    check int "swapped evidence is not delivered" 0 !visited);
   Unix.unlink blob_path;
   Unix.mkfifo blob_path 0o600;
   Fun.protect ~finally:(fun () -> Unix.unlink blob_path) (fun () ->

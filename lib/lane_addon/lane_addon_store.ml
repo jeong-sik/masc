@@ -251,7 +251,46 @@ let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes"
 let save_sampling_outcome t ~instance_id ~request_id json =
   write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
     (Yojson.Safe.to_string json)
-let iter_sampling_requests t ~instance_id ~max_bytes ~f =
+let verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected path =
+  let read () =
+    let* contents = Fs_compat.load_owned_regular_file_range
+      ~ownership_root:t.root ~offset:0 ~max_bytes path
+      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+    match contents with
+    | None -> Error "sampling outcome blob disappeared during recovery"
+    | Some contents when contents.snapshot.file_size > max_bytes ->
+        Error "sampling outcome blob exceeds recovery byte envelope"
+    | Some contents -> Ok contents in
+  let* before = read () in
+  if blob_reference before.content <> expected then Error "sampling outcome blob digest mismatch"
+  else protect (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let stat = Unix.fstat fd in
+      if stat.Unix.st_kind <> Unix.S_REG
+         || stat.Unix.st_dev <> before.snapshot.device
+         || stat.Unix.st_ino <> before.snapshot.inode then
+        Error "sampling outcome blob changed before sync"
+      else
+        let parent = Filename.dirname path in
+        let parent_fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+        Fun.protect ~finally:(fun () -> Unix.close parent_fd) (fun () ->
+          let parent_stat = Unix.fstat parent_fd in
+          if parent_stat.Unix.st_kind <> Unix.S_DIR then
+            Error "sampling outcome parent is not a directory"
+          else (
+            sync_file fd;
+            sync_parent parent_fd;
+            let* after = read () in
+            let parent_now = Unix.lstat parent in
+            if not (Fs_compat.equal_owned_regular_file_snapshot before.snapshot after.snapshot)
+               || before.content <> after.content
+               || parent_now.Unix.st_kind <> Unix.S_DIR
+               || parent_stat.Unix.st_dev <> parent_now.Unix.st_dev
+               || parent_stat.Unix.st_ino <> parent_now.Unix.st_ino then
+              Error "sampling outcome blob changed during sync"
+            else Ok ()))))
+let iter_sampling_requests_with ~sync_file ~sync_parent t ~instance_id ~max_bytes ~f =
   if max_bytes <= 0 then Error "sampling recovery requires a positive byte envelope"
   else protect (fun () ->
     let outcomes = Filename.concat t.root (sampling_outcome_directory instance_id) in
@@ -276,14 +315,12 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                               | None -> Error "sampling outcome reference is missing" in
                             if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
                             else
-                              (match Fs_compat.exact_path_kind
+                              (match Fs_compat.exact_path_kind ~follow:false
                                        (Filename.concat t.root (blob_path (digest bytes))) with
                                | Fs_compat.Exact_missing -> write_blob t bytes |> Result.map (fun _ -> ())
                                | Fs_compat.Exact_kind Unix.S_REG ->
-                                   let* retained = bounded_file_for_sampling ~max_bytes
-                                     (Filename.concat t.root (blob_path (digest bytes))) in
-                                   if blob_reference retained = expected then Ok ()
-                                   else Error "sampling outcome blob digest mismatch"
+                                   verify_sampling_blob ~sync_file ~sync_parent t ~max_bytes ~expected
+                                     (Filename.concat t.root (blob_path (digest bytes)))
                                | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
                                    Error "sampling outcome blob is not a regular file")
                         | _ -> Ok ())
@@ -296,6 +333,7 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
     let* () = scan (sampling_outcome_directory instance_id) ~skip:(fun _ -> false) in
     scan (sampling_directory instance_id) ~skip:(fun name ->
       Fs_compat.exact_path_kind (Filename.concat outcomes name) <> Fs_compat.Exact_missing))
+let iter_sampling_requests = iter_sampling_requests_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
@@ -748,6 +786,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let iter_sampling_requests = iter_sampling_requests_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with

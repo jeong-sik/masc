@@ -9599,10 +9599,16 @@ let render_runtime (state : state) =
     | Masc_tui_types.Runtime_lanes -> List.length candidates
     | Masc_tui_types.Runtime_all -> List.length all_runtimes
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
+    match state.runtime_surface with
+    | None -> "reading unavailable"
+    | Some snapshot ->
+        (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
+         | None -> "reading time unavailable"
+         | Some generated_at ->
+             let recorded = Unix.localtime generated_at in
+             Printf.sprintf "reading %02d:%02d:%02d"
+               recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
   in
   let header =
     match state.runtime_surface with

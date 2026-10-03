@@ -10332,11 +10332,13 @@ let plan_runtime_lane_edit (state : state) = function
                   "%s is a runtime, not a declared lane; there is no table to remove"
                   lane))
         | Rename_lane, _ ->
-          (* The name is the routing key, so the writer changes the table and
-             every reference in one write. Nothing to check here beyond having
-             a lane under the cursor: the file decides whether the lane is
-             declared as its own table and whether the new name is free. *)
-          Open_lane_rename_field lane
+          if runtime_lane_write_busy state then
+            Refuse_lane_edit Lane_write_pending
+          else
+            (* The name is the routing key, so the writer changes the table and
+               every reference in one write. The file decides whether the lane
+               is declared as its own table and whether the new name is free. *)
+            Open_lane_rename_field lane
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->

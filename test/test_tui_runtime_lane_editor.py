@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 import test_tui_keyboard_input as h
 
 
@@ -318,6 +319,10 @@ def run(executable: str) -> None:
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
+    recorded_at = datetime.fromisoformat(
+        store.body["generated_at_iso"].replace("Z", "+00:00")
+    )
+    reading_time = f"reading {recorded_at.astimezone().strftime('%H:%M:%S')}".encode()
 
     def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC System")
@@ -328,7 +333,9 @@ def run(executable: str) -> None:
             process, fd, output, rows=30, columns=131,
             needle=b"MASC System", controls=(h.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        frame = h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        if reading_time not in h.screen_text(frame):
+            raise AssertionError("Runtime header did not use the resolved reading time")
 
         # [a] opens the name field; the letters typed after it are the name's.
         h.send_and_wait(process, fd, output, b"a", b"new lane name: _")
@@ -370,6 +377,16 @@ def run(executable: str) -> None:
         os.write(fd, b"J")
         if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("J posted nothing")
+        frame = h.send_and_wait(
+            process, fd, output, b"R",
+            b"lane write refused: " + BUSY,
+        )
+        if f"rename lane {NEW_LANE} to:".encode() in h.screen_text(frame):
+            raise AssertionError("R opened a rename field while a write was pending")
+        # Moving away and back clears the prior notice, so x must draw its
+        # own refusal rather than satisfying the wait with R's old frame.
+        press(process, fd, output, b"k")
+        press(process, fd, output, b"j")
         h.send_and_wait(
             process, fd, output, b"x",
             b"lane write refused: " + BUSY,
@@ -415,6 +432,13 @@ def run(executable: str) -> None:
         h.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
+        # A failed reread repaints only changed rows; the unchanged header
+        # stays in terminal state even when it is absent from this frame.
+        current_screen = h.screen_text(bytes(output))
+        if reading_time not in current_screen:
+            raise AssertionError(
+                f"failed refresh changed the Runtime reading time: expected {reading_time!r}; screen={current_screen[:1200]!r}"
+            )
         # Another client now removes runtime-a. The TUI still shows the old
         # [runtime-a; runtime-b] order, where runtime-b is second. K used to
         # post that whole stale order and restore runtime-a. The unread list

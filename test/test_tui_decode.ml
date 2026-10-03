@@ -3644,7 +3644,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_tool_surface_bytes", `Int 2360
       ; "skill_discovery_bytes", `Int 369
       ; "skill_eager_body_bytes", `Int 0
-      ; "skill_body_bytes", `Int 4981
+      ; "skill_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "unavailable_skill_names", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
@@ -3744,11 +3744,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
          Alcotest.(check string) "flow node tool" "keeper_lane_status" node.sfn_tool_name;
          Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
        | _ -> Alcotest.fail "expected one decoded flow node and batch");
-      Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
-      Alcotest.(check int) "Skill surface bytes" 2360 ets_skill_tool_surface_bytes;
+      Alcotest.(check (option int)) "whole surface bytes" (Some 79984) ets_tool_surface_bytes;
+      Alcotest.(check (option int)) "Skill surface bytes" (Some 2360) ets_skill_tool_surface_bytes;
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
-      Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
+      Alcotest.(check (option int)) "reported zero body bytes" (Some 0) ets_skill_body_bytes;
       (* The skill source is asserted above, against the shape the producer
          emits. This used to pin a SKILL.md path that no producer has sent
          since the surface moved to skill_provenance -- the fixture was the
@@ -3965,9 +3965,9 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
                { ets_tool_delivery =
                    Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported;
                  ets_skill_profiles = [];
-                 ets_tool_surface_bytes = 0;
-                 ets_skill_tool_surface_bytes = 0;
-                 ets_skill_body_bytes = 0;
+                 ets_tool_surface_bytes = None;
+                 ets_skill_tool_surface_bytes = None;
+                 ets_skill_body_bytes = None;
                  ets_tools = [];
                  _
                });

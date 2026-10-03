@@ -29,6 +29,9 @@ type t =
   ; kill : unit -> unit
   }
 
+type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
+  (Mcp_protocol.Sampling.create_message_result, string) result
+
 let text_of_tool_result (r : Sdk_types.tool_result) =
   List.filter_map
     (fun (c : Sdk_types.tool_content) ->
@@ -45,7 +48,7 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
     [command] is the executable path, [args] are command-line arguments.
     [env] optionally overrides the process environment. *)
 let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
-    ?max_response_bytes ?stderr () =
+    ?max_response_bytes ?stderr ?sampling_handler () =
   if Option.fold ~none:false ~some:(fun bytes -> bytes <= 0) max_response_bytes then
     Error (Error.Mcp (ServerStartFailed
       { command; detail = "max_response_bytes must be positive" }))
@@ -73,6 +76,14 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
         ()
     in
     let client = Sdk_client.create ~transport () in
+    let client = match sampling_handler with
+      | None -> client
+      | Some handler ->
+          let guarded_handler params =
+            try handler params with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          Sdk_client.on_sampling guarded_handler client in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()

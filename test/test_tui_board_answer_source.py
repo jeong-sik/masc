@@ -9,12 +9,7 @@ from typing import Any, cast
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_board.ml",
-    "bin/masc_tui_render_board.mli",
-    "bin/masc_tui_render.ml",
-    "lib/tui_decode.ml",
-)
+
 
 
 def run(executable: str, status: str, persistence_state: str) -> None:

@@ -5,7 +5,7 @@ import re
 import sys
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_keys.ml", "bin/masc_tui_render.ml")
+
 KEY = "prompt-__identity__-`raw`-" + "k" * 95 + "-KEYTAIL"
 FILE = "config/" + "경로-__raw__-" * 22 + "FILETAIL.md"
 VARIABLE = "variable_`raw`_" + "v" * 95 + "_VARTAIL"

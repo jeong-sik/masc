@@ -8,7 +8,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_browser.ml", "bin/masc_tui_browser.mli")
+
 
 
 def run(binary, *, quit_from_history=False, disconnected=False):

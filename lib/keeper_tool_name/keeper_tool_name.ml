@@ -4,9 +4,8 @@
     match, and [of_string] is derived from [all], so it cannot fall behind a
     constructor.
 
-    This lives outside [lib/tool] because keeper names are keeper-owned:
-    [scripts/lint/masc-domain-boundary-ratchet.sh] holds [lib/tool] at zero
-    [Keeper_*] identifiers, and [Tool_name]'s own header reserves that module
+    This lives outside [lib/tool] because keeper names are keeper-owned.
+    [Tool_name]'s own header reserves that module
     for domain vocabularies rather than every [masc_*] name. *)
 
 type t =

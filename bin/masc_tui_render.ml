@@ -9865,8 +9865,11 @@ let render_runtime (state : state) =
              else ""
            in
            let ctx =
-             Printf.sprintf " [%s ctx]"
+             Printf.sprintf " [%s %s]"
                (format_context_tokens runtime.ro_effective_max_context)
+               (match picker.rlp_pick with
+                | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+                | _ -> "ctx")
            in
            let def = if runtime.ro_is_default then " [default]" else "" in
            c.push

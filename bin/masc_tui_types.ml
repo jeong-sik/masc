@@ -9712,8 +9712,7 @@ type runtime_picker_projection = {
       (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
   rlp_total : int;
   rlp_source_total : int;
-      (* The catalogue before the filter: zero is an unread catalogue, not an
-         empty match. *)
+      (* Eligible catalogue size before the text filter. *)
   rlp_summary : string;
       (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
   rlp_filter : string option;
@@ -9894,7 +9893,8 @@ let runtime_picker_rows (state : state) pick =
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
 let runtime_picker_empty_note picker =
-  if picker.rlp_total = 0 && picker.rlp_source_total > 0 then
+  if picker.rlp_total = 0 && picker.rlp_source_total > 0
+     && (match picker.rlp_pick with Pick_exact_lane_replacement _ -> true | _ -> false) then
     "  (no eligible replacement in this candidate group)"
   else if picker.rlp_total = 0 then "  (runtime catalogue unread)"
   else

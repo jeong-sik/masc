@@ -596,12 +596,13 @@ def run_cli_editor(executable: str) -> None:
     def exact_posts() -> list[dict]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
 
-    def wait_for_posts(count: int) -> list[dict]:
-        deadline = time.monotonic() + 5.0
-        while len(exact_posts()) < count:
-            if time.monotonic() > deadline:
-                raise AssertionError(f"exact posts: {exact_posts()!r}")
-            time.sleep(0.05)
+    def wait_for_posts(process, fd, output, count: int) -> list[dict]:
+        # The editor can repaint while the write is starting. Keep consuming
+        # its terminal output so the fixture wait cannot block that write.
+        if not h.wait_for_fixture_state(
+            process, fd, output, lambda: len(exact_posts()) >= count, timeout=5.0,
+        ):
+            raise AssertionError(f"exact posts: {exact_posts()!r}")
         return exact_posts()
 
     def interact(process, fd, _slave, output, _base):
@@ -623,7 +624,7 @@ def run_cli_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
         mark = mark_output(fd, output)
         os.write(fd, b"K")
-        posted = wait_for_posts(1)
+        posted = wait_for_posts(process, fd, output, 1)
         expected = [{"lane": "exact/librarian_exact", "action": "move",
                      "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
         if posted != expected:
@@ -647,7 +648,7 @@ def run_cli_editor(executable: str) -> None:
                           b"[HTTP tail] model-a default", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
         os.write(fd, b"\r")
-        posted = wait_for_posts(2)
+        posted = wait_for_posts(process, fd, output, 2)
         if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
                          "runtime_id": new_cli}:
             raise AssertionError(f"CLI append posted {posted[1]!r}")

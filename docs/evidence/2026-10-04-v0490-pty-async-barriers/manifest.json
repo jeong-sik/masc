@@ -1,0 +1,53 @@
+{
+  "scope": "candidate Python fixtures on existing e4 native binary, synthetic loopback HTTP/PTY",
+  "binary_commit": "e4afdce8f0c4ba4cf02e4326ba423c4fe2207339",
+  "binary_sha256": "64ea20854e47c3a5883c717303de468cbc7ed7b811b8fcea815f263ee8bc41d6",
+  "sources": {
+    "test_tui_keyboard_input.py": "07f9a7c87e5fda04349936561a4f69afa3d97bf10b61a6016bfc99534c49d0dd",
+    "test_tui_remote_workspace_history_pty.py": "b6006eb1e299896fc28a3cc57eec052a2722d8f5b1b1744fccc18248999f8557",
+    "test_tui_item_workspace_authority_pty.py": "d2350ac480a18ca5e2e4b1458f3610f8cad439f7fc2cf6824c68896dbcd473c1"
+  },
+  "stages": [
+    {
+      "stage": "ask",
+      "scope": "focused Ask scenarios",
+      "exit_code": 0,
+      "scenarios": [
+        {
+          "description": "Ask editor and held submit are withdrawn with workspace (admitted=False)",
+          "status": "PASS"
+        },
+        {
+          "description": "Ask editor and held submit are withdrawn with workspace (admitted=True)",
+          "status": "PASS"
+        }
+      ],
+      "raw_log_sha256": "ffbc2673b7a055fbf76d82407bbfd20bf1d261c2c22edc61b56342a40ed34757",
+      "raw_artifacts": {
+        "01.pty": "415a98a0e7ccf65ffdbff9a365ad3f7e34c9e87ff1b1eb584e67d87915ea562f",
+        "02.pty": "5a734eee0e8540361addc3351990d47b8a48338701903cd1764cdc438be0c2f5"
+      }
+    },
+    {
+      "stage": "item",
+      "scope": "official Item workspace authority entrypoint",
+      "exit_code": 0,
+      "scenarios": [
+        {
+          "description": "Item accounts follow A/B/A workspace authority",
+          "status": "PASS"
+        },
+        {
+          "description": "Partial roster retains authoritative Item account",
+          "status": "PASS"
+        }
+      ],
+      "raw_log_sha256": "edf2bcaeb04d5b46c608d040a37c2478fc62940e6a6a4694281d7ff51d5af680",
+      "raw_artifacts": {
+        "01.pty": "73c65dc596fd41bfe62f97eba64b56d3f725bb3ef19d55527e7ea20ff0eb91dd",
+        "02.pty": "a9f667b4250975518eae06a8da0921d00954b163fbab479ba9be471e5d7a667f"
+      }
+    }
+  ],
+  "negative_control": "negative-control.json"
+}

@@ -12,11 +12,14 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
+import socket
 import tempfile
 from pathlib import Path
 import sys
 import threading
+import time
 
 import test_tui_keyboard_input as h
 
@@ -979,7 +982,9 @@ def ask_workspace_withdrawal(binary: str) -> None:
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
         admitted_answers: list[tuple[str, str]] = []
-        def answer_request(method):
+        answer_connections: list[socket.socket] = []
+        answer_deadlines: list[float] = []
+        def answer_request(method, connection):
             if method != "POST":
                 return 405, {"error": "POST required"}
             # The client may cancel its connection while the response is
@@ -987,7 +992,21 @@ def ask_workspace_withdrawal(binary: str) -> None:
             # receipt is only appended after a successful response write.
             with wire.lock:
                 admitted_answers.append((method, wire.phase))
+                answer_connections.append(connection)
+                answer_deadlines.append(time.monotonic() + WAIT_SECONDS)
             return answer()
+        def answer_disconnected():
+            with wire.lock:
+                assert len(answer_connections) == 1, answer_connections
+                connection = answer_connections[0]
+            if not select.select([connection], [], [], 0)[0]:
+                return False
+            try:
+                pending = connection.recv(1, socket.MSG_PEEK)
+            except ConnectionResetError:
+                return True
+            assert pending == b"", "unexpected input on the held Ask connection"
+            return True
         b_asks = threading.Event()
         def asks():
             with wire.lock:
@@ -999,7 +1018,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: h.MethodHttpResponse(answer_request)})
+            h.KEEPER_ASK_ANSWER_PATH: h.ConnectionHttpResponse(answer_request)})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
@@ -1014,6 +1033,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
                     os.write(fd, b"\r")
                     assert h.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
+                    assert not answer_disconnected(), "Ask connection closed before workspace withdrawal"
                 wire.publish("b")
                 assert h.wait_for_fixture_state(process, fd, output,
                     # Approvals withdraws its decision authority in the
@@ -1025,6 +1045,20 @@ def ask_workspace_withdrawal(binary: str) -> None:
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
                 assert h.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
+                if submit:
+                    # Prove cancellation on the transport while no response
+                    # bytes can leave the held gate. A fixture-return event
+                    # alone cannot establish that the old client is gone.
+                    assert not answer.release.is_set() and not answer.completed.is_set()
+                    # Bound the whole admitted request, not only this wait:
+                    # the existing 8s fixture bound is below the TUI's 10s
+                    # HTTP timeout, which must not masquerade as withdrawal.
+                    remaining = answer_deadlines[0] - time.monotonic()
+                    assert remaining > 0, "Ask withdrawal exceeded its admission deadline"
+                    assert h.wait_for_fixture_state(process, fd, output, answer_disconnected,
+                        timeout=remaining), "withdrawn Ask client kept its held connection alive"
+                    assert time.monotonic() < answer_deadlines[0], \
+                        "Ask disconnect was too late to establish workspace cancellation"
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
                 if submit:

@@ -20,16 +20,6 @@ import threading
 import test_tui_keyboard_input as h
 
 
-# scripts/ci/run-edited-tests.sh selects this runnable alias when a changed
-# source path occurs as a quoted literal here; it reads these outside Python.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_selection.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_render_prim.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 HISTORY_PATH = "/api/v1/keepers/alpha/chat/history"

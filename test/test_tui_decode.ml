@@ -9972,6 +9972,29 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   Alcotest.(check bool) "no-change must not invent a generation slot" true
     (Result.is_error (Tui_decode.decode_lane_run_detail invented_slot));
+  let not_entered = match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+    | `Assoc ["run", `Assoc fields] ->
+      `Assoc ["run", `Assoc (("selected_slot", `String "codex.fake") :: List.remove_assoc "selected_slot" fields)]
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "not-entered must not invent a generation slot" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail not_entered));
+  List.iter (fun (status, extra) ->
+    let with_model model =
+      match make ~decision:"uncertain" ~path:"not_entered" ~skipped:false () with
+      | `Assoc ["run", `Assoc fields] ->
+        let output = match List.assoc "output" fields with
+          | `Assoc fields -> fields | _ -> Alcotest.fail "invalid output" in
+        let preflight = `Assoc (["status", `String status; "elapsed_s", `Null] @ extra @ model) in
+        `Assoc ["run", `Assoc (("output", `Assoc (("jev_preflight", preflight)
+          :: List.remove_assoc "jev_preflight" output)) :: List.remove_assoc "output" fields)]
+      | _ -> Alcotest.fail "invalid fixture" in
+    Alcotest.(check bool) (status ^ " without model stays valid") true
+      (Result.is_ok (Tui_decode.decode_lane_run_detail (with_model [])));
+    Alcotest.(check bool) (status ^ " rejects invented model") true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (with_model ["model", `String "invented"]))))
+    [ "awaiting_answer", []; "failed", ["failure", `Assoc ["detail", `String "offline"]]
+    ; "skipped", ["reason", `String "disabled"]; "ineligible", ["reason", `String "input"]
+    ; "question_unavailable", ["reason", `String "missing"] ];
   List.iter (fun (decision, path, skipped) ->
     Alcotest.(check bool) "inconsistent or unknown route rejected" true
       (Result.is_error (Tui_decode.decode_lane_run_detail (make ~decision ~path ~skipped ()))))

@@ -472,12 +472,22 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     admission = h.AtomicChatFixture(no_control_token=True)
     fixtures.update(admission.fixtures)
     beta_submitted = []
+    beta_interrupts = []
     def beta_request(body):
         beta_submitted.append(json.loads(body))
         return 503, {"error": "synthetic beta admission refused"}
     def chat_request(body):
         return beta_request(body) if json.loads(body)["name"] == "beta" else admission.stream(body)
+    def interrupt_request(body):
+        request = json.loads(body)
+        if request.get("name") == "beta":
+            beta_interrupts.append(request)
+            # Beta's refused request has no admitted turn to interrupt.
+            return 409, {"error": "beta request was not admitted",
+                         "signalled": False, "paused": False}
+        return admission.interrupt(body)
     fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(chat_request)
+    fixtures["/api/v1/keepers/turn/interrupt"] = h.RequestHttpResponse(interrupt_request)
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health, HISTORY_PATH: wire.history,
                      MEMORY_PATH: wire.memory})
@@ -523,8 +533,14 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
+            # Admission is recorded before the response reaches the client.
+            # Observe beta's refusal before leaving. An Esc interrupt probe
+            # for that refused request belongs to beta's endpoint response.
+            await_screen(lambda text: b"synthetic beta admission refused" in text,
+                         "beta admission refusal was not applied before leaving chat")
             h.escape_to_keeper_detail(process, fd, output, name=b"beta",
                                       destination=b"MASC Keepers")
+            assert admission.interrupt_requests == [], "leaving beta interrupted alpha's turn"
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
@@ -551,6 +567,10 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
+    # All HTTP handlers have joined, including a delayed Esc probe.
+    assert all(request.get("request_id") == beta_submitted[0]["request_id"]
+               and request.get("interrupt_token") is None
+               for request in beta_interrupts), beta_interrupts
 
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:

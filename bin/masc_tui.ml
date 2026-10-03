@@ -6602,13 +6602,15 @@ let handle_slot_edit state ~mailbox edit =
             Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  let generation = state.runtime_catalog_generation in
   state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Runtime_catalog_loaded result))
+      enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
@@ -10064,6 +10066,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
   state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_unread;
   state.runtime_assignments <- [];
   state.runtime_lanes <- [];
@@ -15275,7 +15278,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ())
-  | Runtime_catalog_loaded result -> (
+  | Runtime_catalog_loaded (generation, result) -> (
+      if generation = state.runtime_catalog_generation then
       match result with
       | Ok (runtimes, lanes, assignments) ->
           state.runtime_catalog <- runtimes;

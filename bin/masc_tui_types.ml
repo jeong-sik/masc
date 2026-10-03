@@ -5385,6 +5385,7 @@ type state = {
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
+  mutable runtime_catalog_generation: int;
   mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Lazy loads for the two detail panes; the id names which row the answer
      belongs to so a stale load is discarded, not drawn under another item.
@@ -8027,6 +8028,7 @@ let create_state
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
+  runtime_catalog_generation = 0;
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = None;
   task_history = None;

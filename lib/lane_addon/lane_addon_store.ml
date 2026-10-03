@@ -8,7 +8,7 @@ let create ~root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = false; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -249,7 +249,11 @@ let iter_sampling_requests t ~instance_id ~max_bytes ~f =
                               | Some json -> evidence_of_json json
                               | None -> Error "sampling outcome reference is missing" in
                             if blob_reference bytes <> expected then Error "sampling outcome digest mismatch"
-                            else write_blob t bytes |> Result.map (fun _ -> ())
+                            else
+                              (match Fs_compat.exact_path_kind
+                                       (Filename.concat t.root (blob_path (digest bytes))) with
+                               | Fs_compat.Exact_missing -> write_blob t bytes |> Result.map (fun _ -> ())
+                               | _ -> read_blob t expected |> Result.map (fun _ -> ()))
                         | _ -> Ok ())
                     | _ -> Ok () in
                   let* () = f json in

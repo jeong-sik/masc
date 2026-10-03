@@ -33,8 +33,12 @@ let with_workspace f =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
+  let previous_delivery = Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
-    ~finally:(fun () -> rm_rf dir)
+    ~finally:(fun () ->
+      ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
+      rm_rf dir)
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));

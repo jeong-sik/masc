@@ -49,7 +49,7 @@ let make_backend () =
   let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
+    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;

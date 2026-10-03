@@ -919,6 +919,31 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   check bool "response-bound refusal preserves known finished result" true
     (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") indexes))
 
+let test_sampling_recovery_reports_unreadable_pending_index () = with_fixture (fun _env _sw dir _docker ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "partial-recovery") in
+  let instance_id = "partial" in
+  let save result = match result with Ok () -> () | Error detail -> fail detail in
+  save (Store.save_sampling_request store ~instance_id ~request_id:"pending" (`Assoc ["state",`String "pending"]));
+  save (Store.save_sampling_request store ~instance_id ~request_id:"finished" (`Assoc ["state",`String "finished"]));
+  save (Store.save_sampling_outcome store ~instance_id ~request_id:"finished" (`Assoc ["state",`String "finished"]));
+  let parent = Filename.concat (Store.root store) "sampling" in
+  let primary = Filename.concat parent (Sys.readdir parent).(0) in
+  let backup = primary ^ ".saved" in
+  Unix.rename primary backup;
+  write primary "unreadable index";
+  Fun.protect ~finally:(fun () -> Unix.unlink primary; Unix.rename backup primary) (fun () ->
+    let visited = ref 0 in
+    let result = Store.iter_sampling_requests (Store.create ~root:(Store.root store))
+      ~instance_id ~max_bytes:65536 ~f:(fun row ->
+        check string "journal still visits finished record" "finished"
+          (Yojson.Safe.Util.member "state" row |> Yojson.Safe.Util.to_string);
+        incr visited; Ok ()) in
+    check int "available journal visited once" 1 !visited;
+    check bool "missing pending index is not full success" true (Result.is_error result));
+  let rows = match sampling_requests store ~instance_id with Ok rows -> rows | Error detail -> fail detail in
+  check int "restored primary includes pending and finished" 2 (List.length rows))
+
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
@@ -1212,6 +1237,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "receipt projection reads shared outcome once" `Quick test_receipt_projection_reads_shared_outcome_once;
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
+  test_case "sampling recovery reports unreadable pending index" `Quick test_sampling_recovery_reports_unreadable_pending_index;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;

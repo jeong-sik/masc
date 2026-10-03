@@ -1168,6 +1168,15 @@ status: reference
   넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
   `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
   넘김이 그대로 통과한다.
+  - **단일 자격증명 트랜잭션 직렬화 (Credential Admission Serialization)**: 인계 대상
+    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_dos_controller.holder_left`),
+    실제 제어권 변경(`Dos_lane.pass`)은 단일 Auth 자격증명 트랜잭션(`with_credential_transaction`)
+    안에서 원자적으로 직렬화된다(#40577). 대상 회수가 먼저 완료되면 목록에서 제외되어 거절되고,
+    인계가 먼저 권한을 얻으면 회수는 인계가 끝날 때까지 대기한 뒤 새 조종자의 권한을 해제한다.
+    적격성 검사와 인계 사이의 자격증명 회수/만료 경쟁 상태를 차단한다.
+  - **네트워크·보드 I/O 분리**: HTTP 요청 본문은 자격증명 잠금을 획득하기 전에 미리 읽어야
+    하며, 실제 DOS 변경 중에는 알림을 큐에 넣기만 하고 Board 공지는 Auth 잠금을 해제한 후에
+    발송한다. 잠금을 잡은 채 외부 네트워크나 본문 수신을 대기하지 않는다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
   초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
   아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
@@ -1177,6 +1186,7 @@ status: reference
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
   [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
+  [Keeper_dos_controller.execute](../../lib/keeper/keeper_dos_controller.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
@@ -1189,6 +1199,23 @@ status: reference
   → [Play_invite](../../lib/play/play_invite.mli) ·
   [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
+
+**Play Pad (플레이 패드 / 가상 키패드 레이아웃)**
+: 공유 머신 게임의 조작을 돕기 위해 프로그램별 버튼 매핑(키 시퀀스 및 라벨)을 선언한
+  패드 레이아웃 파일. `<.masc>/dos/pads/<saves_name>.toml`에 위치하며, 실행 파일과 분리되어
+  게임 내부 디스크로 마운트되지 않는다(#40395).
+  - **엄격한 부재 시에만 폴백 (Absence-Only Fallback)**: 작업공간 파일이 파일시스템상
+    완전히 부재할 때(`lstat` 결과 `ENOENT`)에만 내장(`Builtin`) 기본 레이아웃으로
+    폴백한다. 경로를 읽을 수 없거나(권한 오류), 댕글링 심볼릭 링크이거나, 비정규 파일(디렉터리,
+    FIFO, 소켓)이거나, 구문 분석에 실패한 경우에는 내장 레이아웃으로 넘어가지 않고
+    명시적 오류(`Error`)로 거절하여 작업공간 오버라이드의 의도치 않은 무시를 차단한다.
+  - **비정규 파일 및 FIFO 차단**: 열린 파일 디스크립터는 `O_NONBLOCK`으로 개방되어
+    FIFO 치환 시 쓰기 대기로 인한 블로킹을 방지하며, 내용 판독 전 `fstat`으로 일반 파일(`S_REG`)
+    여부를 재검증한다. 유효한 일반 파일로 이어지는 심볼릭 링크는 작업공간 오버라이드로 수용된다.
+  - **버튼 정의 엄격성**: 각 버튼은 비어 있지 않은 `keys` 배열과 `label`을 가져야 하며,
+    알 수 없는 테이블·필드·키 이름은 즉시 오류로 거절된다(타이포로 인한 무반응 방지).
+  → [Play_pad](../../lib/play/play_pad.mli) ·
+  [RFC Play Link for Shared Machine](../rfc/RFC-play-link-for-the-shared-machine.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
@@ -1341,6 +1368,36 @@ status: reference
   → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
   [quiz-questions](../../addons/quiz-questions/lane.toml),
   [quiz-grader](../../addons/quiz-grader/lane.toml)
+
+**Lane Action Receipt & Uncertainty (Lane 액션 영수증과 불확실성 보존)**
+: Lane Add-on worker에 요청된 액션(`masc_lane_act`)의 진행 상태와 결과 영수증(`Lane Action Receipt`),
+  그리고 파일시스템 반영 경계에서의 불확실성 보존 규약(#40396, #40573).
+  - **영수증 상태와 결과 객체 보존**: 확정 영수증(`confirmed`)은 반드시 객체 형태의 `result`를
+    보유해야 한다. 결과가 누락된 확정 영수증은 상태 조회 및 중복 요청 시 영수증 오류로 취급되며,
+    임의로 재실행(replay)하거나 손상된 영수증을 덮어쓰지 않는다. 워커 응답이 유실된 경우 영수증은
+    `outcome_unknown`으로 유지되며, 디스패치 전 워커가 종료된 미처리 대기열 영수증은
+    `failed_before_effect`로 전환된다. 고아 영수증은 대체 인스턴스에 자동 재실행되지 않는다.
+  - **저장 시 조상 동기화와 판독 시 내구성 재검증**: 영수증을 저장할 때는 액션 디렉터리의
+    조상 경로를 동기화(`fsync`)한 뒤 엄격한 원자적 파일 저장을 수행한다. 이미 존재하는
+    디렉터리도 동기화하므로 앞선 실패에서 가시적으로만 남은 경로를 다시 확인한다.
+    영수증을 읽을 때는 열린 영수증 파일과 바로 위 부모 디렉터리의 디스크립터를 동기화하고,
+    파일 바이트를 다시 읽어 비교하며 파일과 부모 디렉터리의 경로 정체성을 재검증한다.
+    이 판독 검증은 재시작이나 디태치 후에도 적용되지만, 나머지 조상 경로 전체를 다시
+    순회·동기화하지는 않는다. 이름 변경(rename)으로 파일이 보이는 것만으로 내구성이
+    확정되지는 않는다. 판독 검증 실패 시 상태 조회 및 중복 요청은 확정을 보고하지 않고
+    오류를 반환하며, 액션을 재출하하지 않는다.
+  - **라이브 불확실성 보존 (Live Uncertainty Retention)**: 관측 출판이나 최종 영수증 저장에서
+    이름 변경 후 실패가 발생하거나 종료 처리자(finalizer) 폴백마저 실패하더라도, 런타임은 해당
+    시퀀스 번호를 예약(reserve) 처리하고 수신된 패키지 결과를 미완료·불확실 상태(`outcome_unknown`)로
+    보존한다. 후속 관측은 충돌을 피해 다음 시퀀스를 사용하며, 액션을 임의로 재실행하지 않는다.
+  - **구독 커서 재확인 (Cursor Durability)**: `masc_lane_updates`의 확인(acknowledgement) 역시
+    이름 변경 전/후 실패를 구분하여 기록한다. 이미 출판된 영수증의 재시도는 프로듀서, incarnation,
+    시퀀스, 출력 다이제스트를 재검증하되 다음 시퀀스를 소비하지 않고 확인을 갱신한다.
+  → [Lane_addon_store](../../lib/lane_addon/lane_addon_store.mli) ·
+  [Lane_addon_runtime](../../lib/lane_addon/lane_addon_runtime.mli) ·
+  [Lane_addon_subscription](../../lib/lane_addon/lane_addon_subscription.mli) ·
+  [Lane World Actions Guide](../guides/lane-world-actions.md) ·
+  [Lane Subscriptions Guide](../guides/lane-subscriptions.md)
 
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.

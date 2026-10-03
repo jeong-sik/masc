@@ -6,17 +6,7 @@ import unicodedata
 from urllib.parse import parse_qs, urlsplit
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_render_code.ml",
-    "bin/masc_tui_render_code.mli",
-    "bin/masc_tui_code_results.ml",
-    "bin/masc_tui_code_results.mli",
-    "bin/masc_tui_code_requests.ml",
-    "bin/masc_tui_code_requests.mli",
-)
+
 FILE = "notes/[draft](final).lua"
 AUTHOR = "AUTHORHEAD-`literal`-" + "a" * 110 + "-AUTHORTAIL"
 SUBJECT = "SUBJECTHEAD fix glob **/*.ml preserve `literal` " + "한글 history evidence " * 45 + " SUBJECTTAIL (#7654)"

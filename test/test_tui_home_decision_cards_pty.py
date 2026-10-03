@@ -15,13 +15,7 @@ import threading
 import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render_approvals.ml", "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_approvals_model.ml", "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
-    "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml",
-)
+
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
 GATE_PATH = "/api/v1/dashboard/gate"
@@ -537,6 +531,13 @@ def goal_opens_exact_detail(executable):
         visible = h.screen_text(bytes(output))
         assert b"goal-home-exact" in visible and b"metric-goal-home-exact" in visible, visible
         assert b"metric-goal-home-other" not in visible, visible
+        # Stable phase/priority ordering is [other, exact]. The initial Planning
+        # cursor is zero; Home must bind it to exact before relative navigation.
+        h.send_and_wait(process, fd, output, b"[", b"Other goal confirmation")
+        visible = h.screen_text(bytes(output))
+        assert b"metric-goal-home-other" in visible, visible
+        h.send_and_wait(process, fd, output, b"]", b"Exact goal confirmation")
+        assert b"metric-goal-home-exact" in h.screen_text(bytes(output))
         assert path.read_bytes() == before
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")

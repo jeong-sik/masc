@@ -15,33 +15,7 @@ from pathlib import Path
 import test_tui_keyboard_input as terminal
 from test_tui_lane_visual_pty import snapshot
 
-# The sources this walk stands over. scripts/ci/run-edited-tests.sh reads the
-# paths a suite names and runs it when a pull request changes one of them, so
-# a change to the Lane workspace, the guided installer or the schema form is
-# told what it did to the operator's path through them. Without the
-# declaration the only job that ran this file was lane-addon-native.yml,
-# which is not the pull-request gate: #36120 and #36155 each changed drawn
-# text with no PTY scenario running, and main sat red until someone ran the
-# suite by hand.
-SOURCE_MODULES = (
-    "lib/tui_terminal_text.ml",
-    "lib/tui_terminal_text.mli",
-    # Read off the walk's own needles rather than guessed: each of these owns
-    # a literal this file waits for and no other bin source spells it --
-    # "MASC Lane Add-ons" and "MASC Dashboard" (render), "Run action on" and
-    # "no available worker" (lane_addons), "Install Add-on:", "Image
-    # unverified:" and "Local draft only." (lane_installer), "Review input"
-    # (schema_form).
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_lane_addons.ml",
-    "bin/masc_tui_lane_installer.ml",
-    "bin/masc_tui_schema_form.ml",
-    # Not for a word on screen: the walk types ":go lane add-ons" and the
-    # keys j / Enter / 4 / e, so the palette row and dispatcher own the path
-    # it takes even though it waits for nothing they spell.
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui.ml",
-)
+
 
 
 def main(executable: str, captures: Path | None) -> None:
@@ -207,6 +181,89 @@ def guided_install(executable: str, captures: Path | None) -> None:
     print('Package preview / schema fields / review / explicit declaration save: PASS')
 
 
+def broadcast_export(executable: str, captures: Path | None) -> None:
+    data = snapshot()
+    data['instances'] = data['instances'][:1]
+    data['rows'] = data['rows'][:1]
+    data['instances'][0]['rows_count'] = 1
+    owner = data['instances'][0]['instance_id']
+    selected = data['rows'][0]['id']
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures['/api/v1/lane-addons'] = (200, data)
+    fixtures['/api/v1/gate/keepers?detailed=true'] = (200, {
+        'count': 0, 'total': 0, 'truncated': False, 'keepers': []})
+
+    def prepare_workspace(base_path: str) -> None:
+        # The export choices read the canonical local Keeper roster. Remove
+        # only the harness's two seeded identities in this temporary workspace.
+        for name in ('alpha', 'beta'):
+            (Path(base_path) / '.masc' / 'keepers' / f'{name}.json').unlink()
+
+    accepted: list[dict] = []
+    principal_reads: list[bytes] = []
+    requests: terminal.HttpRequests = []
+
+    def principal(body: bytes) -> tuple[int, dict]:
+        principal_reads.append(body)
+        return 200, {'principal': 'principal:operator:fixture-operator'}
+
+    def share(body: bytes) -> tuple[int, dict]:
+        if len(principal_reads) != 1:
+            raise AssertionError('Broadcast sent before proving the captured bearer principal')
+        request = json.loads(body)
+        expected = {'instance_id': owner, 'row_ids': [selected], 'broadcast': True}
+        request_id = request.get('request_id')
+        if not isinstance(request_id, str) or not request_id:
+            raise AssertionError('Broadcast requires a retained request identity')
+        expected['request_id'] = request_id
+        if request != expected:
+            raise AssertionError(f'Broadcast changed selected evidence: {request!r}')
+        accepted.append(request)
+        return 200, {'evidence': {'sha256': 'f' * 64}, 'row_count': 1,
+                     'delivery': {'destination': 'broadcast', 'status': 'committed',
+                                  'request_id': request_id,
+                                  'receipt': {'request_id': 'fixture-broadcast', 'seq': 7}}}
+
+    fixtures['/api/v1/lane-addons/broadcast-principal'] = terminal.RequestHttpResponse(principal)
+    fixtures['/api/v1/lane-addons/evidence'] = terminal.RequestHttpResponse(share)
+
+    def interact(process, master, _slave, output, _base):
+        def key(value: bytes, needle: bytes) -> bytes:
+            return terminal.send_and_wait(process, master, output, value, needle)
+        key(b':go lane add-ons\r', b'World observer')
+        key(b'\r', b'DOM captured')
+        key(b'4', b'DOM captured')
+        key(b' ', b'[selected]')
+        key(b'e', b'> Preserve only')
+        key(b'j', b'> Preserve and share the reference via Broadcast')
+        if accepted:
+            raise AssertionError('Selecting Broadcast published before Enter')
+        key(b'\x1b', b'DOM captured')
+        if accepted:
+            raise AssertionError('Cancelling export published a Broadcast')
+        key(b'e', b'> Preserve only')
+        key(b'j', b'> Preserve and share the reference via Broadcast')
+        frame = key(b'\r', b'Broadcast committed')
+        if b'Keeper reads and actions are unverified' not in terminal.CSI_RE.sub(b'', frame):
+            raise AssertionError('Broadcast receipt claimed or hid Keeper-use status')
+        if len(accepted) != 1:
+            raise AssertionError('Explicit export did not submit exactly once')
+        if len(principal_reads) != 1:
+            raise AssertionError('Broadcast did not prove exactly one authenticated principal')
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / 'broadcast-export.pty').write_bytes(bytes(output))
+            (captures / 'broadcast-export-request.json').write_text(json.dumps(accepted, indent=2))
+        key(b'q', b'World observer')
+        key(b'q', b'MASC Dashboard')
+        os.write(master, b'q')
+
+    terminal.run_terminal_scenario(executable, description='Explicit Lane evidence Broadcast',
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=prepare_workspace)
+    print('Selected evidence / explicit Broadcast / cancelled draft / committed receipt: PASS')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('executable')
@@ -214,3 +271,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
     guided_install(os.path.abspath(args.executable), args.capture_dir)
+    broadcast_export(os.path.abspath(args.executable), args.capture_dir)

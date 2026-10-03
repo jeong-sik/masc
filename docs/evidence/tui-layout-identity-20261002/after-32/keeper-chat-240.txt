@@ -1,0 +1,32 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+   현재 대화 · alpha                                                                                                                                                                    │[Recent] Changes · 2 keepers · feed closed: MCP initial
+              ▄▄▄▄▄▄                 Keepers ▸ alpha ▸ chat                                                                                                                             │                   state     tool        calls  new tok
+          ▄▀▀▀▀▀▀▀▀▀▀▀▀▄           ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+        ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄            (no messages yet -- type below and press Enter)                                                                                                   │· beta             no events
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                                                                             │───────────────────────────────────────────────────────
+      ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄                                                                                                                                                            │alpha · no events on this feed yet
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+          ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+              ▀▀▀▀▀▀
+
+┌────────────────────────────────┐
+│  KEEPERS           Ctrl-B HIDE │
+├────────────────────────────────┤
+│  ● alpha                       │
+│  · beta                        │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│                                │    현재 작업 확인 불가
+│                                │    History load failed · /errors
+│                                │    Memory load failed · /errors
+└────────────────────────────────┘    >
+
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: anthropic.claude-opus-5  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:newline  /:commands  Esc:list  PgUp:scroll back  Ctrl-G:next Keeper  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  …?

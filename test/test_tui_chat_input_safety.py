@@ -14,26 +14,7 @@ import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_command.ml",
-    "bin/masc_tui_command.mli",
-    "bin/masc_tui_keeper_chat_transcript.ml",
-    "bin/masc_tui_keys.ml",
-    "bin/masc_tui_footer.ml",
-    # The composer decides whether a letter reaches the row at all: "i"
-    # focuses only when the row would accept input, and every scenario here
-    # types into it. A change there took this suite red on main while no pull
-    # request ran it, because the list stopped at the files above.
-    "bin/masc_tui_composer.ml",
-    # Draws the composer row and the two hints the scenarios wait for --
-    # "(i to write)" before focus and the capture key after it.
-    "bin/masc_tui_render_prim.ml",
-    # Draws the chat surface the scenarios open, including the breadcrumb
-    # open_chat waits for before it types anything.
-    "bin/masc_tui_render_chat.ml",
-)
+
 CHAT = "/api/v1/keepers/chat/stream"
 APPROVAL = "/api/v1/keepers/tool-approval"
 
@@ -109,11 +90,14 @@ def approval_typing(binary: str, decision: str) -> None:
             assert not [body for path, body in requests if path == APPROVAL], requests
             os.write(fd, b"\r")
             body = h.wait_for_http_request(process, fd, output, requests, path=APPROVAL)
-            assert json.loads(body) == {
-                "name": "alpha",
-                "tool_call_id": "typing-call",
-                "decision": decision,
-            }, body
+            payload = json.loads(body)
+            assert payload["name"] == "alpha"
+            assert payload["tool_call_id"] == "typing-call"
+            assert payload["decision"] == decision
+            assert payload["expected_workspace"] == {
+                "base_path": "",
+                "masc_root": "",
+            }
             assert len([body for path, body in requests if path == APPROVAL]) == 1
         finally:
             show_approval.set()

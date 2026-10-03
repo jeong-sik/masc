@@ -403,24 +403,18 @@ type reopen_outcome =
   | Proof_reset of record
 
 let archive_reopened_proof config ~goal_id ~actor ~at completion =
-  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
-  try
-    Fs_compat.append_jsonl path
-      (`Assoc
-        [ "ts", `String at
-        ; "goal_id", `String goal_id
-        ; "event_type", `String "goal_proof_reopened"
-        ; "payload", `Assoc
-            [ "phase", Goal_phase.to_yojson Goal_phase.Executing
-            ; "actor", `String actor
-            ; "previous_completion", completion_state_to_yojson completion
-            ]
-        ]);
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
-    Error (Printf.sprintf "could not preserve reopened Goal proof: %s" (Printexc.to_string exn))
+  Goal_store.append_audit_event_after_pending_locked config
+    (`Assoc
+      [ "ts", `String at
+      ; "goal_id", `String goal_id
+      ; "event_type", `String "goal_proof_reopened"
+      ; "payload", `Assoc
+          [ "phase", Goal_phase.to_yojson Goal_phase.Executing
+          ; "actor", `String actor
+          ; "previous_completion", completion_state_to_yojson completion
+          ]
+      ])
+  |> Result.map_error (fun detail -> "could not preserve reopened Goal proof: " ^ detail)
 ;;
 
 let reopen_goal config ~goal_id ~actor ~note =

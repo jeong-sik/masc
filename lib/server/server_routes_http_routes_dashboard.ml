@@ -605,6 +605,7 @@ type runtime_config_write_operation =
   | Runtime_config_lane_renamed of string * string
   | Runtime_config_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_config_exact_slot_dropped of Runtime.exact_lane * string
+  | Runtime_config_exact_slot_replaced of Runtime.exact_lane * string * string
   | Runtime_config_exact_slot_moved of
       Runtime.exact_lane * string * Runtime.exact_slot_move
   | Runtime_config_assignment of string * string option
@@ -673,8 +674,15 @@ let runtime_config_write_operation_details =
       , `String
           (match move with
            | Runtime.Move_slot_up -> "up"
-           | Runtime.Move_slot_down -> "down") )
+           | Runtime.Move_slot_down -> "down"
+           | Runtime.Move_slot_first -> "first") )
     ]
+  | Runtime_config_exact_slot_replaced (exact, runtime_id, replacement) ->
+    [ "operation", `String "routing"
+    ; "lane", `String (runtime_route_lane_to_string (Runtime_exact_lane exact))
+    ; "action", `String "replace"
+    ; "runtime_id", `String runtime_id
+    ; "replacement_runtime_id", `String replacement ]
   | Runtime_config_assignment (keeper_name, runtime_id) ->
     [ ("operation", `String "assignment")
     ; ("keeper_name", `String keeper_name)
@@ -699,7 +707,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_lane_created _ | Runtime_config_lane_removed _
   | Runtime_config_lane_renamed _
   | Runtime_config_exact_slot_appended _ | Runtime_config_exact_slot_dropped _
-  | Runtime_config_exact_slot_moved _ -> "routing"
+  | Runtime_config_exact_slot_moved _ | Runtime_config_exact_slot_replaced _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
   | Runtime_config_fusion _ -> "fusion"
   | Runtime_config_account_removal _ -> "account_removal"
@@ -1118,6 +1126,15 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+  | Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)) ->
+    let operation = Runtime_config_exact_slot_replaced (exact, runtime_id, replacement) in
+    (match Runtime.replace_exact_output_lane_slot ~lane:exact ~slot:runtime_id ~replacement () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
 
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -1227,6 +1244,8 @@ module For_testing = struct
         Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
         Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "drop", [ runtime_id ])
+    | Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)) ->
+        Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "replace", [runtime_id; replacement])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
           ( runtime_route_lane_to_string (Runtime_exact_lane exact)
@@ -1234,7 +1253,8 @@ module For_testing = struct
           , [ runtime_id
             ; (match move with
                | Runtime.Move_slot_up -> "up"
-               | Runtime.Move_slot_down -> "down")
+               | Runtime.Move_slot_down -> "down"
+               | Runtime.Move_slot_first -> "first")
             ] )
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -1531,8 +1551,9 @@ let handle_gate_external_mode_body state operator_name request reqd body_str =
 let handle_gate_resolve_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-    match dashboard_gate_resolve_http_json ~base_path ~created_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_resolve_http_json ~workspace_config ~base_path ~created_by:operator_name ~args () with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error (Gone _ as error) ->
       respond_json_value_with_cors
@@ -1564,8 +1585,9 @@ let handle_gate_resolve_body state operator_name request reqd body_str =
 let handle_gate_retry_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_retry_http_json ~base_path ~requested_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -3591,7 +3613,19 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           match parse_keeper_chat_stream_request body_str with
+           let admitted_body =
+             try
+               match Workspace.validate_expected_workspace
+                   ~config:(Mcp_server.workspace_config state)
+                   (Yojson.Safe.from_string body_str) with
+               | Ok payload -> Ok (Yojson.Safe.to_string payload)
+               | Error Workspace.Invalid_workspace_precondition ->
+                   Error "invalid expected_workspace precondition"
+               | Error Workspace.Workspace_precondition_failed ->
+                   Error "workspace precondition failed"
+             with Yojson.Json_error _ -> Error "invalid JSON body"
+           in
+           match Result.bind admitted_body parse_keeper_chat_stream_request with
            | Ok payload ->
                handle_keeper_chat_stream
                  ~sw

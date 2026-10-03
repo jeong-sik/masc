@@ -386,9 +386,27 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(args : Yojson.Safe.t) ()
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
+  let admitted =
+    match workspace_config with
+    | None ->
+      (match args with
+       | `Assoc fields when List.mem_assoc "expected_workspace" fields ->
+         Error (Bad_request "workspace precondition cannot be verified")
+       | _ -> Ok args)
+    | Some config ->
+      (match Workspace.validate_expected_workspace ~config args with
+       | Ok args -> Ok args
+       | Error Workspace.Invalid_workspace_precondition ->
+         Error (Bad_request "invalid expected_workspace precondition")
+       | Error Workspace.Workspace_precondition_failed ->
+         Error (Bad_request "workspace precondition failed"))
+  in
+  match admitted with
+  | Error _ as error -> error
+  | Ok args ->
   match Safe_ops.json_string_opt "id" args with
   | None -> Error (Bad_request "id is required")
   | Some id ->
@@ -444,8 +462,16 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
           Error (Gone err)))
 ;;
 
-let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
+let dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by ~(args : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
+  let* args =
+    match Workspace.validate_expected_workspace ~config:workspace_config args with
+    | Ok args -> Ok args
+    | Error Workspace.Invalid_workspace_precondition ->
+        Error "invalid expected_workspace precondition"
+    | Error Workspace.Workspace_precondition_failed ->
+        Error "workspace precondition failed"
+  in
   let* fields =
     match args with
     | `Assoc fields -> Ok fields
@@ -899,4 +925,3 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   Log.Dashboard.info "all primary dashboard surfaces pre-warmed in parallel (%.1fms total)"
     ((Time_compat.now () -. t0) *. 1000.0)
 ;;
-

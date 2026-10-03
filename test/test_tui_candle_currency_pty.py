@@ -18,20 +18,6 @@ from pathlib import Path
 import test_tui_keyboard_input as h
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_schedule.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_composer.ml",
-    "bin/masc_tui_candle.ml",
-    "bin/masc_tui_keeper_control.ml",
-    "lib/tui_decode.ml",
-    "lib/candle/candle_observation.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 DIRECTIVE_PATH = "/api/v1/keepers/alpha/directive"
@@ -498,6 +484,41 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
 
 
+def currency_is_scoped_to_workspace_usage(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixture = fixtures[ROSTER_PATH]
+    assert isinstance(fixture, tuple)
+    status, roster = fixture
+    assert status == 200 and isinstance(roster, dict)
+    roster["candle"] = dict(READY)
+    for keeper in roster["keepers"]:
+        keeper["candle_balance_milli"] = BALANCE_MILLI
+        keeper["candle_account_revision"] = "a" * 64
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+        await_screen(process, fd, output,
+                     lambda text: balance_contains(text, BALANCE), "personal balance in Info")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Timestamps")
+        assert not any(line in screen(output) for line in SUMMARY), "workspace supply leaked into personal Info"
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b":go Usage\r", b"MASC Usage")
+        h.send_and_wait(process, fd, output, b"v", b"Trend")
+        h.send_and_wait(process, fd, output, b"v", "Candle · workspace supply".encode())
+        await_screen(process, fd, output,
+                     lambda text: all(line in text for line in SUMMARY), "workspace supply in Usage")
+        assert b"Transport \xc2\xb7 queue pressure" not in screen(output), "transport telemetry leaked into keeper usage"
+        h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Queue pressure:")
+        assert b"Queue pressure: steady" in screen(output), "transport telemetry lost its reading"
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary, description="personal balances and workspace supply have separate screens",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=24)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -511,6 +532,7 @@ if __name__ == "__main__":
         }, indent=2) + "\n")
     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
         run(binary, phase, captures)
+    currency_is_scoped_to_workspace_usage(binary)
     currency_follows_workspace_authority(binary, captures)
     short_overview_keeps_its_baseline(binary)
-    print("Candle currency TUI: PASS (9 real PTY scenarios)")
+    print("Candle currency TUI: PASS (10 real PTY scenarios)")

@@ -40,6 +40,7 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; historical_task_contexts : Keeper_librarian_task_context.t list
   ; keeper_id : Keeper_identity.Keeper_id.t
     (** The Keeper whose memory this pass curates: the name the calling lane
         already holds, minted through {!Keeper_identity.Keeper_id.of_string},

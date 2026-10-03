@@ -6,12 +6,7 @@ import time
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui_answering.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui.ml",
-)
+
 
 
 def current_rows(output):

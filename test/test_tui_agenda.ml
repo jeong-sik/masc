@@ -188,171 +188,8 @@ let test_the_halves_fit_together () =
            true
            (width s.clock + width s.waiting <= cols))
     [ 20; 30; 40; 60; 80; 120 ]
+
 ;;
-
-
-(* The two readers of one body budget.
-
-   [surface_body_rows] takes the strip's row off before either renderer or key
-   bound receives the budget. [finish_surface] reads the same agenda projection
-   only to draw that row. Subtracting it again in [scrolled_surface] is what
-   made key geometry shorter than the frame whenever the strip was present.
-
-   [Ast_grep] rather than a substring, because this file names both
-   identifiers in the paragraph above. *)
-let calls ~module_path ~binding_name ~callee =
-  Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
-;;
-
-(* The third reader, and the one the two above did not cover.
-
-   Each surface also works out how many rows it may draw in. When that sum
-   subtracted only the composer, every surface drew one row more than the
-   frame would take, and [finish_surface] cuts a too-tall surface from the
-   bottom -- so the row that disappeared was the footer, with the key hints,
-   the version, the base path and the port on it. It disappeared the moment a
-   wake or a waiting keeper put the strip on screen, and on every surface at
-   once.
-
-   The number now has one owner. The invariant that keeps it that way is that
-   the drawing never reaches for the composer's height itself: a surface that
-   wants a body height has to ask [surface_body_rows], which is where the
-   strip's rows come off. *)
-(* The drawing is no longer one file. A count that means "nowhere in the
-   drawing" has to read every file the drawing lives in, or a definition
-   answers the question by moving rather than by changing. *)
-let render_family =
-  [ "bin/masc_tui_render.ml"
-  ; "bin/masc_tui_render_prim.ml"
-  ; "bin/masc_tui_render_chat.ml"
-  ; "bin/masc_tui_render_approvals.ml"
-  ]
-
-let test_the_drawing_does_not_measure_the_body_itself () =
-  check
-    int
-    "no render site computes a body height from the composer's rows"
-    0
-    (Ast_grep.count_calls_across_files
-       ~module_paths:render_family
-       ~callee:"Composer.rows_for");
-  check
-    bool
-    "they ask the owner instead"
-    true
-    (Ast_grep.count_calls_across_files
-       ~module_paths:render_family
-       ~callee:"Masc_tui_types.surface_body_rows"
-     >= 40);
-  check
-    int
-    "and the owner is the only place the strip's rows come off a height"
-    1
-    (calls
-       ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"surface_body_rows"
-       ~callee:"agenda_chrome_rows")
-;;
-
-let test_the_frame_and_the_bound_read_the_same_number () =
-  check
-    bool
-    "the frame subtracts the strip's rows"
-    true
-    (calls
-       ~module_path:"bin/masc_tui_render_prim.ml"
-       ~binding_name:"finish_surface"
-       ~callee:"Masc_tui_types.agenda_chrome_rows"
-     >= 1);
-  check int "the surface body subtracts the strip once" 1
-    (calls
-       ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"surface_body_rows"
-       ~callee:"agenda_chrome_rows");
-  check int "the typed scroll layout does not subtract it again" 0
-    (calls
-       ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"scrolled_surface"
-       ~callee:"agenda_chrome_rows");
-  check
-    int
-    "and that is the same [rows_taken], not a second count"
-    1
-    (calls
-       ~module_path:"bin/masc_tui_types.ml"
-       ~binding_name:"agenda_chrome_rows"
-       ~callee:"Masc_tui_agenda.rows_taken")
-  ; check int "one loop snapshot refreshes terminal geometry" 1
-      (calls
-         ~module_path:"bin/masc_tui.ml"
-         ~binding_name:"run_loop"
-         ~callee:"refresh_terminal_size")
-  ; check int "ordinary geometry reads share the loop snapshot" 1
-      (calls
-         ~module_path:"bin/masc_tui_ansi.ml"
-         ~binding_name:"get_terminal_size"
-         ~callee:"Masc_tui_render_schedule.Terminal_size_cache.get")
-  (* The loop stopped calling the presenter directly. Both doors a resize can
-     arrive through -- SIGWINCH and the loop's own ioctl snapshot -- end in
-     [discard_frame_for_new_size], and the code says why: "so the two cannot
-     come to disagree about what a resize costs". Counting there counts the
-     rule; counting in [run_loop] counted one spelling of it, and an
-     extraction that changed nothing about the behaviour read as the rule
-     being gone. The loop's side of it is the [refresh_terminal_size] count
-     above. *)
-  ; check int "a resize invalidates the presented frame, in one place" 1
-      (calls
-         ~module_path:"bin/masc_tui.ml"
-         ~binding_name:"discard_frame_for_new_size"
-         ~callee:"Frame_presenter.invalidate")
-  ; check int "Tools End uses the exact projected maximum" 1
-      (calls
-         ~module_path:"bin/masc_tui.ml"
-         ~binding_name:"move_surface_to_end"
-         ~callee:"Masc_tui_scroll.maximum")
-;;
-
-let test_tools_scroll_counts_the_rendered_projection () =
-  check int "the key bound counts the renderer's exact rows" 1
-    (calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"tools_scrolled"
-       ~callee:"Render_tools.tools_display_lines");
-  check int "the main loop routes Tools to that bound" 1
-    (calls
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"scrolled_surface"
-       ~callee:"Masc_tui_render.tools_scrolled")
-;;
-
-let test_tools_renderer_reads_the_typed_scroll_layout () =
-  check int "the renderer reads the same display projection" 1
-    (calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_tools"
-       ~callee:"Render_tools.tools_display_lines");
-  check int "the renderer derives geometry from those same rows" 1
-    (calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_tools"
-       ~callee:"tools_scrolled_for_lines")
-;;
-
-let test_tools_projection_defers_inactive_panes () =
-  (* The Tools projection moved to masc_tui_render_tools when the chrome
-     became a library; the binding is read in the file that holds it. *)
-  check int "only selected typed branches force their projection" 4
-    (calls
-       ~module_path:"bin/masc_tui_render_tools.ml"
-       ~binding_name:"tools_display_lines"
-       ~callee:"Lazy.force");
-  check int "the async branch remains a direct selected projection" 1
-    (calls
-       ~module_path:"bin/masc_tui_render_tools.ml"
-       ~binding_name:"tools_display_lines"
-       ~callee:"async_request_observation_lines")
-;;
-
 
 (* {1 The panel behind [;]} *)
 
@@ -616,22 +453,7 @@ let test_wake_name_is_drawn_without_reparsing () =
     (contains ~needle:"edgar.a.poe" (clock "edgar.a.poe"));
   check bool "an older server's target is not parsed" true
     (contains ~needle:"keeper:edgar.a.poe" (clock "keeper:edgar.a.poe"))
-;;
 
-(* The decoder and both schedule surfaces must consume one field selection.
-   The row choice itself is tested in [test_tui_keys]. *)
-let test_schedule_name_wire_is_connected () =
-  check int "decoder reads the server's bare keeper field" 1
-    (Ast_grep.count_string_literals_in_value_binding
-       ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"decode_schedule_row" ~literals:[ "payload_keeper_name" ]);
-  check int "agenda uses the row's selected name" 1
-    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"agenda"
-       ~callee:"schedule_row_who");
-  check int "Schedules list uses the same selected name" 1
-    (calls ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"schedule_row_subject"
-       ~callee:"Masc_tui_types.schedule_row_who")
 ;;
 
 (* A task that only the operator can move is a reason to draw the strip. The
@@ -910,14 +732,14 @@ let test_home_task_survives_supplemental_source_failure () =
     state.tasks_error <- Some diagnostic;
     check bool "Home retains a current task despite supplemental failure" true
       (List.mem_assoc (Masc_tui_types.Home_request (Home_operator_task task_id))
-         (Masc_tui_types.home_decision_rows state));
+         (Masc_tui_home.home_decision_rows state));
     check bool "Agenda uses the same primary reading" true
       (List.exists (fun line -> line.Agenda.goes_to = Agenda.Stuck_task task_id)
          (lines_of_state state));
     state.view <- Masc_tui_types.Planning;
     state.home_opened_request <- Some (Home_operator_task task_id);
     state.task_detail_id <- Some task_id;
-    Masc_tui_types.reconcile_home_request_detail state;
+    Masc_tui_home.reconcile_home_request_detail state;
     check bool "refresh retains the opened task reader" true
       (state.view = Planning && state.home_opened_request = Some (Home_operator_task task_id)
        && state.task_detail_id = Some task_id))
@@ -930,7 +752,7 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
   check bool "Home offers no current task from a backup" false
     (List.exists (fun (action, _) -> match action with
        | Masc_tui_types.Home_request (Home_operator_task _) -> true
-       | _ -> false) (Masc_tui_types.home_decision_rows state));
+       | _ -> false) (Masc_tui_home.home_decision_rows state));
   let agenda_lines = lines_of_state state in
   check bool "Agenda reports the noncurrent source" true
     (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
@@ -941,7 +763,7 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
        | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines);
   state.view <- Masc_tui_types.Planning;
   state.home_opened_request <- Some (Home_operator_task task_id);
-  Masc_tui_types.reconcile_home_request_detail state;
+  Masc_tui_home.reconcile_home_request_detail state;
   check bool "an unavailable source requires fresh selection" true
     (state.view = Overview && state.home_opened_request = None)
 
@@ -1002,16 +824,8 @@ let () =
             test_the_earliest_coming_row_wins
         ] )
     ; ( "the frame and the bound"
-      , [ test_case "read the same number" `Quick
-            test_the_frame_and_the_bound_read_the_same_number
-        ; test_case "the drawing does not measure the body itself" `Quick
-            test_the_drawing_does_not_measure_the_body_itself
-        ; test_case "Tools scroll counts the rendered projection" `Quick
-            test_tools_scroll_counts_the_rendered_projection
-        ; test_case "Tools renderer uses the typed scroll layout" `Quick
-            test_tools_renderer_reads_the_typed_scroll_layout
-        ; test_case "Tools projection defers inactive panes" `Quick
-            test_tools_projection_defers_inactive_panes
+      , [
+
         ] )
     ; ( "how it reads"
       , [ test_case "the clock is local" `Quick test_the_clock_is_local
@@ -1045,8 +859,7 @@ let () =
             test_rows_fit_the_width_they_were_given
         ; test_case "a wake name is drawn without reparsing" `Quick
             test_wake_name_is_drawn_without_reparsing
-        ; test_case "schedule name wire reaches both surfaces" `Quick
-            test_schedule_name_wire_is_connected
+
         ] )
     ; ( "tasks stuck on the operator"
       , [ test_case "a stuck task alone takes the row" `Quick

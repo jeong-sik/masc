@@ -625,6 +625,24 @@ lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
 
+On Lanes, select a lane and press `s` to edit its model order. Arrow keys or
+`j/k` select a candidate. Press `r` to replace it at the same position;
+type a configured model and reasoning effort such as `luna medium`, select
+with arrows and press Enter. The choices show the declared reasoning effort,
+account provider ID and context. Unset reasoning is shown as `default`.
+The picker uses the terminal height and gives each model two lines: model
+and reasoning first, account and context below. The selected runtime ID is
+shown separately rather than crowding the model name.
+Replacing a candidate selects another configured runtime; it does not change
+the shared model's settings in other lanes.
+
+`a` adds a fallback. `1` moves the selected candidate to the first position
+within its HTTP or CLI group, preserving the other candidates' relative order.
+HTTP candidates always run before CLI candidates. `J/K` move within a group,
+`x` removes, and Esc returns. These changes save immediately. The success
+message appears after the saved order is read back; a failed read is shown as
+unverified rather than successful.
+
 ### Clients
 
 Everyone attached to this workspace in one reading: directory agents,
@@ -2239,6 +2257,16 @@ Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.
 
+A Home-origin operator decision retains its last receipt in the Home context.
+A confirmation accepted with execution deferred remains labelled deferred;
+request presence is determined by the current source read. This session receipt
+does not prove application or survive restart. Creation retries retain their
+original return destination alongside the authored declaration. If the lifecycle
+accepts creation before its roster appears, the named draft remains available
+while sending waits for a reliable roster observation. Creation refuses an
+existing name and preserves the declaration; a reconfiguration response is
+reported as reconfiguration rather than opening a first-assignment composer.
+
 `p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
@@ -2256,6 +2284,16 @@ Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc
 and keeps its draft through the existing per-Keeper draft store.
+
+If a previously matched server workspace becomes unreadable, Home shows the
+remembered conversation as unavailable with choose-Keeper guidance. It offers
+no history shortcut until workspace identity matches. Existing conversation
+drafts remain stored. New messages and waiting messages stay unsent;
+Goal confirmation and Task changes require a matching workspace reading. Refresh
+to read the server workspace again. A matching reading restores send authority and resumes already-authorized
+waiting messages once the Keeper roster is reliable. Unsent composer drafts
+remain drafts. A transient question read failure also preserves partial answers;
+submission waits for a successful read.
 
 Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
 an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its

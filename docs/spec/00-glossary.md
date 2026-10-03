@@ -199,6 +199,30 @@ status: reference
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
   [Provider_config](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**Model Context Window (모델 문맥 창 / 용량 관측)**
+: 런타임 설정에서 지정한 요청 문맥 창 크기(`Requested Context Window`, `context_window`)와,
+  턴 실행 시 제공자/클라이언트가 실제 보고한 가용 문맥 용량(`Client-Reported Capacity`, `provider_context_window`)의
+  엄격한 구분(#40552·#40554).
+  대시보드 런타임 편집기([`runtime-environment-editor.ts`](../../dashboard/src/components/runtime-environment-editor.ts))의
+  `max-context`는 요청 값일 뿐이며 500K·1M 프리셋과 직접 토큰 입력을 지원한다.
+  - 점유율 분모의 출처([`turn-context-window.ts`](../../dashboard/src/lib/turn-context-window.ts)):
+    `TurnRecordEntry`의 문맥 점유율(Occupancy %)은 같은 턴의 클라이언트 보고 용량을 우선하고,
+    보고치가 없으면 설정된 요청 용량을 사용한다(`reported ?? configured`). 보고치가 있으면
+    '실측 컨텍스트', 설정값으로 계산하면 '설정 기준 컨텍스트' 라벨을 붙인다. 예를 들어
+    1,000,000 토큰 요청에 클라이언트가 828,400을 보고하고 414,200 토큰을 입력한 경우,
+    점유율은 50.0%다. 보고치가 없고 설정값이 1,000,000이며 요청당 입력이 100,000이면
+    '설정 기준 컨텍스트'로 10.0%를 표시한다.
+  - 초과 및 누락 처리: 요청당 입력이 선택된 용량을 초과하면 완료된 턴의 문맥 관측은
+    `unavailable`로 표시된다. 이는 요청의 진입 거부를 뜻하지 않는다. 점유율 계산에는
+    요청당(`per_request`) 사용량, 입력 토큰, 양수인 용량과 용량 이하의 입력이 필요하며,
+    이 근거가 없거나 조건에 맞지 않으면 비율을 표시하지 않는다. 클라이언트 보고치 누락만으로
+    무조건 `unmeasured`가 되지는 않으며, 누적/턴 합계 토큰을 요청당 점유율로 쓰지 않는다.
+  - 관측 전용 불변식: 최신 TurnRecord tail(RFC-0233)에서 투영되는 문맥 수치([`keeper_context_observation_projection.mli`](../../lib/keeper/keeper_context_observation_projection.mli))는
+    대시보드 트리아지(밴드·정렬·헬스 카운트) 관측 전용이며, 런타임의 다음 요청 진입 허가 결정에 직접 사용할 수 없다.
+  → [turn-context-window.ts](../../dashboard/src/lib/turn-context-window.ts) ·
+  [Keeper_context_observation_projection](../../lib/keeper/keeper_context_observation_projection.mli) ·
+  [docs/SHARED-RUNTIME-MODELS.md](../SHARED-RUNTIME-MODELS.md)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
@@ -473,17 +497,26 @@ status: reference
 **Jev (TypeSafe AI System One 판정 어댑터)**
 : Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
   TypeSafe AI 어댑터(`Typesafeai_board_attention`). 신뢰도 조건을 충족한 후보를 직접 확정하여
-  `board_attention_exact`의 LLM 판정 요청을 줄인다(#40413·#40420·#40428).
+  `board_attention_exact`의 고비용 LLM 판정 요청을 줄인다(#40413·#40420·#40428·#40505·#40521).
   - 양방향 직접 확정(`Jev_decided`): `relevant` 또는 `not_relevant` 판정 신뢰도가
     `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
     후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
-  - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
-    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
+  - LLM 레인 이관: HTTP 전송 레인에서 Jev가 실행된 뒤 신뢰도 미달(`Jev_low_confidence`), 명시적
+    불확실성(`Needs_review` / `Jev_uncertain`), 또는 호출 실패(`Jev_failed`)가 발생하면
+    설정된 `board_attention_exact` HTTP LLM 레인으로 이관하여 재판정한다.
+  - Jev 부재 및 CLI 전용 처리: Jev가 꺼져 있거나 제외된 키퍼(`Jev_off`)는 HTTP LLM 레인을 직접
+    실행한다. 반면 전송 레인이 CLI 전용(`Jev_cli_only`, `Cli_only`)인 경우 Jev는 HTTP 레인 앞에서만
+    호출되므로 Jev 판정을 건너뛰고 CLI 슬롯을 직접 실행(`walk_cli_slots`)한다(이관이나 재판정이 아님).
+  - 신호 단독 요청 형태(#40505): Jev 요청 상태에는 신호만(`{ "signal": ... }`) 싣고 질문에 키퍼
+    이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 본문을 state에서 제거하고 신호와 명시적 관심사로 판정한다.
+  - 푸시 이벤트 다중 키퍼 배치(#40521): 새 Board 이벤트 발생 시 `Keeper_board_attention_fanout`을 통해
+    후보 키퍼들을 단일 evaluate 요청에 복수 질문으로 묶어 일괄 판정한다.
   - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
     첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
     재조정할 수 있는 정량적 근거를 제공한다(#40420).
   → [Typesafeai_board_attention](../../lib/typesafeai/typesafeai_board_attention.mli) ·
+  [Keeper_board_attention_fanout](../../lib/keeper/keeper_board_attention_fanout.mli) ·
   [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.ml) ·
   [config/runtime.toml](../../config/runtime.toml)
 
@@ -1135,6 +1168,15 @@ status: reference
   넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
   `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
   넘김이 그대로 통과한다.
+  - **단일 자격증명 트랜잭션 직렬화 (Credential Admission Serialization)**: 인계 대상
+    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_dos_controller.holder_left`),
+    실제 제어권 변경(`Dos_lane.pass`)은 단일 Auth 자격증명 트랜잭션(`with_credential_transaction`)
+    안에서 원자적으로 직렬화된다(#40577). 대상 회수가 먼저 완료되면 목록에서 제외되어 거절되고,
+    인계가 먼저 권한을 얻으면 회수는 인계가 끝날 때까지 대기한 뒤 새 조종자의 권한을 해제한다.
+    적격성 검사와 인계 사이의 자격증명 회수/만료 경쟁 상태를 차단한다.
+  - **네트워크·보드 I/O 분리**: HTTP 요청 본문은 자격증명 잠금을 획득하기 전에 미리 읽어야
+    하며, 실제 DOS 변경 중에는 알림을 큐에 넣기만 하고 Board 공지는 Auth 잠금을 해제한 후에
+    발송한다. 잠금을 잡은 채 외부 네트워크나 본문 수신을 대기하지 않는다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
   초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
   아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
@@ -1144,6 +1186,7 @@ status: reference
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
   [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
+  [Keeper_dos_controller.execute](../../lib/keeper/keeper_dos_controller.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
@@ -1156,6 +1199,23 @@ status: reference
   → [Play_invite](../../lib/play/play_invite.mli) ·
   [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
+
+**Play Pad (플레이 패드 / 가상 키패드 레이아웃)**
+: 공유 머신 게임의 조작을 돕기 위해 프로그램별 버튼 매핑(키 시퀀스 및 라벨)을 선언한
+  패드 레이아웃 파일. `<.masc>/dos/pads/<saves_name>.toml`에 위치하며, 실행 파일과 분리되어
+  게임 내부 디스크로 마운트되지 않는다(#40395).
+  - **엄격한 부재 시에만 폴백 (Absence-Only Fallback)**: 작업공간 파일이 파일시스템상
+    완전히 부재할 때(`lstat` 결과 `ENOENT`)에만 내장(`Builtin`) 기본 레이아웃으로
+    폴백한다. 경로를 읽을 수 없거나(권한 오류), 댕글링 심볼릭 링크이거나, 비정규 파일(디렉터리,
+    FIFO, 소켓)이거나, 구문 분석에 실패한 경우에는 내장 레이아웃으로 넘어가지 않고
+    명시적 오류(`Error`)로 거절하여 작업공간 오버라이드의 의도치 않은 무시를 차단한다.
+  - **비정규 파일 및 FIFO 차단**: 열린 파일 디스크립터는 `O_NONBLOCK`으로 개방되어
+    FIFO 치환 시 쓰기 대기로 인한 블로킹을 방지하며, 내용 판독 전 `fstat`으로 일반 파일(`S_REG`)
+    여부를 재검증한다. 유효한 일반 파일로 이어지는 심볼릭 링크는 작업공간 오버라이드로 수용된다.
+  - **버튼 정의 엄격성**: 각 버튼은 비어 있지 않은 `keys` 배열과 `label`을 가져야 하며,
+    알 수 없는 테이블·필드·키 이름은 즉시 오류로 거절된다(타이포로 인한 무반응 방지).
+  → [Play_pad](../../lib/play/play_pad.mli) ·
+  [RFC Play Link for Shared Machine](../rfc/RFC-play-link-for-the-shared-machine.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
@@ -1308,6 +1368,36 @@ status: reference
   → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
   [quiz-questions](../../addons/quiz-questions/lane.toml),
   [quiz-grader](../../addons/quiz-grader/lane.toml)
+
+**Lane Action Receipt & Uncertainty (Lane 액션 영수증과 불확실성 보존)**
+: Lane Add-on worker에 요청된 액션(`masc_lane_act`)의 진행 상태와 결과 영수증(`Lane Action Receipt`),
+  그리고 파일시스템 반영 경계에서의 불확실성 보존 규약(#40396, #40573).
+  - **영수증 상태와 결과 객체 보존**: 확정 영수증(`confirmed`)은 반드시 객체 형태의 `result`를
+    보유해야 한다. 결과가 누락된 확정 영수증은 상태 조회 및 중복 요청 시 영수증 오류로 취급되며,
+    임의로 재실행(replay)하거나 손상된 영수증을 덮어쓰지 않는다. 워커 응답이 유실된 경우 영수증은
+    `outcome_unknown`으로 유지되며, 디스패치 전 워커가 종료된 미처리 대기열 영수증은
+    `failed_before_effect`로 전환된다. 고아 영수증은 대체 인스턴스에 자동 재실행되지 않는다.
+  - **저장 시 조상 동기화와 판독 시 내구성 재검증**: 영수증을 저장할 때는 액션 디렉터리의
+    조상 경로를 동기화(`fsync`)한 뒤 엄격한 원자적 파일 저장을 수행한다. 이미 존재하는
+    디렉터리도 동기화하므로 앞선 실패에서 가시적으로만 남은 경로를 다시 확인한다.
+    영수증을 읽을 때는 열린 영수증 파일과 바로 위 부모 디렉터리의 디스크립터를 동기화하고,
+    파일 바이트를 다시 읽어 비교하며 파일과 부모 디렉터리의 경로 정체성을 재검증한다.
+    이 판독 검증은 재시작이나 디태치 후에도 적용되지만, 나머지 조상 경로 전체를 다시
+    순회·동기화하지는 않는다. 이름 변경(rename)으로 파일이 보이는 것만으로 내구성이
+    확정되지는 않는다. 판독 검증 실패 시 상태 조회 및 중복 요청은 확정을 보고하지 않고
+    오류를 반환하며, 액션을 재출하하지 않는다.
+  - **라이브 불확실성 보존 (Live Uncertainty Retention)**: 관측 출판이나 최종 영수증 저장에서
+    이름 변경 후 실패가 발생하거나 종료 처리자(finalizer) 폴백마저 실패하더라도, 런타임은 해당
+    시퀀스 번호를 예약(reserve) 처리하고 수신된 패키지 결과를 미완료·불확실 상태(`outcome_unknown`)로
+    보존한다. 후속 관측은 충돌을 피해 다음 시퀀스를 사용하며, 액션을 임의로 재실행하지 않는다.
+  - **구독 커서 재확인 (Cursor Durability)**: `masc_lane_updates`의 확인(acknowledgement) 역시
+    이름 변경 전/후 실패를 구분하여 기록한다. 이미 출판된 영수증의 재시도는 프로듀서, incarnation,
+    시퀀스, 출력 다이제스트를 재검증하되 다음 시퀀스를 소비하지 않고 확인을 갱신한다.
+  → [Lane_addon_store](../../lib/lane_addon/lane_addon_store.mli) ·
+  [Lane_addon_runtime](../../lib/lane_addon/lane_addon_runtime.mli) ·
+  [Lane_addon_subscription](../../lib/lane_addon/lane_addon_subscription.mli) ·
+  [Lane World Actions Guide](../guides/lane-world-actions.md) ·
+  [Lane Subscriptions Guide](../guides/lane-subscriptions.md)
 
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
@@ -1604,6 +1694,16 @@ status: reference
   [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
+
+**Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
+: 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039).
+  - 대시보드 Item 탭([`keeper-items-panel.ts`](../../dashboard/src/components/keeper-items-panel.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
+  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
+  - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
+  - 단축 뷰포트 예산 보호: 15~16행의 짧거나 좁은 터미널 화면에서는 Candle 블록이 여유 행(spare rows)에만 진입하며, 화면이 혼잡할 때는 상태 이름과 요약만 남기고 전체 진단과 정확한 수량은 전역 Help/Info 시트로 접어 다른 핵심 작업(Attention, Task)의 시각 예산을 침범하지 않는다.
+  → [keeper-items-panel.ts](../../dashboard/src/components/keeper-items-panel.ts) ·
+  [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_ledger](../../lib/candle_store/candle_ledger.mli)
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
@@ -2642,15 +2742,16 @@ status: reference
 **Memory OS Recall (기억 회상 / 전송 투영)**
 : 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
-  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 아티팩트 조회 도구가 없거나 아티팩트 출판·핀 쓰기가 실패하면, `memory_search_available`에 따라 폴백이 달라진다. 메모리 검색이 가능하면 스토어 가용성·실패 사유·검색 안내와 소스 무효화·보류 식별자를 전달하며, 사실 본문 전체를 인라인으로 넣지 않는다. 이 폴백에서 메모리 검색도 불가능하면 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인으로 넣는다. 읽지 못한 소스의 주장 본문은 어느 경우에도 보류한다.
+  소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 인라인으로 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
   - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
   - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
   - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
   - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
   - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
-  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

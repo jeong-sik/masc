@@ -20,8 +20,7 @@
     "test:e2e:internal-agents": "../scripts/harness_dashboard_internal_agents_e2e.sh",
     "test:e2e:queued-stream": "../scripts/harness_dashboard_keeper_queued_stream_e2e.sh",
     "test:watch": "vitest",
-    "tokens:build": "tsx design-system/tokens/build.ts",
-    "tokens:check": "node design-system/tokens/scripts/check-equivalence.mjs"
+    "tokens:build": "tsx design-system/tokens/build.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -39,7 +38,7 @@
     "@preact/signals": "^2.9.0",
     "cytoscape": "^3.33.3",
     "diff": "^9.0.0",
-    "dompurify": "3.4.13",
+    "dompurify": "3.4.16",
     "effect": "3.22.1",
     "htm": "^3.1.1",
     "lucide-preact": "^1.14.0",

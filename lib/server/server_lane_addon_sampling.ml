@@ -140,7 +140,7 @@ let attempt ~sw ~net ~runtime_id params =
           let temperature = match params.S.temperature with None -> [] | Some _ -> [Temperature] in
           Error (Unsupported_controls (Output_limit :: (unsupported_common params @ temperature)))
 
-let invoke ~sw ~net ~route ~request:_ params =
+let invoke ~sw ~net ~store ~route ~request params =
   let* candidates = route_candidates route in
   let rec walk failures = function
     | [] -> Error (Yojson.Safe.to_string (`Assoc ["route",`String route;
@@ -159,8 +159,13 @@ let invoke ~sw ~net ~route ~request:_ params =
                   ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
               | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _ | Invalid_response _
               | Provider_error _ -> [] in
+            let* diagnostic = Eio_unix.run_in_systhread (fun () ->
+              Lane_addon_store.write_blob store (Yojson.Safe.to_string (`Assoc (
+                ["kind",`String "model_attempt_failure";"runtime_id",`String runtime_id;
+                 "request",Lane_addon_types.evidence_to_json request;
+                 "error",`String (failure_detail failure)] @ stop)))) in
             walk (`Assoc (["runtime_id",`String runtime_id;
-              "error",`String (failure_detail failure)] @ stop) :: failures) rest
+              "error_evidence",Lane_addon_types.evidence_to_json diagnostic] @ stop) :: failures) rest
         | Ok answer ->
             note_answered runtime;
             let metadata = match answer.S._meta with
@@ -179,7 +184,7 @@ let create_handler ~config ~net ~sw ~store ~instance_id ~package ~binding =
   let* route = route_of_binding binding in
   let* _candidates = route_candidates route in
   Lane_addon_sampling.create ~store ~package ~instance_id ~route
-    ~invoke:(invoke ~sw ~net) ()
+    ~invoke:(invoke ~sw ~net ~store) ()
 
 let register ~config ~net =
   Lane_addon_runtime.register_sampling_factory

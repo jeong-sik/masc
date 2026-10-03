@@ -293,19 +293,24 @@ let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* () = if String.length bytes > max_bytes then
         Error "Fusion detail exceeds the available source ingress envelope"
         else Ok () in
-      let reference = Lane_addon_store.blob_reference bytes in
-      let observation = `Assoc [
-        "id",`String reference.Lane_addon_types.uri;"kind",`String "fusion_run";
-        "observed_at",`Float observed_at;"actor",`Null;
-        "evidence",`List [evidence_json reference];"detail",detail] in
-      let captured = envelope ~id ~incarnation:run_id ~cursor:(`String reference.uri)
-        ~complete:true ~detail:(`String "One current Fusion detail; not an exhaustive run history")
-        [observation] in
-      if String.length (Yojson.Safe.to_string captured) > max_bytes then
+      (* Include the evidence address and source metadata before retaining bytes.
+         A discarded capture owns no blob; existing content-addressed evidence
+         can already belong to another observation and must not be removed. *)
+      let captured, size = Eio_unix.run_in_systhread (fun () ->
+        let reference = Lane_addon_store.blob_reference bytes in
+        let observation = `Assoc [
+          "id",`String reference.Lane_addon_types.uri;"kind",`String "fusion_run";
+          "observed_at",`Float observed_at;"actor",`Null;
+          "evidence",`List [evidence_json reference];"detail",detail] in
+        let captured = envelope ~id ~incarnation:run_id ~cursor:(`String reference.uri)
+          ~complete:true ~detail:(`String "One current Fusion detail; not an exhaustive run history")
+          [observation] in
+        captured, String.length (Yojson.Safe.to_string captured)) in
+      let* () = if size > max_bytes then
         Error "Fusion observation exceeds the available source ingress envelope"
-      else
-        let* _reference = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
-        Ok captured
+        else Ok () in
+      let* _ = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
+      Ok captured
 let read_bounded ~max_bytes path =
   try
     let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in

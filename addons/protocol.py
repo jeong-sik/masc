@@ -200,7 +200,13 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         request_id = None
         method = None
         try:
-            request = object_value(json.loads(line), "request")
+            try:
+                decoded = json.loads(line)
+            except json.JSONDecodeError:
+                raise
+            except ValueError as error:
+                raise InvalidInput("JSON value exceeds the decoder limits") from error
+            request = object_value(decoded, "request")
             # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
             supplied_id = request.get("id")
             if not (supplied_id is None or isinstance(supplied_id, (str, int, float))

@@ -216,8 +216,7 @@ let configuration_snapshot ~io ~access ~caller config subscriptions revision =
     "source_revision",(match revision with None->`Null|Some value->`String value);
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
-let dispatch_with ~io ?access ~config ~caller ~operation args =
-  let access = match access with Some value -> value | None -> Lane_addon_sources.Keeper caller in
+let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~caller ~operation args =
   Eio_guard.run_in_systhread ~label:"lane-subscription-dispatch" (fun () ->
   protect (fun () -> Mutex.protect mutex (fun () ->
   let* subscriptions,revision = load config in
@@ -249,6 +248,10 @@ let dispatch_with ~io ?access ~config ~caller ~operation args =
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in
+      let* ()=match access with
+        | Lane_addon_sources.Operator_configuration -> Ok ()
+        | Keeper keeper when String.equal keeper caller -> Ok ()
+        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
       let* s=select_subscription ~caller args subscriptions in
       let store=Store.create ~root:(root config) in
       let* bindings=Store.bindings store in

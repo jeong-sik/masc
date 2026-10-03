@@ -9974,6 +9974,39 @@ let test_librarian_preflight_detail_reports_actual_route () =
   Alcotest.(check bool) "successful run cannot retain awaiting preflight" true
     (Result.is_error (Tui_decode.decode_lane_run_detail
       (not_entered `Null |> with_status "succeeded")));
+  let persistence status intended json = match json with
+    | `Assoc ["run", `Assoc fields] ->
+      let intended_fields = match intended with
+        | None -> [] | Some value -> ["intended_status", `String value] in
+      let failed_fields = if intended = Some "failed" then
+        ["intended_code", `String "interrupted"; "intended_detail", `String "before selection"]
+        else [] in
+      `Assoc ["run", `Assoc
+        (("status", `String status) :: ("persistence_error", `String "append failed") ::
+         ("persistence_state", `String
+           (if status = "completion_persistence_failed" then "not_persisted" else "durability_unknown")) ::
+         intended_fields @ failed_fields @ List.remove_assoc "status" fields)]
+    | _ -> Alcotest.fail "invalid persistence fixture" in
+  List.iter (fun status ->
+    List.iter (fun intended ->
+      Alcotest.(check bool) "intended success cannot claim awaiting preflight" true
+        (Result.is_error (Tui_decode.decode_lane_run_detail
+          (persistence status intended (not_entered `Null))))
+    ) [Some "succeeded"; None; Some "running"; Some "invented"];
+    Alcotest.(check bool) "intended full-generation success requires slot" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail
+        (persistence status (Some "succeeded") (full_lane_without_slot "succeeded"))));
+    List.iter (fun intended ->
+      Alcotest.(check bool) "intended failure or cancellation can precede generation" true
+        (Result.is_ok (Tui_decode.decode_lane_run_detail
+          (persistence status (Some intended) (not_entered `Null))))
+    ) ["failed"; "cancelled"];
+    List.iter (fun (decision, path, skipped) ->
+      Alcotest.(check bool) "valid intended success survives persistence failure" true
+        (Result.is_ok (Tui_decode.decode_lane_run_detail
+          (persistence status (Some "succeeded") (make ~decision ~path ~skipped ()))))
+    ) ["needs_generation", "full_lane", false; "keep_current", "jev_no_change", true]
+  ) ["completion_persistence_failed"; "completion_durability_unknown"];
   let without_observation output =
     match make ~decision:"keep_current" ~path:"jev_no_change" ~skipped:true () with
     | `Assoc ["run", `Assoc fields] ->

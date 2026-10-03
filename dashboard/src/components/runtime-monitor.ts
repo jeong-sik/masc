@@ -1128,21 +1128,12 @@ export function RuntimeMonitor() {
                       </div>`
                   })()}
                   ${(() => {
-                    const cacheRead = metric.total_cache_read_tokens
-                    const inputTokens = metric.total_input_tokens
-                    const hasCacheNumbers =
-                      typeof cacheRead === 'number' && typeof inputTokens === 'number'
-                    let cacheRatio: number | null = null
-                    if (hasCacheNumbers) {
-                      const totalTokens = cacheRead + inputTokens
-                      cacheRatio = totalTokens > 0 ? cacheRead / totalTokens : 0
-                    }
-                    const totalIn =
-                      hasCacheNumbers
-                        ? cacheRead + inputTokens
-                        : null
+                    const paired = metric.cached_input
+                    const cacheRead = paired?.cache_read_tokens ?? null
+                    const totalIn = paired?.input_tokens ?? null
+                    const cacheRatio = paired ? paired.cache_read_tokens / paired.input_tokens : null
                     return html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1">
-                      cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cache savings ${formatPct1(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)
+                      cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cached input ${formatPct1(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)${paired ? ` · ${formatNumber(paired.sample_count)} reported samples` : ''}
                     </div>`
                   })()}
                   ${(metric.error_count ?? 0) > 0

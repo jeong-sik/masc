@@ -961,7 +961,7 @@ let test_autocomplete_subargument_cycling () =
    [handoff_context.summary]. A builder that dropped the summary would pass
    the transport and be refused by the server's schema on every cancel. *)
 let test_cancel_arguments_carry_reason_as_summary () =
-  let expected_workspace : Tui_decode.server_identity =
+  let expected_workspace : Masc.Tui_decode.server_identity =
     { sid_version = "test"; sid_binary_commit = "test";
       sid_binary_commit_age_s = None; sid_base_path = "/fixture";
       sid_masc_root = "/fixture/.masc";

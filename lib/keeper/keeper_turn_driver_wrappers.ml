@@ -36,7 +36,7 @@ let run_named_with_masc_tools
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
-    ?raw_trace
+    ~raw_trace
     ?on_event
     ?on_yield
     ?on_resume
@@ -75,7 +75,7 @@ let run_named_with_masc_tools
       ?temperature
       ?hooks
       ~accept
-      ?raw_trace
+      ~raw_trace
       ?on_event
       ?on_yield
       ?on_resume

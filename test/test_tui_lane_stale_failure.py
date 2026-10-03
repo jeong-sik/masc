@@ -6,11 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml",
-)
+
 
 # The standalone heading's own clock, drawn only from a standalone lane read.
 # A bare "observed " does not say that read landed: the Dashboard draws

@@ -1617,6 +1617,10 @@ status: reference
   (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
   (`lib/masc_log/log.ml`).
 
+**Board audience**
+: 게시글 생성·수정 시 계산해 함께 저장하는 typed 수신 범위. 저장된 값이 없으면
+  수신자를 확인할 수 없는 상태다. 읽기에서 본문의 멘션을 다시 해석해 권한을 만들지 않는다.
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.

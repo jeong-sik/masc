@@ -1222,7 +1222,8 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
     ("pinned", `Bool p.pinned);
-  ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
+  ] @ (match p.audience with Some audience -> [("audience", Board_audience.to_yojson audience)] | None -> [])
+    @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
     @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
     (* RFC-0233 §7: the dashboard board serializer ([board_post_dashboard_json])
        funnels every board list/detail route through this function, so emitting

@@ -113,6 +113,27 @@ class ReportCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertAlmostEqual(json.loads(result.stdout)["paired_median_delta_s"], 1.05)
 
+    def test_valid_fallback_and_not_entered_failures_are_reported(self) -> None:
+        for status, path, rejection in (
+            ("succeeded", "full_lane", "No-change output failed domain validation"),
+            ("failed", "not_entered", None),
+            ("cancelled", "not_entered", None),
+        ):
+            with self.subTest(status=status, path=path):
+                manifest = fixture()
+                run = manifest["pairs"][0]["preflight"]["run"]
+                run.update(status=status, selected_slot="fixture-cli" if path == "full_lane" else None)
+                run["output"].update(
+                    generation_path=path,
+                    full_llm_skipped=False,
+                    preflight_domain_rejection=rejection,
+                    jev_preflight={"status": "judged", "decision": "keep_current"}
+                    if path == "full_lane" else {"status": "failed"},
+                )
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["recorded_generation_skips"], 0)
+
     def test_mismatched_or_contradictory_evidence_is_refused(self) -> None:
         for mode in (
             "input",

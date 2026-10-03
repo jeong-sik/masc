@@ -2401,4 +2401,4 @@
  (package masc)
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_log masc.fs_compat
-  masc.agent_core digestif eio eio_main yojson))
+  masc.agent_core masc.prompt_registry digestif eio eio_main yojson))

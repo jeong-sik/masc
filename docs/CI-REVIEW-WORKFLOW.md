@@ -39,8 +39,10 @@ The publication job verifies its receipt and artifact checksums and uploads the
 existing distribution; it does not rebuild or rerun tests. A publication run is
 not full verification evidence for approval or merge. Development and release-profile OCaml type checks share
 one toolchain job; node behavior and stanza regeneration run only under the
-behavior lane's root `@runtest`. Test-only presentation tools and standalone-runner
-fixtures are not installed or executed by the typecheck job. The dashboard is
+behavior lane's root `@runtest`. Dune's exit status is the behavior verdict;
+there is no known-failure exemption list or second standalone compilation pass.
+The behavior lane runs product suites, without CI/review/PTY-helper self-tests.
+Presentation tools are installed only for the behavior lane. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and backend-coupled dashboard tests stay in their own job.
 Installer script tests run once on Linux in the distribution

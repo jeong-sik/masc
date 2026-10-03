@@ -1257,19 +1257,8 @@ let test_the_row_badge_says_what_the_store_says () =
     (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
 ;;
 
-(* Every badge this cell can draw has to be told apart from every other one.
-
-   The cell is ten cells wide and cuts what runs past it, which was the right
-   shape while the category was a wire string nobody could enumerate. It is a
-   closed set of eight now, plus the pane's own two words, and two of the ten
-   are longer than the cell: [CODE_CHANGE] draws as "CODE_CHAN..." and
-   [VALIDATED_APPROACH] as "VALIDATED...". Nothing collides today, and this
-   is what says so -- a category added later whose first nine characters
-   repeat another's would draw the same cell for two different things, which
-   is the whole job of the column.
-
-   Walked from [all_categories], so a ninth is measured without this file
-   changing. *)
+(* Built-in badges and dynamic labels with the same topic prefix must remain
+   distinct. Dynamic labels retain their suffix within the fixed-width cell. *)
 let test_every_badge_this_cell_draws_is_its_own () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
@@ -1315,7 +1304,11 @@ let test_every_badge_this_cell_draws_is_its_own () =
   let named =
     List.map (fun category ->
         (Cat.category_to_string category, badge (fact_row category)))
-      Cat.all_categories
+      (Cat.all_categories @ List.map (fun name ->
+         match Cat.category_of_string name with
+         | Some category -> category
+         | None -> Alcotest.failf "invalid fixture category: %s" name)
+         ["architecture_decision"; "architecture_pattern"])
     @ [ ("source", badge source_row); ("dropped", badge dropped_row) ]
   in
   List.iter

@@ -1676,7 +1676,9 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          the fixture-seeded cache rather than a projected snapshot carries no
          observation stamp, and every repeat request recomputes instead of
          reusing the bytes it already prepared. *)
-      |> Dashboard_projection_cache.with_current_keeper_observations ~config
+      |> (match fixture with
+          | Some _ -> Fun.id
+          | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
     in

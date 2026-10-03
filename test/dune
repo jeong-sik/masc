@@ -4071,7 +4071,11 @@
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_surface_search
+ (libraries masc_tui_hit
+  masc_tui_press
+  masc_tui_roster_pane
+  masc_tui_ansi
+  masc_tui_surface_search
   masc_tui_pick_list
   alcotest
   masc

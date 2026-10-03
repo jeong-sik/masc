@@ -279,6 +279,8 @@ let durable_consumer_basenames =
   ; Common.keepers_runtime_dirname
   ; "keeper_chat"
   ; "messages"
+  (* Prepared evidence remains owned even before its message commits. *)
+  ; "lane-addons/broadcasts"
   ; "tool_calls"
   ; "traces"
   (* The bounded diagnostic store owns every blob reference for as long as

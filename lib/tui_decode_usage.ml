@@ -253,10 +253,12 @@ let decode_keeper_usage_row json =
   let* kur_coverage =
     match read_state with
     | "read" ->
-        let* malformed = required_int_field metrics_read "malformed_rows" in
-        let* unread = required_int_field metrics_read "unread_turn_rows" in
-        Ok (if malformed = 0 && unread = 0 then Keeper_usage_complete
-            else Keeper_usage_partial { malformed_rows = malformed; unread_turn_rows = unread })
+        let* malformed_rows = required_int_field metrics_read "malformed_rows" in
+        let* unread_turn_rows = required_int_field metrics_read "unread_turn_rows" in
+        if malformed_rows < 0 || unread_turn_rows < 0 then
+          Error "keeper usage unread row counts must be nonnegative"
+        else Ok (if malformed_rows = 0 && unread_turn_rows = 0 then Keeper_usage_complete
+            else Keeper_usage_partial { malformed_rows; unread_turn_rows })
     | "failed" ->
         let* reason = required_string_field metrics_read "reason" in
         Ok (Keeper_usage_failed reason)

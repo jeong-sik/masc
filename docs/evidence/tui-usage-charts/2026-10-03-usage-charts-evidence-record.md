@@ -1,5 +1,7 @@
 # Usage charts and reported headroom
 
+These captures and execution results belong to the pre-integration `a842a515` candidate, identified by the historical manifest source hashes. They do not verify the integrated PR head or subsequent review fixes. No replacement binary, PTY run or screenshot has been produced for the updated source.
+
 ## 공통 헤더
 - 날짜(ISO8601): 2026-10-03T05:15:01.973586+00:00
 - 작성자: Codex

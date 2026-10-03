@@ -5160,6 +5160,56 @@ let test_unknown_capability_key_rejected_at_load () =
               "providers.capcheck.capabilities.supports-teleport")
          errors)
 
+let test_model_capability_keys_checked_at_load () =
+  let config capabilities =
+    Printf.sprintf
+      {|[providers.capcheck]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.sample]
+api-name = "sample"
+max-context = 1024
+
+[models.sample.capabilities]
+%s
+
+[capcheck.sample]
+
+[runtime]
+default = "capcheck.sample"
+|}
+      capabilities
+  in
+  List.iter
+    (fun key ->
+       match Runtime_toml.parse_string (config (key ^ " = true")) with
+       | Ok _ -> failf "unknown model capability %S was accepted" key
+       | Error errors ->
+         check bool "the rejection names the model capability key" true
+           (List.exists
+              (fun (e : Runtime_toml.parse_error) ->
+                 String.equal e.path ("models.sample.capabilities." ^ key))
+              errors))
+    [ "supports-native-streaming"; "supports-tool-choise" ];
+  let known =
+    {|supports-tool-choice = false
+supports-image-input = true
+max-output-tokens = 512
+thinking-control-format = "chat-template-token"
+thinking-control-token = "<|think|>"
+reasoning-streaming-format = "none"|}
+  in
+  List.iter
+    (fun capabilities ->
+       match Runtime_toml.parse_string (config capabilities) with
+       | Error errors ->
+         failf "valid model capabilities rejected: %s"
+           (String.concat "; "
+              (List.map (fun (e : Runtime_toml.parse_error) -> e.message) errors))
+       | Ok _ -> ())
+    [ ""; known ]
+
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
    the AGENT_CORE capability catalog, or the override clamped by the catalog cap.
@@ -6408,6 +6458,9 @@ let () =
           test_case
             "unknown capabilities key is rejected at load"
             `Quick test_unknown_capability_key_rejected_at_load;
+          test_case
+            "model capabilities reject unknown keys and accept declared keys"
+            `Quick test_model_capability_keys_checked_at_load;
           test_case
             "max-context: capability-only source uses the catalog cap"
             `Quick test_runtime_max_context_capability_only_uses_catalog_cap;

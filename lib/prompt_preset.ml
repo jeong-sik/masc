@@ -618,9 +618,21 @@ let list ~base_path =
 let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
 
 let restore_prompt_overrides ~base_path (entries : Override.entry list) =
-  let before = List.map (fun key -> key, (Prompt_registry.resolve_prompt key).effective)
+  let before = List.map (fun key -> key, Prompt_registry.resolve_prompt key)
     [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
      Prompt_names.candle_appraiser_weights] in
+  let notify_changed () =
+    (* Managed default files are outside the preset surface. Use their captured
+       values and committed in-memory overrides; release cleanup does no I/O. *)
+    let overrides = Prompt_registry.override_entries () in
+    if List.exists (fun (key, (resolution : Prompt_registry.prompt_resolution)) ->
+      let override_value = List.find_opt (fun (entry : Override.entry) -> entry.key = key) overrides
+        |> Option.map (fun entry -> entry.Override.value) in
+      let _, effective = Prompt_registry_types.resolve_source
+        ~override_value ~file_value:resolution.file_value in
+      effective <> resolution.effective) before
+    then Candle_payout_worker.wake () in
+  Eio_guard.protect ~finally:notify_changed (fun () ->
   let wanted key =
     List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
   in
@@ -653,10 +665,7 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
     cleared
     entries
   |> finish in
-  if List.exists (fun (key, effective) ->
-    effective <> (Prompt_registry.resolve_prompt key).effective) before
-  then Candle_payout_worker.wake ();
-  result
+  result)
 ;;
 
 let restore_instructions ~base_path instructions =

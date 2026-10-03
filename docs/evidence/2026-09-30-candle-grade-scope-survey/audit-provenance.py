@@ -89,9 +89,13 @@ def validate_runtime(raw, plan):
             'prepared runtime slots disagree with plan')
     provider_id, _ = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
-    require(lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
+    require(type(lane['max_output_tokens']) is int
+            and type(plan['evaluation_overrides']['max-output-tokens']) is int
+            and lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
             'prepared output limit disagrees with plan')
-    require(provider['exact-body-timeout-s'] == plan['evaluation_overrides']['exact-body-timeout-s'],
+    require(type(provider['exact-body-timeout-s']) is float
+            and type(plan['evaluation_overrides']['exact-body-timeout-s']) is float
+            and provider['exact-body-timeout-s'] == plan['evaluation_overrides']['exact-body-timeout-s'],
             'prepared timeout disagrees with plan')
     require(provider['credentials'] == {'type': 'env', 'key': plan['credential_env']},
             'prepared credential reference disagrees with plan')

@@ -159,7 +159,7 @@ let native_json ~binary args =
   | Ok _ | Error _ -> Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
 type reasoning_efforts = { supported : string list; default : string }
-type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option }
+type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option; supports_image_input : bool option }
 let client_reasoning_efforts row =
   let effort = function `String value when value<>"" -> Ok value | _ -> Error Unsupported_connection in
   match List.assoc_opt "supported_reasoning_efforts" row,List.assoc_opt "default_reasoning_effort" row with
@@ -191,8 +191,12 @@ let client_models ~catalog json =
       let context=value (if catalog then "max_context" else "context") row in
       let context=positive context in
       let* reasoning_efforts=client_reasoning_efforts row in
+      let* supports_image_input = match List.assoc_opt "supports_image_input" row with
+        | None | Some `Null -> Ok None
+        | Some (`Bool value) -> Ok (Some value)
+        | Some _ -> Error Unsupported_connection in
       let* tail=project (id::seen) tail in
-      Ok ({id;label;context;reasoning_efforts}::tail)
+      Ok ({id;label;context;reasoning_efforts;supports_image_input}::tail)
     | _ -> Error Unsupported_connection in
   project [] models
 let client_models_json ~source models =
@@ -203,11 +207,22 @@ let client_models_json ~source models =
       | Some {supported;default} ->
         ["supported_reasoning_efforts",`List (List.map (fun effort -> `String effort) supported);
          "default_reasoning_effort",`String default] in
-    `Assoc (["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null] @ efforts)) models in
+    let image = match model.supports_image_input with
+      | None -> [] | Some value -> ["supports_image_input", `Bool value] in
+    `Assoc (["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null] @ efforts @ image)) models in
   `Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows]
 let project_client_models ~source ~catalog json =
   let* models=client_models ~catalog json in
   Ok (client_models_json ~source models)
+let native_client_catalog ~binary client =
+  let* json = native_json ~binary ["runtime-model-list";client] in
+  client_models ~catalog:true json
+let with_catalog_image_capabilities models catalog =
+  List.map (fun model ->
+    let supports_image_input = match List.find_opt (fun entry -> entry.id = model.id) catalog with
+      | Some entry -> entry.supports_image_input
+      | None -> None in
+    {model with supports_image_input}) models
 let import_account ~binary ~base_path request =
   let* request=fields ["integration_id"] ["integration_id"] request in
   let* integration_id=text (value "integration_id" request) in
@@ -379,7 +394,10 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
       let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
-      project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
+      let* models = client_models ~catalog:false json in
+      let* catalog = native_client_catalog ~binary "codex" in
+      Ok (client_models_json ~source:"codex_isolated_account_model_list"
+        (with_catalog_image_capabilities models catalog))
     | Muse ->
       let* source,models=muse_catalog ~binary template in
       Ok (client_models_json ~source models)
@@ -435,7 +453,7 @@ let context ~binary ~net ~base_path request =
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
 let model_spec ~reported_models template request =
-  let* fields=fields ["id";"context";"streaming"] ["id";"context";"streaming"] request in
+  let* fields=fields ["id";"context";"streaming";"supports_image_input"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
@@ -445,8 +463,22 @@ let model_spec ~reported_models template request =
       (match List.find_opt (fun model -> String.equal model.id id) models with
        | Some {context=Some reported;_} when context=`Int reported -> Ok ()
        | Some _ | None -> Error Invalid_request) in
+  let* image = match List.assoc_opt "supports_image_input" fields with
+    | None -> Ok []
+    | Some (`Bool _ as value) -> Ok ["supports_image_input", value]
+    | Some _ -> Error Invalid_request in
+  let* image = match reported_models with
+    | None -> Ok image
+    | Some models ->
+      (match List.find_opt (fun model -> String.equal model.id id) models with
+       | None -> Error Invalid_request
+       | Some model ->
+         let authoritative = match model.supports_image_input with
+           | None -> [] | Some value -> ["supports_image_input", `Bool value] in
+         if image = [] || image = authoritative then Ok authoritative
+         else Error Invalid_request) in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
-      "tools",`Bool true;"streaming",streaming])) |> Result.map_error (fun _ -> Invalid_request)
+      "tools",`Bool true;"streaming",streaming] @ image)) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =
   Eio.Switch.run (fun sw ->
     let* body=fields ["revision";"connections";"selection";"default_runtime_id"] ["revision";"connections";"selection"] request in
@@ -469,8 +501,15 @@ let save ~binary ~base_path request =
         let* reported_models=match choice with
           | Runtime_setup_spec.Muse ->
             let* _,models=muse_catalog ~binary template in Ok (Some models)
+          | Claude_code | Codex ->
+            let client = match choice with Claude_code -> "claude-code" | _ -> "codex" in
+            let* catalog = native_client_catalog ~binary client in
+            (* A refreshed CLI model may be absent from the installed catalog;
+               preserve unknown capability without accepting a browser assertion. *)
+            let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
+            Ok (Some (with_catalog_image_capabilities selected catalog))
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
-          | Claude_code | Codex | Antigravity -> Ok None in
+          | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
           let* spec=model_spec ~reported_models template model in let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in

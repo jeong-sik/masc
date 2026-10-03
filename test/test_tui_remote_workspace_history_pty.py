@@ -972,7 +972,8 @@ def ask_workspace_withdrawal(binary: str) -> None:
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
             "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: h.RequestHttpResponse(answer_request)})
+            h.KEEPER_ASK_ANSWER_PATH: h.RequestHttpResponse(answer_request,
+                get_response=(405, {"error": "POST required"}))})
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:

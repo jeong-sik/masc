@@ -1,6 +1,6 @@
 # Remaining v0.49.0 TUI fixture repairs
 
-Scope: five test files on PR #41018 at `fd7e6c37e006af09b1dba65fb2b3b55249104c7f`. These repairs address existing release verification failures; they add no product feature or main-branch integration.
+PR #41031, issue #41029. Scope: five test files on PR #41018 at `fd7e6c37e006af09b1dba65fb2b3b55249104c7f`. These repairs address existing release verification failures; they add no product feature or main-branch integration.
 
 ## Why these checks failed
 
@@ -26,3 +26,9 @@ Independent source reviewer `release_merge_review` found no P0-P2 in the four in
 The shared HTTP fixture records POSTs after writing a response. A cancelled held response can raise `BrokenPipeError` first and omit an admitted request from that ledger. The Ask scenario now records phase and body on request ingress, keeps exact zero/one admission counts, rejects any admission outside workspace A, and waits for the held response to leave its gate before observing settled B state.
 
 Both Ask modes passed on the old RC diagnostic binary with this final script. `ask-manifest.json` binds script and binary hashes, `ask-after.log` records actual request bodies and completion, and the two terminal text captures show the settled screens. The first Item diagnostic in `initial-diagnostic.log` passed identity withdrawal, recovery and late-reply rejection. The roster branch is intentionally not claimed from this old binary, because its product fix exists only in the new candidate.
+
+The independent reviewer also caught that RequestHttpResponse can route GET to its resolver. The Ask fixture explicitly returns HTTP405 for GET, preserving the POST-only admission contract.
+
+The final diagnostic observed a real cancelled-response BrokenPipe: the response-completion ledger recorded zero POSTs while the ingress ledger retained exactly one admitted answer from A. Both zero-admission and one-admission scenarios passed. The final manifest and captures refer to the POST-only fixture version.
+
+Final independent review covered all five source files including the GET refusal and MCP qualification, with no remaining P0-P2 findings. No runtime or build claim is inferred from that source review.

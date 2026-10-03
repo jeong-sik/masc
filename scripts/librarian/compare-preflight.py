@@ -113,6 +113,15 @@ def goals(value: Json) -> None:
 def goal_context(value: Json) -> None:
     context = obj(value, "goal_context")
     status = context.get("status")
+    fields = {
+        "no_task": {"status"},
+        "available": {"status", "task_id", "goals"},
+        "unavailable": {"status", "task_id", "detail"},
+    }
+    if not isinstance(status, str) or status not in fields:
+        raise ValueError("unknown goal context status")
+    if context.keys() != fields[status]:
+        raise ValueError("goal context fields do not match status")
     if status == "no_task":
         return
     text(context.get("task_id"), "task_id")
@@ -120,8 +129,6 @@ def goal_context(value: Json) -> None:
         goals(context.get("goals"))
     elif status == "unavailable":
         string(context.get("detail"), "goal context detail")
-    else:
-        raise ValueError("unknown goal context status")
 
 
 def goal_source_error(value: Json) -> None:
@@ -371,6 +378,8 @@ def read_run(detail: Json) -> tuple[dict[str, Json], Json, dict[str, Json], floa
     if run["status"] == "failed":
         text(run.get("code"), "failed run code")
         text(run.get("detail"), "failed run detail")
+    elif "code" in run or "detail" in run:
+        raise ValueError("nonfailed run must not record code or detail")
     elapsed = number(run.get("elapsed_s"), "run elapsed_s")
     if elapsed < 0:
         raise ValueError("elapsed_s must be finite and nonnegative")

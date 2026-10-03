@@ -15,11 +15,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names.
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-)
+
 
 VOICE = b"MASC Voice"
 # System's panes spell Esc "back" (Masc_tui_keys.config_bindings); the help

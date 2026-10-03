@@ -18,20 +18,6 @@ from pathlib import Path
 import test_tui_keyboard_input as h
 
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_schedule.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_composer.ml",
-    "bin/masc_tui_candle.ml",
-    "bin/masc_tui_keeper_control.ml",
-    "lib/tui_decode.ml",
-    "lib/candle/candle_observation.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 DIRECTIVE_PATH = "/api/v1/keepers/alpha/directive"

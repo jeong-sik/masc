@@ -179,7 +179,7 @@ def failure(executable):
 
 def keeper_comparison(executable, no_color=False, unreported_cost=False):
     responses, _ = fixtures()
-    def row(name, tokens, cost, missing=0, failed=False, malformed=0):
+    def row(name, tokens, cost, missing=0, failed=False, malformed=0, unread=0):
         return {"keeper_name": name, "sample_count": 10,
                 "total_tokens": tokens, "total_cost_usd": cost,
                 "tokens_reported_samples": 0 if tokens is None else 10 - missing,
@@ -187,8 +187,8 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                 "cost_reported_samples": 0 if cost is None else 10 - missing,
                 "cost_unreported_samples": missing, "cost_unread_samples": 0,
                 "metrics_read": {"state": "failed", "reason": "fixture read failure"} if failed
-                                else {"state": "read", "malformed_rows": malformed}}
-    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, malformed=2),
+                                else {"state": "read", "malformed_rows": malformed, "unread_turn_rows": unread}}
+    keeper_rows = [row("alpha", 1000, 1.0), row("beta-partial", 500, 0.25, missing=3, unread=2),
                    row("gamma-missing", None, None, missing=10),
                    row("delta-failed", 900000, 900.0, failed=True), row("epsilon-zero", 0, 0.0)]
     responses["/api/v1/dashboard/keeper-costs?window=1440"] = (200, {
@@ -211,12 +211,11 @@ def keeper_comparison(executable, no_color=False, unreported_cost=False):
                        70, 120, b"epsilon-zero")
         for text in ("Scale: tokens 1000", "cost unreported" if unreported_cost else "cost $1.0000", "As of 2026-10-03 00:00 UTC",
                      "120s old", "refresh failed: fixture refresh failure",
-                     "partial (2 malformed rows)", "7 reported, 3 missing",
+                     "partial (0 malformed rows, 2 unread turn rows)", "7 reported, 3 missing",
                      "unreported", "fixture read failure", "bars are not quota",
-                     "[" + "█" * 16 + "░" * 16 + "]",
-                     "[unavailable" if unreported_cost else "[" + "█" * 8 + "░" * 24 + "]", "[" + "░" * 32 + "] 0"):
+                     "[unavailable", "[" + "░" * 32 + "] 0"):
             assert text.encode() in wide, f"Keeper comparison evidence missing: {text}"
-        assert wide.count(b"[unavailable") == (7 if unreported_cost else 4), "missing/failed metrics drew a bar"
+        assert wide.count(b"[unavailable") == (8 if unreported_cost else 6), "missing/failed metrics drew a bar"
         compact = capture(process, fd, output, "keeper-comparison-compact" + suffix,
                           20, 80, b"Keeper usage")
         assert b"Scale: tokens 1000" in compact

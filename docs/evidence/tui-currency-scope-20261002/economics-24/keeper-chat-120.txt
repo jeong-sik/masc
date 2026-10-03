@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+   현재 대화 · alpha
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            Keepers ▸ alpha ▸ chat
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀          ────────────────────────────────────────────────────────────────────────────────────
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀             (no messages yet -- type below and press Enter)
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+┌────────────────────────────────┐
+│  KEEPERS           Ctrl-B HIDE │
+├────────────────────────────────┤
+│  ● alpha                       │
+│  · beta                        │
+│                                │
+│                                │ ────────────────────────────────────────────────────────────────────────────────────
+│                                │    History load failed · /errors
+│                                │    Memory load failed · /errors
+└────────────────────────────────┘    >
+
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: anthropic.claude-opus-5  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  /:commands  Esc:list  PgUp:history  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  …?

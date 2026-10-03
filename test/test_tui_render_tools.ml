@@ -192,13 +192,13 @@ let state_showing ?tools ~unavailable_skill_names () =
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
   state
 
-let surface_text state =
-  Masc_tui_render_tools.tools_display_lines state
+let surface_text ?(cols = 80) state =
+  Masc_tui_render_tools.tools_display_lines ~cols state
   |> List.map snd
   |> String.concat "\n"
 
 let test_the_screen_distinguishes_unreported_bytes_from_zero () =
-  let unknown = surface_text (state_showing ~unavailable_skill_names:[] ()) in
+  let unknown = surface_text ~cols:160 (state_showing ~unavailable_skill_names:[] ()) in
   Alcotest.(check bool) "missing byte counts are unknown" true
     (contains "deferred bodies=? · skill tool schema=?/? all tools" unknown);
   let effective =
@@ -215,7 +215,7 @@ let test_the_screen_distinguishes_unreported_bytes_from_zero () =
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
   Alcotest.(check bool) "a reported zero remains zero" true
     (contains "deferred bodies=0B · skill tool schema=0B/0B all tools"
-       (surface_text state))
+       (surface_text ~cols:160 state))
 
 let test_the_screen_names_a_configured_skill_that_is_not_there () =
   let shown =

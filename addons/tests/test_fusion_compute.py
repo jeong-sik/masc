@@ -81,7 +81,7 @@ class Host:
 
 
 def call(host, inputs, settings=None, *, sampling=True, ping=False,
-         command=None, command_env=None, transport_timeout=None):
+         command=None, command_env=None, transport_timeout: float | None = 10.0):
     settings = copy.deepcopy(settings if settings is not None else binding())
     if not settings.get("sources"):
         declared = []
@@ -96,11 +96,16 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
                 declared.append({"source_id": item["source_id"], "kind": "snapshot_file",
                                  "path": "/fixture/" + item["source_id"] + ".json"})
         settings["sources"] = declared
-    process = subprocess.Popen(command if command is not None else
-                               [sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True,
-                               env=command_env if command is not None else {})
+    stderr = tempfile.TemporaryFile(mode="w+t")
+    try:
+        process = subprocess.Popen(command if command is not None else
+                                   [sys.executable, str(ADDONS / "fusion-compute" / "server.py")],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=stderr, text=True,
+                                   env=command_env if command is not None else {})
+    except OSError:
+        stderr.close()
+        raise
     timed_out = threading.Event()
     def expire_transport():
         if process.poll() is None:
@@ -114,7 +119,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
         timer = threading.Timer(transport_timeout, expire_transport)
         timer.daemon = True
         timer.start()
-    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
+    stdin, stdout = process.stdin, process.stdout
     try:
         assert stdin is not None and stdout is not None and stderr is not None
         def send(message):
@@ -125,6 +130,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
             if timed_out.is_set():
                 raise TimeoutError("Fixture worker transport deadline exceeded")
             if not line:
+                stderr.seek(0)
                 raise AssertionError("worker closed stdout: " + stderr.read())
             host.last_reply_bytes = len(line.encode("utf-8"))
             if host.last_reply_bytes > MAXIMUM_FRAME:
@@ -154,6 +160,7 @@ def call(host, inputs, settings=None, *, sampling=True, ping=False,
         stdin.close()
         process.wait(timeout=10)
         assert process.returncode == 0
+        stderr.seek(0)
         assert stderr.read() == ""
         return message["result"]
     finally:

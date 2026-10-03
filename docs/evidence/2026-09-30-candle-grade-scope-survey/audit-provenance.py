@@ -137,8 +137,10 @@ def validate_runtime(raw, plan):
     runtime_id = plan['runtime_id']
     require(lane['slots'] == [runtime_id] and lane['cli_slots'] == [],
             'prepared runtime slots disagree with plan')
-    provider_id, _ = runtime_id.split('.', 1)
+    provider_id, model_id = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
+    require(config['models'][model_id]['api-name'] == model_id,
+            'prepared API model disagrees with declared runtime')
     require(type(lane['max_output_tokens']) is int
             and type(plan['evaluation_overrides']['max-output-tokens']) is int
             and lane['max_output_tokens'] == plan['evaluation_overrides']['max-output-tokens'],
@@ -196,6 +198,14 @@ def main():
         else:
             require(provenance['prompt_commit'] == frozen_prompt_commit,
                     'frozen prompt source declarations disagree')
+    verification = json.loads((args.evidence/'artifact-verification.json').read_text())
+    require(verification['source_commit'] == plan['source_commit'], 'CI artifact source commit mismatch')
+    executable = Path(metadata['build']['executable_path']).name
+    require(executable == 'candle_appraiser_eval_cli.exe', 'unexpected evaluation executable')
+    artifacts = [entry for entry in verification['files'] if entry['file'] == executable]
+    require(len(artifacts) == 1, 'CI artifact must identify exactly one evaluation executable')
+    require(metadata['build']['executable_sha256'] == artifacts[0]['sha256'],
+            'evaluation executable hash disagrees with CI artifact verification')
     corpus = (args.workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "Evidence validation failed: sha(corpus) == plan['cases_sha256']")
     require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "Evidence validation failed: sha((args.workspace / '.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")

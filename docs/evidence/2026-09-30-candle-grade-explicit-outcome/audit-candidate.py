@@ -139,8 +139,10 @@ def validate_runtime(raw, plan):
     runtime_id = plan['runtime_id']
     require(lane['slots'] == [runtime_id] and lane['cli_slots'] == [],
             'prepared runtime slots disagree with plan')
-    provider_id, _ = runtime_id.split('.', 1)
+    provider_id, model_id = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
+    require(config['models'][model_id]['api-name'] == model_id,
+            'prepared API model disagrees with declared runtime')
     require(type(lane['max_output_tokens']) is int
             and same_json(lane['max_output_tokens'], plan['evaluation_overrides']['max-output-tokens']),
             'prepared output limit disagrees with plan')

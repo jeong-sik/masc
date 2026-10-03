@@ -378,7 +378,8 @@ const inlayHintDecorator = ViewPlugin.fromClass(
             visitedLines.add(line.number)
             // RangeSetBuilder requires position order; stable sorting preserves
             // the protocol's response order for hints at the same position.
-            for (const hint of [...lineHints].sort((a, b) => a.position.character - b.position.character)) {
+            for (const hint of [...lineHints].sort((a, b) =>
+              Math.min(a.position.character, line.length) - Math.min(b.position.character, line.length))) {
               const insertPos = Math.min(line.from + hint.position.character, line.to)
               const parts = typeof hint.label === 'string' ? [{ value: hint.label }] : hint.label
               builder.add(

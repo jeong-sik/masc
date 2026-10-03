@@ -80,14 +80,22 @@ status: reference
   붙어 그쪽 도구를 가져온다.
 
 **MCP Sampling (MCP 샘플링)**
-: MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 프로토콜 기능
-  (`sampling/createMessage`). 클라이언트가 모델 접근·선택·권한을 통제하므로 서버
-  프로세스에는 provider 자격 증명이 필요하지 않다. MASC의 `Agent_core.Mcp.connect`는
-  선택적 `sampling_handler`가 설정된 연결에서만 이 capability를 알린다. 이 범용 연결
-  기능만으로 Lane Add-on의 모델 접근을 허가하거나 요청을 Fusion 계산에 연결하지는
-  않는다. MCP 스펙은 사람이 요청을 검토하고 거절할 수 있는 경로를 권고하므로 callback
-  존재만으로 그 상호작용이 구현됐다고 보지 않는다.
-  → [MCP Sampling specification](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
+: MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 MCP 기능
+  (`sampling/createMessage`). 2025-06-18 사양은 클라이언트가 모델 접근·선택·권한을
+  통제하고 서버에 provider 자격 증명이 필요 없도록 정의했다.
+  **현재 사양 상태**: 2026-07-28 사양에서 deprecated로 표시됐다. 새 구현은 이를
+  채택하지 말아야 한다(SHOULD NOT). 기존 구현은 provider API 직접 호출로 옮겨야 한다(SHOULD).
+  해당 개정의 릴리스 후 최소 12개월간 사양에 남고 그 뒤에야 제거 대상이 될 수 있으므로,
+  deprecated 표시는 제거 완료를 뜻하지 않는다.
+  MASC의 `Agent_core.Mcp.connect`는 선택적 `sampling_handler`가 설정된 연결에서만
+  `sampling/createMessage`를 알리고 처리한다. 이 연결 primitive만으로 Lane Add-on의 모델
+  접근이나 Fusion 계산이 활성화되지는 않는다. 현재 Add-on 경로는 manifest의
+  `model_access = "host_sampling"` 선언과 설치 binding의 `model_route`를 확인하고, server
+  factory가 해당 worker에 callback을 제공해 연결한다. 선언만으로 route나 provider 자격
+  증명이 생기지는 않는다. 사양은 사람이 요청을 검토·거절할 수 있어야 한다고 권고하므로
+  callback 존재만으로 그 상호작용이 구현됐다고 보지 않는다.
+  → [MCP Sampling specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/client/sampling),
+  [MCP Sampling specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
   [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
@@ -1818,7 +1826,17 @@ status: reference
   검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
   `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
   라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
+  여기서 Fusion은 MASC의 Board-backed 실행을 뜻하며, Lane Add-on의 조립형 계산과는 다르다.
   → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+
+**Assembled Fusion Computation (조립형 Fusion 계산)**
+: `fusion-compute` Lane Add-on이 패널과 심판을 각각 격리 worker로 실행해 보존 입력과
+  이름 지정 Lane 출력을 계산한다. `fusion/computation` 출력을 내고 `fusion-report`가
+  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 Board-backed Fusion 실행과는 다르다.
+  계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
+  evidence action이 필요하다.
+  → [fusion-compute](../../addons/fusion-compute/README.md),
+  [model access boundary](../design/lane-addon-model-boundary.md)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다

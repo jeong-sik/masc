@@ -398,6 +398,17 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
         ~content:delivery.content (); Ok ()
 
+let register_lane_fleet_backend () =
+  Lane_addon_runtime.register_fleet_backend {
+    snapshot=(fun ~config ~caller ~access ->
+      let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
+      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
+        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
+    project=(fun ~config ~sender_authority ~delivery ~recipient ->
+      append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
+        ~sender_authority delivery ~keeper_name:recipient);
+  }
+
 let project_workspace_message_to_fleet
       ~base_path
       ~registered_keepers
@@ -1889,15 +1900,7 @@ let start_keeper_loops_owned
             (Printexc.to_string exn)));
     mention_outcome
   in
-  Lane_addon_runtime.register_fleet_backend {
-    snapshot=(fun ~config ~caller ~access ->
-      let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
-      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
-        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
-    project=(fun ~config ~sender_authority ~delivery ~recipient ->
-      append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
-        ~sender_authority delivery ~keeper_name:recipient);
-  };
+  register_lane_fleet_backend ();
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   install_workspace_message_mutation_invalidation
     ~invalidate_full_health_snapshot

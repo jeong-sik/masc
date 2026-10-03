@@ -2,6 +2,11 @@
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
 
 (executable
+ (name lane_fusion_container_probe)
+ (modules lane_fusion_container_probe)
+ (libraries masc_test_deps masc.server masc.build_commit mcp_protocol eio_main cohttp-eio unix))
+
+(executable
  (name masc_browser_host)
  (modules masc_browser_host)
  (public_name masc-browser-host)

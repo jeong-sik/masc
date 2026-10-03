@@ -10,9 +10,14 @@ val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
     (Lane_addon_sampling.t, string) result) -> unit
-(** Construction validates the exact package, installation binding and host route
-    without provider I/O. The worker constructs the callback on its lifetime
-    switch; disabled packages do not request a handler. *)
+(** Server-owned model boundary, registered before configuration maintenance.
+    Construction must perform no I/O, credential resolution, provider call or
+    store write: it validates the exact instance, package, binding and host route
+    and returns a closure. It is called before the entry is persisted with the
+    root switch; that validation closure is discarded. Worker startup constructs
+    its actual callback again with the worker lifetime switch. Disabled packages
+    do not request a callback. Construction refuses stores outside the registered
+    workspace. Invocation must retain model requests before invoking a provider. *)
 type fleet_backend = {
   snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access ->
     (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;

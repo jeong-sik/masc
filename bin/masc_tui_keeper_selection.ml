@@ -70,8 +70,11 @@ let reconcile ~current_ids ~next_ids ~current =
        | Some next_cursor -> Calls_keeper { keeper_name; cursor = next_cursor }
        | None -> List_cursor (fallback_cursor ~cursor next_ids))
   | Message_keeper { keeper_name; cursor } ->
+      let selected_id =
+        if cursor < 0 then None else List.nth_opt current_ids cursor
+      in
       let cursor =
-        match find_index keeper_name next_ids with
+        match Option.bind selected_id (fun id -> find_index id next_ids) with
         | Some next_cursor -> next_cursor
         | None -> fallback_cursor ~cursor next_ids
       in

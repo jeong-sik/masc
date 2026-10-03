@@ -1535,9 +1535,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in
+    (* Both panes through the list-window helper the scroll panes read: two
+       arrays, one pass, each row reads its own cells -- no row of the loop
+       walks either list to find itself. *)
+    let rail_window = Rows.of_list ~first:0 ~height rail in
+    let facts_window = Rows.of_list ~first:0 ~height facts in
     for index = 0 to height - 1 do
-      let row lines = Option.value (List.nth_opt lines index) ~default:"" in
-      push (fit_width (row rail) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
-        ^ fit_width (row facts) fact_cols)
+      let cell window = Option.value (Rows.at window index) ~default:"" in
+      push (fit_width (cell rail_window) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+        ^ fit_width (cell facts_window) fact_cols)
     done
   end

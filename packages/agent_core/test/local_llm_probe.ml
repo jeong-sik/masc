@@ -1,7 +1,7 @@
 (** Live integration test: agent-sdk → llama-server (Qwen3.5)
 
     Requires: llama-server running on 127.0.0.1:8085
-    Run: LLAMA_LIVE_TEST=1 dune exec ./test/test_local_llm.exe
+    Run: LLAMA_LIVE_TEST=1 dune exec ./packages/agent_core/test/local_llm_probe.exe
 *)
 
 open Agent_core

@@ -182,6 +182,22 @@ class PresentationPrerequisites(unittest.TestCase):
 
 
 class ModelSelection(unittest.TestCase):
+    def test_account_model_preserves_exact_native_image_declaration_and_context(self):
+        source = dict(choice='codex', command='codex', account_home='/owned/codex')
+        for declared in (True, False, None):
+            with self.subTest(declared=declared), patch.object(
+                    SETUP, 'catalog_models', return_value=[
+                        dict(id='different-model', supports_image_input=True),
+                        dict(id='selected-model', supports_image_input=declared)]):
+                _, selected = SETUP.resolve_model_spec(
+                    source, dict(id='selected-model', context=750000), 10, binary='/fixture/masc')
+                self.assertEqual(selected['max_context'], 750000)
+                self.assertEqual(selected['account_home'], '/owned/codex')
+                if declared is None:
+                    self.assertNotIn('supports_image_input', selected)
+                else:
+                    self.assertIs(selected['supports_image_input'], declared)
+
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
         self.renderer = renderer.start()

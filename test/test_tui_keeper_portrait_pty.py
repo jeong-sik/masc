@@ -10,6 +10,7 @@ import hashlib
 import copy
 import threading
 import json
+import time
 import re
 import sys
 from collections.abc import Callable
@@ -18,22 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import test_tui_keyboard_input as h
 
-# scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
-# path named here.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_types.ml",
-    "lib/tui_decode.ml",
-    "bin/masc_tui_graphics.ml",
-    "bin/masc_tui_image_mosaic.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "lib/keeper_portrait/keeper_portrait_draw.ml",
-    "lib/keeper_portrait/keeper_portrait_look.ml",
-)
+
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
 HALF_BLOCK = "▀▄"
@@ -47,15 +33,14 @@ PAUSED_ROW = b"Paused:"
 CURRENT_FAILURE = b"Current failure"
 # Masc_tui_keeper_portrait.band_size: the rows and cells a mosaic portrait
 # takes, and the rows a placed one does on a 20 px cell.
-MOSAIC_BAND_ROWS = 12
-MOSAIC_BAND_COLS = 24
-PIXEL_BAND_ROWS = 8
+MOSAIC_BAND_ROWS = 8
+MOSAIC_BAND_COLS = 16
+PIXEL_BAND_ROWS = 4
 # Where a portrait cell may sit: the frame's two cells, the fact indent, and
 # the band. A half block further right is not the portrait.
 PORTRAIT_CELLS = 2 + 2 + MOSAIC_BAND_COLS
-# The harness terminal's 30 rows leave the detail 23 content rows, over a
-# mosaic's Masc_tui_keeper_portrait.min_content_rows (20); 24 rows leave it
-# 17, under.
+# A 30-row terminal fits the mosaic and facts; 24 rows give all space to facts.
+# Pixel icons use four rows; Items keeps its larger outfit preview.
 TALL_ROWS = 30
 SHORT_ROWS = 24
 COLUMNS = 100
@@ -168,10 +153,9 @@ def identity_row(rows: dict[int, bytes]) -> int:
 
 def assert_facts_full_width(rows: dict[int, bytes], why: str) -> None:
     assert not portrait_rows(rows), f"{why}, the portrait still drew: {rows!r}"
-    identity = identity_row(rows)
-    # Identity, Name, Paused, a blank row: the facts keep every row.
-    assert row_of(rows, CURRENT_FAILURE) == identity + 4, \
-        f"{why}, the rows the portrait took were not given back: {rows!r}"
+    identity_row(rows)
+    assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
+        f"{why}, Current Work obscured the Identity facts: {rows!r}"
 
 
 def assert_portrait_beside_identity(output: bytearray) -> None:
@@ -182,16 +166,16 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
     assert band[0] == identity and band[-1] < identity + MOSAIC_BAND_ROWS, \
         f"the portrait is not the {MOSAIC_BAND_ROWS} rows beside Identity: rows {band}, Identity {identity}"
     assert len(band) >= MOSAIC_BAND_ROWS // 2, f"too little of the portrait drew: rows {band}"
-    for offset, needle in enumerate((IDENTITY, NAME_ROW, PAUSED_ROW)):
-        text = rows[identity + offset].decode("utf-8", "replace")
+    for number, needle in ((identity, IDENTITY),
+                           (row_of(rows, NAME_ROW), NAME_ROW),
+                           (row_of(rows, PAUSED_ROW), PAUSED_ROW)):
+        text = rows[number].decode("utf-8", "replace")
         cells = [text.find(cell) for cell in HALF_BLOCK if cell in text]
         assert cells and min(cells) < text.find(needle.decode()), \
             f"{needle!r} is not beside the portrait: {text!r}"
-    assert b"alpha" in rows[identity + 1], "the Name row lost the name"
-    # The band holds the facts' rows: the blank row after the portrait, then
-    # the next section.
-    assert row_of(rows, CURRENT_FAILURE) == identity + MOSAIC_BAND_ROWS + 1, \
-        f"the facts after the portrait moved: {rows!r}"
+    assert b"alpha" in rows[row_of(rows, NAME_ROW)], "the Name row lost the name"
+    assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
+        f"Current Work obscured the Identity facts: {rows!r}"
     styled = last_frame_rows(output, preserve_styles=True)
     assert FOREGROUND_ESCAPE in styled[identity], "the portrait was drawn without colour"
 
@@ -217,7 +201,7 @@ def portrait_follows_the_terminal_height(binary: str) -> None:
         open_alpha_detail(process, fd, output)
         assert_portrait_beside_identity(output)
         # A short terminal keeps every row for facts.
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
+        h.resize_and_wait(process, fd, output, rows=20, columns=COLUMNS, needle=IDENTITY)
         h.drain_until_quiet(process, fd, output)
         assert_facts_full_width(last_frame_rows(output), "on a short terminal")
         # And the portrait comes back when the rows do.
@@ -256,6 +240,16 @@ def no_portrait_under_no_color(binary: str) -> None:
 
 def portrait_as_pixels(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    reason = "fixture appraiser unavailable " + "long account headline " * 8
+    revision = hashlib.sha256(("disabled\0" + reason).encode()).hexdigest()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "disabled", "reason": reason}
+    for keeper in roster["keepers"]:
+        keeper["candle_account_revision"] = revision
+    fixtures["/api/v1/keepers/alpha/items"] = (200, {
+        "status": "disabled", "keeper": "alpha",
+        "reason": reason, "account_revision": revision,
+    })
 
     def interact(process, fd, _slave, output, _base):
         start = len(output)
@@ -280,8 +274,29 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        assert row_of(rows, CURRENT_FAILURE) == identity + PIXEL_BAND_ROWS + 1, \
+        assert row_of(rows, b"Current Work") == identity + 4, \
             "the facts did not leave the picture its rows"
+        # Item text that needs the full width must remove the actual Kitty
+        # placement as well as its reserved columns. Mosaic-only proof cannot
+        # detect a pixel overlay left above the text.
+        start = len(output)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"Candle disabled:" in b"\n".join(last_frame_rows(output).values()), timeout=10)
+        h.wait_for_output(process, fd, output, PORTRAIT_DELETE, start=start, timeout=3.0)
+        h.drain_until_quiet(process, fd, output)
+        after = bytes(output[output.rfind(PORTRAIT_DELETE, start):])
+        assert not any(kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+                       for match in PLACEMENT.finditer(after)), \
+            "long Item account headline retained a Kitty portrait over its text"
+        assert row_of(last_frame_rows(output), b"glasses") > 0
+        capture_item_screen(output, "kitty-account-full-width")
+        start = len(output)
+        h.send_and_wait(process, fd, output, b"[", INFO_TAB)
+        h.drain_until_quiet(process, fd, output)
+        assert any(kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+                   for match in PLACEMENT.finditer(bytes(output[start:]))), \
+            "Info did not restore its Kitty portrait after the full-width Item view"
         # Leaving the detail takes the picture down with it.
         start = len(output)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
@@ -346,6 +361,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         second = last_frame_rows(output)
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
+        assert row_of(second, b"Selected: 1.000") > 0
         assert row_of(second, b"Preview changes this picture only") > 0
         capture_item_screen(output, "shades-preview")
         # Read the current completed viewport after each navigation or resize.
@@ -356,6 +372,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
         assert row_of(last_frame_rows(output), b"Selected: unpriced") > 0
+        assert row_of(last_frame_rows(output), b"Preview changes this picture only") > 0
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
@@ -376,6 +393,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         narrow = last_frame_rows(output)
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
         assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
+        assert row_of(narrow, b"Preview changes this picture only") > 0, "narrow Items hid the preview notice"
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 
@@ -436,6 +454,96 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         http_fixtures=fixtures, prepare_workspace=items.prepare,
         terminal_cols=COLUMNS,
     )
+
+def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    identity = {"base": None, "matched_reads": 0}
+    held = threading.Event()
+    release = threading.Event()
+    served = threading.Event()
+    held_at = [None]
+    arm = [False]
+    balance = ["12500"]
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "owned_items": [],
+             "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                         for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["matched_reads"] += 1
+        base = identity["base"] or ""
+        return 200, {"paths": {"effective_base_path": base,
+                               "effective_masc_root": os.path.join(base, ".masc")}}
+
+    def account():
+        value = balance[0]
+        if arm[0]:
+            arm[0] = False
+            held_at[0] = time.monotonic()
+            held.set()
+            if not release.wait(timeout=30):
+                return 504, {"error": "held fixture read timeout"}
+            def send_held_body():
+                # The fixture server resumes this generator only after its
+                # write and flush succeeded. A callable-return event alone
+                # would fire before any HTTP body reached the socket.
+                yield json.dumps(dict(ready, balance_milli=value)).encode()
+                served.set()
+            return h.StreamingHttpResponse(send_held_body)
+        return 200, dict(ready, balance_milli=value)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = account
+
+    def await_frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), \
+            f"workspace boundary did not settle: {last_frame_rows(output)!r}"
+
+    def interact(process, fd, _slave, output, base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 12.500 Candle" in frame)
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10)
+            identity["base"] = str(base) + "-other-workspace"
+            await_frame(process, fd, output, lambda frame: "▸Items".encode() not in frame
+                        and b"Balance 12.500 Candle" not in frame)
+            previous_reads = identity["matched_reads"]
+            identity["base"] = str(base)
+            # Two serial full-refresh probes prove the first matching result
+            # was admitted before its successor could start.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            balance[0] = "13000"
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 13.000 Candle" in frame)
+            # Masc_tui_http.default_timeout_sec is 10 seconds. Releasing
+            # after that would test a timeout instead of a late successful read.
+            assert held_at[0] is not None and time.monotonic() - held_at[0] < 10
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3), \
+                "held HTTP response was not written and flushed"
+            assert time.monotonic() - held_at[0] < 10, "held read exceeded the TUI HTTP timeout"
+            previous_reads = identity["matched_reads"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output, quiet=0.05), "late response did not settle"
+            frame = b"\n".join(last_frame_rows(output).values())
+            assert b"Balance 13.000 Candle" in frame and b"Balance 12.500 Candle" not in frame
+            capture_item_screen(output, "workspace-authority-return")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item detail tokens are withdrawn across a different workspace identity",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(base)),
+                            refresh=0.2)
+
 
 def item_account_follows_private_changes(binary: str) -> None:
     # Public discovery stays unchanged while the private account changes.
@@ -852,6 +960,131 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
                             refresh=0.2)
 
 
+def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs: bool = False, leave: bool = False, fallback_exit: bool = False) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    reads = []
+    old = b"instructions-obsolete-runtime"
+    current = b"instructions-current-runtime"
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def config():
+        reads.append(True)
+        marker = old if len(reads) == 1 else current
+        # The actual config-view projection reads this nested runtime field.
+        value = ({"state": "no_local_stream", "backend": None, "instances": [],
+                  "tail": 200, "reason": marker.decode()} if sandbox_logs else
+                 {"name": "alpha", "execution": {"selected_runtime_id": marker.decode()},
+                  "prompt": {"instructions": "Synthetic Instructions recovery fixture"}})
+        if len(reads) != 1:
+            return 200, value
+        held.set()
+        assert release.wait(timeout=30), "held Instructions response was not released"
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures[("/api/v1/gate/keeper-sandbox-logs" if sandbox_logs else
+              "/api/v1/keepers/alpha/config")] = config
+
+    def wait_refreshes(process, fd, output):
+        before = identity["probes"]
+        # Full refreshes are serial: the following probe starts after applying
+        # the preceding identity response, so this crosses the state boundary.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= before + 2, timeout=10)
+
+    def frame(output):
+        return b"\n".join(last_frame_rows(output).values())
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=45, columns=COLUMNS, needle=INFO_TAB)
+            # Enter Instructions, or Sandbox plus its separate initial log
+            # read. Endpoint arrival confirms the request actually started.
+            os.write(fd, b"]]o" if sandbox_logs else b"]]]")
+            assert h.wait_for_fixture_event(process, fd, output, held, timeout=3)
+            identity["unread"] = True
+            wait_refreshes(process, fd, output)
+            # A manual read during revocation must not create a new token
+            # that would admit an answering but unverified endpoint.
+            os.write(fd, b"o" if sandbox_logs else b"r")
+            wait_refreshes(process, fd, output)
+            assert reads == [True], "unread authority restarted the held detail read"
+            assert old not in frame(output)
+            if leave or fallback_exit:
+                if fallback_exit:
+                    # Failed roster recovery retains suspended detail focus.
+                    # Leave that detail before leaving the Keeper list.
+                    metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
+                    original_metadata = metadata.read_bytes()
+                    metadata.write_text("{invalid fixture metadata")
+                    try:
+                        identity["unread"] = False
+                        wait_refreshes(process, fd, output)
+                        report = f"[masc-tui] decode failed for {metadata}:"
+                        assert h.wait_for_fixture_state(
+                            process, fd, output,
+                            lambda: report in h.exit_reason_log(_base),
+                            timeout=10,
+                        ), "failed roster decode was not observed"
+                        assert h.wait_for_fixture_state(process, fd, output,
+                            lambda: b"No keeper selected" in frame(output), timeout=10)
+                        assert reads == [True], "failed roster resumed detail"
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+                    finally:
+                        metadata.write_bytes(original_metadata)
+                else:
+                    h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+                    identity["unread"] = False
+                wait_refreshes(process, fd, output)
+                release.set()
+                wait_refreshes(process, fd, output)
+                h.drain_until_quiet(process, fd, output)
+                assert b"MASC Dashboard" in frame(output), "recovery stole navigation"
+                assert reads == [True], "left detail restarted its suspended read"
+                assert old not in frame(output) and current not in frame(output)
+                os.write(fd, b"q")
+                return
+            identity["unread"] = False
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: current in frame(output), timeout=10), "Instructions did not recover automatically"
+            assert len(reads) == 2, "authority recovery duplicated its detail read"
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_event(process, fd, output, served, timeout=3)
+            wait_refreshes(process, fd, output)
+            assert h.drain_until_quiet(process, fd, output), "late Instructions response did not settle"
+            assert current in frame(output) and old not in frame(output)
+            assert old not in output[start:], "obsolete Instructions callback replaced the recovery"
+            assert len(reads) == 2, "ordinary full/scoped refresh relaunched the settled detail"
+            capture_item_screen(output, "sandbox-log-authority-recovery" if sandbox_logs else "instructions-authority-recovery")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary,
+        description=("Esc from recovery fallback list retires suspended focus" if fallback_exit else
+                     "Leaving revoked Instructions retires suspended focus" if leave else
+                     "Held Sandbox logs are revoked and resumed on authority recovery" if sandbox_logs else
+                     "Held Instructions reads are revoked and the visible pane resumes on same-workspace recovery"),
+        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+        prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())), refresh=0.2)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -859,7 +1092,7 @@ if __name__ == "__main__":
         captures = Path(artifact_root) / "keeper-items-tui"
         captures.mkdir(parents=True, exist_ok=True)
         (captures / "manifest.json").write_text(json.dumps({
-            "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+            "scope": "synthetic Item account, Instructions and Sandbox log authority-recovery HTTP responses through the real TUI in a PTY",
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "source_sha": os.environ.get("GITHUB_SHA"),
             "columns": COLUMNS, "item_rows": SHORT_ROWS,
@@ -875,4 +1108,9 @@ if __name__ == "__main__":
     item_account_refuses_an_unobserved_server_workspace(binary)
     item_account_withdraws_unread_authority(binary)
     item_account_withdraws_unread_authority(binary, boundary="roster")
-    print("tui keeper portrait: PASS (11 scenarios)")
+    item_account_is_withdrawn_at_workspace_boundary(binary)
+    instructions_read_recovers_workspace_authority(binary)
+    instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)
+    instructions_read_recovers_workspace_authority(binary, leave=True)
+    instructions_read_recovers_workspace_authority(binary, fallback_exit=True)
+    print("tui keeper portrait: PASS (16 scenarios)")

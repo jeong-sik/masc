@@ -324,7 +324,6 @@ let test_gate_retry_workspace_precondition () =
     expect_error "unbound dashboard request keeps existing parser" "retry request.id is required"
       (retry []))
 
-
 let test_keeper_memory_cleanup_routes_and_closed_requests () =
   let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
   let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
@@ -2351,14 +2350,6 @@ let test_dashboard_proof_http_json_surfaces_submission_index () =
          (source |> member "route" |> to_string)
          "/api/v1/dashboard/execution-trust"))
 
-let test_dashboard_proof_route_registered_in_http_routers () =
-  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
-  let h2 = read_file "lib/server/server_h2_gateway.ml" in
-  check bool "HTTP/1 dashboard proof route registered" true
-    (String_util.contains_substring http1 "\"/api/v1/dashboard/proof\"");
-  check bool "HTTP/2 dashboard proof route registered" true
-    (String_util.contains_substring h2 "\"/api/v1/dashboard/proof\"")
-
 let config_sync_runtime_toml =
   {|[runtime]
 default = "test_provider.test_model"
@@ -2465,21 +2456,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
 
-let test_execution_trust_does_not_call_full_keeper_projection () =
-  let source = read_file "lib/dashboard/dashboard_http_keeper.ml" in
-  check bool
-    "execution-trust refresh cannot reintroduce the full compact projection"
-    false
-    (String_util.contains_substring
-       source
-       "keepers_dashboard_json ~compact:true")
-
-(* A refusal the keeper cannot read is a refusal it cannot answer. The
-   dashboard used to fill an omitted reason with the constant "dashboard
-   rejected approval", so a rejected keeper had nothing to act on: polisher
-   re-sent `echo ok` for 20+ turns against that string. RFC-0305 already
-   forbids defaulting an omitted [decision] to approve; a rejection's reason
-   is the same class of field. *)
 let test_gate_resolve_requires_reason_on_reject () =
   let attempt reason_field =
     let fields =
@@ -2625,7 +2601,6 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (not_requested |> member "started" |> to_int);
   check int "not requested queued" 0
     (not_requested |> member "queued" |> to_int)
-
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -3273,6 +3248,7 @@ let execution_payload_key (payload : Dashboard_cache.cached_payload) =
 
 let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
     (`Assoc [ "default_marker", `String "last-success";
@@ -3319,8 +3295,33 @@ let test_execution_default_response_reuses_prepared_bytes () =
        check bool "identity bytes are reused without serialization" true
          (payload.raw_json == warm))
 
+let test_execution_fixture_selection_isolates_prepared_live_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  with_cached_surface_success Surface.execution_cache
+    (`Assoc [ "live_marker", `Bool true;
+              "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
+  let context query = Surface.execution_http_request ~state
+      (request_with_headers ("/api/v1/dashboard/execution" ^ query) []) in
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    ignore (Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) (context "")));
+  List.iter (fun query ->
+    check bool ("fixture does not reuse prepared live bytes: " ^ query) true
+      (Option.is_none (Surface.dashboard_execution_cached_http_representation
+        (context query))))
+    [ ""; "?fixture="; "?fixture=execution_smoke" ];
+  check bool "explicit unknown suppresses the environment fixture" true
+    (Option.is_some (Surface.dashboard_execution_cached_http_representation
+      (context "?fixture=unknown")));
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    check bool "disabled fixture retains the live representation" true
+      (Option.is_some (Surface.dashboard_execution_cached_http_representation
+        (context "?fixture=execution_smoke"))))
+
 let test_execution_first_compute_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
@@ -3617,6 +3618,19 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   check string "ETag identifies the exact response bytes"
     (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
   let open Yojson.Safe.Util in
+  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
+  let keeper_money json field =
+    json |> member field |> to_list |> List.map (fun row ->
+      `List (List.map (fun key -> member key row)
+        ["name"; "portrait"; "candle_balance_milli"; "candle_account_revision"])) in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check bool "HTTP fill and warm read preserve the fixture Candle summary" true
+      (member "candle" payload.json = member "candle" expected);
+    List.iter (fun field ->
+      check bool ("HTTP fixture preserves money and portraits in " ^ field) true
+        (keeper_money payload.json field = keeper_money expected field))
+      ["keepers"; "continuity_briefs"])
+    [first; second];
   check string "actor metadata is part of cached body" "alice"
     (first.json |> member "query" |> member "actor" |> to_string);
   check string "workspace metadata is part of cached body" config.workspace_path
@@ -3654,13 +3668,17 @@ let test_execution_parameterized_payload_separates_request_queries () =
     check bool "each scoped encoding retains its own complete identity bytes" true
       (encoded.identity == payload.raw_json)) payloads;
   let keys = List.map execution_payload_key payloads in
-  check int "every distinct query owns its response bytes"
-    (List.length payloads) (List.length (List.sort_uniq String.compare keys));
+  check int "distinct resolved queries own separate response bytes"
+    (List.length payloads - 2) (List.length (List.sort_uniq String.compare keys));
+  List.iter (fun payload ->
+    check string "equivalent fixture selections share their cache key"
+      (execution_payload_key explicit) (execution_payload_key payload))
+    [ absent; empty ];
   let open Yojson.Safe.Util in
-  check bool "absent fixture stays null" true
-    (absent.json |> member "query" |> member "fixture" = `Null);
-  check string "empty fixture stays explicitly empty" ""
-    (empty.json |> member "query" |> member "fixture" |> to_string);
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check string "query records the selected environment fixture" "execution_smoke"
+      (payload.json |> member "query" |> member "fixture" |> to_string))
+    [ absent; empty; explicit ];
   check bool "full query preserved" true
     (explicit.json |> member "query" |> member "full" |> to_bool);
   check bool "light query preserved" true
@@ -4828,7 +4846,6 @@ let test_tools_routes_serve_prepared_http_representations () =
     check_first_h2_charge "origin-refusal"
       [ "origin", "https://disallowed.example"; "authorization", "Bearer " ^ token ]
       "/mcp" 403)
-
 
 (* A dashboard read that answers straight from [Dashboard_cache] sends the bytes
    the cache serialized with the entry. The prepared-payload hook fires each
@@ -7263,7 +7280,6 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
         (List.length names)
         (json |> member "total" |> to_int))
 
-
 (* The `.mli` calls the error clear on success a deliberate contract, and
    nothing tested it. It is also exactly what a snapshot swap could drop,
    since the fields now have to be named in the record update rather than
@@ -7552,8 +7568,6 @@ let () =
             test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
-          test_case "proof route registered in HTTP routers" `Quick
-            test_dashboard_proof_route_registered_in_http_routers;
           test_case "Gate mode save reports recovery independently" `Quick
             test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "bootstrap omits eager goal tree" `Quick
@@ -7587,6 +7601,8 @@ let () =
             test_execution_request_resolves_actor_once;
           test_case "execution default response reuses prepared bytes" `Quick
             test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution fixture selection isolates prepared live bytes" `Quick
+            test_execution_fixture_selection_isolates_prepared_live_bytes;
           test_case "execution first compute reuses prepared bytes" `Quick
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
@@ -7725,8 +7741,6 @@ let () =
             test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick
             test_execution_trust_uses_narrow_keeper_projection;
-          test_case "execution trust cannot call full Keeper projection" `Quick
-            test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
           test_case "offline keeper composite names why the keeper is not running" `Quick

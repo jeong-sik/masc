@@ -7,8 +7,7 @@ import re
 import sys
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_schedule.ml",
-                  "bin/masc_tui_render_schedule.mli", "bin/masc_tui.ml")
+
 
 def run(executable, no_color=False):
     fixtures = h.planning_selection_http_fixtures()

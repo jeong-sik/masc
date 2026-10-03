@@ -1,0 +1,32 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Work  ▸Goals  Task Review  Task Verdicts  17:09:50  HTTP [connected]
+    sort:phase/P1-P5  filter:active
+    No longer listed: 1
+    earlier-plan-29424 24.0h
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ┌ Goals · measured outcomes                             ┐  ┌ Tasks · Backlog:                                      ┐
+  │ Goals: 1 [░░░░░░░░]  0% (0/1)  │  ◐ Exec: 1           │  │ ○ todo=0 · ◐ claimed=0 · ◐ in_progress=0 · ◐          │
+  └───────────────────────────────────────────────────────┘  │ awaiting_verification=0 · ● done=0 · × cancelled=0    │
+                                                             └───────────────────────────────────────────────────────┘
+    Net change since this TUI's first reading 41d08h ago: Goals done +0 · Tasks done +0 · Goal reviews pending +0
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    PHASE        JUDGE PRI OPEN             TITLE                                                       AGE DUE
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  > [executing]        P1                   Audit goal
+
+
+
+
+
+
+
+
+
+
+
+
+    goal-audit-ready · metric: checks → 5
+
+  j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  Right / Enter:detail  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

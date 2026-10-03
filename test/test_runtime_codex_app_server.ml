@@ -4293,7 +4293,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?hooks
                       ?context_injector
                       ?context
-                      ?raw_trace
+                      ~raw_trace
                       ?session_id
                       ?on_event
                       ?on_request_attribution

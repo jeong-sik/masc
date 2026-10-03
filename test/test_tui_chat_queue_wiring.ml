@@ -2950,7 +2950,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
     let state = Tui_types.create_state ~workspace:"test" ~port:8935
         ~refresh_interval:2. () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
     let occurrence : Live.tool_occurrence =

@@ -3273,6 +3273,7 @@ let execution_payload_key (payload : Dashboard_cache.cached_payload) =
 
 let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
     (`Assoc [ "default_marker", `String "last-success";
@@ -3319,8 +3320,33 @@ let test_execution_default_response_reuses_prepared_bytes () =
        check bool "identity bytes are reused without serialization" true
          (payload.raw_json == warm))
 
+let test_execution_fixture_selection_isolates_prepared_live_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  with_cached_surface_success Surface.execution_cache
+    (`Assoc [ "live_marker", `Bool true;
+              "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
+  let context query = Surface.execution_http_request ~state
+      (request_with_headers ("/api/v1/dashboard/execution" ^ query) []) in
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    ignore (Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) (context "")));
+  List.iter (fun query ->
+    check bool ("fixture does not reuse prepared live bytes: " ^ query) true
+      (Option.is_none (Surface.dashboard_execution_cached_http_representation
+        (context query))))
+    [ ""; "?fixture="; "?fixture=execution_smoke" ];
+  check bool "explicit unknown suppresses the environment fixture" true
+    (Option.is_some (Surface.dashboard_execution_cached_http_representation
+      (context "?fixture=unknown")));
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    check bool "disabled fixture retains the live representation" true
+      (Option.is_some (Surface.dashboard_execution_cached_http_representation
+        (context "?fixture=execution_smoke"))))
+
 let test_execution_first_compute_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
@@ -7587,6 +7613,8 @@ let () =
             test_execution_request_resolves_actor_once;
           test_case "execution default response reuses prepared bytes" `Quick
             test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution fixture selection isolates prepared live bytes" `Quick
+            test_execution_fixture_selection_isolates_prepared_live_bytes;
           test_case "execution first compute reuses prepared bytes" `Quick
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick

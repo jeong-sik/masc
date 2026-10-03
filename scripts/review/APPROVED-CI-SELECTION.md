@@ -36,9 +36,10 @@ Supply the preparation receipt as the `selection` JSON input. Select any of
 explicit nonempty `suites` and uses the minimal runner. Prefer short, lightweight
 checks; about two minutes illustrates their intended size, not a fixed cap,
 job timeout or pass/fail boundary. Existing runner hang guards are separate
-resource safeguards. Broad release-profile, dashboard,
-TLA, lint and full behavior checks remain in `release-candidate.yml` on a
-release branch or version tag. There is no changed-file heuristic choosing
+resource safeguards. Broad release-profile, dashboard, distribution and full
+behavior checks remain in `release-candidate.yml` on a release branch or version
+tag. TLA model checks are explicitly dispatched through `model-check.yml` when
+state-machine specifications change. There is no changed-file heuristic choosing
 work for the leader.
 
 The runner rechecks current source approvals using the integrated main guard,

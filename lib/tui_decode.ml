@@ -5500,6 +5500,50 @@ type librarian_preflight_reading =
   ; lp_domain_rejection : string option
   }
 
+(* Decode the retained observation with the same alternatives emitted by
+   [Typesafeai_client] and [Typesafeai_librarian_preflight.to_yojson]. A received
+   answer is evidence only when its destination, request and failed predecessors
+   are present as well. *)
+let decode_librarian_preflight_attempt json =
+  let* destination = decode_standalone_lane_jev_destination json in
+  let* refusal = required_member json "refusal" in
+  let* kind = required_string_field refusal "kind" in
+  let* detail = required_string_field refusal "detail" in
+  let* refusal = match kind with
+    | "transport" -> Ok (Typesafeai_client.Transport_failure detail)
+    | "http_response" ->
+      let* status = required_int_field refusal "status" in
+      let* destination_uri = required_string_field refusal "destination_uri" in
+      let* body = required_member refusal "body" in
+      let* body = match body with
+        | `String body -> Ok body
+        | `Assoc _ ->
+          let* encoding = required_string_field body "encoding" in
+          let* content = required_string_field body "content" in
+          let* total_bytes = required_int_field body "total_bytes" in
+          (match encoding, Base64.decode content with
+           | "base64", Ok decoded when String.length decoded = total_bytes -> Ok decoded
+           | _ -> Error "invalid encoded preflight refusal body")
+        | _ -> Error "preflight refusal body must be text or encoded bytes" in
+      Ok (Typesafeai_client.Http_response_failure {status; destination_uri; body; detail})
+    | _ -> Error ("unknown preflight refusal kind " ^ kind) in
+  Ok {Typesafeai_client.destination_uri = destination.sljd_destination_uri;
+      model = destination.sljd_model; refusal}
+
+let decode_librarian_preflight_failure json =
+  let* kind = required_string_field json "kind" in
+  let* attempts = required_list_field json "attempts" in
+  let* attempts = decode_list "attempts" decode_librarian_preflight_attempt attempts in
+  match kind, attempts with
+  | "every_destination_refused", first_attempt :: later_attempts ->
+    Ok {Typesafeai_client.first_attempt; later_attempts}
+  | _ -> Error "preflight failure requires the nonempty refused destination history"
+
+let preflight_fields_absent json fields =
+  match List.find_opt (fun field -> Option.is_some (Json_util.assoc_member_opt field json)) fields with
+  | None -> Ok ()
+  | Some field -> Error ("preflight status must not report " ^ field)
+
 let decode_librarian_preflight output =
   let ( let+ ) result f = Result.map f result in
   match Json_util.assoc_member_opt "jev_preflight" output with
@@ -5511,8 +5555,9 @@ let decode_librarian_preflight output =
       | "skipped" | "ineligible" | "question_unavailable" ->
         let+ reason = required_string_field preflight "reason" in Preflight_not_called reason
       | "failed" ->
-        let+ failure = required_member preflight "failure" in
-        Preflight_failed (Yojson.Safe.to_string failure)
+        let* failure = required_member preflight "failure" in
+        let+ decoded = decode_librarian_preflight_failure failure in
+        Preflight_failed (Yojson.Safe.to_string (Typesafeai_client.failure_to_yojson decoded))
       | "invalid_answer" ->
         let+ reason = required_string_field preflight "reason" in Preflight_invalid reason
       | "judged" ->
@@ -5536,22 +5581,43 @@ let decode_librarian_preflight output =
     let* () = match lp_generation_path, lp_full_llm_skipped, lp_status with
       | Generation_jev_no_change, true,
         Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _} -> Ok ()
-      | Generation_not_entered, false, _ -> Ok ()
+      | Generation_not_entered, false, Preflight_awaiting -> Ok ()
       | Generation_full_lane, false, Preflight_awaiting -> Error "awaiting preflight cannot enter generation"
       | Generation_full_lane, false, _ -> Ok ()
       | _ -> Error "Librarian preflight decision and generation path disagree"
     in
-    let* lp_elapsed_s = optional_float_field preflight "elapsed_s" in
-    let* () = match lp_elapsed_s with
-      | Some elapsed when not (Float.is_finite elapsed) -> Error "nonfinite preflight elapsed time"
-      | _ -> Ok () in
+    let* lp_elapsed_s = required_nullable_float_field preflight "elapsed_s" in
+    let* () = match lp_status, lp_elapsed_s with
+      | (Preflight_awaiting | Preflight_not_called _), None -> Ok ()
+      | (Preflight_failed _ | Preflight_invalid _ | Preflight_judged _), Some elapsed
+        when Float.is_finite elapsed && elapsed >= 0. -> Ok ()
+      | _ -> Error "preflight elapsed time must match the observation status and be finite and nonnegative" in
     let* lp_model = match lp_status with
       | Preflight_judged _ | Preflight_invalid _ ->
-        let+ model = required_string_field preflight "model" in Some model
+        let* model = required_string_field preflight "model" in
+        let* destination = required_member preflight "destination" in
+        let* _ = decode_standalone_lane_jev_destination destination in
+        let* hash = required_string_field preflight "request_body_sha256" in
+        let* () =
+          if String.length hash = 64
+             && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) hash
+          then Ok () else Error "preflight request hash must be a SHA-256 hex digest" in
+        let* passed_over = required_list_field preflight "passed_over" in
+        let* _ = decode_list "passed_over" decode_librarian_preflight_attempt passed_over in
+        let* () = preflight_fields_absent preflight
+          (match lp_status with
+           | Preflight_invalid _ -> ["failure"; "decision"; "confidence"; "probabilities"]
+           | _ -> ["failure"; "reason"]) in
+        Ok (Some model)
       | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ ->
-        (match Json_util.assoc_member_opt "model" preflight with
-         | None -> Ok None
-         | Some _ -> Error "preflight without an evaluated answer must not report model") in
+        let* () = preflight_fields_absent preflight
+          (["model"; "destination"; "request_body_sha256"; "passed_over";
+            "decision"; "confidence"; "probabilities"]
+           @ (match lp_status with
+              | Preflight_awaiting -> ["reason"; "failure"]
+              | Preflight_not_called _ -> ["failure"]
+              | _ -> ["reason"])) in
+        Ok None in
     let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
     let* () = match lp_status, lp_generation_path, lp_domain_rejection with
       | Preflight_judged {Typesafeai_types.choice = Typesafeai_librarian_preflight.Keep_current; _},

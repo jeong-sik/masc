@@ -1110,7 +1110,12 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
   write journal "unavailable journal";
   Fun.protect ~finally:(fun () -> Unix.unlink journal; Unix.rename backup journal) (fun () ->
     check bool "primary terminal index succeeds when journal is unavailable" true
-      (Result.is_ok (invoke "journal-failure" (Ok (answer `Null)))));
+      (Result.is_ok (invoke "journal-failure" (Ok (answer `Null))));
+    let recovered = match sampling_requests (Store.create ~root:(Store.root store))
+        ~instance_id:"journal-failure" with
+      | Ok rows -> rows | Error detail -> fail detail in
+    check int "reopened recovery reads primary while journal stays unavailable" 1
+      (List.length recovered));
   let rows = match sampling_requests store ~instance_id:"journal-failure" with Ok rows -> rows | Error detail -> fail detail in
   let row = match rows with [row] -> row | _ -> fail "missing terminal recovery row" in
   let reference = match Types.evidence_of_json (Yojson.Safe.Util.member "outcome" row) with

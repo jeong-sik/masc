@@ -763,6 +763,33 @@ let test_sampling_response_bound_and_directory_durability () = with_fixture (fun
   check bool "response-bound refusal preserves known finished result" true
     (List.for_all (fun row -> Yojson.Safe.Util.member "state" row = `String "finished") indexes))
 
+let test_sampling_refuses_nonfinite_evidence () = with_fixture (fun _env _sw dir _docker ->
+  let module S = Mcp_protocol.Sampling in
+  let module Sampling = Masc.Lane_addon_sampling in
+  let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "finite-evidence") in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let calls = ref 0 and response_meta = ref None in
+  let broker = match Sampling.create ~store ~package ~instance_id:"finite" ~route:"r"
+    ~invoke:(fun ~route:_ ~request:_ _ -> incr calls; Ok {
+      S.role=S.Assistant;content=S.Text {type_="text";text="answer"};model="fixture";
+      stop_reason=Some "endTurn";_meta= !response_meta}) () with
+    | Ok value -> value | Error detail -> fail detail in
+  let handler = match Sampling.for_worker broker ~package ~instance_id:"finite" with
+    | Ok value -> value | Error detail -> fail detail in
+  let params = match S.create_message_params_of_yojson (`Assoc ["messages",`List [];"maxTokens",`Int 1]) with
+    | Ok value -> value | Error detail -> fail detail in
+  List.iter (fun number ->
+    let metadata = `Assoc ["extension",`List [`Assoc ["number",`Float number]]] in
+    check bool "nonfinite request refused before invocation" true
+      (Result.is_error (handler {params with _meta=Some metadata}));
+    check int "invalid request invokes no model" 0 !calls) [Float.nan;Float.infinity;Float.neg_infinity];
+  List.iter (fun number ->
+    response_meta := Some (`Assoc ["nested",`List [`Float number]]);
+    check bool "nonfinite response is not accepted" true (Result.is_error (handler params)))
+    [Float.nan;Float.infinity;Float.neg_infinity];
+  response_meta := Some (`Assoc ["nested",`List [`Float 0.5]]);
+  check bool "finite response remains accepted" true (Result.is_ok (handler params)))
+
 let test_sampling_recovery_streams_bounded_records () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "streaming-recovery") in
@@ -873,6 +900,7 @@ let test_sampling_terminal_recovery_and_host_redaction () = with_fixture (fun _e
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling terminal recovery and host redaction" `Quick test_sampling_terminal_recovery_and_host_redaction;
   test_case "sampling reply bound and ancestor durability" `Quick test_sampling_response_bound_and_directory_durability;
+  test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "sampling recovery streams bounded records" `Quick test_sampling_recovery_streams_bounded_records;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;

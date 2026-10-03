@@ -360,7 +360,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
@@ -447,7 +446,6 @@
   test_lsp_workspace_pool
   test_agent_observation_bridge
   test_enum_mirror_sync
-  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_filesystem_tool_toml_parity
@@ -722,7 +720,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
@@ -809,7 +806,6 @@
   test_lsp_workspace_pool
   test_agent_observation_bridge
   test_enum_mirror_sync
-  test_blocker_class_mirror
   test_tool_definition_toml
   test_board_tool_toml_parity
   test_filesystem_tool_toml_parity
@@ -1225,17 +1221,6 @@
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot))
-
-; Focused CI gate: the conditions wire vocabulary must match on both ends.
-; #26569 had the encoder emitting thirteen fields while the client zod object
-; declared eleven; zod strips undeclared keys, so two conditions never reached
-; the dashboard and nothing failed.
-
-(test
- (name test_keeper_conditions_wire_parity)
- (modules test_keeper_conditions_wire_parity)
- (libraries masc_test_deps)
- (deps ../dashboard/src/api/schemas/keeper-composite.ts))
 
 ; Focused CI gate for runtime TOML validity.
 

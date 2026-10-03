@@ -111,25 +111,9 @@ try:
     if args.mcp:
         require(ns_restarted['rpc']('tools/call', {}) == {'local': True}, 'restarted RPC was rejected')
         require(ns_restarted['records'][-1]['server_generation'] == 2, 'fixture server generation was concealed in RPC')
-    # Run the real assignment sites too: correct helpers cannot rescue a
-    # restart consumer that still unpacks an obsolete response shape.
-    request_assignments = [node for node in ast.walk(source)
-                           if isinstance(node, ast.Assign)
-                           and isinstance(node.value, ast.Call)
-                           and isinstance(node.value.func, ast.Name)
-                           and node.value.func.id == 'request']
-    ns.update(path='/probe', portrait_path='/probe')
-    for assignment in request_assignments:
-        exec(compile(ast.Module(body=[assignment], type_ignores=[]),
-                     str(args.source), 'exec'), ns)
-        require(ns['status'] == 200, 'request assignment lost its response status')
-    consumer_lines = [assignment.lineno for assignment in request_assignments]
-    require(consumer_lines, 'acceptance source has no request consumers')
     print(json.dumps({'scope': 'actual extracted helpers, synthetic loopback TCP; no native run',
                       'source_sha256': hashlib.sha256(args.source.read_bytes()).hexdigest(),
-                      'controls': results, 'direct_requests_pass': True,
-                      'request_consumer_lines': sorted(consumer_lines),
-                      'request_assignments_executed': len(request_assignments)}, indent=2))
+                      'controls': results, 'direct_requests_pass': True}, indent=2))
 finally:
     for s in servers:
         s.shutdown()

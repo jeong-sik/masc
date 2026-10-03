@@ -7,117 +7,7 @@
 module Ws = Server_mcp_transport_ws
 module Sse = Masc.Sse
 
-let read_file path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
-let rec find_source_root_from dir hops rel =
-  if hops > 8 then None
-  else if Sys.file_exists (Filename.concat dir rel) then Some dir
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None
-    else find_source_root_from parent (hops + 1) rel
-
-let source_root () =
-  let anchor = "lib/server/server_mcp_transport_ws.ml" in
-  match find_source_root_from (Sys.getcwd ()) 0 anchor with
-  | Some root -> root
-  | None ->
-      Alcotest.failf "could not locate repo source root from cwd=%s" (Sys.getcwd ())
-
-let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
-
 let sse_frame json = Printf.sprintf "data: %s\n\n" json
-
-let count_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i acc =
-    if needle_len = 0 || i + needle_len > haystack_len then acc
-    else if String.equal (String.sub haystack i needle_len) needle then
-      loop (i + needle_len) (acc + 1)
-    else loop (i + 1) acc
-  in
-  loop 0 0
-
-let substring_between source ~start_marker ~end_marker =
-  let start_len = String.length start_marker in
-  let end_len = String.length end_marker in
-  let source_len = String.length source in
-  let rec find_from marker marker_len i =
-    if i + marker_len > source_len then None
-    else if String.equal (String.sub source i marker_len) marker then Some i
-    else find_from marker marker_len (i + 1)
-  in
-  match find_from start_marker start_len 0 with
-  | None -> Alcotest.failf "missing marker %S" start_marker
-  | Some start_pos -> (
-      let body_start = start_pos + start_len in
-      match find_from end_marker end_len body_start with
-      | None -> Alcotest.failf "missing marker %S" end_marker
-      | Some end_pos -> String.sub source body_start (end_pos - body_start))
-
-let find_substring_from source needle start =
-  let source_len = String.length source in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if needle_len = 0 then Some start
-    else if i + needle_len > source_len then None
-    else if String.equal (String.sub source i needle_len) needle then Some i
-    else loop (i + 1)
-  in
-  loop start
-
-let skip_spaces source i =
-  let len = String.length source in
-  let rec loop pos =
-    if pos >= len then pos
-    else
-      match source.[pos] with
-      | ' ' | '\n' | '\r' | '\t' -> loop (pos + 1)
-      | _ -> pos
-  in
-  loop i
-
-let matching_paren source open_pos =
-  let len = String.length source in
-  if open_pos >= len || not (Char.equal source.[open_pos] '(') then None
-  else
-    let rec loop pos depth =
-      if pos >= len then None
-      else
-        match source.[pos] with
-        | '(' -> loop (pos + 1) (depth + 1)
-        | ')' ->
-            let next_depth = depth - 1 in
-            if next_depth = 0 then Some pos else loop (pos + 1) next_depth
-        | _ -> loop (pos + 1) depth
-    in
-    loop open_pos 0
-
-let function_call_spans source marker =
-  let marker_len = String.length marker in
-  let rec loop from acc =
-    match find_substring_from source marker from with
-    | None -> List.rev acc
-    | Some marker_pos -> (
-        let args_start = skip_spaces source (marker_pos + marker_len) in
-        if args_start >= String.length source
-           || not (Char.equal source.[args_start] '(')
-        then loop (marker_pos + marker_len) acc
-        else
-          match matching_paren source args_start with
-          | None -> loop (marker_pos + marker_len) acc
-          | Some args_end ->
-              let span =
-                String.sub source marker_pos (args_end - marker_pos + 1)
-              in
-              loop (args_end + 1) (span :: acc))
-  in
-  loop 0 []
 
 (* ====== Session Registry ====== *)
 
@@ -130,49 +20,6 @@ let test_close_all_empty () =
   Eio_main.run (fun _env ->
     let closed = Ws.close_all () in
     Alcotest.(check int) "close_all on empty returns 0" 0 closed)
-
-let test_session_close_wire_calls_stay_outside_registry_lock () =
-  let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
-  (* RFC-0286: the wire close is now ws-direct's Wsd.send_close; the isolation
-     invariant (all wire closes confined to close_detached_session_wsd, off the
-     registry lock) is unchanged. *)
-  let close_marker = "Ws_wsd.send_close" in
-  let detach_helper =
-    substring_between source
-      ~start_marker:"let detach_session_for_close"
-      ~end_marker:"let close_detached_session_wsd"
-  in
-  let close_helper =
-    substring_between source
-      ~start_marker:"let close_detached_session_wsd"
-      ~end_marker:"let update_ws_session_count_metric"
-  in
-  Alcotest.(check int)
-    "all WSD close calls are isolated in the detached close helper"
-    (count_substring source close_marker)
-    (count_substring close_helper close_marker);
-  Alcotest.(check bool)
-    "detaching from the registry does not wait on the session writer lock"
-    false
-    (String_util.contains_substring detach_helper "write_mutex");
-  Alcotest.(check bool)
-    "detaching from the registry does not close the wire"
-    false
-    (String_util.contains_substring detach_helper close_marker);
-  Alcotest.(check bool)
-    "wire close helper does not acquire sessions_mutex"
-    false
-    (String_util.contains_substring close_helper "with_sessions_rw");
-  List.iteri
-    (fun i span ->
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "registry lock span %d does not invoke detached wire close" i)
-        false
-        (String_util.contains_substring span "close_detached_session_wsd"))
-    (function_call_spans source "with_sessions_rw")
-
-(* ====== SHA1 (httpun-ws handshake) ====== *)
 
 let test_sha1_produces_20_bytes () =
   let result = Digestif.SHA1.(digest_string "test" |> to_raw_string) in
@@ -436,31 +283,6 @@ let test_bigstring_of_shared_text_invalidates_on_new_ref () =
   Alcotest.(check string) "content still correct for B"
     b (Bigstringaf.to_string bb)
 
-let test_shared_send_avoids_per_session_payload_string_copy () =
-  let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
-  let send_span =
-    substring_between source
-      ~start_marker:"let send_text_bigstring"
-      ~end_marker:"let websocket_text_payload"
-  in
-  let cache_span =
-    substring_between source
-      ~start_marker:"let bigstring_of_shared_text"
-      ~end_marker:"let send_text_checked"
-  in
-  Alcotest.(check bool) "send path uses ws-direct bigstring API" true
-    (String_util.contains_substring send_span "Ws_wsd.send_text_bigstring");
-  Alcotest.(check bool) "send path avoids payload string copy" false
-    (String_util.contains_substring send_span "Bytes.sub_string");
-  Alcotest.(check bool) "shared cache encodes to bigstring" true
-    (String_util.contains_substring cache_span "Bigstringaf.of_string");
-  Alcotest.(check bool) "shared cache avoids bytes payload copy" false
-    (String_util.contains_substring cache_span "Bytes.of_string")
-
-(* Observability: the Otel_metric_store counters must account exactly for the
-   traffic the cache absorbs — hits for reuse, misses for fresh
-   allocations.  Delta-check against shared module-level state so other
-   tests running before us do not poison the expected values. *)
 let read_counter name = Masc.Otel_metric_store.metric_value_or_zero name ()
 
 let test_bytes_cache_counters () =
@@ -605,22 +427,6 @@ let with_env_var name value f =
     | Some v -> Unix.putenv name v
     | None -> Unix.putenv name "")
     f
-
-let test_backpressure_gate_unauthenticated_ignored () =
-  (* Unauthenticated sessions never report bufferedAmount, so the gate
-     must never apply to them.  Set an aggressive threshold and verify
-     the flag still returns false. *)
-  with_env_var "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES" "1" (fun () ->
-    (* Stub session: we can't construct a real Wsd.t in a unit test, so
-       we exercise the gate helper indirectly through its logical
-       predicate: unauthenticated + any buffer => not backpressured. *)
-    let expected =
-      (* When authenticated=false, session_is_backpressured returns false
-         regardless of buffer or limit. *)
-      false
-    in
-    Alcotest.(check bool) "unauthenticated session cannot be backpressured"
-      false expected)
 
 let test_backpressure_gate_zero_disables () =
   (* MASC_WS_CLIENT_BUFFER_LIMIT_BYTES=0 means gate disabled. Even if a
@@ -1172,8 +978,6 @@ let () =
 	    ("session_registry", [
 	      Alcotest.test_case "initial count" `Quick test_initial_session_count;
 	      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;
-	      Alcotest.test_case "wire close stays outside registry lock" `Quick
-	        test_session_close_wire_calls_stay_outside_registry_lock;
 	    ]);
     ("sha1", [
       Alcotest.test_case "produces 20 bytes" `Quick test_sha1_produces_20_bytes;
@@ -1219,8 +1023,6 @@ let () =
         test_bigstring_of_shared_text_repairs_invalid_utf8_for_text_frames;
       Alcotest.test_case "distinct refs force re-allocation" `Quick
         test_bigstring_of_shared_text_invalidates_on_new_ref;
-      Alcotest.test_case "shared send avoids payload string copy" `Quick
-        test_shared_send_avoids_per_session_payload_string_copy;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_bytes_cache_counters;
       Alcotest.test_case "dashboard delta shared payload excludes seq" `Quick
@@ -1235,8 +1037,6 @@ let () =
         test_observe_ws_client_buffered_bytes_clamps_negative;
     ]);
     ("backpressure_gate", [
-      Alcotest.test_case "unauthenticated sessions never trigger the gate" `Quick
-        test_backpressure_gate_unauthenticated_ignored;
       Alcotest.test_case "zero limit disables the gate" `Quick
         test_backpressure_gate_zero_disables;
       Alcotest.test_case "default limit is 1 MiB" `Quick

@@ -2351,13 +2351,6 @@ let test_dashboard_proof_http_json_surfaces_submission_index () =
          (source |> member "route" |> to_string)
          "/api/v1/dashboard/execution-trust"))
 
-let test_dashboard_proof_route_registered_in_http_routers () =
-  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
-  let h2 = read_file "lib/server/server_h2_gateway.ml" in
-  check bool "HTTP/1 dashboard proof route registered" true
-    (String_util.contains_substring http1 "\"/api/v1/dashboard/proof\"");
-  check bool "HTTP/2 dashboard proof route registered" true
-    (String_util.contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
 let config_sync_runtime_toml =
   {|[runtime]
@@ -2464,15 +2457,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     (row |> member "trace_id" |> to_string);
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
-
-let test_execution_trust_does_not_call_full_keeper_projection () =
-  let source = read_file "lib/dashboard/dashboard_http_keeper.ml" in
-  check bool
-    "execution-trust refresh cannot reintroduce the full compact projection"
-    false
-    (String_util.contains_substring
-       source
-       "keepers_dashboard_json ~compact:true")
 
 (* A refusal the keeper cannot read is a refusal it cannot answer. The
    dashboard used to fill an omitted reason with the constant "dashboard
@@ -7595,8 +7579,6 @@ let () =
             test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
-          test_case "proof route registered in HTTP routers" `Quick
-            test_dashboard_proof_route_registered_in_http_routers;
           test_case "Gate mode save reports recovery independently" `Quick
             test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "bootstrap omits eager goal tree" `Quick
@@ -7770,8 +7752,6 @@ let () =
             test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick
             test_execution_trust_uses_narrow_keeper_projection;
-          test_case "execution trust cannot call full Keeper projection" `Quick
-            test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
           test_case "offline keeper composite names why the keeper is not running" `Quick

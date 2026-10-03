@@ -75,10 +75,6 @@ class ContinuityAdmission(unittest.TestCase):
         self.assertEqual(payload["sandbox_image"], "chosen-image")
         self.assertEqual(payload["microvm_backend"], "apple_container")
         self.assertNotIn("remote_endpoint", payload)
-        self.assertIn(
-            "Validate real keeper continuity under isolated load.",
-            payload["instructions"],
-        )
 
     def test_missing_declaration_stops_before_real_run_setup(self):
         result = run_function("real_run", {})

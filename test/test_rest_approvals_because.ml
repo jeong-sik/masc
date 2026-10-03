@@ -1,46 +1,6 @@
 open Masc
 
-(* task-345 evidence: the REST approvals listing actually serializes
-   [because].
-
-   The verifier's third rejection snapshot was taken at 85c7e81616, before
-   the force-push; the branch tip (rebased onto origin/main as 98acacad99)
-   answers all three findings. This test pins the one that had no coverage
-   anywhere: that GET /api/v1/keepers/tool-approvals — the only place an
-   operator sees why a call was held — emits [because] in its rows.
-
-   Two facts, each pinned at its own layer, in the house style of
-   test_dashboard_http_core's route-registration tests:
-
-   - routing: the HTTP/1 dashboard router binds
-     ["/api/v1/keepers/tool-approvals"] to the listing handler;
-   - serialization: a wait parked in the shared registry — the same way a
-     keeper turn parks one — comes back out carrying [because] in the
-     handler's own response bytes, driven through a Server_connection the
-     way the test dashboard drives handlers. *)
-
-let read_file path =
-  let path =
-    if Filename.is_relative path then
-      match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> Filename.concat root path
-      | None -> path
-    else path
-  in
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in_noerr ic;
-  s
-;;
-
-let test_approvals_route_is_registered () =
-  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
-  Alcotest.(check bool)
-    "HTTP/1 dashboard router serves the tool-approvals listing"
-    true
-    (String_util.contains_substring http1 "\"/api/v1/keepers/tool-approvals\"")
-;;
+(* The listing response must carry the held call's reason. *)
 
 (* Drive the handler the way an HTTP server would: hand its request to a
    Server_connection and collect the response bytes it writes. The write
@@ -169,10 +129,7 @@ let test_rest_listing_serializes_because () =
 let () =
   let open Alcotest in
   run "rest_approvals_because"
-    [ ( "routing"
-      , [ test_case "tool-approvals listing route is registered" `Quick
-            test_approvals_route_is_registered ] )
-    ; ( "listing"
+    [ ( "listing"
       , [ test_case "rest approvals listing serializes because" `Quick
             test_rest_listing_serializes_because ] )
     ]

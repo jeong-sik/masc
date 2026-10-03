@@ -86,18 +86,13 @@ AssertionError: timed out waiting for b'MASC Overview': b'...'
 
 ## 4. CI 에서 돌리기
 
-### PR CI
+### PR 검증
 
-`scripts/ci/run-edited-tests.sh` 가 PR 이 바꾼 파일로 스위트를 고른다.
-
-- 편집한 `test/test_*.py` 중 `test/dune` 에 `runtest-<stem>` 규칙이 있는 것은
-  `dune build @test/runtest-<stem>` 으로 돈다. 로그에 `== test/<stem> (dune rule)` 이 찍힌다.
-- 소스 경로를 문자열로 적어 둔 스위트는 그 소스가 바뀐 PR 에서도 돈다(아래 `SOURCE_MODULES`).
-- 기본 키보드 산책은 지금 그 파일을 고친 PR 에서만 돈다. 렌더 파일만 고친 PR 의 초록은 산책의 증거가
-  아니다. 그런 PR 은 바뀐 문구가 `test/*.py` 에 needle 로 남아 있는지 직접 찾는다.
-- 스위트 하나의 상한은 300초이고 키보드 산책만 600초다. `timeout` 이 끊으면 출력이 남지 않는다.
-  로그의 `== test/<stem>` 줄과 `ran N, skipped M` 줄의 시각 차가 상한과 같고 PASS 도
-  `AssertionError` 도 없으면 시간 초과다.
+PR·일반 branch push로 자동 CI를 실행하지 않는다. 변경한 입력·렌더링 경계와 직접
+소비자를 확인하고, 필요한 경우 해당 가족의 검증을 명시적으로 요청한다.
+`SOURCE_MODULES` 기반 선택기는 제거됐으므로 경로 문자열 선언으로 실행을 보장하지 않는다.
+Full CI는 최종 Release/Tag 후보에서 실행하며, 세부 절차는 `docs/constitution.xml`의
+`execution_protocol`과 `docs/CI-REVIEW-WORKFLOW.md`를 따른다.
 
 ### 가족 하나를 Linux 에서
 
@@ -111,20 +106,13 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
 
 ## 5. 새 시나리오 만들기
 
-기본 산책에 시나리오를 더 넣지 않는다. 산책은 이미 CI 상한 가까이 걸린다(이슈 #36343).
+기본 산책에 시나리오를 더 넣지 않는다.
 초점 스위트 파일을 따로 만든다. `test/test_tui_tab_strip_pty.py` 가 예다.
 
 1. `test/test_tui_<무엇을 확인하나>.py` 를 만들고 `import tui_keyboard_harness as h` 로 하네스를 쓴다.
    필요한 fixture 는 그 정의가 있는 소유 모듈에서 명시적으로 import 한다.
-2. 파일 위쪽에 이 시나리오가 지키는 소스를 **큰따옴표**로 적는다. PR CI 의 현재 selector 는
-   `"경로"` 전체를 문자 그대로 찾으므로 작은따옴표로 바꾸면 소스 변경 시 선택되지 않는다.
-
-   ```python
-   SOURCE_MODULES = (
-       "bin/masc_tui_render.ml",
-   )
-   ```
-
+2. 시나리오 docstring에 검증하는 사용자 동작과 입력·출력 경계를 적는다.
+   실행 여부를 보장하지 않는 `SOURCE_MODULES` 선언은 추가하지 않는다.
 3. `h.run_terminal_scenario(executable, description=..., interact=..., http_fixtures=...)` 를 부른다.
    끝에 `print("<무엇>: PASS")` 를 찍는다.
 4. `test/dune` 에 규칙과 `runtest` 연결을 둘 다 넣는다. 연결이 없으면 전체 테스트에서 안 돈다.

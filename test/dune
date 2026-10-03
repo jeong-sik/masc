@@ -1656,6 +1656,16 @@
  (modules test_executor_pool_eio_mutex)
  (libraries masc_test_deps))
 
+(test
+ (name test_executor_pool_cancellation)
+ (modules test_executor_pool_cancellation)
+ (libraries alcotest masc.masc_core eio eio_main))
+
+(test
+ (name test_dashboard_cache_cancellation)
+ (modules test_dashboard_cache_cancellation)
+ (libraries alcotest masc.dashboard masc.masc_core eio eio_main yojson))
+
 ; Focused single-module tests
 
 (test

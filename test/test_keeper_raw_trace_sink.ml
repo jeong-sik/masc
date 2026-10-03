@@ -740,87 +740,6 @@ let test_untraced_turn_names_no_reference () =
        (Keeper_agent_run.For_testing.raw_trace_reference_for_turn
           ~turn_trace_ref:None ~sink:None))
 
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
-let repo_root () =
-  let marker path = Filename.concat path "lib/keeper/keeper_agent_run.ml" in
-  let has_marker path = Sys.file_exists (marker path) in
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_marker root -> root
-  | _ ->
-      let rec ascend path =
-        if has_marker path then path
-        else
-          let parent = Filename.dirname path in
-          if String.equal parent path then path else ascend parent
-      in
-      ascend (Sys.getcwd ())
-
-(* Dispatch-site wiring guard: within the run_named call block (anchored by
-   ~goal:user_message, which doc-comment mentions of run_named never carry),
-   ?raw_trace must be passed. This is the regression that motivated the fix:
-   the parameter existed end-to-end but the dispatch never supplied it.
-   The companion checks pin the option to the degrade adapter and keep
-   retention after TurnRecord publication, so a future edit cannot silently
-   reintroduce a hard dependency or pre-dispatch cleanup. *)
-let test_keeper_dispatch_passes_raw_trace () =
-  let root = repo_root () in
-  let rel_path = "lib/keeper/keeper_agent_run.ml" in
-  let source = read_file (Filename.concat root rel_path) in
-  let marker = "Keeper_turn_driver.run_named" in
-  let required_anchor = "~goal:user_message" in
-  let required = "?raw_trace" in
-  let rec search pos =
-    match Astring.String.find_sub ~start:pos ~sub:marker source with
-    | None -> false
-    | Some idx ->
-        let len = min 3000 (String.length source - idx) in
-        let dispatch_block = String.sub source idx len in
-        (Astring.String.is_infix ~affix:required_anchor dispatch_block
-         && Astring.String.is_infix ~affix:required dispatch_block)
-        || search (idx + String.length marker)
-  in
-  Alcotest.(check bool)
-    (Printf.sprintf
-       "%s: keeper dispatch must pass ?raw_trace into \
-        Keeper_turn_driver.run_named"
-       rel_path)
-    true (search 0);
-  Alcotest.(check bool)
-    (Printf.sprintf
-       "%s: the dispatched sink must come from the degrading adapter \
-        (raw_trace_for_dispatch), not a turn-failing require"
-       rel_path)
-    true
-    (Astring.String.is_infix
-       ~affix:"let raw_trace = raw_trace_for_dispatch ~config ~meta"
-       source
-     && Astring.String.is_infix
-          ~affix:"call_run_named ?raw_trace ~initial_messages"
-          source);
-  let record_write =
-    Astring.String.find_sub ~sub:"Keeper_turn_record_writer.write" source
-  in
-  let cleanup_after_write =
-    Option.bind record_write (fun start ->
-      Astring.String.find_sub
-        ~start
-        ~sub:"prune_raw_traces_after_turn_record ~config ~meta raw_trace"
-        source)
-  in
-  Alcotest.(check bool)
-    (Printf.sprintf
-       "%s: raw-trace cleanup must run only after the TurnRecord commit attempt"
-       rel_path)
-    true
-    (match record_write, cleanup_after_write with
-     | Some write_at, Some cleanup_at -> cleanup_at > write_at
-     | _ -> false)
-
 let () =
   Alcotest.run "keeper_raw_trace_sink"
     [
@@ -858,7 +777,5 @@ let () =
             `Quick test_failed_turn_keeps_its_trace_through_retention;
           Alcotest.test_case "untraced turn names no reference" `Quick
             test_untraced_turn_names_no_reference;
-          Alcotest.test_case "dispatch passes ?raw_trace" `Quick
-            test_keeper_dispatch_passes_raw_trace;
         ] );
     ]

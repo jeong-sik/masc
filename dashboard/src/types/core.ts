@@ -429,7 +429,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   // Emitted by `blocker_class_to_string` in lib/keeper/keeper_meta_contract.ml
   // and previously discarded here: `asKeeperRuntimeBlockerClass` answers null
   // for anything absent, so eleven real classes arrived and were dropped.
-  // `test_blocker_class_mirror` fails if the server gains another one.
   'agent_core_input_required',
   'gate_replay_repair_required',
   'incomplete_tool_transcript',

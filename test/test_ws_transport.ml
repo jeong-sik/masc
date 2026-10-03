@@ -426,22 +426,6 @@ let with_env_var name value f =
     | None -> Unix.putenv name "")
     f
 
-let test_backpressure_gate_unauthenticated_ignored () =
-  (* Unauthenticated sessions never report bufferedAmount, so the gate
-     must never apply to them.  Set an aggressive threshold and verify
-     the flag still returns false. *)
-  with_env_var "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES" "1" (fun () ->
-    (* Stub session: we can't construct a real Wsd.t in a unit test, so
-       we exercise the gate helper indirectly through its logical
-       predicate: unauthenticated + any buffer => not backpressured. *)
-    let expected =
-      (* When authenticated=false, session_is_backpressured returns false
-         regardless of buffer or limit. *)
-      false
-    in
-    Alcotest.(check bool) "unauthenticated session cannot be backpressured"
-      false expected)
-
 let test_backpressure_gate_zero_disables () =
   (* MASC_WS_CLIENT_BUFFER_LIMIT_BYTES=0 means gate disabled. Even if a
      session has a huge buffered_amount, the helper should pass. *)
@@ -1050,8 +1034,6 @@ let () =
         test_observe_ws_client_buffered_bytes_clamps_negative;
     ]);
     ("backpressure_gate", [
-      Alcotest.test_case "unauthenticated sessions never trigger the gate" `Quick
-        test_backpressure_gate_unauthenticated_ignored;
       Alcotest.test_case "zero limit disables the gate" `Quick
         test_backpressure_gate_zero_disables;
       Alcotest.test_case "default limit is 1 MiB" `Quick

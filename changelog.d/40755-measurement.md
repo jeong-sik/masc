@@ -1,1 +1,0 @@
-Add a read-only paired Librarian run reporter that requires identical frozen inputs, retains terminal failures, and separates recorded generation skips/timings from unmeasured provider counts, semantic quality and TUI agreement.

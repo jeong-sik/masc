@@ -349,6 +349,40 @@ let json_seq json = Yojson.Safe.Util.(json |> member "seq" |> to_int)
 let line_text json =
   Yojson.Safe.Util.(json |> member "line" |> member "text" |> to_string)
 
+let test_malformed_output_has_utf8_snapshot_and_live_tail () =
+  let raw = "plain 한글 🧭\n\255 partial \237\149" in
+  let displayed = "plain 한글 🧭\n� partial �" in
+  EO.record_completed ~keeper_name:"alpha" ~task_id:None
+    ~stdout:raw ~stderr:raw ~status:status_ok ();
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json ~keeper_name:"alpha" in
+  check bool "snapshot frame is UTF-8" true
+    (String_util.is_valid_utf8 (EO.sse_frame snapshot));
+  List.iter (fun field ->
+    check string field displayed (snapshot |> member field |> to_string))
+    ["stdout_since"; "stderr_since"];
+  (match EO.snapshot ~keeper_name:"alpha" with
+   | None -> fail "expected raw snapshot"
+   | Some retained ->
+     check string "raw stdout preserved" raw retained.stdout_since;
+     check string "raw stderr preserved" raw retained.stderr_since;
+     check int "stdout byte count" (String.length raw) retained.since_stdout;
+     check int "stderr byte count" (String.length raw) retained.since_stderr);
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect ~finally:(fun () -> EO.unsubscribe subscriber) (fun () ->
+        EO.append_stream_chunk ~keeper_name:"alpha" ~stream:`Stdout raw;
+        EO.append_stream_chunk ~keeper_name:"alpha" ~stream:`Stderr raw;
+        let events = take_events env subscriber ~count:4 in
+        List.iter (fun event ->
+          check bool "live frame is UTF-8" true
+            (String_util.is_valid_utf8 (EO.sse_frame event))) events;
+        check (list string) "valid text survives; malformed sequences are replaced"
+          ["plain 한글 🧭"; "� partial �"; "plain 한글 🧭"; "� partial �"]
+          (List.map line_text events)))
+
 (* One captured stdout arrives as a single chunk. Every row of it must reach
    a subscriber that has not read anything yet, in order. *)
 let test_large_chunk_reaches_undrained_subscriber_whole () =
@@ -506,6 +540,8 @@ let () =
             (with_fresh test_snapshot_merges_completed_output)
         ; test_case "snapshot json shape" `Quick (with_fresh test_snapshot_json_shape)
         ; test_case "snapshot line ring shape" `Quick (with_fresh test_snapshot_line_ring_shape)
+        ; test_case "malformed output has UTF-8 snapshot and live tail"
+            `Quick (with_fresh test_malformed_output_has_utf8_snapshot_and_live_tail)
         ; test_case
             "long line continues in next rows"
             `Quick

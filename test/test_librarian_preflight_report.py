@@ -430,13 +430,14 @@ class ReportCliTest(unittest.TestCase):
                 run = manifest["pairs"][0]["preflight"]["run"]
                 run["selected_slot"] = "fixture-cli"
                 run["output"].update(
-                    jev_preflight={"status": status, "reason": reason},
+                    jev_preflight={"status": status, "reason": reason, "elapsed_s": None},
                     generation_path="full_lane",
                     full_llm_skipped=False,
                 )
                 result = self.execute(manifest)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, "")
+                self.assertIn("preflight arm must enter preflight evaluation", result.stderr)
 
     def test_completed_assessment_cannot_leave_generation_not_entered(self) -> None:
         for status in ("failed", "cancelled"):
@@ -534,7 +535,8 @@ class ReportCliTest(unittest.TestCase):
                     if mode == "keep_current_fallback":
                         run["selected_slot"] = "fixture-cli"
                     if mode == "disabled_candidate":
-                        run["output"]["jev_preflight"] = {"status": "skipped", "reason": "librarian_preflight_disabled"}
+                        run["selected_slot"] = "fixture-cli"
+                        run["output"]["jev_preflight"] = {"status": "skipped", "reason": "librarian_preflight_disabled", "elapsed_s": None}
                     elif mode == "successful_not_entered":
                         run["output"].update(generation_path="not_entered", jev_preflight=observation("awaiting_answer"))
                 elif mode == "input":
@@ -564,6 +566,8 @@ class ReportCliTest(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 if mode == "keep_current_fallback":
                     self.assertIn("keep-current fallback domain rejection", result.stderr)
+                elif mode == "disabled_candidate":
+                    self.assertIn("preflight arm must enter preflight evaluation", result.stderr)
                 elif mode == "successful_not_entered":
                     self.assertIn("interrupted awaiting preflight", result.stderr)
 

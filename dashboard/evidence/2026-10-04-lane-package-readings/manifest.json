@@ -1,6 +1,6 @@
 {
   "base": "293520d7e3117128e845fbdb03c8f10af21685f5",
-  "state": "B5 isolated worktree; will stack after B2",
+  "state": "B5 display repair over #41114; declaration session repair follows separately",
   "source_sha256": {
     "dashboard/src/api/lane-addons.ts": "c975ea9bb3549134e48936e7be374d7a9ec59c049e44c077fddf4c087fdbb251",
     "dashboard/src/components/lane-addon-readings.ts": "8e43d1d4caccfeaa4c7bc3fe356b299de2611a4145491009199a5fb492ce7ad1",

@@ -1,6 +1,6 @@
 # Package-authored Lane readings on the Dashboard
 
-Issue #41100, audit B5. Initial implementation base: `293520d7e3117128e845fbdb03c8f10af21685f5` (#41114). This branch is intended to stack after the separate Lane declaration session repair.
+Issue #41100, audit B5. Initial implementation base: `293520d7e3117128e845fbdb03c8f10af21685f5` (#41114). This display repair is independent of the concurrent Lane declaration session repair.
 
 The actual package JSON already includes `binding_schema` and `presentation`; the Dashboard previously decoded only `outputs`. The decoder now retains both contracts. The real panel renders description plus reading label/order/unit/format, resolving each package-local Lane ID within its declaring instance. Missing and wrong-type values display Unavailable. Zero/false remain actual values, multiline text is escaped, and original fields/evidence remain accessible. This does not add installer forms or grant action authority.
 

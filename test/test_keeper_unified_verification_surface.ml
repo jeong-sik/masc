@@ -893,6 +893,37 @@ let test_completion_authority_rejection_has_own_prompt_layer () =
          pending_board_events = [ sample_completion_authority_rejection ] })
 ;;
 
+let test_approved_outcome_renders_once_without_a_rejection () =
+  Masc_test_deps.init_unified_tool_registry ();
+  init_runtime_default_for_tests ();
+  let outcome : Keeper_event_queue.task_outcome =
+    { to_task_id = "task-approved-once"
+    ; to_verification_id = "verification-approved-once"
+    ; to_producer = "producer"
+    ; to_authority = Masc_domain.System_llm_agent { agent_run_id = "approver" }
+    } in
+  let approved = { sample_board_event with
+    event_kind = WO.Task_outcome outcome;
+    post_id = Keeper_event_queue.task_outcome_post_id outcome } in
+  let render events =
+    let { Masc.Keeper_unified_prompt.world_state; _ } =
+      build_prompt ~meta:minimal_meta { base_observation with pending_board_events = events } in
+    world_state in
+  let only_approved = render [approved] in
+  check bool "approval has its outcome section" true
+    (contains_sub "### Approved Task Outcomes (1)" only_approved);
+  check bool "approval does not also create a decisions section" false
+    (contains_sub "### Completion Authority Decisions" only_approved);
+  let mixed = render [approved; sample_completion_authority_rejection] in
+  check bool "mixed decisions count only the rejection" true
+    (contains_sub "### Completion Authority Decisions (1)" mixed);
+  check bool "mixed outcomes count the approval" true
+    (contains_sub "### Approved Task Outcomes (1)" mixed);
+  let correlations = String.split_on_char '\n' mixed |> List.filter
+    (contains_sub "verification_id=\"verification-approved-once\"") in
+  check int "approved correlation appears in one row only" 1 (List.length correlations)
+;;
+
 let test_completion_authority_rejection_preserves_human_provenance () =
   Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
@@ -1174,6 +1205,7 @@ let sample_own_post : Masc.Board.post =
   ; post_kind = Masc.Board.Human_post
   ; meta_json = None
   ; visibility = Masc.Board.Public
+  ; audience = None
   ; created_at = 1_753_300_000.0
   ; content_updated_at = 1_753_300_000.0
   ; updated_at = 1_753_300_100.0
@@ -1495,6 +1527,8 @@ let () =
           test_case
             "prompt: completion authority rejection has its own layer"
             `Quick test_completion_authority_rejection_has_own_prompt_layer;
+          test_case "prompt: approved outcome appears once, separate from rejection" `Quick
+            test_approved_outcome_renders_once_without_a_rejection;
           test_case "prompt: task cancellation has its own layer" `Quick
             test_task_cancellation_has_own_prompt_layer;
           test_case "prompt: task cancellation without reason omits the field" `Quick

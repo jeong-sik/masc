@@ -43,12 +43,24 @@ type bucket_metric =
   ; b_error_rate : float
   ; b_total_cost_usd : float option
   ; b_cache_hit_ratio : float option
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
   }
 
 type model_bucketed =
   { mb_model_id : string
   ; mb_buckets : bucket_metric list
   }
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
 
 type model_stats =
   { model_id : string
@@ -70,6 +82,7 @@ type model_stats =
   ; total_input_tokens : int option
   ; total_output_tokens : int option
   ; total_cache_read_tokens : int option
+  ; cached_input : cached_input option
   ; total_cache_creation_tokens : int option
   ; total_reasoning_tokens : int option
   ; usage_sample_count : int
@@ -105,6 +118,15 @@ type cost_read_diagnostics =
 type cost_read_result =
   (cost_read_diagnostics, Dated_jsonl.read_error) result
 
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -115,8 +137,12 @@ type aggregate =
   ; cost_read : cost_read_result
   }
 
+val read_error_to_string : read_error -> string
+
 type raw_entry =
   { model : string
+  ; executed_runtime_id : string option
+    (** Exact observed answerer from the decision, never inferred from an API model name. *)
   ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
   ; outcome : string
@@ -150,6 +176,7 @@ type raw_entry =
 
 type parse_error =
   | Not_assoc
+  | Invalid_ts_unix
   | Missing_ts_unix
   | Out_of_window
   | No_telemetry_object

@@ -1,0 +1,68 @@
+{
+  "scope": "real CodeMirror and MASC LSP extension with synthetic WebSocket; no real language server or production execution",
+  "checkout_head": "7384d0168833dbea38664ab079f64960b9e31247",
+  "source_sha256": {
+    "dashboard/src/components/ide/ide-lsp-client.ts": "db3184502c372c31526e092681ed397d04eb0f5c8dd517150bed21bcb817c44b",
+    "dashboard/src/components/ide/ide-editor-extensions.ts": "22a6f346199e408ecfdad13e90920dfe57ceb6da87eb4d380570d6e87313dda2",
+    "lib/server/server_ide_lsp_proxy.ml": "ae463d0ee84066f85687b4b0ccd5cbf499fc03b9f11ccb9848991237c495db95",
+    "docs/evidence/2026-10-04-ide-codelens-audit/codelens-fixture.ts": "1761ec45ca4c1883199d0a18cb27f4dcde1ed811b3307902766824eed7e7988d"
+  },
+  "status": "passed",
+  "page_errors": [],
+  "browser": "147.0.7727.15",
+  "before": {
+    "messages": [
+      "initialize",
+      "initialized",
+      "textDocument/didOpen",
+      "textDocument/codeLens",
+      "textDocument/inlayHint",
+      "textDocument/diagnostic"
+    ],
+    "document": "let value = 1\nlet answer = value + 1",
+    "labels": [
+      {
+        "text": "Run tests",
+        "tooltip": "읽기 전용 정보 · 실행할 수 없음",
+        "cursor": "auto",
+        "tabIndex": -1,
+        "interactive": false
+      },
+      {
+        "text": "2 references",
+        "tooltip": "읽기 전용 정보 · 실행할 수 없음",
+        "cursor": "auto",
+        "tabIndex": -1,
+        "interactive": false
+      }
+    ]
+  },
+  "after": {
+    "messages": [
+      "initialize",
+      "initialized",
+      "textDocument/didOpen",
+      "textDocument/codeLens",
+      "textDocument/inlayHint",
+      "textDocument/diagnostic"
+    ],
+    "document": "let value = 1\nlet answer = value + 1",
+    "labels": [
+      {
+        "text": "Run tests",
+        "tooltip": "읽기 전용 정보 · 실행할 수 없음",
+        "cursor": "auto",
+        "tabIndex": -1,
+        "interactive": false
+      },
+      {
+        "text": "2 references",
+        "tooltip": "읽기 전용 정보 · 실행할 수 없음",
+        "cursor": "auto",
+        "tabIndex": -1,
+        "interactive": false
+      }
+    ]
+  },
+  "label_received_focus": false
+}

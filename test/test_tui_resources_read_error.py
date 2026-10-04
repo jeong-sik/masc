@@ -4,23 +4,10 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_resources as _keyboard_resources
 
-SOURCE_MODULES = (
-    "bin/masc_tui_resources_requests.ml",
-    "bin/masc_tui_resources_requests.mli",
-    "bin/masc_tui_resources_updates.ml",
-    "bin/masc_tui_resources_updates.mli",
-    "bin/masc_tui_render_resources.ml",
-    "bin/masc_tui_render_resources.mli",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_prim.mli",
-    "bin/masc_tui.ml",
-    "bin/masc_tui_async_read.ml",
-    "bin/masc_tui_http.ml",
-    "bin/masc_tui_mcp.ml",
-    "bin/masc_tui_render.ml",
-)
+
 
 ERRORS = (
     (
@@ -37,21 +24,21 @@ ERRORS = (
 
 
 def run_case(executable: str, kind: str, prefix: bytes, expected: bytes) -> None:
-    fixtures = h.resources_mcp_fixture()
+    fixtures = _keyboard_resources.resources_mcp_fixture()
     # The observer GET has no JSON-RPC body. Keep it out of the POST callback;
     # this fixture exercises resource reads and has no observer events to send.
-    fixtures["/mcp?sse_kind=observer"] = h.RawHttpResponse(
+    fixtures["/mcp?sse_kind=observer"] = _keyboard_harness.RawHttpResponse(
         200, b"", content_type="text/event-stream"
     )
     original = fixtures["/mcp"]
-    assert isinstance(original, h.RequestHttpResponse)
+    assert isinstance(original, _keyboard_harness.RequestHttpResponse)
 
     def answer(body: bytes):
         request = json.loads(body)
         if request.get("method") != "resources/read":
             return original.resolve(body)
         if kind == "http":
-            return h.RawHttpResponse(
+            return _keyboard_harness.RawHttpResponse(
                 503,
                 b'{"error":"fixture service unavailable"}',
                 content_type="application/json",
@@ -61,29 +48,29 @@ def run_case(executable: str, kind: str, prefix: bytes, expected: bytes) -> None
             "id": request["id"],
             "error": {"code": -32000, "message": "fixture read denied"},
         }
-        return h.RawHttpResponse(
+        return _keyboard_harness.RawHttpResponse(
             200, json.dumps(payload).encode(), content_type="application/json"
         )
 
-    fixtures["/mcp"] = h.RequestHttpResponse(answer)
+    fixtures["/mcp"] = _keyboard_harness.RequestHttpResponse(answer)
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC System")
-        h.send_and_wait(process, fd, output, b"s", b"Event Log (JSON)")
-        h.send_and_wait(process, fd, output, b"\r", prefix)
-        h.resize_and_wait(
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.send_and_wait(process, fd, output, b"s", b"Event Log (JSON)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", prefix)
+        _keyboard_harness.resize_and_wait(
             process, fd, output, rows=30, columns=200,
-            needle=prefix, controls=(h.FULL_REDRAW,),
+            needle=prefix, controls=(_keyboard_harness.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        screen = h.screen_text(bytes(output))
+        screen = _keyboard_harness.screen_text(bytes(output))
         if screen.count(prefix) != 1 or screen.count(expected) != 1:
             raise AssertionError(f"Resource failure lost its cause: {screen!r}")
         if b"Read failed:" in screen or b"resources/read error:" in screen:
             raise AssertionError(f"Resource failure was repeated: {screen!r}")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description=f"MCP resource {kind} read failure is shown once",
         interact=interact,

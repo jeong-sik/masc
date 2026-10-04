@@ -3,12 +3,11 @@
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_schedule as _keyboard_schedule
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml",
-)
+
 
 
 def run(executable: str) -> None:
@@ -33,18 +32,18 @@ def run(executable: str) -> None:
             b"schedule lookup unavailable:",
         ),
     ):
-        fixtures = h.schedule_detail_http_fixtures()
-        fixtures[h.SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = response
+        fixtures = _keyboard_schedule.schedule_detail_http_fixtures()
+        fixtures[_keyboard_schedule.SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = response
 
         def interact(process, fd, _slave, output, _base_path):
-            h.palette_go(
+            _keyboard_harness.palette_go(
                 process, fd, output, b"go schedules", b"status:running"
             )
-            h.send_and_wait(process, fd, output, b"\x1b[C", b"instance-proof-701")
-            h.send_and_wait(
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"instance-proof-701")
+            _keyboard_harness.send_and_wait(
                 process, fd, output, b"\x1b[6~", b"Wake history:"
             )
-            frame = h.unwrapped(h.screen_text(bytes(output)))
+            frame = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(bytes(output)))
             for needle in (b"Wake history:", cause, verdict):
                 if needle not in frame:
                     raise AssertionError(
@@ -60,7 +59,7 @@ def run(executable: str) -> None:
                 )
             os.write(fd, b"q")
 
-        h.run_terminal_scenario(
+        _keyboard_harness.run_terminal_scenario(
             executable,
             description=f"Schedule wake {kind} failure says its cause once",
             interact=interact,

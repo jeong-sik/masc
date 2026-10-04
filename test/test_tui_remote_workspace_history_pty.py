@@ -17,19 +17,16 @@ from pathlib import Path
 import sys
 import threading
 
-import test_tui_keyboard_input as h
+import tui_keyboard_approvals as _keyboard_approvals
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_keepers as _keyboard_keepers
+import tui_keyboard_observer as _keyboard_observer
+import tui_keyboard_runtime as _keyboard_runtime
+import tui_keyboard_schedule as _keyboard_schedule
+import tui_keyboard_tools as _keyboard_tools
 
 
-# scripts/ci/run-edited-tests.sh selects this runnable alias when a changed
-# source path occurs as a quoted literal here; it reads these outside Python.
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_keeper_selection.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_render_prim.ml",
-)
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"
 HISTORY_PATH = "/api/v1/keepers/alpha/chat/history"
@@ -41,15 +38,15 @@ DRAFT = b"unsent-draft-owned-by-workspace-a"
 WAIT_SECONDS = 8.0  # Fixture failure deadline, not a product refresh policy.
 # Runtime identities are the response-generation barrier below. Keep the
 # lifecycle/runtime column visible instead of waiting for a hidden cell.
-TERMINAL_COLUMNS = h.KEEPER_RUNTIME_COLUMN_COLUMNS
+TERMINAL_COLUMNS = _keyboard_harness.KEEPER_RUNTIME_COLUMN_COLUMNS
 
 
 def screen(output: bytearray) -> bytes:
-    end = output.rfind(h.FRAME_END)
-    return h.screen_text(bytes(output[: end + len(h.FRAME_END)])) if end >= 0 else b""
+    end = output.rfind(_keyboard_harness.FRAME_END)
+    return _keyboard_harness.screen_text(bytes(output[: end + len(_keyboard_harness.FRAME_END)])) if end >= 0 else b""
 
 
-def history_row(marker: bytes, stamp: float) -> h.HttpResponse:
+def history_row(marker: bytes, stamp: float) -> _keyboard_harness.HttpResponse:
     return 200, [{"id": marker.decode(), "role": "assistant",
                   "content": marker.decode(), "ts": stamp}]
 
@@ -94,12 +91,12 @@ class WorkspaceWire:
             if self.root_only:
                 base = self.local_base
             self.events.append({"event": "health", "phase": phase, "base_path": base})
-        _, payload = h.fleet_safety_fixture()
+        _, payload = _keyboard_harness.fleet_safety_fixture()
         payload["paths"] = {"effective_base_path": base,
                             "effective_masc_root": root}
         # A tuple health response is rewritten to the harness workspace.
         # Raw bytes preserve the authority this scenario deliberately chose.
-        return h.RawHttpResponse(200, json.dumps(payload).encode(),
+        return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(),
                                  content_type="application/json")
 
     def roster(self):
@@ -147,21 +144,21 @@ class WorkspaceWire:
 
 
 def run(binary: str, captures: Path | None) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     fixtures[ROSTER_PATH] = wire.roster
     fixtures[HISTORY_PATH] = wire.history
     fixtures[MEMORY_PATH] = wire.memory
     fixtures["/health"] = wire.health
     fixtures["/health?full=1"] = wire.health
-    context = h.context_inspector_fixtures()
+    context = _keyboard_harness.context_inspector_fixtures()
     context_path = "/api/v1/keepers/alpha/provider-input?turn_ref=trace-context%2342"
-    held_context = h.GatedHttpResponse(context[context_path],
+    held_context = _keyboard_harness.GatedHttpResponse(context[context_path],
         subsequent_response=context[context_path], hold_seconds=30.0)
     fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = context[
         "/api/v1/keepers/alpha/turn-records?limit=50"]
     fixtures[context_path] = held_context
-    posts: h.HttpRequests = []
+    posts: _keyboard_harness.HttpRequests = []
 
     def capture(output, name):
         visible = screen(output)
@@ -172,28 +169,28 @@ def run(binary: str, captures: Path | None) -> None:
 
     def interact(process, fd, _slave, output, local_base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), f"{label}: {screen(output)!r}"
 
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             assert str(Path(local_base).resolve()) == wire.local_base
             metadata_path = Path(local_base, ".masc", "keepers", "alpha.json")
             metadata_bytes = metadata_path.read_bytes()
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: BEFORE in text, "A history was not displayed")
-            h.send_and_wait(process, fd, output, DRAFT, h.composer_showing(DRAFT))
+            _keyboard_harness.send_and_wait(process, fd, output, DRAFT, _keyboard_harness.composer_showing(DRAFT))
             capture(output, "a-history-and-draft")
 
             wire.arm_history()
-            assert h.wait_for_fixture_event(process, fd, output, wire.held_started,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.held_started,
                 timeout=WAIT_SECONDS), "the next automatic A history read did not start"
-            h.send_and_wait(process, fd, output, b"\x18", b"MASC Context")
-            assert h.wait_for_fixture_event(process, fd, output, held_context.requested,
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x18", b"MASC Context")
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_context.requested,
                 timeout=WAIT_SECONDS), "A exact-context read was not held"
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"b.current" in text
@@ -211,8 +208,8 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
                          "fresh B roster after the late response was not applied")
-            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
-                             needle=b"b.settled", controls=(h.FULL_REDRAW,))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+                             needle=b"b.settled", controls=(_keyboard_harness.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
             with wire.lock:
@@ -225,12 +222,12 @@ def run(binary: str, captures: Path | None) -> None:
                 # Require the previous notice to leave the current screen
                 # before asking this entry path for its own visible refusal.
                 if refusal in screen(output):
-                    h.write_all(fd, output, b"\x1b")
+                    _keyboard_harness.write_all(fd, output, b"\x1b")
                     await_screen(lambda text: refusal not in text,
                                  "previous chat refusal did not clear")
-                h.send_and_wait(process, fd, output, key, refusal)
+                _keyboard_harness.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
-            h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
+            _keyboard_harness.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:
                 assert not [event for event in wire.events
                     if event["event"] in ("history", "memory")
@@ -239,8 +236,8 @@ def run(binary: str, captures: Path | None) -> None:
 
             # Return to the original matching workspace before asking to
             # compose. The test never opens or authorizes remote chat.
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "▸Info".encode())
             # A failed local read after B must not preserve B's same-name
             # selectable row or combine its metadata with A lifecycle facts.
             metadata_path.write_text("{not-json", encoding="utf-8")
@@ -250,31 +247,31 @@ def run(binary: str, captures: Path | None) -> None:
                          "failed A metadata reload retained B's Keeper detail")
             metadata_path.write_bytes(metadata_bytes)
             os.write(fd, b"r")
-            h.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
-                             needle=b"Total Turns:", controls=(h.FULL_REDRAW,))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=TERMINAL_COLUMNS,
+                             needle=b"Total Turns:", controls=(_keyboard_harness.FULL_REDRAW,))
             await_screen(lambda text: b"Total Turns:" in text
                          and b"no Keeper selected" not in text,
                          "repaired A metadata was not reloaded")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
                          "the original workspace did not become authoritative again")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: RECOVERED in text and DRAFT in text,
                          "returning to A did not restore the unsent draft and fresh history")
             assert BEFORE not in screen(output) and LATE not in screen(output)
-            assert LATE not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+            assert LATE not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "the released A response reappeared after the workspace boundary"
             capture(output, "a-restored-draft-current-history")
-            h.send_and_wait(process, fd, output, b"\x18", b"MASC Context")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x18", b"MASC Context")
             await_screen(lambda text: b"50.0k" in text and b"200.0k" in text,
                          "returning to A did not load a fresh Context reading")
             assert held_context.subsequent_requested.is_set(), "A reused its withdrawn Context cache"
             capture(output, "a-fresh-context-after-return")
-            h.send_and_wait(process, fd, output, b"\x1b", "▸ chat".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", "▸ chat".encode())
             assert not [path for path, _ in posts if path.startswith("/api/v1/keepers/")], \
                 "preserving an unsent draft submitted Keeper work"
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             if "metadata_path" in locals() and "metadata_bytes" in locals():
@@ -290,14 +287,14 @@ def run(binary: str, captures: Path | None) -> None:
                     "posts": [{"path": path, "body": json.loads(body)} for path, body in posts],
                 }, indent=2) + "\n")
 
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace change withdraws held chat history and retains its unsent draft",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
 def scoped_roster_authority(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     template = fixtures[ROSTER_PATH][1]
     class ScopedWire(WorkspaceWire):
         def __init__(self):
@@ -309,10 +306,10 @@ def scoped_roster_authority(binary: str) -> None:
         def health(self):
             with self.lock:
                 base = "/fixture-workspace-b" if self.phase == "b" else "/fixture-workspace-c"
-            _, payload = h.fleet_safety_fixture()
+            _, payload = _keyboard_harness.fleet_safety_fixture()
             payload["paths"] = {"effective_base_path": base,
                                 "effective_masc_root": str(Path(base, ".masc"))}
-            return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
+            return _keyboard_harness.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
         def roster(self):
             with self.lock:
                 phase = self.phase
@@ -330,32 +327,32 @@ def scoped_roster_authority(binary: str) -> None:
         def board(self):
             with self.lock:
                 title = "workspace-b-board" if self.phase == "b" else "workspace-c-board"
-            return 200, {"posts": [h.board_selection_post("scope", title, "authority fixture")]}
+            return 200, {"posts": [_keyboard_harness.board_selection_post("scope", title, "authority fixture")]}
     wire = ScopedWire()
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
                      "/api/v1/board?sort_by=hot": wire.board})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
             # At 80 columns the Activity pane is not drawn. Board does not
             # need the roster, so entering Keepers dispatches a scoped GET.
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=32, columns=80, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
             await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
             with wire.lock:
                 wire.hold_roster = True
-            h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
-            assert h.wait_for_fixture_event(process, fd, output, wire.roster_started,
+            _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, wire.roster_started,
                 timeout=WAIT_SECONDS), "the scoped B roster was not held"
-            h.palette_go(process, fd, output, b"go Board", b"MASC Board")
+            _keyboard_harness.palette_go(process, fd, output, b"go Board", b"MASC Board")
             wire.publish("b-after-late")
-            h.resize_and_wait(process, fd, output, rows=32, columns=300,
-                             needle=b"MASC Board", controls=(h.FULL_REDRAW,))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=300,
+                             needle=b"MASC Board", controls=(_keyboard_harness.FULL_REDRAW,))
             os.write(fd, b"r")
             # While a scoped read is held the full revalidation still owns
             # /health. Its exact Base footer is the applied identity barrier;
@@ -363,34 +360,38 @@ def scoped_roster_authority(binary: str) -> None:
             await_screen(lambda text: b"Base: /fixture-workspace-c" in text,
                          "full C identity reading did not become current")
             c_boundary = len(output)
-            h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+            _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             wire.roster_release.set()
             # Revalidate while scoped-inflight queued a full followup. Only
             # the stale scoped completion retires that flag and launches it.
             # Its C row is the client barrier after the B completion.
             await_screen(lambda text: b"c-only" in text, "C followup roster did not become selectable")
-            assert b"b-only" not in h.CSI_RE.sub(b"", bytes(output[c_boundary:])),                 "the superseded B scoped roster was rendered under C authority"
-            h.select_keeper_row(process, fd, output, b"c-only")
+            assert b"b-only" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[c_boundary:])),                 "the superseded B scoped roster was rendered under C authority"
+            _keyboard_harness.select_keeper_row(process, fd, output, b"c-only")
             os.write(fd, b"q")
         finally:
             wire.roster_release.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="superseded scoped roster cannot replace a newer full workspace reading",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=30.0, terminal_cols=80)
 
 
 def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
     queued = b"retained-workspace-a-queued-payload"
-    class HeldAdmission(h.AtomicChatFixture):
+    class HeldAdmission(_keyboard_chat.AtomicChatFixture):
         def __init__(self):
             super().__init__(no_control_token=True)
             self.held_received = threading.Event()
             self.release_admission = threading.Event()
             self.held_once = False
             self.phases = []
+            self.directives = []
+        def directive(self, body):
+            self.directives.append(json.loads(body))
+            return super().directive(body)
         def stream(self, body):
             with wire.lock:
                 self.phases.append(wire.phase)
@@ -406,22 +407,22 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                      MEMORY_PATH: wire.memory})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: BEFORE in text, "A history was not ready")
-            h.send_and_wait(process, fd, output, b"first-workspace-a-request", h.composer_showing(b"first-workspace-a-request"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"first-workspace-a-request", _keyboard_harness.composer_showing(b"first-workspace-a-request"))
             os.write(fd, b"\r")
-            assert h.wait_for_fixture_event(process, fd, output, admission.held_received,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
-            h.send_and_wait(process, fd, output, queued, h.composer_showing(queued))
-            h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+            _keyboard_harness.send_and_wait(process, fd, output, queued, _keyboard_harness.composer_showing(queued))
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MISMATCH local " in text,
                          "B authority did not become visible")
@@ -432,36 +433,38 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             wire.publish("a-returned")
             await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
                          "A authority was not restored")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: b"Queue (1 waiting" in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
-            h.send_and_wait(process, fd, output, b"/queue resume", h.composer_showing(b"/queue resume"))
-            h.send_and_wait(process, fd, output, b"\r", b"Server confirmed queue resume")
-            h.wait_for_atomic_admissions(process, fd, output, admission, 2)
+            _keyboard_harness.send_and_wait(process, fd, output, b"/queue resume", _keyboard_harness.composer_showing(b"/queue resume"))
+            os.write(fd, b"\r")
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, admission, 2)
+            assert admission.directives == [], "local input resume issued a server directive"
             assert admission.phases == ["a", "a-returned"], admission.phases
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             admission.release_admission.set()
             admission.release.set()
             admission.release_interrupt.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description=("MASC-root-only change" if root_only else "workspace change")
             + " suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
+    assert admission.directives == [], "local resume sent a late server directive"
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     """Actual /attach + /ref payloads survive A/B/A only for their original Keeper."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
-    admission = h.AtomicChatFixture(no_control_token=True)
+    admission = _keyboard_chat.AtomicChatFixture(no_control_token=True)
     fixtures.update(admission.fixtures)
     beta_submitted = []
     def beta_request(body):
@@ -469,7 +472,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
         return 503, {"error": "synthetic beta admission refused"}
     def chat_request(body):
         return beta_request(body) if json.loads(body)["name"] == "beta" else admission.stream(body)
-    fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(chat_request)
+    fixtures["/api/v1/keepers/chat/stream"] = _keyboard_harness.RequestHttpResponse(chat_request)
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health, HISTORY_PATH: wire.history,
                      MEMORY_PATH: wire.memory})
@@ -478,25 +481,25 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     image_data = []
     def prepare(base):
         wire.prepare(base)
-        h.seed_image_workspace(base)
-        image_data.append(base64.b64encode(Path(base, h.IMAGE_NAME).read_bytes()).decode())
+        _keyboard_chat.seed_image_workspace(base)
+        image_data.append(base64.b64encode(Path(base, _keyboard_chat.IMAGE_NAME).read_bytes()).decode())
     def interact(process, fd, _slave, output, base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=40, columns=300, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: BEFORE in text, "A history was not ready")
-            for command, receipt in ((f"/attach {Path(base, h.IMAGE_NAME)}".encode(), b"attached shot.png"),
+            for command, receipt in ((f"/attach {Path(base, _keyboard_chat.IMAGE_NAME)}".encode(), b"attached shot.png"),
                                      (f"/ref {reference}".encode(), b"reference(s)")):
-                h.send_and_wait(process, fd, output, command, h.composer_showing(command))
-                h.send_and_wait(process, fd, output, b"\r", receipt)
-            h.send_and_wait(process, fd, output, staged_text, h.composer_showing(staged_text))
+                _keyboard_harness.send_and_wait(process, fd, output, command, _keyboard_harness.composer_showing(command))
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", receipt)
+            _keyboard_harness.send_and_wait(process, fd, output, staged_text, _keyboard_harness.composer_showing(staged_text))
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"MASC Keepers" in text
                          and b"MISMATCH local " in text, "B withdrawal was not applied")
@@ -505,38 +508,38 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             wire.publish("a-returned")
             await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
                          "A authority was not restored")
-            h.select_keeper_row(process, fd, output, b"beta")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
+            _keyboard_harness.select_keeper_row(process, fd, output, b"beta")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ beta ▸ chat".encode())
             assert staged_text not in screen(output), "alpha draft was restored for beta"
-            h.send_and_wait(process, fd, output, b"beta-has-no-alpha-media", h.composer_showing(b"beta-has-no-alpha-media"))
+            _keyboard_harness.send_and_wait(process, fd, output, b"beta-has-no-alpha-media", _keyboard_harness.composer_showing(b"beta-has-no-alpha-media"))
             os.write(fd, b"\r")
-            assert h.wait_for_fixture_state(process, fd, output, lambda: len(beta_submitted) == 1,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: len(beta_submitted) == 1,
                 timeout=WAIT_SECONDS), "beta request was not observed"
             assert beta_submitted[0].get("attachments", []) == [], beta_submitted
             assert not [block for block in beta_submitted[0].get("user_blocks", [])
                         if block.get("type") == "image"], beta_submitted
-            h.escape_to_keeper_detail(process, fd, output, name=b"beta")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"beta")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             await_screen(lambda text: staged_text in text, "alpha draft was not restored")
             os.write(fd, b"\r")
-            h.wait_for_atomic_admissions(process, fd, output, admission, 1)
+            _keyboard_chat.wait_for_atomic_admissions(process, fd, output, admission, 1)
             actual = admission.submitted[0]
             assert actual["message"] == staged_text.decode(), actual
             assert len(actual.get("attachments", [])) == 1, actual
             attached = actual["attachments"][0]
-            assert attached["name"] == h.IMAGE_NAME and attached["data"] == image_data[0], attached
+            assert attached["name"] == _keyboard_chat.IMAGE_NAME and attached["data"] == image_data[0], attached
             images = [block for block in actual["user_blocks"] if block.get("type") == "image"]
             assert images == [{"type": "image", "attachment_id": attached["id"]},
                               {"type": "image", "url": reference}], actual
-            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             admission.release.set()
             admission.release_interrupt.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description=("MASC-root-only transition: " if root_only else "")
             + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
@@ -545,10 +548,10 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    fixtures.update(h.schedule_detail_http_fixtures())
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
-    schedule_template = fixtures[h.SCHEDULES_PATH][1]
+    schedule_template = fixtures[_keyboard_schedule.SCHEDULES_PATH][1]
     unknown_health = threading.Event()
     cancel_requests = []
     def schedules():
@@ -560,7 +563,7 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
         return 200, payload
     def health():
         if unknown_health.is_set():
-            return h.RawHttpResponse(503, b'{"error":"synthetic identity unread"}', content_type="application/json")
+            return _keyboard_harness.RawHttpResponse(503, b'{"error":"synthetic identity unread"}', content_type="application/json")
         return wire.health()
     def cancel(body):
         with wire.lock:
@@ -568,47 +571,47 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
         cancel_requests.append((phase, json.loads(body)))
         return 200, {"status": "ok", "message": "synthetic schedule cancelled"}
     fixtures.update({ROSTER_PATH: wire.roster, "/health": health, "/health?full=1": health,
-                     h.SCHEDULES_PATH: schedules,
-                     "/api/v1/tools/masc_schedule_cancel": h.RequestHttpResponse(cancel)})
+                     _keyboard_schedule.SCHEDULES_PATH: schedules,
+                     "/api/v1/tools/masc_schedule_cancel": _keyboard_harness.RequestHttpResponse(cancel)})
     requests = []
     def interact(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output,
+        _keyboard_harness.resize_and_wait(process, fd, output,
             rows=45, columns=300, needle=b"MASC Dashboard",
-            controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
-        h.palette_go(process, fd, output, b"go schedules", b"reaction:matched_consumed_ack")
-        h.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
+        _keyboard_harness.palette_go(process, fd, output, b"go schedules", b"reaction:matched_consumed_ack")
+        _keyboard_harness.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         wire.publish("b")
         await_screen(lambda text: b"MISMATCH local " in text and b"armed: cancel" not in text
                      and b"reaction:matched_consumed_ack" in text,
                      "B identity did not withdraw A's cancel arm and apply its list")
-        h.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
-        h.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"workspace-b-schedule-owner")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        _keyboard_harness.send_and_wait(process, fd, output, b"x", b"armed: cancel schedule-proof-701")
         assert cancel_requests == [], "A's first press authorized a POST on B"
         os.write(fd, b"x")
-        assert h.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: len(cancel_requests) == 1,
             timeout=WAIT_SECONDS), "the explicit B confirmation did not send"
         assert cancel_requests[0][0] == "b" and cancel_requests[0][1]["schedule_id"] == "schedule-proof-701"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
-        h.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Schedules")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
         await_screen(lambda text: b"b.current" in text, "B roster was not applied")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"u", "Keepers ▸ alpha ▸ runtime".encode())
         wire.publish("a-returned")
         await_screen(lambda text: b"a.returned" in text and b"MASC Keepers" in text
                      and "▸ runtime".encode() not in text, "A identity did not close B runtime picker")
         unknown_health.set()
         # Health failure and a successful roster share this refresh. An
         # explicit lifecycle key must refuse even if that roster reports live.
-        h.palette_go(process, fd, output, b"go System / runtime.toml", b"server identity unread")
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        h.send_and_wait(process, fd, output, b"w", b"Workspace identity has not been read; action unavailable")
+        _keyboard_harness.palette_go(process, fd, output, b"go System / runtime.toml", b"server identity unread")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"w", b"Workspace identity has not been read; action unavailable")
         assert not [path for path, _ in requests if path.startswith("/api/v1/keepers/")], requests
         os.write(fd, b"q")
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace switch withdraws schedule confirmation, runtime picker and unknown-identity lifecycle",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=requests, refresh=0.5, terminal_cols=300)
@@ -616,8 +619,8 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
 
 def observer_workspace_retirement(binary: str) -> None:
     """A live old stream cannot carry its session, cursor or events into B."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    fixtures.update(h.observer_http_fixtures())
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures.update(_keyboard_observer.observer_http_fixtures())
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     release_a = threading.Event()
     release_b = threading.Event()
@@ -630,7 +633,7 @@ def observer_workspace_retirement(binary: str) -> None:
             phase = wire.phase
         session = "session-workspace-" + phase
         sessions.append(session)
-        return h.RawHttpResponse(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
+        return _keyboard_harness.RawHttpResponse(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
             content_type="application/json", headers=(("Mcp-Session-Id", session),))
     def frame(event_id, tool):
         value = {"type": "keeper_tool_call", "name": "alpha", "tool_name": tool,
@@ -650,22 +653,22 @@ def observer_workspace_retirement(binary: str) -> None:
                 yield frame(1, "b-observer-visible")
                 assert release_b.wait(timeout=30), "B observer fixture not released"
                 yield frame(2, "b-observer-settled")
-        return h.StreamingHttpResponse(chunks, headers=(
+        return _keyboard_harness.StreamingHttpResponse(chunks, headers=(
             ("x-masc-sse-instance-id", "epoch-workspace-" + phase), ("x-masc-sse-replay", "fresh")))
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health, "/health?full=1": wire.health,
-                     "/mcp": h.RequestHttpResponse(initialize),
-                     "/mcp?sse_kind=observer": h.HeadersHttpResponse(observer)})
+                     "/mcp": _keyboard_harness.RequestHttpResponse(initialize),
+                     "/mcp?sse_kind=observer": _keyboard_harness.HeadersHttpResponse(observer)})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC System")
-            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
-            h.send_and_wait(process, fd, output, b"f", b"scope actions")
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+            _keyboard_harness.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            _keyboard_harness.send_and_wait(process, fd, output, b"f", b"scope actions")
             await_screen(lambda text: b"a-observer-visible" in text, "A event was not applied")
             wire.publish("b")
             await_screen(lambda text: b"b-observer-visible" in text, "B fresh event was not applied")
@@ -678,12 +681,12 @@ def observer_workspace_retirement(binary: str) -> None:
             release_b.set()
             await_screen(lambda text: b"b-observer-settled" in text, "B completion barrier was not applied")
             assert b"a-observer-late-forbidden" not in screen(output)
-            h.palette_go(process, fd, output, b"go dashboard", b"MASC Dashboard")
+            _keyboard_harness.palette_go(process, fd, output, b"go dashboard", b"MASC Dashboard")
             os.write(fd, b"q")
         finally:
             release_a.set()
             release_b.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace switch retires live observer session, cursor and acting events",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
@@ -691,7 +694,7 @@ def observer_workspace_retirement(binary: str) -> None:
 
 def identity_refresh_workspace_chain(binary: str) -> None:
     """Hold provider one's actual POST; withdrawal forbids provider two's POST."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     held_first = threading.Event()
     release_first = threading.Event()
@@ -718,28 +721,28 @@ def identity_refresh_workspace_chain(binary: str) -> None:
         return 200, {"status": "ok"}
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health, "/health?full=1": wire.health,
         "/api/v1/keepers/oauth/attached-tools?keeper=alpha": providers,
-        "/api/v1/keepers/alpha/identity-refresh": h.RequestHttpResponse(refresh)})
+        "/api/v1/keepers/alpha/identity-refresh": _keyboard_harness.RequestHttpResponse(refresh)})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_identity(marker):
             # The same marked title strip as keyboard [/] navigation; no
             # hardcoded index or tab count selects a different detail surface.
-            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+            title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Identity" in text]
-            assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
+            assert len(title_rows) == 1, _keyboard_harness.screen_rows(bytes(output))
+            _keyboard_keepers.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
             open_identity(b"a-identity-second")
             os.write(fd, b"R")
-            assert h.wait_for_fixture_event(process, fd, output, held_first,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_first,
                 timeout=WAIT_SECONDS), "first provider POST was not held"
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text
@@ -760,15 +763,15 @@ def identity_refresh_workspace_chain(binary: str) -> None:
                          "A identity was not restored in the current footer")
             open_identity(b"a-returned-identity-second")
             os.write(fd, b"R")
-            assert h.wait_for_fixture_state(process, fd, output, lambda: len(submitted) == 3,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: len(submitted) == 3,
                 timeout=WAIT_SECONDS), "fresh authorized provider refresh did not complete"
             assert submitted == [("a", "first"), ("a-returned", "first"),
                                  ("a-returned", "second")], submitted
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             release_first.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace withdrawal cancels held identity mutation before its next provider and allows fresh A retry",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
@@ -776,7 +779,7 @@ def identity_refresh_workspace_chain(binary: str) -> None:
 
 
 def bundle_identity_during_read(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     class BundleWire(WorkspaceWire):
         armed = False
         def roster(self):
@@ -792,11 +795,11 @@ def bundle_identity_during_read(binary: str) -> None:
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
     def interact(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output,
+        _keyboard_harness.resize_and_wait(process, fd, output,
             rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-            controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        assert h.wait_for_fixture_state(process, fd, output,
+            controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: b"a.current" in screen(output), timeout=WAIT_SECONDS)
         with wire.lock:
             wire.armed = True
@@ -805,30 +808,30 @@ def bundle_identity_during_read(binary: str) -> None:
         def boundary_observed():
             with wire.lock:
                 return any(e["event"] == "health" and e["phase"] == "b" for e in wire.events)
-        assert h.wait_for_fixture_state(process, fd, output, boundary_observed,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output, boundary_observed,
             timeout=WAIT_SECONDS), "post-roster B identity was not probed"
-        h.resize_and_wait(process, fd, output, rows=36, columns=TERMINAL_COLUMNS,
-                         needle=b"MASC Keepers", controls=(h.FULL_REDRAW,))
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=36, columns=TERMINAL_COLUMNS,
+                         needle=b"MASC Keepers", controls=(_keyboard_harness.FULL_REDRAW,))
         os.write(fd, b"r")
-        assert h.wait_for_fixture_state(process, fd, output,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: b"b.current" in screen(output) and b"MISMATCH local " in screen(output),
             timeout=WAIT_SECONDS), "a fresh coherent B bundle did not recover"
-        assert b"cross-workspace-poison" not in h.CSI_RE.sub(b"", bytes(output[start:])), \
+        assert b"cross-workspace-poison" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[start:])), \
             "an A-started bundle displayed the B response before revalidation"
         os.write(fd, b"q")
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="discard a bundle whose workspace changes during its roster GET",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
 def settings_editor_workspace_change(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
-                     h.KEEPER_SETTINGS_PATH: h.keeper_settings_fixture()})
-    posts: h.HttpRequests = []
+                     _keyboard_keepers.KEEPER_SETTINGS_PATH: _keyboard_keepers.keeper_settings_fixture()})
+    posts: _keyboard_harness.HttpRequests = []
     with tempfile.TemporaryDirectory(prefix="tui-workspace-editor-") as work:
         started, release = Path(work, "started"), Path(work, "release")
         editor = Path(work, "edit.py")
@@ -839,27 +842,27 @@ def settings_editor_workspace_change(binary: str) -> None:
             f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
         def interact(process, fd, _slave, output, _base):
             try:
-                h.resize_and_wait(process, fd, output,
+                _keyboard_harness.resize_and_wait(process, fd, output,
                     rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-                h.tab_until(process, fd, output, b"MASC Keepers")
-                h.select_keeper_row(process, fd, output, b"alpha")
+                    controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+                _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
                 os.write(fd, b"e")
-                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output, started.exists,
                     timeout=WAIT_SECONDS), "settings editor did not open"
                 # The clone keeps the same keeper name and config revision.
                 # No event-loop refresh can retire A while $EDITOR blocks.
                 wire.publish("b")
                 release.touch()
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"settings not saved" in screen(output), timeout=WAIT_SECONDS), \
                     "post-editor identity change was not visibly refused"
-                assert not [p for p, _ in posts if p == h.KEEPER_SETTINGS_PATH], \
+                assert not [p for p, _ in posts if p == _keyboard_keepers.KEEPER_SETTINGS_PATH], \
                     "the edited A patch was posted to same-revision B"
                 os.write(fd, b"q")
             finally:
                 release.touch()
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description="same-revision workspace replacement during settings editor refuses the POST",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
@@ -868,13 +871,13 @@ def settings_editor_workspace_change(binary: str) -> None:
 
 
 def schedule_editor_workspace_change(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
-    fixtures.update(h.schedule_detail_http_fixtures())
-    fixtures[h.SCHEDULES_PATH][1]["requests"][0]["status"] = "scheduled"
+    fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
+    fixtures[_keyboard_schedule.SCHEDULES_PATH][1]["requests"][0]["status"] = "scheduled"
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
-    posts: h.HttpRequests = []
+    posts: _keyboard_harness.HttpRequests = []
     with tempfile.TemporaryDirectory(prefix="tui-schedule-workspace-editor-") as work:
         started, release = Path(work, "started"), Path(work, "release")
         editor = Path(work, "edit.py")
@@ -885,18 +888,18 @@ def schedule_editor_workspace_change(binary: str) -> None:
             f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
         def interact(process, fd, _slave, output, _base):
             try:
-                h.resize_and_wait(process, fd, output,
+                _keyboard_harness.resize_and_wait(process, fd, output,
                     rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-                h.palette_go(process, fd, output, b"go schedules", b"reaction:matched_consumed_ack")
+                    controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                _keyboard_harness.palette_go(process, fd, output, b"go schedules", b"reaction:matched_consumed_ack")
                 os.write(fd, b"e")
-                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output, started.exists,
                     timeout=WAIT_SECONDS), "schedule editor did not open"
                 # The clone keeps the same schedule ID.
                 # No event-loop refresh can retire A while $EDITOR blocks.
                 wire.publish("b")
                 release.touch()
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"modify: Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
                     "post-editor identity change was not visibly refused"
                 assert not [p for p, _ in posts if p == "/api/v1/tools/masc_schedule_update"], \
@@ -904,7 +907,7 @@ def schedule_editor_workspace_change(binary: str) -> None:
                 os.write(fd, b"q")
             finally:
                 release.touch()
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description="workspace replacement while Schedule editor blocks refuses the update POST",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
@@ -912,15 +915,15 @@ def schedule_editor_workspace_change(binary: str) -> None:
 
 
 def runtime_config_editor_workspace_change(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
-        **h.runtime_config_read_metadata(),
-        "path": "/workspace/config/runtime.toml", "source_text": h.config_navigation_source(),
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (200, {
+        **_keyboard_runtime.runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml", "source_text": _keyboard_runtime.config_navigation_source(),
     })
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
-    posts: h.HttpRequests = []
+    posts: _keyboard_harness.HttpRequests = []
     with tempfile.TemporaryDirectory(prefix="tui-runtime-workspace-editor-") as work:
         started, release = Path(work, "started"), Path(work, "release")
         editor = Path(work, "edit.py")
@@ -930,19 +933,19 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
             f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
         def interact(process, fd, _slave, output, _base):
             try:
-                h.resize_and_wait(process, fd, output,
+                _keyboard_harness.resize_and_wait(process, fd, output,
                     rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-                h.tab_until(process, fd, output, b"MASC System")
-                h.wait_for_output(process, fd, output, b"first-value = ", start=0, timeout=WAIT_SECONDS)
+                    controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+                _keyboard_harness.wait_for_output(process, fd, output, b"first-value = ", start=0, timeout=WAIT_SECONDS)
                 os.write(fd, b"e")
-                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output, started.exists,
                     timeout=WAIT_SECONDS), "runtime config editor did not open"
                 # The clone keeps the same config revision.
                 # No event-loop refresh can retire A while $EDITOR blocks.
                 wire.publish("b")
                 release.touch()
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
                     "post-editor identity change was not visibly refused"
                 assert not [p for p, _ in posts if p.startswith("/api/v1/runtime/config/")], \
@@ -950,7 +953,7 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
                 os.write(fd, b"q")
             finally:
                 release.touch()
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description="workspace replacement while runtime.toml editor blocks refuses preview and save",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
@@ -960,65 +963,65 @@ def runtime_config_editor_workspace_change(binary: str) -> None:
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
-        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
-        answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        answer = _keyboard_harness.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
         b_asks = threading.Event()
         def asks():
             with wire.lock:
                 phase = wire.phase
                 wire.events.append({"event": "asks", "phase": phase})
             if phase == "a":
-                return h.keeper_asks_response()
+                return _keyboard_approvals.keeper_asks_response()
             b_asks.set()
             return 503, {"error": "B questions unavailable"}
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-            "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
-            h.KEEPER_ASK_ANSWER_PATH: answer})
-        posts: h.HttpRequests = []
+            "/health?full=1": wire.health, _keyboard_harness.KEEPER_ASKS_PATH: asks,
+            _keyboard_approvals.KEEPER_ASK_ANSWER_PATH: answer})
+        posts: _keyboard_harness.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
-                h.resize_and_wait(process, fd, output,
+                _keyboard_harness.resize_and_wait(process, fd, output,
                     rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
-                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-                h.palette_go(process, fd, output, b"go Approvals", b"Questions waiting on you")
-                h.send_and_wait(process, fd, output, b"a", b"Enter:answer")
-                h.send_and_wait(process, fd, output, b"1", b"1 (o) ")
-                h.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
+                    controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                _keyboard_harness.palette_go(process, fd, output, b"go Approvals", b"Questions waiting on you")
+                _keyboard_harness.send_and_wait(process, fd, output, b"a", b"Enter:answer")
+                _keyboard_harness.send_and_wait(process, fd, output, b"1", b"1 (o) ")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
                 if submit:
                     os.write(fd, b"\r")
-                    assert h.wait_for_fixture_event(process, fd, output, answer.requested,
+                    assert _keyboard_harness.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"MISMATCH local " in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
                         and b"Press Enter again to send" not in screen(output),
                     timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
-                assert h.wait_for_fixture_event(process, fd, output, b_asks,
+                assert _keyboard_harness.wait_for_fixture_event(process, fd, output, b_asks,
                     timeout=WAIT_SECONDS), "B failing asks read was not observed"
-                h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+                _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
                 wire.publish("b-after-late")
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
                 # Full refreshes normally read asks. The cancelled answer
                 # must never publish its old completion or recreate answer mode.
-                h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
+                _keyboard_harness.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
-                assert len([p for p, _ in posts if p == h.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                assert len([p for p, _ in posts if p == _keyboard_approvals.KEEPER_ASK_ANSWER_PATH]) == int(submit)
                 os.write(fd, b"q")
             finally:
                 answer.release.set()
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description=f"Ask editor and held submit are withdrawn with workspace (admitted={submit})",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
 def github_workspace_withdrawal(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     release = threading.Event()
     def chunks():
@@ -1032,25 +1035,25 @@ def github_workspace_withdrawal(binary: str) -> None:
             "authenticated": True, "login": phase + "-github-current", "scopes": []}}
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
         "/health?full=1": wire.health, "/api/v1/keepers/alpha/github-identity": identity,
-        "/api/v1/keepers/alpha/github-login": h.StreamingHttpResponse(chunks)})
-    posts: h.HttpRequests = []
+        "/api/v1/keepers/alpha/github-login": _keyboard_harness.StreamingHttpResponse(chunks)})
+    posts: _keyboard_harness.HttpRequests = []
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS)
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
-            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
+            title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"GitHub" in text]
             assert len(title_rows) == 1
-            h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
+            _keyboard_keepers.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
                                     needle=b"a-github-current")
-            h.send_and_wait(process, fd, output, b"L", b"A-device-code-visible")
+            _keyboard_harness.send_and_wait(process, fd, output, b"L", b"A-device-code-visible")
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"A-device-code-visible" not in text)
             boundary = len(output)
@@ -1058,24 +1061,24 @@ def github_workspace_withdrawal(binary: str) -> None:
             wire.publish("b-after-late")
             # Re-entering obtains a fresh, stamped B observation after the
             # server released the stale stream; it cannot recreate A's view.
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             await_screen(lambda text: b"b.settled" in text)
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"GitHub")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"GitHub")
             if b"Login scopes" not in screen(output):
-                title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                               if b"Info" in text and b"GitHub" in text]
                 assert len(title_rows) == 1
-                h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
+                _keyboard_keepers.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
                                         needle=b"b-after-late-github-current")
             await_screen(lambda text: b"b-after-late-github-current" in text)
-            assert b"A-late-device-code-forbidden" not in h.CSI_RE.sub(b"", bytes(output[boundary:]))
+            assert b"A-late-device-code-forbidden" not in _keyboard_harness.CSI_RE.sub(b"", bytes(output[boundary:]))
             assert len([p for p, _ in posts if p.startswith("/api/v1/keepers/alpha/github-login")]) == 1
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             release.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="GitHub device stream cannot restore a withdrawn workspace view",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=posts, refresh=0.5, terminal_cols=300)
@@ -1083,9 +1086,9 @@ def github_workspace_withdrawal(binary: str) -> None:
 
 def connector_workspace_withdrawal(binary: str) -> None:
     """Same IDs cannot transfer confirmation or a held two-request write."""
-    fixtures = h.connector_unbind_all_fixtures()
+    fixtures = _keyboard_keepers.connector_unbind_all_fixtures()
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
-    base_connectors = fixtures[h.CONNECTORS_PATH]
+    base_connectors = fixtures[_keyboard_keepers.CONNECTORS_PATH]
     submitted = []
     held = threading.Event()
     released = threading.Event()
@@ -1106,68 +1109,68 @@ def connector_workspace_withdrawal(binary: str) -> None:
             returned.set()
         return 200, {"ok": True}
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-        "/health?full=1": wire.health, h.CONNECTORS_PATH: connectors,
-        h.CONNECTOR_UNBIND_PATH: h.RequestHttpResponse(unbind)})
+        "/health?full=1": wire.health, _keyboard_keepers.CONNECTORS_PATH: connectors,
+        _keyboard_keepers.CONNECTOR_UNBIND_PATH: _keyboard_harness.RequestHttpResponse(unbind)})
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_channels(marker):
-            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+            title_rows = [row for row, text in _keyboard_harness.screen_rows(bytes(output)).items()
                           if b"Info" in text and b"Channels" in text]
-            assert len(title_rows) == 1, h.screen_rows(bytes(output))
-            h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
+            assert len(title_rows) == 1, _keyboard_harness.screen_rows(bytes(output))
+            _keyboard_keepers.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
             await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
                          "fresh connector targets are not visible")
         try:
-            h.resize_and_wait(process, fd, output,
+            _keyboard_harness.resize_and_wait(process, fd, output,
                 rows=45, columns=300, needle=b"MASC Dashboard",
-                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
+                controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
             open_channels(b"a-Discord")
-            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            _keyboard_harness.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
             assert submitted == [], submitted
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"a-Discord" not in text,
                          "workspace B did not withdraw A's connector projection")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             await_screen(lambda text: b"b.current" in text, "B roster not ready")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Channels")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"b-Discord")
-            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            _keyboard_harness.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
             assert submitted == [], "A's arm authorized B's first press"
             os.write(fd, b"U")
-            assert h.wait_for_fixture_event(process, fd, output, held, timeout=WAIT_SECONDS)
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held, timeout=WAIT_SECONDS)
             wire.publish("a-returned")
             await_screen(lambda text: b"MISMATCH" not in text and b"b-Discord" not in text,
                          "returning authority did not retire the held connector write")
             released.set()
-            assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             await_screen(lambda text: b"a.returned" in text, "returned roster not ready")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"\r", b"Channels")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Channels")
             open_channels(b"a-returned-Discord")
             # A current successful read is the client response barrier. Only
             # B's already-admitted first request may exist; no successor POST.
             assert len(submitted) == 1 and submitted[0][0] == "b", submitted
             assert submitted[0][1] == {"channel_id": "111", "keeper_name": "alpha"}, submitted
-            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            _keyboard_harness.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
             assert len(submitted) == 1, "stale completion armed or dispatched on returned A"
             os.write(fd, b"q")
         finally:
             released.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace switch withdraws connector arms and held sequential writes with reused IDs",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
 
 
 def tools_workspace_withdrawal(binary: str) -> None:
-    fixtures = h.skills_usage_clarity_http_fixtures()
+    fixtures = _keyboard_tools.skills_usage_clarity_http_fixtures()
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     old_started, old_release, old_returned = (threading.Event() for _ in range(3))
     new_started, new_release = threading.Event(), threading.Event()
@@ -1210,30 +1213,30 @@ def tools_workspace_withdrawal(binary: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            h.tab_until(process, fd, output, b"MASC System")
-            h.send_and_wait(process, fd, output, b"t", b"workspace_a_initial_tools")
-            assert h.wait_for_fixture_event(process, fd, output, old_started, timeout=WAIT_SECONDS)
+            _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+            _keyboard_harness.send_and_wait(process, fd, output, b"t", b"workspace_a_initial_tools")
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_started, timeout=WAIT_SECONDS)
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text, "B authority did not become current")
             assert b"workspace_a_initial_tools" not in screen(output), "old cached inventory survived withdrawal"
-            assert h.wait_for_fixture_event(process, fd, output, new_started, timeout=WAIT_SECONDS), "old pending slot blocked B read"
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, new_started, timeout=WAIT_SECONDS), "old pending slot blocked B read"
             new_release.set()
             await_screen(lambda text: b"workspace_b_current_tools" in text, "current B inventory did not load")
             old_release.set()
-            assert h.wait_for_fixture_event(process, fd, output, old_returned, timeout=WAIT_SECONDS)
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_returned, timeout=WAIT_SECONDS)
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: counts["b"] >= 2, timeout=WAIT_SECONDS), "current polling did not resume"
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
             visible = screen(output)
             assert b"workspace_b_current_tools" in visible and b"workspace_a_late_forbidden" not in visible, visible
             os.write(fd, b"q")
         finally:
             old_release.set()
             new_release.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="Tools workspace withdrawal clears cached inventory and supersedes held same-Keeper reads",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
@@ -1241,8 +1244,8 @@ def tools_workspace_withdrawal(binary: str) -> None:
 
 def verification_workspace_withdrawal(binary: str) -> None:
     """Held A rows cannot restore an approval arm on B with the same IDs."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    fixtures.update(h.verification_verdict_fixtures())
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures.update(_keyboard_approvals.verification_verdict_fixtures())
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     old_started = threading.Event()
     old_release = threading.Event()
@@ -1263,11 +1266,11 @@ def verification_workspace_withdrawal(binary: str) -> None:
             old_returned.set()
         if phase == "b":
             return 503, {"error": "verification-b-not-ready"}
-        row = h.verification_request_row("task-901")
+        row = _keyboard_approvals.verification_request_row("task-901")
         row["task_title"] = (
             "workspace-a-verification-row" if phase == "a"
             else "workspace-b-verification-row")
-        return 200, h.verification_snapshot([row])
+        return 200, _keyboard_approvals.verification_snapshot([row])
 
     def verdict(body):
         with wire.lock:
@@ -1277,27 +1280,27 @@ def verification_workspace_withdrawal(binary: str) -> None:
 
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
-                     h.VERIFICATION_QUEUE_PATH: queue,
-                     h.VERIFICATION_VERDICT_PATH: h.RequestHttpResponse(verdict)})
+                     _keyboard_approvals.VERIFICATION_QUEUE_PATH: queue,
+                     _keyboard_approvals.VERIFICATION_VERDICT_PATH: _keyboard_harness.RequestHttpResponse(verdict)})
 
     def interact(process, fd, _slave, output, _base):
         nonlocal hold_next
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            h.resize_and_wait(process, fd, output, rows=45, columns=300,
-                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
-            h.tab_until(process, fd, output, b"MASC Work")
-            h.send_and_wait(process, fd, output, b"v", b"Task Review")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=45, columns=300,
+                needle=b"MASC Dashboard", controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Work")
+            _keyboard_harness.send_and_wait(process, fd, output, b"v", b"Task Review")
             await_screen(lambda text: b"workspace-a-verification-row" in text,
                          "A verification row not visible")
-            h.send_and_wait(process, fd, output, b"a",
+            _keyboard_harness.send_and_wait(process, fd, output, b"a",
                 b"armed: approve task-901 -- same key again to send")
             assert verdicts == [], "first A press sent a verdict"
             with wire.lock:
                 hold_next = True
-            assert h.wait_for_fixture_event(process, fd, output, old_started,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_started,
                 timeout=WAIT_SECONDS), "next A verification read was not held"
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text
@@ -1306,7 +1309,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
                          "B did not withdraw A verification rows and confirmation")
             os.write(fd, b"a")
             old_release.set()
-            assert h.wait_for_fixture_event(process, fd, output, old_returned,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, old_returned,
                 timeout=WAIT_SECONDS), "A verification reply was not released"
             await_screen(lambda text: b"verification-b-not-ready" in text,
                          "fresh B verification refusal did not settle")
@@ -1315,11 +1318,11 @@ def verification_workspace_withdrawal(binary: str) -> None:
             await_screen(lambda text: b"workspace-b-verification-row" in text,
                          "B verification read did not recover")
             assert b"workspace-a-verification-row" not in screen(output)
-            h.send_and_wait(process, fd, output, b"a",
+            _keyboard_harness.send_and_wait(process, fd, output, b"a",
                 b"armed: approve task-901 -- same key again to send")
             assert verdicts == [], "B reused A confirmation for matching IDs"
             os.write(fd, b"a")
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: len(verdicts) == 1, timeout=WAIT_SECONDS)
             assert verdicts[0] == ("b-after-late", {
                 "task_id": "task-901", "verification_id": "vr-task-901",
@@ -1327,7 +1330,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"q")
         finally:
             old_release.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace verification withdrawal requires fresh rows and confirmation",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
@@ -1335,7 +1338,7 @@ def verification_workspace_withdrawal(binary: str) -> None:
 
 def task_dispatch_workspace_withdrawal(binary: str) -> None:
     """An A MCP initialization cannot create a task after B becomes current."""
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     initialized = threading.Event()
     release_initialize = threading.Event()
@@ -1357,7 +1360,7 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
                 initialized.set()
                 assert release_initialize.wait(timeout=30), "A initialization not released"
                 initialize_returned.set()
-            return h.RawHttpResponse(200, json.dumps({
+            return _keyboard_harness.RawHttpResponse(200, json.dumps({
                 "jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
                 content_type="application/json",
                 headers=(("Mcp-Session-Id", "task-session-" + phase),))
@@ -1371,34 +1374,34 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health,
                      HISTORY_PATH: wire.history, MEMORY_PATH: wire.memory,
-                     "/mcp": h.RequestHttpResponse(mcp),
+                     "/mcp": _keyboard_harness.RequestHttpResponse(mcp),
                      "/api/v1/keepers/chat/stream": (503, {"error": "synthetic chat capture"})})
 
     def interact(process, fd, _slave, output, _base):
         def await_screen(predicate, label):
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
-            assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, observer_requested,
                 timeout=WAIT_SECONDS), "startup observer did not finish initialization"
             assert not initialized.is_set(), "startup initialization satisfied the task barrier"
-            h.resize_and_wait(process, fd, output, rows=45, columns=300,
-                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            h.send_and_wait(process, fd, output, b"/task workspace-a-pending-task",
-                h.composer_showing(b"/task workspace-a-pending-task"))
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=45, columns=300,
+                needle=b"MASC Dashboard", controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"/task workspace-a-pending-task",
+                _keyboard_harness.composer_showing(b"/task workspace-a-pending-task"))
             foreground_armed.set()
-            h.send_and_wait(process, fd, output, b"\r",
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r",
                 b"creating a task for alpha: workspace-a-pending-task")
-            assert h.wait_for_fixture_event(process, fd, output, initialized,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, initialized,
                 timeout=WAIT_SECONDS), "A task initialization not held"
             wire.publish("b")
             await_screen(lambda text: b"MISMATCH local " in text and b"b.current" in text,
                          "B authority not applied while initialization held")
             release_initialize.set()
-            assert h.wait_for_fixture_event(process, fd, output, initialize_returned,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, initialize_returned,
                 timeout=WAIT_SECONDS), "A initialization response not released"
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text, "B refresh not applied")
@@ -1408,12 +1411,12 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             wire.publish("a-returned")
             await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
                          "A authority did not return")
-            h.select_keeper_row(process, fd, output, b"alpha")
-            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            h.send_and_wait(process, fd, output, b"/task workspace-a-fresh-task",
-                h.composer_showing(b"/task workspace-a-fresh-task"))
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"/task workspace-a-fresh-task",
+                _keyboard_harness.composer_showing(b"/task workspace-a-fresh-task"))
             os.write(fd, b"\r")
-            chat = h.wait_for_http_request(process, fd, output, requests,
+            chat = _keyboard_harness.wait_for_http_request(process, fd, output, requests,
                 path="/api/v1/keepers/chat/stream")
             assert created == [("a-returned", {"title": "workspace-a-fresh-task"})], created
             assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
@@ -1421,7 +1424,7 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
         finally:
             release_initialize.set()
             observer_release.set()
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="workspace withdrawal cancels pending task creation and permits a fresh task after return",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=requests, refresh=0.5, terminal_cols=300)
@@ -1439,16 +1442,16 @@ def hold_observer_before_headers(fixtures):
     def observer(_headers):
         requested.set()
         assert release.wait(timeout=30), "baseline observer was not released"
-        return h.RawHttpResponse(503, b'{"error":"baseline observer stopped"}',
+        return _keyboard_harness.RawHttpResponse(503, b'{"error":"baseline observer stopped"}',
             content_type="application/json")
 
-    fixtures["/mcp?sse_kind=observer"] = h.HeadersHttpResponse(observer)
+    fixtures["/mcp?sse_kind=observer"] = _keyboard_harness.HeadersHttpResponse(observer)
     return requested, release
 
 
 def resource_workspace_withdrawal(binary: str) -> None:
     for held_method in ("initialize", "resources/read"):
-        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
         started, release, returned = (threading.Event() for _ in range(3))
         foreground_armed = threading.Event()
@@ -1481,35 +1484,35 @@ def resource_workspace_withdrawal(binary: str) -> None:
                     "text": "resource-body-" + phase}]}
             else:
                 raise AssertionError(request)
-            return h.RawHttpResponse(200,
+            return _keyboard_harness.RawHttpResponse(200,
                 json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode(),
                 content_type="application/json", headers=headers)
 
         fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
-            "/health?full=1": wire.health, "/mcp": h.RequestHttpResponse(mcp)})
+            "/health?full=1": wire.health, "/mcp": _keyboard_harness.RequestHttpResponse(mcp)})
 
         def interact(process, fd, _slave, output, _base):
             try:
-                assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+                assert _keyboard_harness.wait_for_fixture_event(process, fd, output, observer_requested,
                     timeout=WAIT_SECONDS), "startup observer did not finish initialization"
                 assert not started.is_set(), "startup initialization satisfied the foreground barrier"
-                h.tab_until(process, fd, output, b"MASC System")
+                _keyboard_harness.tab_until(process, fd, output, b"MASC System")
                 if held_method == "initialize":
                     foreground_armed.set()
-                h.send_and_wait(process, fd, output, b"s", b"MASC System / Resources")
+                _keyboard_harness.send_and_wait(process, fd, output, b"s", b"MASC System / Resources")
                 if held_method == "resources/read":
-                    h.wait_for_output(process, fd, output, b"resource-a", start=0, timeout=WAIT_SECONDS)
+                    _keyboard_harness.wait_for_output(process, fd, output, b"resource-a", start=0, timeout=WAIT_SECONDS)
                     foreground_armed.set()
                     os.write(fd, b"\r")
-                assert h.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
+                assert _keyboard_harness.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
                 wire.publish("b")
-                assert h.wait_for_fixture_state(process, fd, output,
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
-                assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                h.send_and_wait(process, fd, output, b"r", b"resource-b")
-                h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
+                assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
+                _keyboard_harness.send_and_wait(process, fd, output, b"r", b"resource-b")
+                _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
                     assert [(phase, method) for phase, method in calls
@@ -1518,7 +1521,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
             finally:
                 release.set()
                 observer_release.set()
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description=f"Resource {held_method} ownership is withdrawn before same-URI B recovery",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             refresh=0.5, terminal_cols=300)
@@ -1526,7 +1529,7 @@ def resource_workspace_withdrawal(binary: str) -> None:
 
 
 def runtime_parameter_workspace_withdrawal(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
     current_read = threading.Event()
     writes = []
@@ -1546,39 +1549,39 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
 
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
         "/health?full=1": wire.health, "/api/v1/runtime/params": parameters,
-        "/api/v1/runtime/params/set": h.RequestHttpResponse(write),
-        "/api/v1/runtime/params/clear": h.RequestHttpResponse(write)})
+        "/api/v1/runtime/params/set": _keyboard_harness.RequestHttpResponse(write),
+        "/api/v1/runtime/params/clear": _keyboard_harness.RequestHttpResponse(write)})
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\r", b"Keepers")
-        h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
-        h.send_and_wait(process, fd, output, b"/settings", b"/settings")
-        h.send_and_wait(process, fd, output, b"\r", b"original_a_parameter")
-        h.send_and_wait(process, fd, output, b"\r", b"editing original_a_parameter")
+        _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:detail")
+        _keyboard_harness.send_and_wait(process, fd, output, b"/settings", b"/settings")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"original_a_parameter")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"editing original_a_parameter")
         wire.publish("b")
-        assert h.wait_for_fixture_state(process, fd, output,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
         assert b"original_a_parameter" not in screen(output), screen(output)
         os.write(fd, b"\r")
         # Re-read B explicitly. Its failure cannot authorize retained A input.
         os.write(fd, b"r")
-        assert h.wait_for_fixture_event(process, fd, output, current_read, timeout=WAIT_SECONDS)
-        h.drain_until_quiet(process, fd, output)
+        assert _keyboard_harness.wait_for_fixture_event(process, fd, output, current_read, timeout=WAIT_SECONDS)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert writes == [], "parameters sent an A-derived write after withdrawal"
         os.write(fd, b"q")
-    h.run_terminal_scenario(binary,
+    _keyboard_harness.run_terminal_scenario(binary,
         description="Workspace withdrawal retires parameter edits before successor writes",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
 
 
-def live_identity_before_chat_and_lifecycle(binary: str) -> None:
+def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None = None) -> None:
     # No refresh after readiness: the client retains A while the same endpoint
     # reports B only to the dispatch-time health probe.
     for operation in ("chat", "pause", "boot-recovery"):
-        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
         if operation == "boot-recovery":
             row = fixtures[ROSTER_PATH][1]["keepers"][0]
             row.update(keepalive_running=False, status="idle", phase="stopped")
@@ -1588,7 +1591,8 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
         writes = []
         def health():
             reply = wire.health()
-            if armed.is_set(): probes.set()
+            if armed.is_set():
+                probes.set()
             return reply
         def post(path, body):
             writes.append((path, body))
@@ -1600,24 +1604,65 @@ def live_identity_before_chat_and_lifecycle(binary: str) -> None:
                          MEMORY_PATH:wire.memory, "/health":health, "/health?full=1":health})
         for path in ("/api/v1/keepers/chat/stream", "/api/v1/keepers/chat",
                      "/api/v1/keepers/alpha/boot", "/api/v1/keepers/alpha/directive"):
-            fixtures[path] = h.RequestHttpResponse(lambda body, path=path: post(path, body))
+            fixtures[path] = _keyboard_harness.RequestHttpResponse(lambda body, path=path: post(path, body))
+        def capture(output, label):
+            if captures is None:
+                return
+            captures.mkdir(parents=True, exist_ok=True)
+            prefix = captures / f"live-identity-{operation}-{label}"
+            prefix.with_suffix(".pty").write_bytes(bytes(output))
+            prefix.with_suffix(".txt").write_bytes(screen(output))
+            with wire.lock:
+                events = list(wire.events)
+            prefix.with_suffix(".json").write_text(json.dumps({
+                "operation": operation,
+                "events": events,
+                "writes": [{"path": path, "body_hex": body.hex()}
+                           for path, body in writes],
+            }, indent=2) + "\n")
         def interact(process, fd, _slave, output, _base):
-            h.tab_until(process, fd, output, b"MASC Keepers")
-            h.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             if operation == "chat":
-                h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-                h.send_and_wait(process, fd, output, b"private-A-message", h.composer_showing(b"private-A-message"))
+                _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                _keyboard_harness.send_and_wait(process, fd, output, b"private-A-message", _keyboard_harness.composer_showing(b"private-A-message"))
             armed.set()
-            if operation != "boot-recovery": wire.publish("b")
+            if operation != "boot-recovery":
+                wire.publish("b")
             os.write(fd, b"\r" if operation == "chat" else b"p")
-            assert h.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: b"Workspace identity changed or is unavailable" in screen(output), timeout=WAIT_SECONDS)
-            h.drain_until_quiet(process, fd, output)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            capture(output, "refused")
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
+            if operation == "chat":
+                # Main retires the chat pane on authority withdrawal. The
+                # draft must return to its editable composer when A returns.
+                assert b"MASC Keepers" in screen(output), screen(output)
+                assert "▸ chat".encode() not in screen(output), screen(output)
+                assert writes == [], "leaving the refused draft dispatched chat"
+                wire.publish("a-returned")
+                os.write(fd, b"r")
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"a.returned" in screen(output)
+                        and b"workspace identity is unverified" not in screen(output),
+                    timeout=WAIT_SECONDS), "original workspace roster did not return"
+                with wire.lock:
+                    assert any(event["event"] == "roster" and event["phase"] == "a-returned"
+                               for event in wire.events), "returning to A did not read its roster"
+                _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+                _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: _keyboard_harness.composer_showing(b"private-A-message").search(screen(output)) is not None,
+                    timeout=WAIT_SECONDS), "returning to A lost its refused composer draft"
+                capture(output, "a-restored")
+                assert writes == [], "returning to A automatically resent the refused draft"
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                assert writes == [], "leaving the restored draft dispatched chat"
             os.write(fd, b"q")
-        h.run_terminal_scenario(binary,
+        _keyboard_harness.run_terminal_scenario(binary,
             description="Live dispatch identity refuses cached workspace " + operation,
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             refresh=3600, terminal_cols=TERMINAL_COLUMNS)
@@ -1640,7 +1685,7 @@ if __name__ == "__main__":
     resource_workspace_withdrawal(binary)
     runtime_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
-    live_identity_before_chat_and_lifecycle(binary)
+    live_identity_before_chat_and_lifecycle(binary, captures)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     schedule_editor_workspace_change(binary)

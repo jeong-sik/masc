@@ -73,15 +73,15 @@ let sanitize_event (value : event) =
     tags = List.map Safe_ops.sanitize_text_utf8 value.tags;
   }
 
-(* P3-4: trace the upstream emitter when sanitize_event actually repairs
-   invalid UTF-8.  We compare field values with physical equality (==)
+(* Trace the upstream emitter when sanitize_event repairs invalid UTF-8
+   or replaces disallowed control characters. Compare physical equality (==)
    to detect whether sanitization changed any bytes.  sanitize_text_utf8
    and sanitize_json_utf8 both return the original object unchanged when
    no repair is needed, so == is a reliable O(1) change detector for
    string and json values.
    Note: entity_ref is a record and Option.map / List.map always allocate
    new wrappers, so actor/subject/tags are compared field-by-field.
-   This surfaces "which kind of event / actor had invalid UTF-8 at the emit
+   This surfaces "which kind of event / actor needed text repair at the emit
    site" without requiring post-hoc forensics on the read-path repair log.
    Log fires once per (kind × actor) via a new call since the Warn channel
    has no built-in dedup; operators should correlate with the Otel_metric_store
@@ -120,8 +120,8 @@ let sanitize_event_traced (value : event) : event =
       | None -> "<none>"
     in
     Log.Misc.warn
-      "[activity_graph] UTF-8 repaired at emit kind=%s actor=%s \
-       — upstream emitter sent invalid UTF-8; trace the caller that \
+      "[activity_graph] text repaired at emit kind=%s actor=%s \
+       — upstream text contained invalid UTF-8 or disallowed control characters; trace the caller that \
        constructs payloads for this (kind, actor) pair"
       value.kind actor_str
   end;

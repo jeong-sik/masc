@@ -37,8 +37,10 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 ```
 
 위 명령은 이미 빌드된 바이너리에 사용합니다. 코딩 에이전트는 로컬 빌드 대신
-허용된 `release/v*` 브랜치 또는 태그에서 `Release` workflow의 `workflow_dispatch`로
-바이너리와 증거를 생성합니다.
+허용된 `release/v*` 브랜치 또는 `v*` 태그에서
+[`Release Candidate Verification`](../.github/workflows/release-candidate.yml)의
+`workflow_dispatch`로 바이너리와 증거를 생성합니다. 기존 태그를 대상으로 하는
+[`Release`](../.github/workflows/release.yml)는 검증된 RC 산출물을 가져와 게시합니다.
 
 ## One-commit candidate verification
 
@@ -55,27 +57,30 @@ release 브랜치로 치환합니다. 현재 workflow는 `release/v*` 브랜치 
 gh workflow run release-candidate.yml --ref release/vX.Y.Z
 ```
 
-이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 전체 `Test`, 4개 플랫폼 `Release` 설치
+이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 전체 `Test`, 4개 플랫폼 `release-build.yml` 설치
 검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
-입력은 없습니다. 기존
-`test/ci-known-failures.txt` 정책은 그대로 적용되므로 전체 Test 통과를
-모든 알려진 결함의 해결로 해석하지 않습니다.
+입력은 없습니다. 전체 Test는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
+판정합니다. 실패를 허용하는 목록이나 별도 재컴파일 경로는 없습니다.
 
 `candidate-verification-<sha>-attempt-<n>` artifact는 커밋과 세 결과를 기록합니다.
 실패·취소·건너뜀은 성공으로 기록하지 않습니다. 재실행 시 해당 job의
-중간 자산을 교체하며, 최종 배포 묶음과 receipt는 attempt별로 보존합니다. 공개 Release는 생성하지
+중간 자산을 교체합니다. 배포 묶음은 run별로 보존해 실패한 job만 재실행해도
+이전에 성공한 설치 산출물을 사용하며, receipt는 attempt별로 보존합니다. 공개 Release는 생성하지
 않습니다. 공개 게시에는 기존 버전 태그를 대상으로 하는 명시적 `publish=true` dispatch와
-전체 필수 검증 성공이 필요합니다. 새 커밋을 태그할 때는
+해당 커밋의 최신 성공 Full RC를 지정하는 `rc_run_id`가 필요합니다.
+게시 단계는 최신 RC attempt의 검증 receipt와 같은 run의 성공한 배포 묶음을 내려받아 SHA-256을 확인하고,
+검증된 파일과 RC에서 길이·날짜를 검사한 릴리즈 본문을 그대로 게시합니다. 빌드와 테스트를 반복하지 않습니다. 새 커밋을 태그할 때는
 그 커밋으로 다시 실행해야 합니다. 과거 freeze 브랜치의 초록 결과를
 현재 main의 증거로 재사용하지 않습니다.
 
 ## Workflow Contract
 
-- [`Release`](../.github/workflows/release.yml)는 macOS ARM64/x64와 Linux ARM64/x64를 모두 빌드한다. 각 job은 `release-evidence-<arch>.md`와 raw captures를 `masc-<arch>` Actions artifact에 업로드한다.
+- [`Release build and installation`](../.github/workflows/release-build.yml)는 macOS ARM64/x64와 Linux ARM64/x64를 모두 빌드한다. 각 job은 `release-evidence-<arch>.md`와 raw captures를 `masc-<arch>` Actions artifact에 업로드한다.
 - 같은 job은 `scripts/install-smoke.sh dist <arch>`로 checksum 기반 설치, 설정 seed, 설치된 서버의 health와 대시보드를 검증한다. Linux는 새 Ubuntu 24.04 container에서도 반복한다.
-- 기본 `workflow_dispatch`는 Actions artifact를 생성한다. 기존 `v*` 태그에서 `publish=true`로 명시적으로 요청한 실행은 전체 필수 검증 성공 후 공개 Release 자산과 `SHA256SUMS`를 게시한다. 태그 push 자체는 자동 게시를 시작하지 않는다.
+- [`Release`](../.github/workflows/release.yml)는 기존 `v*` 태그에서 `rc_run_id`와 `publish=true`를 받아 검증된 RC 자산과 `SHA256SUMS`를 게시한다. `publish=false`는 같은 검증과 다운로드만 수행한다. 태그 push 자체는 자동 게시를 시작하지 않는다.
+- 실패한 RC, 다른 커밋, 더 최신 RC가 있는 경우, 만료 또는 누락된 artifact, 체크섬 불일치는 게시를 거부한다. 배포 묶음이 만료됐다면 같은 커밋의 RC를 다시 검증해야 한다.
 - 실제 발행은 출시 담당이 현재 운영자 결정, workflow 활성 상태와 고정 SHA의 검증을 확인한 뒤 실행한다. 이 문서의 후보 검증 명령은 활성화·태그·발행을 요청하거나 승인하지 않는다.
-- 일반 `CI`의 main push에서 release evidence artifact가 생성된다고 가정하지 않는다. 증거는 검증할 커밋의 `Release` 실행에서 가져온다.
+- 일반 `CI`의 main push에서 release evidence artifact가 생성된다고 가정하지 않는다. 증거는 검증할 커밋의 `Release Candidate Verification` 실행에서 가져온다.
 - release evidence는 docs-only narrative가 아니라, 실제 build artifact에서 재생성 가능한 산출물이어야 한다.
 
 ## What This Proves

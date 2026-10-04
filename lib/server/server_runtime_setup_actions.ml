@@ -97,7 +97,7 @@ let source_template ~sw ~pending ~workspace config request =
   let endpoint_val = match endpoint with Some v -> v | None -> `Null in
   let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
-  let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
+  let metadata = if http then List.filter (fun (key,_) -> key="provider_kind") selected else [] in
   let* account = match List.assoc_opt "account_ref" request with
     | None -> Ok None
     | Some (`String reference) when not http && not (List.mem_assoc "api_key" request) ->
@@ -463,7 +463,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,provider_id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let* reported_models=match choice with
@@ -472,7 +472,12 @@ let save ~binary ~base_path request =
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
-          let* spec=model_spec ~reported_models template model in let* tail=specs tail in Ok (spec::tail) in
+          let* spec=model_spec ~reported_models template model in
+          let spec = match declared_provider config provider_id with
+            | None -> spec
+            | Some provider ->
+              (match Runtime_setup_spec.for_provider spec provider with Some spec -> spec | None -> spec) in
+          let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
         let* tail=prepare tail in Ok (models::tail) in
     let* prepared=prepare connections in

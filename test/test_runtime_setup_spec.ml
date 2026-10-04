@@ -1,17 +1,24 @@
-let test_existing_installer_contract () =
-  let rows = Yojson.Safe.from_file "fixtures/runtime-setup-spec-parity.json" |> Yojson.Safe.Util.to_list in
-  List.iter (fun row ->
+let test_installer_declarations () =
+  let specs = Yojson.Safe.from_file "fixtures/runtime-setup-specs.json" |> Yojson.Safe.Util.to_list in
+  List.iter (fun json ->
     let open Yojson.Safe.Util in
-    let spec = match Runtime_setup_spec.of_json (row |> member "spec") with
+    let spec = match Runtime_setup_spec.of_json json with
       | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
     let rendered = Runtime_setup_spec.render spec in
-    Alcotest.check Alcotest.string "same persistent provider/model identity"
-      (row |> member "runtime_id" |> to_string) rendered.runtime_id;
-    Alcotest.check Alcotest.string "same appended runtime fragment"
-      (row |> member "runtime_toml" |> to_string) rendered.runtime_toml;
     let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id) ^ "\n" ^ rendered.runtime_toml in
     match Runtime_toml.parse_string whole with
-    | Ok _ -> () | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML") rows
+    | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML"
+    | Ok config ->
+      let model = List.hd config.Runtime_schema.models in
+      let binding = List.hd config.bindings in
+      Alcotest.check Alcotest.string "selected API model survives rendering"
+        (json |> member "model" |> to_string) model.api_name;
+      Alcotest.check (Alcotest.option Alcotest.int) "declared context survives rendering"
+        (Some (json |> member "max_context" |> to_int)) model.max_context;
+      Alcotest.check Alcotest.string "binding uses the account connection"
+        (Runtime_setup_spec.provider_id spec) binding.provider_id;
+      Alcotest.check Alcotest.string "rendered identity resolves to its binding"
+        rendered.runtime_id (Runtime_schema.binding_key binding)) specs
 let test_rejects_invalid_transport_claims () =
   let valid = {|{"choice":"codex","model":"m","max_context":1024,"tools":true,"streaming":true}|} in
   let fields = match Yojson.Safe.from_string valid with `Assoc fields -> fields | _ -> assert false in
@@ -157,10 +164,8 @@ let test_codex_account_home_preserved () =
       "{" ^ base ^ {|,"account_home":"accounts/a"|} ^ "}"
     ; "an HTTP connection cannot carry an account home",
       {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
-(* The operator reads this id in the TUI and in runtime.toml, so it names the
-   client and the model. The same short hash follows each and keeps one id
-   per answer set; a character a model id does not admit becomes one '-',
-   counted in characters rather than UTF-8 bytes. *)
+(* Human-readable prefixes keep the client and model recognizable. The
+   hashes distinguish account connections and model declarations separately. *)
 let test_id_names_the_client_and_the_model () =
   let render model =
     let input = Printf.sprintf
@@ -187,7 +192,8 @@ let test_id_names_the_client_and_the_model () =
   Alcotest.check Alcotest.bool "a short hash follows the client" true
     (String.length provider_hash = 8
      && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) provider_hash);
-  Alcotest.check Alcotest.string "the same hash follows the model" provider_hash model_hash;
+  Alcotest.check Alcotest.bool "a model declaration has its own identity" true
+    (String.length model_hash = 8 && provider_hash <> model_hash);
   let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String id) ^ "\n" ^ rendered.runtime_toml in
   Alcotest.check Alcotest.bool "the rendered connection parses as configuration" true
     (Result.is_ok (Runtime_toml.parse_string whole))
@@ -215,7 +221,7 @@ let test_image_declaration_survives_native_save () =
 
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "image declaration survives native save" `Quick test_image_declaration_survives_native_save;
-  Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
+  Alcotest.test_case "installer declarations survive rendering" `Quick test_installer_declarations;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;

@@ -25,7 +25,17 @@ val setup_exact_body_timeout_s : float
     exact-output lanes at: on a connection it renders, and on an existing
     provider [--setup-lanes] selects that declares none (#38779). *)
 val model_id : t -> string
-val render : t -> rendered
+val provider_id : t -> string
+(** Connection identity, shared by every model and context variant using the
+    same transport and account. Model declarations do not change it. *)
+val for_provider : t -> Runtime_schema.provider -> t option
+(** Reuse a parsed, configured provider only when its protocol, transport,
+    credential and account selection match this specification. A new account
+    reference or changed connection returns [None]. This is not a JSON field. *)
+val render : ?include_provider:bool -> ?wizard_default:bool -> t -> rendered
+(** [include_provider=false] appends a model to an already declared connection.
+    [wizard_default=false] avoids adding a second installation default on that
+    provider. Standalone rendering includes both declarations by default. *)
 val render_json : rendered -> Yojson.Safe.t
 (** Private native CLI/Python ABI only: TOML may contain credential paths.
     Web receipts must project only safe runtime/model identities. *)

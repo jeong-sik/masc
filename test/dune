@@ -8060,7 +8060,7 @@
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
  (libraries alcotest yojson masc.runtime)
- (deps fixtures/runtime-setup-spec-parity.json))
+ (deps fixtures/runtime-setup-specs.json))
 (test
  (name test_runtime_setup_batch)
  (modules test_runtime_setup_batch)

@@ -204,10 +204,20 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
       List.find_map (fun (lane:Runtime_schema.lane_decl) ->
         if String.equal lane.id lane_id then List.nth_opt lane.candidate_ids 0 else None)
         parsed.lane_decls in
-  let rendered = List.map Runtime_setup_spec.render specs in
-  let additions = List.fold_left (fun acc (row:Runtime_setup_spec.rendered) ->
+  let providers = List.map (fun (provider:Runtime_schema.provider) -> provider.id) parsed.providers in
+  let bound_providers = List.map (fun (binding:Runtime_schema.binding) -> binding.provider_id) parsed.bindings in
+  (* One account has one provider section, even when this save selects several
+     models or context variants. Subsequent saves append only their new model
+     and binding; existing provider settings remain the operator's values. *)
+  let _, _, additions = List.fold_left (fun (providers, bound_providers, acc) spec ->
+    let provider = Runtime_setup_spec.provider_id spec in
+    let row = Runtime_setup_spec.render
+        ~include_provider:(not (List.mem provider providers))
+        ~wizard_default:(not (List.mem provider bound_providers)) spec in
     if List.mem row.runtime_id existing || List.exists (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id=row.runtime_id) acc
-    then acc else acc @ [row]) [] rendered in
+    then providers, bound_providers, acc
+    else provider :: providers, provider :: bound_providers, acc @ [row])
+      (providers, bound_providers, []) specs in
   let available = existing @ List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id) additions in
   if not (List.for_all (fun id -> List.mem id available) selected) then Error Invalid_selection else
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in

@@ -77,11 +77,11 @@ elif args[0]=='runtime-verify':
 else: raise AssertionError(args)
 |}); Unix.chmod binary 0o700;
   test base runtime binary (Eio.Stdenv.net env)))
-let request base source =
+let request ?(context=1024) base source =
   let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
   `Assoc ["revision",`String revision;
     "connections",`List [`Assoc ["source",source;"models",`List [
-      `Assoc ["id",`String "selected-model";"context",`Int 1024;"streaming",`Bool true]]]];
+      `Assoc ["id",`String "selected-model";"context",`Int context;"streaming",`Bool true]]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]]
 let source fields = `Assoc (["integration_id",`String "vllm";"endpoint",`String "http://127.0.0.1:19001/v1"] @ fields)
 let test_private_key () = fixture (fun base runtime binary _net ->
@@ -111,6 +111,26 @@ let test_forbidden_reference () = fixture (fun base runtime binary _net ->
       (Actions.save ~binary ~base_path:base (request base (source fields)) = Error Actions.Invalid_request))
     [["account_home",`String "/private/home"];["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
   Alcotest.check Alcotest.string "invalid request preserves configuration" before (In_channel.with_open_bin runtime In_channel.input_all))
+let test_existing_http_context_variant () = fixture (fun base runtime binary _net ->
+  let initial = get (Actions.save ~binary ~base_path:base
+    (request base (source ["api_key", `String "fixture-key"]))) in
+  let open Yojson.Safe.Util in
+  let initial_id = initial |> member "runtime_id" |> to_string in
+  let before = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let first_binding = List.find (fun binding -> Runtime_schema.binding_key binding=initial_id) before.bindings in
+  let provider_id = first_binding.provider_id in
+  let receipt = get (Actions.save ~binary ~base_path:base
+    (request ~context:2048 base (`Assoc ["integration_id", `String provider_id]))) in
+  let added_id = receipt |> member "runtime_id" |> to_string in
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let added = List.find (fun binding -> Runtime_schema.binding_key binding=added_id) after.bindings in
+  Alcotest.check Alcotest.string "HTTP variant uses the selected provider" provider_id added.provider_id;
+  Alcotest.check Alcotest.int "HTTP provider is not duplicated on a later save"
+    (List.length before.providers) (List.length after.providers);
+  Alcotest.check (Alcotest.option Alcotest.int) "HTTP variant preserves its context window"
+    (Some 2048) added.max_context;
+  Alcotest.check Alcotest.bool "both context variants remain available" true
+    (initial_id<>added_id && List.exists (fun binding -> Runtime_schema.binding_key binding=initial_id) after.bindings))
 let test_native_client_metadata () = fixture (fun base _runtime binary net ->
   Eio.Switch.run (fun sw ->
     let json=get (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "codex"])) in
@@ -157,7 +177,7 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
   Unix.mkdir account_home 0o700;
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel (Printf.sprintf
-      "\n[providers.private_codex]\nprotocol = \"codex-app-server\"\ncommand = \"selected-codex\"\naccount-home = %S\n"
+      "\n[providers.private_codex]\ndisplay-name = \"My Codex account\"\nprotocol = \"codex-app-server\"\ncommand = \"selected-codex\"\nis-non-interactive = true\nmax-context = 4096\naccount-home = %S\n"
       account_home));
   let config = Runtime_toml.parse_file runtime |> Result.get_ok in
   let public = Runtime_wizard_inventory.to_json config in
@@ -169,8 +189,8 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
   Alcotest.check Alcotest.bool "public inventory keeps the account path private" false
     (String_util.contains_substring (Yojson.Safe.to_string public) account_home);
   Eio.Switch.run (fun sw ->
-    let request = `Assoc ["integration_id",`String "private_codex"] in
-    let result = get (Actions.discover ~binary ~sw ~net ~base_path:base request) in
+    let selected_source = `Assoc ["integration_id",`String "private_codex"] in
+    let result = get (Actions.discover ~binary ~sw ~net ~base_path:base selected_source) in
     let args = Yojson.Safe.from_file (Filename.concat base "codex-args.json")
       |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
     Alcotest.check (Alcotest.list Alcotest.string) "configured selected account reaches native discovery"
@@ -188,7 +208,7 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
       |> Runtime_setup_batch.revision_to_string in
     let receipt = get (Actions.save ~binary ~base_path:base (`Assoc [
       "revision",`String revision;
-      "connections",`List [`Assoc ["source",request;"models",`List [`Assoc [
+      "connections",`List [`Assoc ["source",selected_source;"models",`List [`Assoc [
         "id",`String model_id;"context",fresh_model |> member "context";"streaming",`Bool true]]]];
       "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]])) in
     let runtime_id = receipt |> member "runtime_id" |> to_string in
@@ -204,10 +224,31 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
     let saved = Runtime_toml.parse_file runtime |> Result.get_ok in
     let binding = List.find (fun binding -> Runtime_instance.id_of_binding binding = runtime_id) saved.bindings in
     let provider = List.find (fun (provider:Runtime_schema.provider) -> provider.id = binding.provider_id) saved.providers in
-    Alcotest.check (Alcotest.option Alcotest.string) "new saved provider retains that same account"
+    Alcotest.check Alcotest.string "new model remains on the selected configured provider"
+      "private_codex" provider.id;
+    Alcotest.check Alcotest.string "configured account display name is preserved"
+      "My Codex account" provider.display_name;
+    Alcotest.check (Alcotest.option Alcotest.int) "variant context overrides the provider default"
+      (Some 272000) binding.max_context;
+    Alcotest.check (Alcotest.option Alcotest.string) "saved provider retains that same account"
       (Some account_home) provider.account_home;
     Alcotest.check Alcotest.bool "save receipt keeps the account path private" false
-      (String_util.contains_substring (Yojson.Safe.to_string receipt) account_home)))
+      (String_util.contains_substring (Yojson.Safe.to_string receipt) account_home);
+    let new_home = Filename.concat base "new-codex-account" in
+    Unix.mkdir new_home 0o700;
+    let reference = Runtime_setup_accounts.register_home ~workspace:base
+        ~integration_id:"private_codex" ~cli_path:"selected-codex" ~account_home:new_home
+      |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+    let changed = get (Actions.save ~binary ~base_path:base (request base
+      (`Assoc ["integration_id", `String "private_codex"; "account_ref", `String reference]))) in
+    let changed_id = changed |> member "runtime_id" |> to_string in
+    let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+    let added_binding = List.find (fun binding -> Runtime_instance.id_of_binding binding=changed_id) after.bindings in
+    Alcotest.check Alcotest.bool "a new account cannot overwrite the selected provider" true
+      (added_binding.provider_id<>"private_codex");
+    let retained = List.find (fun (provider:Runtime_schema.provider) -> provider.id="private_codex") after.providers in
+    Alcotest.check (Alcotest.option Alcotest.string) "the previous account home remains unchanged"
+      (Some account_home) retained.account_home))
 let test_configured_muse_readiness_inventory () = fixture (fun _base runtime _binary _net ->
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel {|
@@ -405,14 +446,14 @@ let test_bound_models_follow_account_home () = fixture (fun base runtime binary 
   let home = Filename.concat base "shared-codex-account" in
   let other_home = Filename.concat base "other-codex-account" in
   Unix.mkdir home 0o700; Unix.mkdir other_home 0o700;
-  let add model account_home =
+  let add ?(include_provider=true) model account_home =
     let spec = Runtime_setup_spec.of_json (`Assoc [
       "choice",`String "codex"; "model",`String model;
       "max_context",`Int 32768; "tools",`Bool true; "streaming",`Bool true;
       "command",`String "codex"; "account_home",`String account_home]) |> Result.get_ok in
-    Runtime_setup_spec.render spec in
+    Runtime_setup_spec.render ~include_provider ~wizard_default:include_provider spec in
   let first = add "fresh-model" home in
-  let second = add "second-model" home in
+  let second = add ~include_provider:false "second-model" home in
   let other = add "other-model" other_home in
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     List.iter (fun rendered -> output_string channel ("\n" ^ rendered.Runtime_setup_spec.runtime_toml))
@@ -450,6 +491,7 @@ let test_status_of_error () =
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
+  Alcotest.test_case "configured HTTP account accepts another context variant" `Quick test_existing_http_context_variant;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
   Alcotest.test_case "malformed advertised reasoning efforts refuse discovery" `Quick test_malformed_client_reasoning_efforts;

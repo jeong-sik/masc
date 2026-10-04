@@ -1,6 +1,6 @@
 {
-  "direct_base": "9f26f8fba211112ff10a8d481fa8bd9e35f96468",
-  "final_source_identity": "manifest.json hashes; final source commit follows this evidence preparation",
+  "direct_base": "b80555d8ce98e5c74f2a78257f716a266665877e",
+  "final_source_identity": "manifest.json hashes; source unchanged after qualified merge commit",
   "regressions": [
     {
       "product": "543b080c268ada1d9f96346bd5b0b92406baa250",
@@ -36,10 +36,10 @@
     }
   ],
   "final_tests": {
-    "files": 10,
-    "passed": 252,
+    "files": 14,
+    "passed": 434,
     "failed": 0,
-    "log": "focused.txt"
+    "log": "focused.txt.gz"
   },
   "typecheck_exit": 0,
   "scoped_lint_exit": 0,
@@ -51,5 +51,14 @@
     "unexpected_routes": 0,
     "result": "browser-result.json"
   },
-  "limits": "Synthetic HTTP and mocked API values, not a real backend, actual worker/provider, native TUI, full SPA bootstrap, CI, main integration or release. F8 continuous application tracking is separate."
+  "limits": "Synthetic HTTP and mocked API values, not a real backend, actual worker/provider, native TUI, full SPA bootstrap, CI, main integration or release. F8 continuous application tracking is separate.",
+  "qualified_source_commit": "443b017eecf6589d9577a5db12e1fc0f270cc242",
+  "previous_qualification": {
+    "head": "586d3bb4dd92d331b37d5679dd5325d023fad67c",
+    "base": "9f26f8fba211112ff10a8d481fa8bd9e35f96468",
+    "tests": 252,
+    "files": 10,
+    "status": "historical; not reused for the changed parent"
+  },
+  "parent_recheck": "Raw save now requires the saved source path; setup-resume completion clears exact activity errors. Read the changed API/editor/activity consumers and reran the focused union and browser. Native parent scope was not exercised."
 }

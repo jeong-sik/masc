@@ -66,11 +66,12 @@ let machine_publication = function
 
 let snapshot ~config =
   let exact = Exact_projection.observe () in
+  let browser_activity = Server_browser_configuration.activity_snapshot () in
   let builtin = Lane_id.all_of_builtin |> List.map (fun lane ->
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
       | Lane_id.Browser id ->
-          Browser id,(match Browser_lane.inventory_observation id with
+          Browser id,(match Browser_lane.inventory_observation ~observed_activity:(browser_activity id) id with
             | {Browser_lane.activity; backend=Live_clients count} -> Browser_clients (activity,count)
             | {Browser_lane.activity; backend=Executor_registered registered} -> Browser_executor (activity,registered))
       | Lane_id.Machine id -> Machine id,Machine_state (match id with

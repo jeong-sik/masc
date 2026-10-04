@@ -160,6 +160,38 @@ def run(binary):
         interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
     print('Exact activity focused PTY: PASS (synthetic HTTP)')
 
+def run_compact_quit(binary):
+    server = Server()
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[RAW] = h.RequestHttpResponse(server.raw)
+    fixtures[PREVIEW] = h.RequestHttpResponse(server.preview)
+    fixtures[lanes.LANE_INVENTORY_PATH] = h.RequestHttpResponse(server.inventory)
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b'go keepers', b'MASC Keepers')
+        h.select_keeper_row(process, fd, output, b'alpha')
+        h.palette_go(process, fd, output, b'go lanes', b'All lanes')
+        select(process, fd, output, 'exact/librarian_exact', b'Librarian')
+        h.send_and_wait(process, fd, output, b' ', b'Current file: On')
+        h.send_and_wait(process, fd, output, b' ', b'Activity draft: Off')
+        h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                          needle=b'terminal too small')
+        os.write(fd, b'q')
+        h.drain_until_quiet(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=32, columns=120,
+                          needle=b'MASC Exact activity')
+        assert b'Activity draft: Off' in h.screen_text(bytes(output)), 'compact quit closed the hidden Exact draft'
+        assert server.previews == 0 and not server.saves, 'compact quit dispatched a write'
+        h.resize_and_wait(process, fd, output, rows=12, columns=120,
+                          needle=b'terminal too small')
+        os.write(fd, b'q')
+        assert process.wait(timeout=3) == 0, 'second compact q did not finish the visible quit flow'
+
+    h.run_terminal_scenario(binary, description='Compact overlay owns Exact quit',
+        interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
+    print('Exact compact quit PTY: PASS (synthetic HTTP)')
+
 
 if __name__ == '__main__':
     run(sys.argv[1])
+    run_compact_quit(sys.argv[1])

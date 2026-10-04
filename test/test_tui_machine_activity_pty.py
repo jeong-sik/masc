@@ -43,6 +43,7 @@ class Server:
                              'source_text': self.text, 'source_revision': revision(self.text)}
             request = json.loads(body)
             self.saves.append(request)
+            assert request['expected_source_path'] == PATH, 'save lost its observed configuration path'
             if request['expected_source_revision'] != revision(self.text):
                 return 409, {'code': 'revision_conflict', 'error': 'file changed', 'current': {
                     'source_path': PATH, 'source_text': self.text, 'source_revision': revision(self.text)}}
@@ -65,6 +66,7 @@ class Server:
             configured = tomllib.loads(self.text)['machines']
             observed = self.msx_observed
         status, value = lanes.lane_inventory_response()
+        assert isinstance(value, dict) and isinstance(value.get('rows'), list)
         for row in value['rows']:
             if row['selection']['kind'] == 'machine':
                 machine = row['selection']['machine']
@@ -219,8 +221,65 @@ def run_compact_quit(binary):
     print('Machine compact quit PTY: PASS (synthetic HTTP)')
 
 
+
+def run_workspace_boundary(binary, switch_after):
+    server = Server()
+    fixtures = h.keeper_runtime_http_fixtures()
+    armed = threading.Event()
+    switched = threading.Event()
+    inventory_after_switch = []
+
+    def foreign_identity(_body):
+        return h.RawHttpResponse(200, json.dumps({'paths': {
+            'effective_base_path': '/fixture/foreign-workspace',
+            'effective_masc_root': '/fixture/foreign-workspace/.masc',
+        }}).encode(), content_type='application/json')
+
+    def switch_workspace():
+        fixtures['/health'] = h.RequestHttpResponse(foreign_identity)
+        fixtures['/health?full=1'] = h.RequestHttpResponse(foreign_identity)
+        switched.set()
+
+    def raw(body):
+        result = server.raw(body)
+        if armed.is_set() and not body and switch_after == 'document':
+            switch_workspace()
+        return result
+
+    def inventory(body):
+        if switched.is_set():
+            inventory_after_switch.append(True)
+        result = server.inventory(body)
+        if armed.is_set() and switch_after == 'inventory':
+            switch_workspace()
+        return result
+
+    fixtures[RAW] = h.RequestHttpResponse(raw)
+    fixtures[lanes.LANE_INVENTORY_PATH] = h.RequestHttpResponse(inventory)
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b'go lanes', b'All lanes')
+        select(process, fd, output, 'msx')
+        h.drain_until_quiet(process, fd, output)
+        armed.set()
+        start = len(output)
+        h.send_and_wait(process, fd, output, b' ', b'MASC Machine activity')
+        h.drain_until_quiet(process, fd, output)
+        assert switched.is_set(), 'fixture never switched workspace'
+        if switch_after == 'document':
+            assert not inventory_after_switch, 'inventory dispatched after document changed workspace'
+        assert b'Current file: On' not in bytes(output[start:]), 'mixed-workspace document accepted'
+        assert not server.saves, 'workspace change dispatched a write'
+        os.write(fd, b'q')
+
+    h.run_terminal_scenario(binary, description='Machine workspace switch after ' + switch_after,
+        interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=40)
+    print('Machine workspace boundary after ' + switch_after + ': PASS')
+
 if __name__ == '__main__':
     run(os.path.abspath(sys.argv[1]))
     run_compact_quit(os.path.abspath(sys.argv[1]))
     run_unavailable_file(os.path.abspath(sys.argv[1]))
+    run_workspace_boundary(os.path.abspath(sys.argv[1]), 'document')
+    run_workspace_boundary(os.path.abspath(sys.argv[1]), 'inventory')
     print('tui machine activity: PASS')

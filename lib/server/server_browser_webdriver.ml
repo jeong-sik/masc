@@ -199,18 +199,19 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
           , pid
           , log_path )
 
-let start ~sw ~env ~base_path =
+let prepare_start ~cleanup ~sw ~env ~base_path =
+  let configuration = Runtime.browser_configuration () in
   let clock = Eio.Stdenv.clock env in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in
   let profile_root = Browser_driver_process.profile_root ~masc_root in
-  Eio.Fiber.fork ~sw (fun () ->
-    stop_driver_left_behind ~record_path;
+  (fun () ->
+    cleanup ~record_path;
     (* Profiles are cleared only once no browser can still be using one. *)
     (match Result.bind (stop_browsers_using ~clock ~profile_root) (fun () -> clear_profile_root ~profile_root) with
      | Ok () -> ()
      | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
-    match Runtime.browser_configuration () with
+    match configuration with
     | None -> Log.Server.error "browser-lane: Runtime configuration is unavailable"
     | Some { Browser_configuration.automation = None; _ } ->
       Log.Server.info "browser-lane: automation has no browser.automation.geckodriver"
@@ -239,3 +240,13 @@ let start ~sw ~env ~base_path =
             | Error error -> Log.Server.warn "browser-lane: close failed: %s"
                 (Browser_webdriver.error_message error));
           Log.Server.info "browser-lane: geckodriver pid %d serves automation at %s" pid endpoint)
+
+let start ~sw ~env ~base_path =
+  let worker = prepare_start ~sw ~env ~base_path
+    ~cleanup:stop_driver_left_behind in
+  Eio.Fiber.fork ~sw worker
+module For_testing = struct
+  let start_with_cleanup ~cleanup ~sw ~env ~base_path =
+    let worker = prepare_start ~sw ~env ~base_path ~cleanup:(fun ~record_path:_ -> cleanup ()) in
+    Eio.Fiber.fork_promise ~sw worker
+end

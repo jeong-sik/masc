@@ -2325,10 +2325,13 @@ export class RuntimeTomlSaveRejected extends Error {
 export async function saveRuntimeTomlConfig(
   sourceText: string,
   expectedSourceRevision: string,
-  options: RuntimeTomlRequestOptions = {},
+  options: RuntimeTomlRequestOptions & { expectedSourcePath: string },
 ): Promise<CommittedRuntimeTomlConfig> {
   if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
     throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
+  if (typeof options.expectedSourcePath !== 'string' || options.expectedSourcePath === '' || options.expectedSourcePath.includes('\0')) {
+    throw new Error('runtime.toml 저장 기준 path가 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
   }
   await ensureDevToken()
   options.beforeDispatch?.()
@@ -2336,6 +2339,7 @@ export async function saveRuntimeTomlConfig(
     const raw = await post<unknown>('/api/v1/runtime/config/raw', {
       source_text: sourceText,
       expected_source_revision: expectedSourceRevision,
+      expected_source_path: options.expectedSourcePath,
     })
     return decodeCommittedRuntimeTomlConfig(raw)
   } catch (error: unknown) {

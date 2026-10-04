@@ -2949,11 +2949,12 @@ let runtime_config_conflict_document body =
 (** Both the preview and guarded save validate, but only the save compares the
     captured source revision under the server write lock. *)
 let post_runtime_config_raw ~(host : string) ~(port : int)
-    ~(source_text : string) ~(expected_source_revision : string)
+    ~(source_text : string) ~(expected_source_revision : string) ~(expected_source_path : string)
     : (runtime_config_commit_receipt, runtime_config_save_error) result =
   let body = Yojson.Safe.to_string (`Assoc
     [ "source_text", `String source_text;
-      "expected_source_revision", `String expected_source_revision ]) in
+      "expected_source_revision", `String expected_source_revision;
+      "expected_source_path", `String expected_source_path ]) in
   match http_post ~headers:(auth_headers ()) ~host ~port
       ~path:"/api/v1/runtime/config/raw" ~body with
   | Error detail -> Error (Runtime_config_save_unconfirmed detail)

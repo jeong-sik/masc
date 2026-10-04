@@ -6,7 +6,7 @@ import re
 import sys
 
 import test_tui_home_journey_pty as home
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
 
 
 
@@ -15,28 +15,28 @@ VIEWPORTS = ((80, 24), (120, 32), (160, 48))
 
 def viewport_journey(executable, *, unread, no_color):
     if unread:
-        fixtures = h.overview_event_http_fixtures()
+        fixtures = _keyboard_harness.overview_event_http_fixtures()
         ready = b"Choose a Keeper"
         expected = b"not fully read"
     else:
-        fixtures, _items, _new = h.approval_selection_http_fixtures()
+        fixtures, _items, _new = _keyboard_harness.approval_selection_http_fixtures()
         ready = b"Approvals and questions: 3"
         expected = b"3 need you"
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, ready, start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, ready, start=0, timeout=10)
         for columns, rows in VIEWPORTS:
-            frame = h.resize_and_wait(
+            frame = _keyboard_harness.resize_and_wait(
                 process, fd, output, rows=rows, columns=columns,
-                needle=b"Enter:open", controls=(h.FULL_REDRAW,),
+                needle=b"Enter:open", controls=(_keyboard_harness.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
-            visible = h.screen_text(frame)
-            screen = h.screen_rows(frame)
+            visible = _keyboard_harness.screen_text(frame)
+            screen = _keyboard_harness.screen_rows(frame)
             for needle in (expected, b"Continue", b"Choose a Keeper", b"Enter:open"):
                 assert needle in visible, (columns, rows, needle, visible)
-                assert 1 <= h.screen_row_of(screen, needle) <= rows
+                assert 1 <= _keyboard_harness.screen_row_of(screen, needle) <= rows
             if unread:
                 assert b"No decision is waiting" not in visible, visible
             assert b"[Recent]" not in visible, visible
@@ -45,7 +45,7 @@ def viewport_journey(executable, *, unread, no_color):
             # could contain offscreen output from an earlier size.
             assert max(screen) <= rows, visible
             for row in screen.values():
-                assert h.fixture_cell_width(row.decode("utf-8")) <= columns, row
+                assert _keyboard_harness.fixture_cell_width(row.decode("utf-8")) <= columns, row
             if no_color:
                 for sgr in re.findall(rb"\x1b\[([0-9;]*)m", frame):
                     parameters = [int(part) for part in sgr.split(b";") if part]
@@ -61,16 +61,16 @@ def viewport_journey(executable, *, unread, no_color):
             # Exercise Home's selected-row dispatch at each size, rather
             # than proving only that a global shortcut works at the last one.
             home.select_destination(process, fd, output, b"Approvals and questions:")
-            h.send_and_wait(process, fd, output, b"\r", b"MASC Approvals")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"MASC Approvals")
             home.assert_no_decision_posts(requests)
-            h.palette_go(process, fd, output, b"go dashboard", ready)
+            _keyboard_harness.palette_go(process, fd, output, b"go dashboard", ready)
         # The same recipient-selection action remains available after all
         # three resizes; this is navigation, so no product POST is allowed.
-        h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
         home.assert_no_decision_posts(requests)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description=f"Home viewports unread={unread} no_color={no_color}",
         interact=interact, http_fixtures=fixtures, http_requests=requests,

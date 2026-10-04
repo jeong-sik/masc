@@ -2,6 +2,7 @@
   "scope": "Complete same-corpus measurements, not an acceptance or calibration verdict",
   "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
   "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "runtime_config_verification": "declared_hash_only; private configuration bytes are not published",
   "runtime_id": "glm-coding.glm-5.3-flash",
   "calls_each": 240,
   "cases_sha256": "e73b7151f79c0253419e516ceb60d45bb27e7aa34fdcdf194f93b28deedc3c78",

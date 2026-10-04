@@ -1,0 +1,50 @@
+{
+  "strict_pyright_before": {
+    "filesAnalyzed": 107,
+    "errorCount": 9490,
+    "warningCount": 0,
+    "informationCount": 0,
+    "timeInSec": 7.022
+  },
+  "strict_pyright_after": {
+    "filesAnalyzed": 132,
+    "errorCount": 9490,
+    "warningCount": 0,
+    "informationCount": 0,
+    "timeInSec": 8.644
+  },
+  "new_verifier_script_diagnostics": [],
+  "ruff_before": {
+    "EXE001": 2,
+    "I001": 60,
+    "UP031": 5,
+    "B023": 67,
+    "SIM117": 5,
+    "TRY004": 9,
+    "FURB167": 1,
+    "ISC004": 3,
+    "PLW1509": 1,
+    "UP012": 4,
+    "FLY002": 1,
+    "UP037": 4,
+    "F841": 2,
+    "SIM102": 1
+  },
+  "ruff_after": {
+    "EXE001": 1,
+    "UP031": 5,
+    "B023": 67,
+    "SIM117": 5,
+    "TRY004": 9,
+    "FURB167": 1,
+    "F841": 2,
+    "SIM102": 1,
+    "UP012": 4,
+    "ISC004": 3,
+    "PLW1509": 1,
+    "FLY002": 1,
+    "UP037": 4
+  },
+  "undefined_names_after": [],
+  "limitation": "Strict pyright and ruff are not clean on the original monolith. Existing scenario bodies are preserved byte-for-byte; no suppressions or formatting changes are applied to them. Whole changed-source strict diagnostics total 9490 before and after; this is a baseline comparison, not a claim of strict typecheck success."
+}

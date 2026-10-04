@@ -68,3 +68,24 @@ owner/consumer source and interface files and compiled the eight candidate
 implementations before running 53 tests. Provider mode checked the cached Runtime
 loader source/interface and passed the 14 + 13 suites. `runner-refusals.json` records
 the rejected unknown mode and deliberate source mismatch; neither reached linking.
+
+## Current parent integration
+
+The original cache-runner manifests/results above are historical evidence for
+their recorded source states. This integration uses parent #41048
+`fe81b2ef68d62c47ff37828274ff692b719c5537`. Its production source, interfaces,
+configuration and provider `request-path` repair remain unchanged. The adjacent
+namespace conflict keeps both the parent's valid-path/typo regression and this
+child's model-set/table-form/file-loader checks.
+
+The inherited zero-retention test is now explicitly named legacy JSONL rotation;
+it exercises `append_jsonl_line`, while the separate dated-store test exercises
+`append_keeper_metrics` and the shared public reader. Assertions are unchanged.
+
+Local focused OCaml 5.5.1 repository-wrapper build passed. Namespace 15/15
+(0.005s) and boot TOML overrides 55/55 (0.025s) tests passed on the integrated
+sources: 70 newly executed native tests. Parent account declaration 13/13 and
+runtime validity 144/144 evidence may be reused only because their source and
+production dependencies are unchanged; those suites were not rerun here. The
+historical cache harness was not rerun. No full build/suite, provider activation,
+installed runtime, deployment or release proof is claimed.

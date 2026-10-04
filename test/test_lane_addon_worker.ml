@@ -990,7 +990,12 @@ let test_sampling_wire_frame_envelope () =
       let store = Store.create ~root:(Filename.concat dir "wire-evidence") in
       let calls = ref 0 in
       let broker = match Sampling.create ~store ~package:p ~instance_id:"wire" ~route:"r"
-        ~invoke:(fun ~route:_ ~request:_ _ -> incr calls; Ok answer) () with
+        ~invoke:(fun ~route:_ ~request _ ->
+          let retained = match Store.read_blob store request with
+            | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
+          check string "accepted request is durable before model invocation" "model_request"
+            Yojson.Safe.Util.(member "kind" retained |> to_string);
+          incr calls; Ok answer) () with
         | Ok broker -> broker | Error detail -> fail detail in
       let handler = match Sampling.for_worker broker ~package:p ~instance_id:"wire" with
         | Ok handler -> handler | Error detail -> fail detail in
@@ -1031,10 +1036,13 @@ for line in sys.stdin:
         let summary = ref `Null in
         let observed = Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
           ~on_error:Fun.id (fun () ->
+            let rec request remaining =
             match Agent_core.Mcp.call_tool_full client ~name:"sample" ~arguments:(`Assoc []) with
             | Error error -> Error (Agent_core.Error.to_string error)
             | Ok result -> summary := Option.get result.structured_content;
-                Ok {Types.rows=[];coverage=[]}) in
+                if remaining > 1 then request (remaining - 1)
+                else Ok {Types.rows=[];coverage=[]} in
+            request (if boundary = `Too_small then 3 else 1)) in
         check bool "actual sampling wire exchange completes" true (Result.is_ok observed);
         let open Yojson.Safe.Util in
         check bool "complete frame including newline stays in envelope" true
@@ -1057,7 +1065,14 @@ for line in sys.stdin:
               | Ok bytes -> Yojson.Safe.from_string bytes | Error detail -> fail detail in
             check string "wire refusal agrees with durable terminal" "invalid_response"
               (member "status" retained |> to_string)
-        | `Too_small -> check int "unrepresentable failure frame never invokes host" 0 !calls)))
+        | `Too_small ->
+            check int "unrepresentable failure frame never invokes host" 0 !calls;
+            let evidence = Filename.concat (Store.root store) "evidence" in
+            let retained = if Sys.file_exists evidence then Array.to_list (Sys.readdir evidence) else [] in
+            check int "repeated preflight refusals retain no unreachable request blobs" 0 (List.length retained);
+            let indexes = match sampling_requests store ~instance_id:"wire" with
+              | Ok rows -> rows | Error detail -> fail detail in
+            check int "preflight refusals create no request journal" 0 (List.length indexes))))
       [`Exact;`Overflow;`Failure_exact;`Too_small])
     [Mcp_protocol.Jsonrpc.String (String.make 64 '"' ^ "한글");Mcp_protocol.Jsonrpc.Int max_int]
 
@@ -1929,6 +1944,52 @@ let test_sampling_pending_discovery_resumes_after_namespace_repair () = with_fix
   check string "malformed discovery evidence preserved" "invalid discovery marker"
     (Fs_compat.load_file (Filename.concat marker_dir ".discovery")))
 
+let test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes () = with_fixture (fun _ _ dir _ ->
+  let module Store = Masc.Lane_addon_store in
+  let store = Store.create ~root:(Filename.concat dir "namespace-progress") in
+  let instance_id = "namespace-progress-instance" in
+  let save_good, save_bad, good_namespace, bad_namespace = if healthy_outcomes then
+      Store.save_sampling_outcome,Store.save_sampling_request,"sampling-outcomes","sampling"
+    else Store.save_sampling_request,Store.save_sampling_outcome,"sampling","sampling-outcomes" in
+  let save save request_id answer =
+    let terminal, _, reference, bytes = sampling_retry_case store ~instance_id ~request_id answer in
+    sampling_require (save store ~instance_id ~request_id terminal);
+    reference,bytes in
+  let good_reference,good_bytes = save save_good "healthy" "healthy namespace result" in
+  let bad_reference,bad_bytes = save save_bad "blocked" "recover after directory repair" in
+  List.iter (fun id -> Unix.unlink (sampling_retry_path store instance_id id)) ["healthy";"blocked"];
+  let directory namespace = Filename.concat (Store.root store) (namespace ^ "/" ^ Store.digest instance_id) in
+  let blocked = directory bad_namespace in
+  let saved = blocked ^ ".saved" in
+  let outside = Filename.concat dir "empty-outside-directory" in
+  Unix.mkdir outside 0o700;
+  Unix.rename blocked saved;
+  Unix.symlink outside blocked;
+  Fun.protect ~finally:(fun () ->
+    if Sys.file_exists saved then (Unix.unlink blocked; Unix.rename saved blocked)) (fun () ->
+  let report = Store.discover_sampling_requests store ~instance_id ~max_reply_bytes:65536 in
+  check bool "one namespace failure stays explicit" true (Result.is_error report.outcome);
+  check bool "incomplete namespace discovery remains pending" false report.discovery_complete;
+  check string "healthy namespace result becomes durable" good_bytes
+    (sampling_require (Store.read_blob store good_reference));
+  check bool "healthy request marker is fully retired" false
+    (Sys.file_exists (sampling_retry_path store instance_id "healthy"));
+  let healthy_path = Filename.concat (directory good_namespace) (Store.digest "healthy" ^ ".json") in
+  List.iter (fun () ->
+    let reads = ref [] in
+    check bool "blocked namespace remains a visible error on retry" true
+      (Result.is_error (Store.For_testing.retry_sampling_requests ~on_read:(fun path -> reads := path :: !reads)
+        (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536));
+    check bool "completed namespace history is not read again" false (List.mem healthy_path !reads)) [();()];
+  let next_reference,next_bytes = save save_good "new-public-write" "new indexed write" in
+  ignore (Store.retry_sampling_requests (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536);
+  check string "completed discovery does not hide a new public writer" next_bytes
+    (sampling_require (Store.read_blob store next_reference));
+  Unix.unlink blocked; Unix.rename saved blocked;
+  sampling_require (Store.retry_sampling_requests (Store.create ~root:(Store.root store)) ~instance_id ~max_reply_bytes:65536);
+  check string "unfinished namespace resumes after repair" bad_bytes
+    (sampling_require (Store.read_blob store bad_reference))))
+
 let test_sampling_cold_read_keeps_optional_compaction () = with_fixture (fun _ _ dir _ ->
   let module Store = Masc.Lane_addon_store in
   let store = Store.create ~root:(Filename.concat dir "optional-compaction") in
@@ -2088,6 +2149,10 @@ let test_relative_store_root ~sequence () =
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "bounded sampling root loop returns error" `Quick test_sampling_bounded_root_loop_is_error;
   test_case "cold read preserves optional marked compaction" `Quick test_sampling_cold_read_keeps_optional_compaction;
+  test_case "request namespace progress survives outcome discovery failure" `Quick
+    (test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes:false);
+  test_case "outcome namespace progress survives request discovery failure" `Quick
+    (test_sampling_discovery_keeps_namespace_progress ~healthy_outcomes:true);
   test_case "pending discovery resumes after namespace repair" `Quick test_sampling_pending_discovery_resumes_after_namespace_repair;
   test_case "pending recovery sees two Stores and concurrent writer" `Quick test_sampling_retry_two_stores_and_concurrent_writer;
   test_case "pending recovery handles crash and failed write orphans" `Quick test_sampling_retry_crash_and_failed_write_orphans;

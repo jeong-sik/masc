@@ -1,4 +1,4 @@
-# Metrics retention after boot configuration (K1-retention)
+# Auxiliary JSONL retention after boot configuration (K1-retention)
 
 Base: `2b230357cb72586fe0c20d5a07490a43cb93ecab` (current main at review freeze).
 
@@ -36,6 +36,13 @@ directory shifting, and disabled rotation. Environment and filesystem globals ar
 checks applied/effective zero retention and actual file rotation. The existing
 boot range test now rejects negative retention and accepts environment zero.
 
-The authored native tests have not been executed. No typecheck, Dune, CI,
-production-directory mutation, deployed behavior or crash-atomicity claim.
-Rotation continues to be a sequence of file operations, not a transaction.
+The original parser-only snapshot is retained in parser-checks.txt. A subsequent
+[native review](native-review/README.md) executes all 24 registered rotation
+cases plus three real TOML/configuration-to-writer checks. Exact source hashes,
+logs and reproducible runners are in that directory. The whole runtime-TOML
+suite, full server build, CI and deployed behavior remain unverified. Rotation
+continues to be a sequence of file operations, not a transaction.
+
+The settings apply to auxiliary Keeper JSONL logs. Date-sharded turn/heartbeat
+metrics use Dated_jsonl separately and do not consume these two settings.
+The typed setting registry and operator documentation now name that boundary.

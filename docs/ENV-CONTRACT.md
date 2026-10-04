@@ -56,7 +56,7 @@ should be treated as restart-required.
 | Runtime root and config root | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC` | boot-time watchdog setup; storage is filesystem-only by construction |
-| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded once and injected into the process env during boot |
+| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store; explicit process env values take precedence |
 
 Representative code paths:
 
@@ -102,6 +102,24 @@ Examples:
 - `Config_dir_resolver` helpers read env accessors, but
   [`resolve()`](../lib/config_dir_resolver/config_dir_resolver.ml)
   caches the result, so root changes are boot-static.
+
+#### Keeper auxiliary JSONL rotation
+
+The `[metrics]` keys `max_bytes` and `max_rotated` configure the auxiliary
+JSONL writer used for decision logs, response feedback and runtime manifests.
+Their environment names are `MASC_KEEPER_METRICS_MAX_BYTES` and
+`MASC_KEEPER_METRICS_MAX_ROTATED`. The typed
+[`runtime setting registry`](../lib/config/keeper_runtime_setting_registry.ml)
+owns their defaults, bounds and operator-facing descriptions.
+
+At the next size-triggered rotation, `max_rotated = 0` discards old versions;
+reducing the count removes excess numbered backups. `max_bytes = 0` disables
+both rotation and that cleanup. TOML changes require restart to reload the
+boot override store; these readers observe the loaded value on each append.
+
+Date-sharded turn and heartbeat metrics under
+`keepers/<name>/metrics/YYYY-MM/DD.jsonl` use `Dated_jsonl.append` separately.
+These two settings do not limit that store's size or retention.
 
 ### 4. Execute exec gates (`request_dynamic`, additive-only)
 

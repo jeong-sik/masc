@@ -135,7 +135,8 @@ module KeeperSpawn = struct
 end
 
 module KeeperMetrics = struct
-  (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
+  (** Auxiliary Keeper JSONL logs: maximum file size before rotation
+      (default: 10MB). Date-sharded metrics use a separate Dated_jsonl store. *)
   let max_file_bytes () = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
   (** Zero discards old versions at rotation; max_bytes=0 disables rotation. *)

@@ -63,6 +63,8 @@ module KeeperSpawn : sig
 end
 
 module KeeperMetrics : sig
+  (** Rotation settings for auxiliary Keeper JSONL logs written through
+      [Keeper_types_support.append_jsonl_line], not the date-sharded metrics store. *)
   val max_file_bytes : unit -> int
   val max_rotated_files_min : int
   val max_rotated_files : unit -> int

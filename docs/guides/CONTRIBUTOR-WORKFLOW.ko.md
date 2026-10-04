@@ -190,7 +190,11 @@ CI를 자동으로 시작하지 않습니다.
 의존성 캐시가 준비되지 않으면 더 오래 걸릴 수 있습니다. 실제로 성공한 완료 결과만
 빌드 증거로 사용합니다.
 
-PR, 일반 push와 정기 CI는 없습니다. `release/vX.Y.Z`에서는
+PR과 일반 push의 자동 CI는 없습니다. 운영자가 요청한
+`main-minimal-build.yml`은 30분마다 main을 확인하며, 문서·changelog 외 입력에
+성공한 빌드 기록이 없을 때만 운영 실행 파일 4개를 빌드합니다. opam/Dune 캐시를
+재사용하고 실제 빌드 SHA와 생략을 구분합니다. 일반 리뷰와 Release/Tag 요구사항은 같습니다.
+`release/vX.Y.Z`에서는
 [release-candidate.yml](../../.github/workflows/release-candidate.yml)을 명시적으로 요청하여
 같은 head의 전체 빌드·타입 검사·동작 테스트·설치 검증을 실행합니다. 태그 발행에도 전체
 검사와 테스트가 필요합니다. 정확한 절차는 [CI와 리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다.

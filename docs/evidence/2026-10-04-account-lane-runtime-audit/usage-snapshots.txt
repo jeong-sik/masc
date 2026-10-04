@@ -1,0 +1,7 @@
+account lifecycle.000.output
+ASSERT the removed cap leaves only uncapped USD use
+ASSERT empty report is retained and stale cap cannot return
+
+account lifecycle.001.output
+
+account lifecycle.002.output

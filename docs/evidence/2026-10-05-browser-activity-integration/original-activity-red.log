@@ -1,0 +1,53 @@
+Testing `Browser activity'.
+This run has ID `EZA91O0M'.
+
+  [SKIP]        configuration          0   paths retained and accepting locat...
+  [SKIP]        configuration          1   both automation locations.
+  [SKIP]        configuration          2   flat binary and nested driver.
+  [SKIP]        configuration          3   wrong flag type.
+  [SKIP]        configuration          4   unknown backend key.
+  [SKIP]        configuration          5   wrong table type.
+  [SKIP]        configuration          6   stray browser key.
+  [SKIP]        configuration          7   relative path even when off.
+  [SKIP]        configuration          8   partial stagehand even when off.
+  [SKIP]        configuration          9   stagehand empty table.
+> [FAIL]        admission              0   off precedes selection.
+  [SKIP]        admission              1   off and unavailable keep status/cl...
+  [SKIP]        admission              2   accepted automation request finishes.
+  [SKIP]        admission              3   accepted live request survives off.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        admission              0   off precedes selection.             │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT off precedes absent client
+File "lib_eio/core/switch.ml", line 133, character 8:
+FAIL off precedes absent client
+
+   Expected: `"browser_lane_off"'
+   Received: `"no_live_client"'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-parent-sync-20261005/_build/_tests/Browser activity/admission.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-parent-sync-20261005/_build/_tests/Browser activity'.
+1 failure! in 0.000s. 1 test run.

@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+   MASC Lanes  Candidate orders  All runtimes  ▸Lanes (12 lanes)  02:19:36  HTTP [connected]                            
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    All lanes · observed 16:47:49                                                                                       
+  LANE                                                                STATE                                             
+  Exact-output · Board Attention                                      1 running · 1 admitted slots                      
+  Exact-output · HITL Auto Judge                                      idle · 1 admitted slots                           
+  Exact-output · Librarian                                            idle · 1 admitted slots                           
+  Exact-output · Workspace Curator                                    idle · 1 admitted slots                           
+  Exact-output · Verifier                                             idle · 1 admitted slots                           
+  Exact-output · Browser Stagehand                                    no retained runs · 1 admitted slots               
+  Exact-output · Candle Appraiser                                     idle · 1 admitted slots                           
+  Browser · Live browser                                              off; configuration retained; 0 connected clients  
+  Browser · Browser automation                                        on; executor not registered                       
+  Browser · Browser Stagehand                                         on; executor not registered                       
+    [lines 1-10/12]                                                                                                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Space: activity · Enter: browser                                                                                    
+    Browser automation                                                                                                  
+    Browser backend observation.                                                                                        
+    Identity: browser/automation                                                                                        
+    Reading: on; executor not registered                                                                                
+    Opening this row reads the selected browser backend; it does not open a new session.                                
+    Off retains configuration and sessions; status and close remain available.                                          
+    Registration does not prove browser process health or an open session.                                              
+    Activity follows saved settings; executable and profile paths are installed at server startup.                      
+                                                                                                                        
+                                                                                                                        
+
+  j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  e:exact: config  Right / Enter:open  Esc:dashboard  q:quit  …?
+ › to alpha   (i to write)                                                                                              

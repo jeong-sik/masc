@@ -1,0 +1,16 @@
+{
+  "parent": "0b541f32bdcc0e5483fbac8248904cf05bf2ac58",
+  "tests": 138,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "files": {
+    "README.md": "e7625ffd48a67c1b587166dcc09066aa02b2a5eb1a4d089652e9916d3561ef17",
+    "clean-read-green.log": "d02ec3c7cf6b61cb74e951e1fc5599915a654d74b1b849275217ce556a7d00bb",
+    "clean-read-red.log": "1ef53341ccc3f5b4b84b6c1dbb616b97d2d61b5dc4ef766ad45edc15e388ae19",
+    "green.log": "251d39741aa44811c314366f2146d2045692aa348be3f3124d12269435c70404",
+    "integrated-eslint2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "integrated-tests2.log": "0893fff4c062a56cc199e981733fd97534df972e64ad0a31479e81f6a6489aad",
+    "integrated-tsc2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "red.log": "41df49e5656999b3d976349a65d92cf18e4759d926db52dd1368ead9e47bd64e"
+  }
+}

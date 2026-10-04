@@ -452,7 +452,9 @@ type async_msg =
   | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
   | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
   | Runtime_config_view_loaded of
-      (Masc_tui_runtime_config_view.reading, string) result
+      int * string option
+      * (Masc_tui_runtime_config_view.reading, string) result
+      (* Read generation and captured model-settings entry request. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of

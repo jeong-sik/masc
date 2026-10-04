@@ -82,8 +82,8 @@ let trace_of_metadata ~runtime_root ~keepers_dir keeper_id =
   let path =
     Filename.concat
       keepers_dir
-      (Masc.Keeper_runtime_root_entry.keeper_basename
-         ~keeper_name:keeper_id Masc.Keeper_runtime_root_entry.Metadata)
+      (Keeper_runtime_root_entry.keeper_basename
+         ~keeper_name:keeper_id Keeper_runtime_root_entry.Metadata)
   in
   match Masc.Keeper_meta_store.read_meta_file_path_read_only
           ~ownership_root:runtime_root path with

@@ -28,6 +28,8 @@ observation detail, scoped to the exact owning instance. Package descriptions
 appear beside the installation, and the package input/display contracts remain
 inspectable in a separate detail. A number `0` and boolean `false` are real
 readings; missing or incorrectly typed values are explicitly unavailable.
+Integer number readings outside JavaScript’s exact range are also unavailable
+rather than displayed as rounded counts.
 Multiline text is escaped as text, while original fields and evidence stay in
 the observation details.
 

@@ -446,10 +446,40 @@ let run_runtime_evidence ?fixture_dir () =
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
       (if Option.is_some (runtime_skip_reason scenario) then 0 else 1) (List.length !jev_requests);
-    let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
-        (Runs.list_runs registry) with
-      | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
-      | _ -> Alcotest.fail "expected one actual Librarian run" in
+    let actor_runs = Runs.list_runs registry
+      |> List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
+      |> List.map (fun (run : Runs.run) -> Runs.get registry ~run_id:run.run_id |> Option.get) in
+    (* #40709 retained each absorb evaluation beside its owning pass. Both use
+       the same lane and actor; their structured inputs distinguish them. *)
+    let passes, evaluations = List.fold_left (fun (passes, evaluations) (run : Runs.run) ->
+      match run.input with
+      | Runs.Exact_input (`Assoc fields) ->
+        (match List.assoc_opt "actual_input" fields,
+               List.assoc_opt "message_count" fields,
+               List.assoc_opt "current_fact_count" fields,
+               List.assoc_opt "direction" fields,
+               List.assoc_opt "request" fields with
+         | Some (`Assoc _), Some (`Int _), Some (`Int _), None, None ->
+           run :: passes, evaluations
+         | None, None, None, Some (`String ("forward" | "reverse")), Some (`Assoc _) ->
+           passes, run :: evaluations
+         | _ -> Alcotest.failf "unclassified Librarian input for run %s" run.run_id)
+      | Runs.Exact_input _ -> Alcotest.failf "non-object Librarian input for run %s" run.run_id)
+      ([], []) actor_runs in
+    Alcotest.(check int) "each actual JEV request has its own retained evaluation"
+      (List.length !jev_requests) (List.length evaluations);
+    let run = match passes with
+      | [ run ] -> run
+      | matching ->
+        let describe (run : Runs.run) =
+          Printf.sprintf "%s actor=%S lane=%s status=%s"
+            run.run_id run.actor
+            (Standalone_lane.to_id (Runs.standalone_lane run.lane))
+            (Runs.status_label run.status) in
+        Alcotest.failf
+          "expected one actual Librarian pass; matching=%d global_identity=%b rows=[%s]"
+          (List.length matching) (registry == Runs.global ())
+          (String.concat "; " (List.map describe actor_runs)) in
     Alcotest.(check string) "Memory result remains distinct from JEV result"
       (match scenario with
        | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
@@ -484,8 +514,19 @@ let run_runtime_evidence ?fixture_dir () =
       original (Runs.run_to_yojson replayed);
     let output = member "output" original in
     (match output with
-     | `Assoc (("absorb_gate", _) :: _) -> ()
-     | _ -> Alcotest.fail "absorb_gate evidence must precede exact_output");
+     | `Assoc fields ->
+       (* JEV preflight (#40758) may precede both reports. The absorb report
+          still must precede the potentially large model output. *)
+       let position key = List.find_index (fun (name, _) -> name = key) fields in
+       (match run.status, position "absorb_gate", position "exact_output" with
+        | Runs.Completed {outcome=Runs.Succeeded;_}, Some gate, Some exact when gate < exact -> ()
+        | Runs.Completed {outcome=Runs.Failed _;_}, Some _, None -> ()
+        | Runs.Completed {outcome=Runs.Succeeded;_}, _, _ ->
+          Alcotest.fail "successful absorb_gate evidence must precede exact_output"
+        | Runs.Completed {outcome=Runs.Failed _;_}, _, _ ->
+          Alcotest.fail "failed pass must retain its gate without inventing exact_output"
+        | _ -> Alcotest.fail "expected a completed Librarian pass")
+     | _ -> Alcotest.fail "execution output must be an object");
     let gate = member "absorb_gate" output in
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"

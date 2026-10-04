@@ -1,0 +1,20 @@
+Testing `TUI Lane inventory'.
+This run has ID `LI34C7EE'.
+
+  [OK]          wire and display          0   exact off retains candidates an...
+  [OK]          wire and display          1   disabled intent keeps unfinishe...
+  [OK]          wire and display          2   running observation survives in...
+  [OK]          wire and display          3   bounded run reading remains vis...
+  [OK]          wire and display          4   all builtins and manual identity.
+  [OK]          wire and display          5   invalid declaration and live wo...
+  [OK]          wire and display          6   partial reading and unknown owner.
+  [OK]          wire and display          7   absent declaration and failed c...
+  [OK]          wire and display          8   unknown wire rejected.
+  [OK]          wire and display          9   missing and duplicate rejected.
+  [OK]          wire and display         10   targets remain coherent.
+  [OK]          wire and display         11   embedded exact decoder retained.
+  [OK]          wire and display         12   overview agrees with exact detail.
+  [OK]          wire and display         13   instance ownership unique.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/TUI Lane inventory'.
+Test Successful in 0.003s. 14 tests run.

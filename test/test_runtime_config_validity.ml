@@ -3752,6 +3752,23 @@ let exact_lane_runtime_toml ~lane ~slot =
     slot
 ;;
 
+let test_off_exact_lanes_retain_unavailable_candidates () =
+  List.iter (fun lane ->
+    let active = exact_lane_runtime_toml ~lane ~slot:"local.absent"
+      ^ "cli_slots = [\"local.missing-client\"]\n" in
+    let off = Toml_line_editor.edit_table_bool active
+      ~path:("runtime.exact_output_lanes." ^ lane) ~key:"enabled" ~value:false in
+    with_temp_runtime_toml off (fun path ->
+      match load_list_text ~config_path:path with
+      | Ok _ -> ()
+      | Error error -> failf "off %s rejected dormant candidates: %s" lane error);
+    with_temp_runtime_toml active (fun path ->
+      match load_list_text ~config_path:path with
+      | Error _ -> ()
+      | Ok _ -> failf "enabled %s admitted an unresolved CLI candidate" lane))
+    ["librarian_exact"; "verifier_exact"]
+;;
+
 let test_verifier_exact_slot_must_name_a_configured_route () =
   with_temp_runtime_toml
     (exact_lane_runtime_toml ~lane:"verifier_exact" ~slot:"local.absent")
@@ -3966,6 +3983,22 @@ let test_saving_an_exact_slot_without_body_deadline_is_refused () =
          (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
     check string "the refused save leaves the file as it was" baseline
       (Fs_compat.load_file path))
+;;
+
+let test_saving_off_lane_without_body_deadline_preserves_candidates () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let baseline = exact_deadline_runtime_toml
+    ~body_timeout:(Some exact_deadline_body_timeout_s) ~lane:"" in
+  let dormant = exact_deadline_runtime_toml ~body_timeout:None
+    ~lane:"[runtime.exact_output_lanes.librarian_exact]\nenabled = false\nslots = [\"local.sample\"]\n" in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml baseline (fun path ->
+    (match Runtime.save_config_text ~runtime_config_path:path dormant with
+     | Ok _ -> ()
+     | Error error -> failf "off HTTP lane deadline blocked save: %s" error);
+    check string "save retains the exact off declaration" dormant (Fs_compat.load_file path))
 ;;
 
 (* Owner rule: never a hard gate on keeper actions. A file that already
@@ -6422,6 +6455,7 @@ let () =
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates
+        ; test_case "off exact lanes retain unavailable candidates" `Quick test_off_exact_lanes_retain_unavailable_candidates
         ; test_case "exact lane activity preserves settings and required lanes" `Quick test_exact_lane_activity_preserves_configuration;
           test_case "exact-output lane cli_slots parse in order" `Quick
             test_exact_output_lane_cli_slots_parse_in_order;
@@ -6512,6 +6546,8 @@ let () =
             test_exact_cli_slots_carry_no_body_deadline_rule;
           test_case "replacement catalog targets skip the body deadline rule" `Quick
             test_replacement_catalog_targets_skip_the_body_deadline_rule;
+          test_case "saving an off lane without a body deadline retains candidates" `Quick
+            test_saving_off_lane_without_body_deadline_preserves_candidates;
           test_case "saving an exact slot without a body deadline is refused" `Quick
             test_saving_an_exact_slot_without_body_deadline_is_refused;
           test_case "an existing gap does not block an unrelated save" `Quick

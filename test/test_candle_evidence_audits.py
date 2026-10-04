@@ -140,6 +140,18 @@ class CandleEvidenceAudits(unittest.TestCase):
                 self.run_audit(source/script_name, bundle, bundle)
                 original = runtime_path.read_text()
                 for before, after, error in [
+                    ('["providers"."glm-coding"]',
+                     '["providers"."glm-coding"]\n"enabled" = false',
+                     'prepared runtime is not enabled and bound'),
+                    ('["glm-coding"."glm-5.3-flash"]',
+                     '["glm-coding"."glm-5.3-flash"]\n"enabled" = false',
+                     'prepared runtime is not enabled and bound'),
+                    ('["glm-coding"."glm-5.3-flash"]',
+                     '["glm-coding"."unused-model"]',
+                     'prepared runtime is not enabled and bound'),
+                    ('["providers"]',
+                     '["runtime"."exact_output_lanes"."extra"]\n"slots" = ["glm-coding.glm-5.3-flash"]\n\n["providers"]',
+                     'prepared exact output lanes disagree with evaluator'),
                     ('"api-name" = "glm-5.3-flash"', '"api-name" = "another-model"',
                      'prepared API model disagrees with declared runtime'),
                     ('"endpoint" = "https://api.z.ai/api/coding/paas/v4"',

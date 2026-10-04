@@ -135,12 +135,19 @@ def validate_answer(value, schema):
 
 def validate_runtime(raw, plan):
     config = tomllib.loads(raw.decode())
-    lane = config['runtime']['exact_output_lanes']['candle_appraiser']
+    lanes = config['runtime']['exact_output_lanes']
+    require(set(lanes) == {'candle_appraiser'},
+            'prepared exact output lanes disagree with evaluator')
+    lane = lanes['candle_appraiser']
     runtime_id = plan['runtime_id']
     require(lane['slots'] == [runtime_id] and lane['cli_slots'] == [],
             'prepared runtime slots disagree with plan')
     provider_id, model_id = runtime_id.split('.', 1)
     provider = config['providers'][provider_id]
+    binding = config.get(provider_id, {}).get(model_id)
+    require(provider.get('enabled', True) is True and isinstance(binding, dict)
+            and binding.get('enabled', True) is True,
+            'prepared runtime is not enabled and bound')
     # Both retained measurements used this concrete Z.AI HTTP destination.
     require(provider.get('protocol') == 'openai-compatible-http'
             and provider.get('endpoint') == 'https://api.z.ai/api/coding/paas/v4',

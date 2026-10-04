@@ -97,7 +97,7 @@ def run_unapplied_installations(executable: str) -> None:
         _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
         _keyboard_harness.wait_for_output(process, fd, output, HEADING, start=0, timeout=10)
         _keyboard_harness.send_and_wait(process, fd, output, b"/dos-counter", b"dos-counter")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
         _keyboard_harness.send_and_wait(process, fd, output, b"d", b"no worker observed")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         frame = _keyboard_harness.screen_text(bytes(output))

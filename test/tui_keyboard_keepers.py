@@ -1118,6 +1118,7 @@ def standalone_lane_fixture(
         ),
     }
     purpose, required = lane_contracts[lane_id]
+    running_count = 1 if status == "running" else 0
     row = {
         "lane_id": lane_id,
         "label": label,
@@ -1138,8 +1139,8 @@ def standalone_lane_fixture(
         "admission_error": None,
         "status": status,
         "retained_run_count": retained,
-        "running_count": 0,
-        "succeeded_count": retained,
+        "running_count": running_count,
+        "succeeded_count": retained - running_count,
         "failed_count": 0,
         "cancelled_count": 0,
         "last_started_at": 1787557600.0 if retained else None,
@@ -1575,13 +1576,31 @@ def keeper_lanes_ia_interaction(
         if header_row < 0 or b"LANE" not in lane_rows[header_row]:
             raise AssertionError(f"Lanes drew no common header: {lanes_plain!r}")
         state_column = lane_rows[header_row].decode("utf-8").index("STATE")
-        for label in (b"Board Attention", b"Workspace Curator"):
+        for label, expected_state in (
+            (b"Board Attention", "1 running · 1 admitted slots"),
+            (b"Workspace Curator", "idle · 1 admitted slots"),
+        ):
             line = lane_rows[screen_row_of(lane_rows, label)].decode("utf-8")
-            if line.find("1 admitted slots") != state_column:
+            if line.find(expected_state) != state_column:
                 raise AssertionError(f"common state column drifted: {line!r}")
-        for family in ("Exact-output", "Browser", "Machines"):
-            if family not in lanes_plain:
-                raise AssertionError(f"common list omitted {family!r}")
+        if "Exact-output" not in lanes_plain:
+            raise AssertionError(f"common list omitted Exact-output: {lanes_plain!r}")
+        # The list has a bounded viewport even at 30 rows. Search brings
+        # each other family into view; its last rows need not fit initially.
+        for identity, label, family in (
+            (b"browser/live", b"Live browser", b"Browser"),
+            (b"machine/dos", b"DOS", b"Machines"),
+        ):
+            send_and_wait(process, master_fd, output, b"/" + identity,
+                          re.compile(rb"\x1b\[7m[^\x1b\n]*" + re.escape(label)))
+            send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
+            drain_until_quiet(process, master_fd, output)
+            visible = screen_rows(bytes(output))
+            row_index = screen_row_of(visible, label)
+            if row_index < 0 or family not in visible[row_index]:
+                raise AssertionError(f"common list omitted {family!r}: {visible!r}")
+        send_and_wait(process, master_fd, output, b"\x1b[H",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention"))
         send_and_wait(process, master_fd, output, b"d", b"MASC Lane reading")
         drain_until_quiet(process, master_fd, output)
         detail_plain = screen_text(bytes(output)).decode("utf-8")

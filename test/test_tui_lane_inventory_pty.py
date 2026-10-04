@@ -117,7 +117,7 @@ def prose(screen):
 def select(process, fd, output, identity, visible_label):
     terminal.send_and_wait(process, fd, output, b"/" + identity.encode(),
                            re.compile(rb"\x1b\[7m[^\x1b\n]*" + re.escape(visible_label)))
-    terminal.send_and_wait(process, fd, output, b"\x1b", b"All lanes")
+    terminal.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
 
 
 def run_inventory(executable, columns):
@@ -277,7 +277,10 @@ def run_destinations(executable):
                 path="/api/v1/lane-addons/declaration?source_path=" + quote(BROKEN_PATH, safe=""))
             if marker.exists():
                 raise AssertionError("Enter spawned the external editor instead of inspecting TOML")
-            terminal.send_and_wait(process, fd, output, b"\x1b", b"Lane Add-ons")
+            # Esc closes the document but leaves the Technical installation
+            # view. Its title is unchanged and may not be repainted; wait for
+            # the new body before q closes the Add-ons overlay.
+            terminal.send_and_wait(process, fd, output, b"\x1b", b"Installation inventory unread")
             terminal.send_and_wait(process, fd, output, b"q", b"All lanes")
             select(process, fd, output, "instance/" + MANUAL_ID, b"Manual observer")
             terminal.send_and_wait(process, fd, output, b"\r", b"Manual observer")
@@ -295,7 +298,10 @@ def run_destinations(executable):
                 raise AssertionError(f"inspection sent mutations: {mutations!r}")
             if not slice_reads:
                 raise AssertionError("retained selection stopped after Inspect without reading history")
-            terminal.send_and_wait(process, fd, output, b"q", b"Lane Add-ons")
+            # Leave Technical detail, then the worker, then the overlay.
+            # Each wait names a changed body instead of its unchanged title.
+            terminal.send_and_wait(process, fd, output, b"\x1b", b"1 Results")
+            terminal.send_and_wait(process, fd, output, b"q", b"Retained history")
             terminal.send_and_wait(process, fd, output, b"q", b"All lanes")
             os.write(fd, b"q")
 

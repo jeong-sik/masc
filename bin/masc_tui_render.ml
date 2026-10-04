@@ -3606,7 +3606,9 @@ let render_lanes_overview (state : state) =
        if available > 0 then begin
          box_divider buf cols;
          let detail = match selected_standalone_lane state with
-           | Some lane -> standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
+           | Some lane ->
+               (Theme.info (), "  Space: activity · s: models · a: candidate")
+               :: standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
            | None -> Masc_tui_lane_inventory.detail_lines inventory_row
                |> List.concat_map (fun line ->
                     Terminal_text.single_line line

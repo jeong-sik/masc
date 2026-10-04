@@ -42,9 +42,8 @@ work still finishing. `running_count` describes retained observation coverage,
 not an atomic census of all processes. Browser Stagehand has no standalone run
 history. The inventory read never starts or stops work.
 
-This change provides the configuration owner and its readout. A dedicated TUI
-toggle/save interaction and Web activity control remain follow-up work. Enabling
-a lane allows its next request; this change does not send a new wake to a parked
+The TUI provides the activity draft described below. Web activity control
+remains follow-up work. Enabling a lane allows its next request; this does not send a new wake to a parked
 Workspace Curator owner. Its next owner request resumes processing.
 
 ## Upgrade notes

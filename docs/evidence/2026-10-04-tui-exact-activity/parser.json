@@ -42,7 +42,7 @@
       "path": "bin/masc_tui_render.ml",
       "exit": 0,
       "stderr": "",
-      "sha256": "f061ccbf63cd96cd9ce8b1a479db028b94c8b87e70a639ac2ad3333fc0127521"
+      "sha256": "2eb9bf3a80e1001a14802fbac9d602281008c5692006422bb958d191a6e4c938"
     },
     {
       "path": "bin/masc_tui_types.ml",

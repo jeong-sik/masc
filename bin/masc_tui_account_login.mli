@@ -119,7 +119,7 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
     cannot be removed. [Error] when the answer is for another provider or does
     not read. *)
 val removed_notice : provider -> string option -> string
-(** What the list says once [provider] is removed, with the login store left
+(** What the list says once the selected provider connection is removed, with the login store left
     on disk. *)
 val save_failed : t -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit

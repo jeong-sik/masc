@@ -924,6 +924,19 @@ let grouped_existing_accounts () =
   ignore (Login.key t "down");
   check bool "removal preview targets the explicitly selected provider only" true
     (match Login.key t "enter" with Login.Preview_removal {provider;_} -> provider.id="a2" | _ -> false);
+  let selected = match Login.key t "enter" with
+    | Login.Preview_removal {provider;_} -> provider
+    | _ -> fail "expected selected connection preview" in
+  let preview = match removable with
+    | `Assoc fields -> `Assoc (("integration_id", `String selected.id) :: List.remove_assoc "integration_id" fields)
+    | _ -> assert false in
+  ok (Login.removal_preview t selected ~refused:None preview);
+  check bool "confirmation names the selected connection" true
+    (mentions "지울 공급자 연결: a2" t);
+  check bool "confirmation does not claim account deletion" false (mentions "지울 계정:" t);
+  let completion = Login.removed_notice selected None in
+  check bool "completion names selected connection" true (contains completion "연결 (a2)");
+  check bool "completion does not claim the account was deleted" false (contains completion "계정을 지웠습니다");
   ignore (Login.key t "esc");
   check bool "Esc returns to grouped account list" true
     (t.phase=Login.Providers (Login.Accounts Codex));

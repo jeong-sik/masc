@@ -117,7 +117,7 @@ it('selects multiple models and default by clicking, hides key, resumes only aft
 it('keeps selected revision across inventory changes and hides backend errors', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   const view = render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/))
   view.rerender(html`<${RuntimeSetupPicker} inventory=${{ ...initial, setup_revision: 'new-revision' }} onSaved=${vi.fn()} />`)
   vi.mocked(post).mockRejectedValue(new Error('private-backend-secret'))
   fireEvent.click(screen.getByText('검증 후 선택 저장'))
@@ -166,7 +166,7 @@ it('keeps saved success distinct when server activation fails', async () => {
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/모델 저장과 응답·도구 검증은 완료했습니다/)
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
   expect(modelSetupResumeState.value.kind).toBe('failed')
@@ -181,7 +181,7 @@ it('keeps uncertain durability visible after activation failure without repeatin
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/디스크 저장 내구성을 확인하지 못했습니다/)
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
   expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/connections'))).toHaveLength(1)
@@ -190,7 +190,7 @@ it.each([undefined, { durability: 'unknown' }])('refuses a save receipt with mis
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockResolvedValue({ configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], commit })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/resume'))).toHaveLength(0)
 })
@@ -201,7 +201,7 @@ it('displays a lock release warning after the committed save without exposing se
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/설정 잠금 해제를 확인하지 못했습니다/)
   expect(document.body.textContent).not.toContain('private-server-path')
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
@@ -211,7 +211,7 @@ it.each([undefined, [{ code: 'unknown' }]])('refuses missing or unknown lock war
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockResolvedValue({ configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], commit: { durability: 'durable', warnings } })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   expect(vi.mocked(post).mock.calls.filter(([path]) => path.endsWith('/resume'))).toHaveLength(0)
 })
@@ -223,7 +223,7 @@ it('names a runtime saved without the check because of a usage limit', async () 
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/사용 한도에 걸려 응답·도구 검증은 못 했습니다: old\.id \(quota_exhausted\)/)
   expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
@@ -238,7 +238,7 @@ it('names a bound runtime the save did not check again', async () => {
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/기존 연결은 이번에 다시 확인하지 않았습니다: old\.id\./)
   expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
@@ -250,7 +250,7 @@ it('refuses a receipt that reports verified beside a not_rechecked list', async 
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
 })
 it('refuses a usage-limited receipt that does not name a saved runtime', async () => {
@@ -261,7 +261,7 @@ it('refuses a usage-limited receipt that does not name a saved runtime', async (
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
 })
 it('prepares only the chosen model without a numeric input', async () => {
@@ -341,7 +341,7 @@ it('owns cancellation of a pending save and never treats cancellation as rollbac
   }))
   const selected = { ...inventory, runtimes: [{ id: 'existing.model', provider_id: 'existing', display_name: 'Existing', model: 'Model', protocol: 'codex-app-server', endpoint: null }] }
   render(html`<${RuntimeSetupPicker} inventory=${selected} onSaved=${vi.fn()} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   fireEvent.click(await screen.findByText('요청 대기 취소'))
   await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   expect(post).not.toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
@@ -410,7 +410,7 @@ it('cancels a pending resume after save without reporting activation or calling 
   const saved = vi.fn()
   const selected = { ...inventory, runtimes: [{ id: 'existing.model', provider_id: 'existing', display_name: 'Existing', model: 'Model', protocol: 'codex-app-server', endpoint: null }] }
   render(html`<${RuntimeSetupPicker} inventory=${selected} onSaved=${saved} />`)
-  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(screen.getByLabelText(/Existing · 연결 (old\.id|existing\.model) · Model/)); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await waitFor(() => expect(resumeSignal).toBeDefined())
   fireEvent.click(screen.getByText('요청 대기 취소'))
   await screen.findByText(/설정 적용 응답 대기를 취소했습니다/)
@@ -449,4 +449,31 @@ it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('uses docume
     selection: [{ connection: 0, model: 0 }],
   }))
   expect(vi.mocked(post).mock.calls.some(([path]) => path.endsWith('/context'))).toBe(false)
+})
+
+it('identifies grouped accounts by reported email and keeps duplicate runtime connections distinguishable', async () => {
+  const grouped = {
+    ...inventory,
+    integrations: ['personal-a', 'personal-b', 'work'].map(id => ({ id, display_name: id, protocol: 'codex-app-server', setup_support: 'existing_connection' })),
+    account_groups: [
+      { id: '1'.repeat(64), integration_ids: ['personal-a', 'personal-b'], runtime_ids: ['personal-a.luna', 'personal-b.luna'] },
+      { id: '2'.repeat(64), integration_ids: ['work'], runtime_ids: ['work.luna'] },
+    ],
+    account_emails: [
+      { integration_id: 'personal-a', state: 'read', email: 'personal@example.test' },
+      { integration_id: 'personal-b', state: 'read', email: 'personal@example.test' },
+      { integration_id: 'work', state: 'read', email: 'work@example.test' },
+    ],
+    runtimes: ['personal-a', 'personal-b', 'work'].map(id => ({ id: `${id}.luna`, provider_id: id, display_name: 'Codex', protocol: 'codex-app-server', model: 'luna', endpoint: null, max_context: 272000 })),
+  }
+  vi.mocked(post).mockRejectedValue(new Error('stop after observing selection'))
+  render(html`<${RuntimeSetupPicker} inventory=${grouped} onSaved=${vi.fn()} />`)
+  expect(screen.getByRole('option', { name: /personal@example.test/ })).toBeTruthy()
+  expect(screen.getByRole('option', { name: /work@example.test/ })).toBeTruthy()
+  fireEvent.click(screen.getByLabelText(/연결 personal-b\.luna/))
+  fireEvent.click(screen.getByLabelText(/연결 personal-a\.luna/))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
+    revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'personal-b.luna' }, { runtime_id: 'personal-a.luna' }],
+  }))
 })

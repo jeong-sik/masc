@@ -62,9 +62,16 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     if (!group) return fallback
     const client = protocol === 'codex-app-server' ? 'Codex' : protocol === 'claude-code' ? 'Claude Code'
       : protocol === 'muse-serve' ? 'Muse Code' : protocol === 'antigravity-cli' ? 'Antigravity' : fallback
-    return `${client} · ${group.id.slice(0, 8)} · 모델 설정 ${group.runtime_ids.length}개`
+    const members = integrations.filter(row => group.integration_ids.includes(row.id))
+    const emails = [...new Set((inventory.account_emails ?? []).flatMap(row =>
+      group.integration_ids.includes(row.integration_id) && row.state === 'read' && row.email.trim()
+        ? [row.email] : []))]
+    const labels = [...new Set(members.map(row => row.display_name))]
+    const identity = emails.length ? emails.join(' / ')
+      : `${labels.length ? labels.join(' / ') : fallback} · 이메일 미확인 · 연결 ${group.integration_ids.join(', ')}`
+    return `${identity} · ${client} · ${group.id.slice(0, 8)} · 모델 설정 ${group.runtime_ids.length}개`
   }
-  const runtimeLabel = (row: RuntimeRow) => `${accountLabel(row.provider_id, row.display_name, row.protocol)} · ${row.model}${row.max_context == null ? '' : ` · ${row.max_context.toLocaleString()} context`}`
+  const runtimeLabel = (row: RuntimeRow) => `${accountLabel(row.provider_id, row.display_name, row.protocol)} · 연결 ${row.id} · ${row.model}${row.max_context == null ? '' : ` · ${row.max_context.toLocaleString()} context`}`
   const integration = integrations.find(row => row.id === provider && selectable(row))
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
@@ -107,9 +114,10 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   }
   function replaceAccountChoices() {
     invalidateDiscovery(); setSelectedAccount(null); setNotice('')
+    const members = groupFor(provider)?.integration_ids ?? [provider]
     setChoices(current => current.filter(choice => choice.kind === 'new'
-      ? choice.source.integration_id !== provider
-      : !inventory.runtimes.some(row => row.id === choice.id && row.provider_id === provider)))
+      ? !members.includes(choice.source.integration_id)
+      : !inventory.runtimes.some(row => row.id === choice.id && members.includes(row.provider_id))))
   }
   async function loggedIn(selected: Source) {
     if (!alive.current || activeRequest.current) return

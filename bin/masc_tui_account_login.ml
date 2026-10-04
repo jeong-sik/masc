@@ -523,11 +523,11 @@ let removal_preview t (provider:provider) ~refused json =
   | `String id, Some revision, `String "refused" when id=provider.id ->
     (match string (field "reason" json) with
      | Some reason -> t.phase <- Removal {provider; revision; removal = Unremovable reason};
-       t.notice <- lead ^ "이 계정은 지금 지울 수 없습니다."; Ok ()
+       t.notice <- lead ^ "이 연결은 지금 지울 수 없습니다."; Ok ()
      | None -> Error "지울 수 없는 이유를 읽지 못했습니다.")
   | _ -> Error "지울 내용을 읽지 못했습니다."
 let removed_notice (provider:provider) login_store =
-  provider.label ^ " 계정을 지웠습니다."
+  provider.label ^ " 연결 (" ^ provider.id ^ ")을 설정에서 지웠습니다."
   ^ (match login_store with Some path -> " 로그인 정보는 남아 있습니다: " ^ path | None -> "")
 let source t = `Assoc (["integration_id", `String (match t.provider with Some p -> p.id | None -> "")]
   @ (match t.account_ref with Some r -> ["account_ref",`String r] | None -> []))
@@ -750,7 +750,7 @@ let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
   | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
-  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:지우기  Esc:공급자 목록"
+  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:연결 삭제  Esc:공급자 목록"
   | Providers (Account_providers _) -> "↑↓:공급자 연결  Enter/D:선택한 연결 삭제 미리보기  Esc:계정 목록"
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
@@ -815,7 +815,7 @@ let body_rows t =
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
     @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
   | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
-  | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
+  | Removal {provider; removal; _} -> Text ("지울 공급자 연결: " ^ provider.id ^ " · " ^ provider.label ^ account_suffix t provider) ::
     (match removal with
      | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
        @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])

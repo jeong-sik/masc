@@ -14,6 +14,7 @@ vi.mock('../api/lane-addons', async original => ({
   ...await original<typeof import('../api/lane-addons')>(), ...api,
 }))
 import { LaneAddonsPanel } from './lane-addons-panel'
+import { LaneAddonReadings } from './lane-addon-readings'
 
 const row = {
   id: 'external-evidence-1', lane_id: 'unregistered-domain', kind: 'relation',
@@ -146,6 +147,69 @@ describe('optional Lane Add-on surface', () => {
       'Unavailable · field does not match declared display format',
       '{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}',
     ])
+  })
+  it('renders deeply nested valid JSON readings without recursive validation overflow', async () => {
+    const raw = '['.repeat(12000) + '{"count":7}' + ']'.repeat(12000)
+    const fields = JSON.parse('{"deep":' + raw + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect(group.querySelector('dd')?.textContent).toBe(raw)
+    expect(screen.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Deep')).toBeTruthy()
+    expect(detail.getByText(raw)).toBeTruthy()
+    expect(detail.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+  })
+  it('keeps the panel usable when the browser compact formatter rejects a deep valid reading', async () => {
+    const fields = JSON.parse('{"deep":' + '['.repeat(12000) + '7' + ']'.repeat(12000) + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    const deep = decoded.rows[0]!.fields.deep
+    const stringify = JSON.stringify
+    const formatter = vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof JSON.stringify>) => {
+      if (args[0] === deep) throw new RangeError('fixture browser compact formatter limit')
+      return stringify(...args)
+    })
+    try {
+      api.fetchLaneAddons.mockResolvedValue(decoded)
+      const screen = render(html`<${LaneAddonsPanel} />`)
+      const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+      expect(group.textContent).toContain('Unavailable · JSON nesting exceeds this browser’s formatter capacity')
+      expect(group.textContent).not.toContain('field does not match declared display format')
+      fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+      const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+      expect(detail.getByText('Unavailable · JSON nesting exceeds this browser’s formatter capacity')).toBeTruthy()
+      expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    } finally { formatter.mockRestore() }
+  })
+  it.each([
+    ['{"first":[9007199254740993],"second":1e400}', 'integer exceeds JavaScript’s exact range'],
+    ['{"first":[1e400],"second":9007199254740993}', 'field does not match declared display format'],
+  ])('preserves first invalid JSON number in display order: %s', (raw, reason) => {
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields: JSON.parse('{"value":' + raw + '}') }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['value'], label: 'Value', format: 'json', unit: null },
+        ] } } }],
+    })
+    const view = render(html`<${LaneAddonReadings} row=${decoded.rows[0]!} instances=${decoded.instances} />`)
+    expect(view.getByText(`Unavailable · ${reason}`)).toBeTruthy()
   })
   it('rejects malformed package display contracts instead of discarding them', () => {
     const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }

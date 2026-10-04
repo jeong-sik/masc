@@ -17,6 +17,15 @@ const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transpare
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
+function rawFieldsText(fields: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(fields, null, 2)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    return 'Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.'
+  }
+}
+
 function isDeclarationFile(directory: string, sourcePath: string): boolean {
   const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
   const expectedPath = `${directory}${directory.endsWith('/') ? '' : '/'}${fileName}`
@@ -245,7 +254,7 @@ export function LaneAddonsPanel() {
       <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
       <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
       <${LaneAddonReadings} row=${focused} instances=${snapshot?.instances ?? []} />
-      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(focused.fields, null, 2)}</pre>
+      <pre class="whitespace-pre-wrap break-all">${rawFieldsText(focused.fields)}</pre>
       <h4>Original evidence</h4>
       ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
       ${focused.related_ids.length > 0 && html`<div>Recorded relationships: ${focused.related_ids.map(id => {
@@ -349,7 +358,7 @@ export function LaneAddonsPanel() {
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}
       <${LaneAddonReadings} row=${row} instances=${snapshot?.instances ?? []} />
       <details><summary>Fields and original evidence · ${row.id}</summary>
-        <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.fields, null, 2)}</pre>
+        <pre class="whitespace-pre-wrap break-all">${rawFieldsText(row.fields)}</pre>
         ${row.evidence.map(evidence => html`<p key=${evidence.uri} class="break-all">${evidence.uri} · sha256 ${evidence.sha256 ?? 'unknown'}</p>`)}
         ${row.related_ids.length > 0 && html`<p>Related: ${row.related_ids.join(', ')}</p>`}
       </details>

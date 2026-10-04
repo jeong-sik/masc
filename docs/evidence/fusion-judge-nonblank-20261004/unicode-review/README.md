@@ -11,6 +11,8 @@ initialization, the schema's character class is generated from that property;
 there is no separate handwritten production whitespace list. The decoder folds
 UTF-8 input through the same property, preserving meaningful content unchanged.
 Malformed UTF-8 is an explicit error. uutf/uucp are direct fusion_core dependencies.
+The package declaration and checked-in opam metadata also declare uutf directly.
+No Dune metadata generation or full build was performed.
 
 Actual isolated native decoder processes evaluated 135 blank cases: empty,
 each Unicode White_Space code point and their concatenation, at all five

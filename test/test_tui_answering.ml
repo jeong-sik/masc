@@ -406,9 +406,16 @@ let test_each_source_alone_starts_the_mark () =
          (lanes_snapshot
             [ { (idle_lane ~lane:Standalone_lane.Librarian) with
                 Tui_decode.sl_status = Tui_decode.Standalone_running
+              ; sl_running_count = 1
               }
             ])
        ());
+  Alcotest.(check bool) "off does not hide accepted work" true
+    (animating ~lanes:(lanes_snapshot [{(idle_lane ~lane:Standalone_lane.Librarian) with
+      sl_status=Standalone_off;sl_configuration_state=Lane_off;sl_running_count=1}]) ());
+  Alcotest.(check bool) "off and drained does not animate" false
+    (animating ~lanes:(lanes_snapshot [{(idle_lane ~lane:Standalone_lane.Librarian) with
+      sl_status=Standalone_off;sl_configuration_state=Lane_off}]) ());
   (* The one that was missing. The observer feed opens a transcript before the
      next poll returns the row for it, and the chat pane draws the mark
      against the feed. *)

@@ -1151,6 +1151,28 @@ let test_model_without_turn_timeout_leaves_it_unset () =
          (model.Runtime_schema.turn_timeout_s = None)
      | _ -> fail "exactly one model must parse")
 
+let test_exact_lane_activity_preserves_configuration () =
+  let parse lane body = Runtime_toml.parse_string
+    ("[runtime.exact_output_lanes." ^ lane ^ "]\n" ^ body) in
+  let one body = match parse "librarian_exact" body with
+    | Ok config -> (match config.Runtime_schema.exact_output_lane_decls with
+      | [lane] -> lane | _ -> fail "expected one lane")
+    | Error _ -> fail "lane activity did not parse" in
+  let original = one "slots=[\"slot-b\",\"slot-a\"]\ncli_slots=[\"cli\"]\nthinking=false\nmax_output_tokens=123\n" in
+  check bool "omission accepts existing configuration" true original.enabled;
+  let off = one "enabled=false\nslots=[\"slot-b\",\"slot-a\"]\ncli_slots=[\"cli\"]\nthinking=false\nmax_output_tokens=123\n" in
+  check bool "disable changes only activity" true
+    (Runtime_schema.equal_exact_output_lane_decl {original with enabled=false} off);
+  check bool "off can be configured before selecting candidates" false (one "enabled=false\n").enabled;
+  List.iter (fun (lane,body) -> match parse lane body with
+    | Error _ -> () | Ok _ -> fail "invalid activity accepted")
+    ["librarian_exact", "enabled=\"false\"\nslots=[\"slot\"]\n";
+     "librarian_exact", "enabled=true\n";
+     "librarian_exact", "enabled=false\nslots=[\"duplicate\",\"duplicate\"]\n";
+     "board_attention_exact", "enabled=false\nslots=[\"slot\"]\n";
+     "hitl_auto_judge", "enabled=false\nslots=[\"slot\"]\n"]
+;;
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -2045,7 +2067,7 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
+    { Runtime_schema.id; enabled = true; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
@@ -6321,7 +6343,8 @@ let () =
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
-            test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
+            test_exact_output_lane_config_is_ordered_and_rejects_duplicates
+        ; test_case "exact lane activity preserves settings and required lanes" `Quick test_exact_lane_activity_preserves_configuration;
           test_case "exact-output lane cli_slots parse in order" `Quick
             test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick

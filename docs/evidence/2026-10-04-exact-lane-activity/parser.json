@@ -1,0 +1,206 @@
+{
+  "compiler": "5.5.1",
+  "scope": "Parsing only, no typecheck or linking",
+  "files": [
+    {
+      "path": "bin/masc_tui_answering.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_queue_refresh.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_runtime.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime_exact_output_registry.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime_exact_output_registry.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime_schema.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime_schema.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/runtime/runtime_toml.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/server/server_standalone_lane_projection.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/server/server_standalone_lane_projection.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/server/server_workspace_memory_curator.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/tui_decode.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/tui_decode.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/exact_output_fixture.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_candle_appraisal_flow.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_dashboard_gate_cli_lane.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_exact_output_catalog_precedence.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_exact_output_catalog_precedence_fixture.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_exact_output_runtime_deadline.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_exact_output_runtime_reasoning.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_hitl_summary_worker.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_absorb_gate.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_cancellation.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_capacity_callback.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_context_review.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_exact_lane_preference.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_preflight.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_runtime_config_validity.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_server_standalone_lane_projection.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_tui_answering.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "exit": 0,
+      "diagnostics": ""
+    },
+    {
+      "path": "test/test_verifier_exact_lane.ml",
+      "exit": 0,
+      "diagnostics": ""
+    }
+  ]
+}

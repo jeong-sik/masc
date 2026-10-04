@@ -2773,7 +2773,8 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
       List.concat_map
         (fun (key, _) ->
            if
-             String.equal key "slots"
+             String.equal key "enabled"
+             || String.equal key "slots"
              || String.equal key "cli_slots"
              || String.equal key "max_output_tokens"
              || String.equal key "thinking"
@@ -2782,12 +2783,13 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown exact-output lane key %S; expected slots, cli_slots, \
+                  "unknown exact-output lane key %S; expected enabled, slots, cli_slots, \
                    max_output_tokens or thinking"
                   key))
         entries
     | _ -> []
   in
+  let enabled_result = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:true in
   let slots_result =
     match Otoml.find_opt tbl Fun.id [ "slots" ] with
     (* Absent reads as empty, the same as [cli_slots] below. The lane's rule is
@@ -2865,11 +2867,18 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
     | Ok slots, Ok cli_slots, Ok max_output_tokens, Ok thinking ->
       Ok (slots, cli_slots, max_output_tokens, thinking)
   in
+  let* enabled = enabled_result in
+  let* () =
+    match Standalone_lane.of_id id with
+    | Some lane when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
+      Error (error (path ^ ".enabled") "required exact-output lane cannot be disabled")
+    | Some _ | None -> Ok ()
+  in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], [], _, _) ->
+  | [], Ok ([], [], _, _) when enabled ->
     Error (error path "exact-output lane must have at least one slot")
   | [], Ok (slot_ids, cli_slot_ids, max_output_tokens, thinking) ->
     let rec validate_cli position seen = function
@@ -2894,7 +2903,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
          | Ok () ->
-           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens; thinking })
+           Ok { Runtime_schema.id; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then

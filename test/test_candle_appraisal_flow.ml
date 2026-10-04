@@ -751,7 +751,7 @@ let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
     let publish ?(unrelated = false) id base_url =
       let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
       let lane : Runtime_schema.exact_output_lane_decl =
-        {id="candle_appraiser";slot_ids=[id];cli_slot_ids=[];
+        {id="candle_appraiser";enabled = true; slot_ids=[id];cli_slot_ids=[];
          max_output_tokens=Some F.fixture_max_output_tokens;thinking=None} in
       let lanes = if unrelated then [lane; {lane with id="other-lane"}] else [lane] in
       match R.publish ~lanes snapshot with

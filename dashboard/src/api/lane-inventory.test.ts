@@ -8,6 +8,23 @@ describe('common Lane inventory wire', () => {
     expect(parsed.rows).toHaveLength(12)
     expect(parsed.exact_snapshot.lanes).toHaveLength(7)
   })
+  it('keeps disabled candidates and running observations, rejecting contradictory activity', () => {
+    const raw = structuredClone(fixture)
+    const lane = raw.exact_snapshot.lanes.find(item => item.lane_id === 'librarian_exact')!
+    const row = raw.rows.find(item => item.id === 'exact/librarian_exact')!
+    Object.assign(lane, { configured: true, configuration_state: 'off', status: 'off',
+      admitted_slots: [], cli_slots: [], dropped_slots: [], admission_error: null,
+      declared_slots: ['first', 'second'], declared_cli_slots: ['cli'], running_count: 1 })
+    Object.assign(row.state, { configuration: { kind: 'off', declared_slots: ['first', 'second'], declared_cli_slots: ['cli'] } })
+    expect(parseLaneInventory(raw).exact_snapshot.lanes.find(item => item.laneId === 'librarian_exact'))
+      .toMatchObject({ status: 'off', runningCount: 1, declaredSlots: ['first', 'second'], declaredCliSlots: ['cli'] })
+    lane.status = 'running'
+    expect(() => parseLaneInventory(raw)).toThrow(/inconsistent admission/)
+    lane.status = 'off'; lane.required = true
+    expect(() => parseLaneInventory(raw)).toThrow(/inconsistent admission/)
+    lane.required = false; lane.declared_slots = ['other']
+    expect(() => parseLaneInventory(raw)).toThrow(/disagrees/)
+  })
   it('rejects mismatched families, duplicate identities, missing builtins and conflicting exact readings', () => {
     for (const mutate of [
       (value: typeof fixture) => { value.rows.push(value.rows[0]!) },

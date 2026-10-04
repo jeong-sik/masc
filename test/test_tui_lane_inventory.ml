@@ -164,7 +164,32 @@ let disabled_is_desired_not_cleanup_proof () =
   let invalid = set "enabled" (str "false") (declaration false) in
   rejects "nonboolean desired activity is not coerced" (snapshot [declared invalid])
 
+let disabled_exact_keeps_candidates_and_finishing_work () =
+  let off = exact_lane Standalone_lane.Librarian
+    |> set "configuration_state" (str "off") |> set "status" (str "off")
+    |> set "admitted_slots" (strings []) |> set "cli_slots" (strings [])
+    |> set "declared_slots" (strings ["first";"second"])
+    |> set "declared_cli_slots" (strings ["cli"]) |> set "running_count" (`Int 1) in
+  let make off =
+    let observed = exact_snapshot |> set "lanes" (`List (List.map (fun lane ->
+      if Standalone_lane.equal lane Librarian then off else exact_lane lane) Standalone_lane.all)) in
+    snapshot [] |> set "exact_snapshot" observed |> set "rows" (`List (List.map (fun row ->
+      if get "id" row = str "exact/librarian_exact" then
+        set "state" (object_ ["kind",str "exact";"configuration",object_
+          ["kind",str "off";"declared_slots",strings ["first";"second"];"declared_cli_slots",strings ["cli"]]]) row
+      else row) builtin_rows)) in
+  let observed = ok (Decode.decode (make off)) in
+  let row = find "exact/librarian_exact" observed in
+  Alcotest.(check string) "off preserves observation of accepted work"
+    "off · 1 finishing · off; candidates retained" (Display.row_summary_in observed row);
+  Alcotest.(check bool) "candidate order available in detail" true
+    (List.mem "Declared HTTP slots: first, second" (Display.detail_lines row));
+  rejects "off must not admit new candidates" (make (off |> set "admitted_slots" (strings ["first"])));
+  rejects "off and running status contradict" (make (off |> set "status" (str "running")));
+  rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;
     Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
   Alcotest.test_case "bounded run reading remains visible" `Quick bounded_run_reading_is_visible;

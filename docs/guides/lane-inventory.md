@@ -30,7 +30,7 @@ Clients use `selection` for navigation, not heuristics over labels or IDs.
 
 | State kind | Fields and meaning |
 | --- | --- |
-| `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; or `unconfigured`/`unavailable` with `detail` |
+| `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; `off` with `declared_slots` and `declared_cli_slots`; or `unconfigured`/`unavailable` with `detail` |
 | `browser_clients` | `connected_clients`, counted using the existing connection deadline without pruning clients or settling requests |
 | `browser_executor` | `registered`; registration does not prove a child process or browser session is alive |
 | `machine` | `publication`: `no_screen`, `stable` or `running`, from the owner's Atomic publication only |
@@ -40,6 +40,12 @@ An exact registry that cannot be read, including a publication reservation, is
 `unavailable`; it is not interpreted as disabled. Machine reads do not acquire
 the machine lock, capture pixels or infer a controller/program. Browser reads
 never invoke an executor or open a session.
+
+Exact `off` refuses new acquisitions while retaining its declared candidates.
+The embedded standalone snapshot has `configuration_state: "off"`, `status:
+"off"`, and `configured: true`. Admitted/dropped lists are empty in this
+readout; retained run counts remain independent and can show accepted work still
+finishing. See [Exact activity](exact-lane-activity.md).
 
 Package declaration states are:
 

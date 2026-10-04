@@ -602,7 +602,10 @@ val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, strin
 
 val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
-    execution-kind constraint; a replacing registry cannot grant admission. *)
+    execution-kind constraint, including when the lane is off. New implicit
+    reviews acquire the lane through [verifier_exact_lane_slot_ids] first; this
+    candidate check does not revoke an already acquired review when activity
+    changes. Explicit single-runtime overrides remain independent of lane activity. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the

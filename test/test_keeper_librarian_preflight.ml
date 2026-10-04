@@ -24,7 +24,8 @@ let generated = Yojson.Safe.to_string (`Assoc
   ; "dropped", `List []; "working_contexts", `List []; "working_state", `Null ])
 
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
-    ?(context_only = false) ?(with_context = false) ~name ~status ~body
+    ?(context_only = false) ?(with_context = false) ?(lane_enabled = true)
+    ?(disable_during_preflight = false) ~name ~status ~body
     ~expected_jev ~expected_llm () =
   Fixture.with_official_client_runtimes @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -33,6 +34,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
   let jev_calls = ref 0 and llm_calls = ref 0 in
+  let before_reply = ref (fun () -> ()) in
   let socket = Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
   let port = match Eio.Net.listening_addr socket with
@@ -43,6 +45,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     (* The runtime's source record must exist before this effect. *)
     Alcotest.(check bool) "source persisted before JEV"
       true (List.exists (fun (run : Runs.run) -> run.actor = name) (Runs.list_runs registry));
+    !before_reply ();
     Cohttp_eio.Server.respond_string ~status ~body () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
@@ -55,9 +58,16 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     excluded_keepers=(if excluded then [name] else [])} in
   Masc_test_deps.with_process_env "MASC_PREFLIGHT_FIXTURE_KEY" (Some "fixture-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy policy @@ fun () ->
-  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
-    ~cli_slot_ids:[Fixture.cli_primary_runtime]
-    (Fixture.resolver_snapshot ~source:"preflight-fixture" []));
+  let resolver = Fixture.resolver_snapshot ~source:"preflight-fixture" [] in
+  let initial = Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime] resolver in
+  let declaration = match Runtime_exact_output_registry.declared_lane initial ~lane_id:"librarian_exact" with
+    | Some declaration -> declaration | None -> Alcotest.fail "no fixture lane" in
+  let set_activity enabled =
+    match Runtime_exact_output_registry.publish ~lanes:[{declaration with enabled}] resolver with
+    | Ok _ -> () | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error) in
+  set_activity lane_enabled;
+  if disable_during_preflight then before_reply := (fun () -> set_activity false);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let fact : Memory.fact = Memory.observed ~claim:"The established constraint is still valid."
     ~category:Memory.Constraint ~now:1000.
@@ -91,7 +101,14 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ~base_path ~keepers_dir ~keeper_id:name ~expected_revision:(Some stored.revision) input;
   Alcotest.(check int) "actual JEV dispatches" expected_jev !jev_calls;
   Alcotest.(check int) "actual generation dispatches" expected_llm !llm_calls;
-  if not context_only then (
+  if not lane_enabled then (
+    Alcotest.(check bool) "off must not acknowledge memory consumption" false !committed;
+    (match Current.committed_durable_range ~keepers_dir ~keeper_id:name ~receipt_scope:range.receipt_scope with
+     | Ok None -> () | Ok (Some _) -> Alcotest.fail "off consumed the range" | Error detail -> Alcotest.fail detail);
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:name with
+    | Ok (Some snapshot) -> Alcotest.(check int) "off retains prior revision" stored.revision snapshot.revision
+    | Ok None -> Alcotest.fail "off removed memory" | Error detail -> Alcotest.fail detail)
+  else if not context_only then (
     Alcotest.(check bool) "normal commit observer ran" true !committed;
     (match Current.committed_durable_range ~keepers_dir ~keeper_id:name
       ~receipt_scope:range.receipt_scope with
@@ -106,6 +123,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
   let run = List.filter (fun (run : Runs.run) -> run.actor = name) (Runs.list_runs registry) in
   match run with
+  | [] when not lane_enabled -> ()
   | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};_}] ->
     Alcotest.(check (option string)) "JEV never claims a catalog or CLI slot"
       (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot
@@ -120,12 +138,15 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case ?enabled ?excluded ?context_only ?with_context name status body jev llm =
+  let case ?enabled ?excluded ?context_only ?with_context ?lane_enabled ?disable_during_preflight name status body jev llm =
     Alcotest.test_case name `Quick
-      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?with_context
+      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?with_context ?lane_enabled ?disable_during_preflight
         ~name ~status ~body ~expected_jev:jev ~expected_llm:llm) in
   Alcotest.run "Librarian JEV preflight"
     ["real dispatch and commit", [
+      case ~lane_enabled:false "off-skips-jev-and-consumption" `OK (answer "keep_current") 0 0;
+      case ~disable_during_preflight:true "accepted-pass-keeps-cli-after-off" `OK (answer "needs_generation") 1 1;
+      case ~disable_during_preflight:true "accepted-no-change-finishes-after-off" `OK (answer "keep_current") 1 0;
       case "keep-current" `OK (answer "keep_current") 1 0;
       case "needs-generation" `OK (answer "needs_generation") 1 1;
       case "uncertain" `OK (answer "uncertain") 1 1;

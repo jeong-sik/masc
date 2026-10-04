@@ -46,7 +46,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
   let resolver = Fixture.resolver_snapshot ~source:"capacity-callback-fixture" targets in
   (match Runtime_exact_output_registry.publish
       ~lanes:[{Runtime_schema.id = "librarian_exact";
-        slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
+        enabled = true; slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
         cli_slot_ids = List.map fst cli_errors;
         max_output_tokens = Some 4_096; thinking = None}] resolver with
    | Ok _ -> ()

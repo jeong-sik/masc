@@ -97,6 +97,8 @@ let selection_json = function
   | Manual_instance {instance_id;incarnation} ->
       `Assoc ["kind",str "manual_instance";"instance_id",str instance_id;"incarnation",str incarnation]
 let configuration_json = function
+  | Exact_projection.Disabled c -> `Assoc ["kind",str "off";
+      "declared_slots",strings c.declared_slots;"declared_cli_slots",strings c.declared_cli_slots]
   | Exact_projection.Configured c -> `Assoc ["kind",str "configured";
       "admitted_slots",strings c.admitted_slots;"cli_slots",strings c.cli_slots;
       "declared_slots",strings c.declared_slots;"declared_cli_slots",strings c.declared_cli_slots;

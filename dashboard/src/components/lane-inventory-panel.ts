@@ -15,7 +15,8 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
       const config = state.configuration
       return [config.kind === 'configured'
         ? `${config.admitted_slots.length} HTTP · ${config.cli_slots.length} CLI admitted`
-        : `${config.kind}: ${config.detail}`,
+        : config.kind === 'off' ? 'Off · candidate configuration retained; accepted runs finish'
+          : `${config.kind}: ${config.detail}`,
       ...(lane ? [`${lane.status} · ${lane.runningCount} running · ${lane.retainedRunCount} retained runs`] : [])]
     }
     case 'browser_clients': return [`${state.connected_clients} connected clients`]

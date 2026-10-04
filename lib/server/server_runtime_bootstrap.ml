@@ -206,7 +206,8 @@ let warn_browser_stagehand_slots registry =
   let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Error
-      ( Runtime_exact_output_registry.Exact_lane_unconfigured _
+      ( Runtime_exact_output_registry.Exact_lane_off _
+      | Runtime_exact_output_registry.Exact_lane_unconfigured _
       | Runtime_exact_output_registry.No_admitted_lane_slots _ ) ->
     (* [Runtime.report_exact_output_registry] reported it. *)
     ()

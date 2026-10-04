@@ -420,6 +420,7 @@ let run_runtime_evidence ?fixture_dir () =
       [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
     (match Runtime_exact_output_registry.publish
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
+               ; enabled = true
                ; slot_ids = [ "librarian-absorb-fixture" ]
                ; cli_slot_ids = []
                ; max_output_tokens = Some 4_096; thinking = None
@@ -1793,6 +1794,7 @@ let test_the_runtime_does_not_save_a_copy () =
     [ { Fixture.id = "librarian-copy-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
     ~lanes:[ { Runtime_schema.id = "librarian_exact"
+             ; enabled = true
              ; slot_ids = [ "librarian-copy-fixture" ]
              ; cli_slot_ids = []
              ; max_output_tokens = Some 4_096; thinking = None
@@ -1891,6 +1893,7 @@ let test_payment_failure_does_not_multiply_current_claims () =
     [ { Fixture.id = "librarian-payment-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
     ~lanes:[ { Runtime_schema.id = "librarian_exact"
+             ; enabled = true
              ; slot_ids = [ "librarian-payment-fixture" ]
              ; cli_slot_ids = []
              ; max_output_tokens = Some 4_096; thinking = None

@@ -15,6 +15,7 @@ type configuration =
       declared_slots : string list; declared_cli_slots : string list;
       dropped_slots : string list; admission_error : string option;
     }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
   | Unconfigured of string
   | Registry_unavailable of string
 

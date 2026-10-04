@@ -1848,9 +1848,13 @@ let verifier_exact_slot_admission ~runtime_id =
   | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
   | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
-     | Ok _ | Error _ -> direct ())
+    (* New reviews acquire the lane through [verifier_exact_lane_slot_ids].
+       This is a candidate check inside an already admitted review (or an
+       explicit single-runtime override). Activity changes must not erase a
+       retained CLI candidate's execution-kind constraint during failover. *)
+    (match Runtime_exact_output_registry.declared_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
+     | Some lane when List.mem runtime_id lane.cli_slot_ids -> verifier_cli_slot_admission ~runtime_id
+     | Some _ | None -> direct ())
 ;;
 
 let is_local_runtime_id (id : string) : bool option =
@@ -2705,6 +2709,8 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
       feature
       lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
+    Log.Server.info "exact_output: lane %S is off; its candidate configuration is retained" lane_id
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Log.Server.warn
       "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"

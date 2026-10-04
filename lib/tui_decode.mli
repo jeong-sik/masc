@@ -744,6 +744,7 @@ val decode_keeper_lanes_snapshot :
 (** Read-only standalone LLM lane observation. These rows describe existing
     admission and run registries; they never carry a control action. *)
 type standalone_lane_status =
+  | Standalone_off
   | Standalone_running
   | Standalone_idle
   | Standalone_degraded
@@ -757,6 +758,7 @@ type standalone_lane_status =
     [Lane_slotless] is the server's "degraded": configured, but with no
     catalog slot and no CLI slot admitted. *)
 type standalone_lane_configuration =
+  | Lane_off
   | Lane_ready
   | Lane_slotless
   | Lane_unconfigured

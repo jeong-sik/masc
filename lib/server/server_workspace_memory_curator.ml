@@ -301,6 +301,7 @@ let start ~sw ~base_path =
     | Error _ -> false
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+       | Error (Runtime_exact_output_registry.Exact_lane_off _)
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
        | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true) in
   start_with ~sw ~base_path ~enabled ~prepare:(fun () -> prepare_execution ~base_path)

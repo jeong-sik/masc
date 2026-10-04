@@ -88,6 +88,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     [ { Fixture.id = "cancel-librarian-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
+               ; enabled = true
                ; slot_ids = [ "cancel-librarian-fixture" ]
                ; cli_slot_ids = []
                ; max_output_tokens = Some 4_096; thinking = None

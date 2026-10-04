@@ -201,7 +201,7 @@ let expected_lane_ids =
 let lane_unavailable registry lane =
   match Registry.resolve_lane registry ~lane_id:lane with
   | Error (Registry.No_admitted_lane_slots _) -> true
-  | Error (Registry.Exact_lane_unconfigured _) | Ok _ -> false
+  | Error (Registry.Exact_lane_off _) | Error (Registry.Exact_lane_unconfigured _) | Ok _ -> false
 
 (* A connect deadline ends at the response headers, so a provider that
    declares only [connect-timeout-s] would read the Exact body with no

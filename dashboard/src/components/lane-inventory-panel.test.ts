@@ -27,6 +27,21 @@ describe('operator Lane inventory', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Inspect / }))
     expect(screen.getByText('Manage this machine through its TUI detail or operator tools.')).toBeTruthy()
   })
+  it('shows off with retained candidates and work finishing independently', async () => {
+    const raw = structuredClone(fixture)
+    const lane = raw.exact_snapshot.lanes.find(item => item.lane_id === 'librarian_exact')!
+    const row = raw.rows.find(item => item.id === 'exact/librarian_exact')!
+    Object.assign(lane, { configured: true, configuration_state: 'off', status: 'off',
+      admitted_slots: [], cli_slots: [], dropped_slots: [], admission_error: null,
+      declared_slots: ['first', 'second'], declared_cli_slots: ['cli'], running_count: 1 })
+    Object.assign(row.state, { configuration: { kind: 'off', declared_slots: ['first', 'second'], declared_cli_slots: ['cli'] } })
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: `Inspect ${row.label}` }))
+    expect(screen.getAllByText('Off · candidate configuration retained; accepted runs finish').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/off · 1 running/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: 'Runtime settings · Lane candidates' })).toBeTruthy()
+  })
   it('labels the retained reading after refresh fails and retries on demand', async () => {
     api.fetchLaneInventory.mockResolvedValueOnce(parseLaneInventory(fixture)).mockRejectedValueOnce(new Error('inventory offline'))
     const screen = render(html`<${LaneInventoryPanel} />`)

@@ -28,6 +28,8 @@ import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-r
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
 import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
+import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
+import type { LaneNavigationTarget } from '../lib/lane-navigation'
 
 type Filter =
   | 'all'
@@ -667,10 +669,20 @@ function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
 }
 
 export function InternalAgentsMonitor() {
+  const navigation = useLaneNavigation(['exact'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before reading this Lane target.'} pending=${navigation.pending} />`
+  const target = navigation.target?.kind === 'exact' ? navigation.target : undefined
+  return html`<${InternalAgentsMonitorContent} target=${target}
+    key=${target && navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
+}
+
+function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'exact' }> }) {
   const [rows, setRows] = useState<Row[]>([])
   const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
   const [laneMatrixError, setLaneMatrixError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilterState] = useState<Filter>('all')
+  function setFilter(value: Filter) { setFilterState(value); if (target) clearLaneNavigation() }
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
@@ -678,6 +690,12 @@ export function InternalAgentsMonitor() {
     exact: 'loading', verification: 'loading', fusion: 'loading',
   })
   const refreshVersion = useRef(0)
+  const targetRow = useRef<HTMLTableRowElement>(null), focusedTarget = useRef<typeof target>(undefined)
+  useEffect(() => {
+    if (target && target !== focusedTarget.current && targetRow.current) {
+      targetRow.current.focus(); focusedTarget.current = target
+    }
+  }, [target, laneMatrix])
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
@@ -733,7 +751,9 @@ export function InternalAgentsMonitor() {
     }
   }, [refresh])
 
-  const visible = useMemo(() => rows.filter(row => matches(row, filter)), [rows, filter])
+  const visible = useMemo(() => rows.filter(row => target
+    ? row.source === 'exact' ? row.run.lane === target.lane : row.source === 'verification' && target.lane === 'verifier_exact'
+    : matches(row, filter)), [rows, filter, target])
   const roster = keeperRosterSignal.value
   const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
   const keepers = useMemo(() => {
@@ -772,6 +792,9 @@ export function InternalAgentsMonitor() {
 
   return html`
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
+      ${target && html`<p role="status">Selected Lane: ${target.lane}. The run list is limited to this Lane; other Lane observations remain visible in the matrix.
+        <button type="button" onClick=${clearLaneNavigation}>Show all Lane runs</button></p>`}
+      ${target && laneMatrix && !laneMatrix.lanes.some(lane => lane.laneId === target.lane) && html`<p role="alert">The selected Lane is absent from this reading.</p>`}
       <div class="ia-head">
         <h3>Internal execution evidence</h3>
         <span class="ia-count mono">${completeReading ? rows.length : "—"} runs · ${keepers.length} Keeper owners${allFresh ? "" : " · incomplete or stale"}</span>
@@ -839,7 +862,9 @@ export function InternalAgentsMonitor() {
                             ? 'JEV unavailable: Board lane is not ready'
                             : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
-                      <tr key=${lane.laneId}>
+                      <tr key=${lane.laneId} ref=${target?.lane === lane.laneId ? targetRow : undefined}
+                        tabIndex=${target?.lane === lane.laneId ? -1 : undefined} aria-current=${target?.lane === lane.laneId ? 'true' : undefined}
+                        aria-label=${`Lane observation ${lane.laneId}`}>
                         <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code><p class="text-xs text-[var(--color-fg-muted)]">${lane.purpose}</p>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
                         <td class=${statusClass}><strong>${statusLabel}</strong><br /><span class="text-3xs">Config: ${lane.configurationState}</span>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>

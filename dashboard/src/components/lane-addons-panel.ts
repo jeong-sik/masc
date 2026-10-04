@@ -15,6 +15,8 @@ import { LanePackageInstaller } from './lane-package-installer'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
+import { useLaneNavigation, LaneNavigationNotice } from './lane-navigation'
+import { declarationIdentity, laneTargetLabel, type LaneNavigationTarget } from '../lib/lane-navigation'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
@@ -202,6 +204,14 @@ function LaneAddonActions({ instances, authority }: {
 
 /** This component owns its reads. A slow package never joins the fleet refresh. */
 export function LaneAddonsPanel() {
+  const navigation = useLaneNavigation(['declaration', 'instance'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before opening this Lane target.'} pending=${navigation.pending} />`
+  const target = navigation.target
+  return html`<${LaneAddonsPanelContent} navigationTarget=${target && (target.kind === 'declaration' || target.kind === 'instance') ? target : undefined} />`
+}
+
+function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extract<LaneNavigationTarget, { kind: 'declaration' | 'instance' }> }) {
   const authority = executionWorkspaceAuthority.value
   const [recoveringAuthority, setRecoveringAuthority] = useState(false)
   const [authorityError, setAuthorityError] = useState<string | null>(null)
@@ -232,7 +242,9 @@ export function LaneAddonsPanel() {
   const [selectedValue, setSelected] = useState<string[]>([])
   const [evidenceAuthority, setEvidenceAuthority] = useState(authority)
   const evidenceCurrent = evidenceAuthority === authority
-  const instance = evidenceCurrent ? instanceValue : ''
+  const navigationInstanceMissing = navigationTarget?.kind === 'instance' && snapshot !== null
+    && !snapshot.instances.some(item => item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation && item.phase.kind !== 'detached')
+  const instance = evidenceCurrent && !navigationInstanceMissing ? instanceValue : ''
   const focusedRow = evidenceCurrent ? focusedRowValue : null
   const selected = evidenceCurrent ? selectedValue : []
   useLayoutEffect(() => {
@@ -331,12 +343,55 @@ export function LaneAddonsPanel() {
   const configuration = snapshot?.configuration ?? null
   const session = authority !== null && snapshot !== null && configuration !== null
     ? laneDeclarationSessionFor(authority, configuration.directory) : null
+  const handledNavigation = useRef<{ authority: ExecutionWorkspaceAuthority; target: typeof navigationTarget } | null>(null)
+  const declarationFocus = useRef<HTMLDivElement>(null), instanceFocus = useRef<HTMLTableRowElement>(null)
+  let targetError: string | null = null
+  if (navigationTarget && snapshot) {
+    if (navigationTarget.kind === 'instance') {
+      if (navigationInstanceMissing) targetError = 'The selected worker is absent or its incarnation changed. No replacement worker was selected.'
+    } else {
+      const declaration = configuration?.declarations.find(item => item.source_path === navigationTarget.path)
+      const issue = configuration?.issues.find(item => item.source_path === navigationTarget.path)
+      if (!configuration || !isDeclarationFile(configuration.directory, navigationTarget.path)) targetError = 'The selected file is outside the current declaration directory.'
+      else if (declaration && navigationTarget.installation !== null && declaration.id !== navigationTarget.installation)
+        targetError = 'The selected file now belongs to a different installation. Its replacement was not opened.'
+      else if (!declaration && (!issue || navigationTarget.installation !== null && issue.id !== navigationTarget.installation))
+        targetError = configuration.complete ? 'The selected declaration is absent from this reading.' : 'The declaration reading is incomplete; the selected target is not confirmed.'
+      const loaded = session?.state.value.drafts[navigationTarget.path]?.document
+      if (!targetError && navigationTarget.installation !== null && loaded) {
+        try {
+          if (declarationIdentity(loaded.source_text) !== navigationTarget.installation)
+            targetError = 'The file read belongs to a different installation. The replacement was not opened.'
+        } catch { targetError = 'The file read cannot confirm the selected installation ID. Open the file explicitly from the current workspace to repair it.' }
+      }
+    }
+  }
+  useEffect(() => {
+    if (!navigationTarget || !authority || !snapshot || targetError || handledNavigation.current?.target === navigationTarget && handledNavigation.current.authority === authority) return
+    if (navigationTarget.kind === 'declaration') {
+      if (!session) return
+      session.open(navigationTarget.path, authority)
+      const declaration = configuration?.declarations.find(item => item.source_path === navigationTarget.path)
+      if (declaration) session.openActivity(declaration.source_path, declaration.id, authority)
+      else session.closeActivity(authority)
+      declarationFocus.current?.focus()
+    } else {
+      setInstance(navigationTarget.instance); setSelected([])
+      session?.close(); session?.closeActivity(authority)
+      instanceFocus.current?.focus()
+    }
+    handledNavigation.current = { authority, target: navigationTarget }
+  }, [navigationTarget, authority, snapshot, session, targetError])
   const rows = slice?.rows ?? snapshot?.rows ?? []
   const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
     rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
   const focused = rows.find(row => row.id === focusedRow)
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
+  if (navigationTarget && targetError) return html`<${LaneNavigationNotice} message=${targetError} onRetry=${refresh} />`
+  if (navigationTarget && !snapshot) return html`<${LaneNavigationNotice}
+    message=${error ?? 'Reading the selected Lane target in the current workspace…'} onRetry=${reading ? undefined : refresh} />`
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
+    ${navigationTarget && html`<p role="status" class="break-all">Selected target: ${laneTargetLabel(navigationTarget)}. Navigation reads and selects only; existing drafts are retained.</p>`}
     <header class="flex items-center justify-between gap-4">
       <div><h2 class="text-lg font-semibold">Lane Add-ons</h2>
         <p>Optional observations and relationships. Keeper work continues independently.</p></div>
@@ -413,9 +468,9 @@ export function LaneAddonsPanel() {
     ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
       key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
       authority=${authority} documents=${session} snapshot=${snapshot} />`}
-    ${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
+    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSaved=${() => {
       if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
-    }} />`}
+    }} />`}</div>
     <details><summary>Attach a package</summary>
       <form class="flex flex-wrap gap-2 py-2" onSubmit=${(event: Event) => {
         event.preventDefault()
@@ -433,7 +488,10 @@ export function LaneAddonsPanel() {
     </details>
     <div class="overflow-x-auto"><table class="w-full text-left"><thead><tr>
       <th>Instance / package</th><th>Run / revision</th><th>Status</th><th>Cursor / rows</th><th>Actions</th>
-    </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}>
+    </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}
+      ref=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? instanceFocus : undefined}
+      tabIndex=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? -1 : undefined}
+      aria-label=${`Worker ${item.instance_id} · incarnation ${item.incarnation}`}>
       <td><label><input type="radio" name="addon-instance" checked=${instance === item.instance_id}
         onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>

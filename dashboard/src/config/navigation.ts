@@ -581,6 +581,9 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
+  // Target identity only belongs to these receiver surfaces. Ordinary
+  // navigation must not carry an old Lane selection into an unrelated screen.
+  if (tabId !== 'monitoring' || !['runtime', 'lane-addons', 'internal-agents'].includes(next.section ?? '')) delete next.lane_target
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
   if (tabId === 'settings') {

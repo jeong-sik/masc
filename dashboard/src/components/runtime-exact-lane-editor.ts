@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { RuntimeResolution } from '../api/schemas/runtime-resolved'
 import type { StandaloneLaneSnapshotRow } from '../api/dashboard-standalone-lanes'
 import type { RuntimeExactSlotAction, RuntimeExactSlotDirection } from '../api/dashboard-runtime'
@@ -8,7 +8,8 @@ import { ActionButton } from './common/button'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 
 export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisabled, deadlineDisabled,
-  onSlotAction, onDeadlineChange }: {
+  selectedLane, onSlotAction, onDeadlineChange }: {
+  selectedLane?: string
   sourceText: string
   lanes: readonly StandaloneLaneSnapshotRow[]
   runtimes: readonly RuntimeResolution[]
@@ -19,6 +20,12 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
   onDeadlineChange: (providerId: string, seconds: number | null) => void
 }) {
   const [newSlot, setNewSlot] = useState<Record<string, string>>({})
+  const selectedRef = useRef<HTMLElement>(null), focusedLane = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (selectedLane && selectedLane !== focusedLane.current && selectedRef.current) {
+      selectedRef.current.focus(); focusedLane.current = selectedLane
+    }
+  }, [selectedLane, lanes])
   const orderedLanes = useMemo(() => [...lanes].sort((left, right) => {
     if (left.laneId === 'librarian_exact') return -1
     if (right.laneId === 'librarian_exact') return 1
@@ -50,6 +57,8 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
         { kind: 'cli_slots', label: 'CLI slots · HTTP 소진 후', slots: lane.declaredCliSlots },
       ]
       return html`<section key=${lane.laneId} class="rounded border border-[var(--color-border-default)] p-3 space-y-3"
+        ref=${selectedLane === lane.laneId ? selectedRef : undefined} tabIndex=${selectedLane === lane.laneId ? -1 : undefined}
+        aria-label=${`Lane configuration ${lane.laneId}`} aria-current=${selectedLane === lane.laneId ? 'true' : undefined}
         data-testid=${`exact-lane-${lane.laneId}`}>
         <header class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 class="font-semibold">${lane.laneId === 'librarian_exact' ? 'Librarian' : lane.label}</h2>

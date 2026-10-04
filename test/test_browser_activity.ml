@@ -87,6 +87,38 @@ let test_off_and_close () = with_lane (fun _ current ->
   refused (Lane.issue_automation ~verb:Tabs_list ~timeout_sec:1.);
   is_answer (Lane.issue_automation ~verb:Session_close ~timeout_sec:1.))
 
+let test_off_preselection () = with_lane (fun _ current ->
+  current := Disabled;
+  let rejected route verb code =
+    match Lane.resolve_target ~verb route with
+    | Error error -> check string "activity precedes selection" code (Lane.selection_error_code error)
+    | Ok _ -> fail "unavailable activity selected a browser" in
+  rejected (Lane.Live_route None) Lane.Tabs_list "browser_lane_off";
+  rejected (Lane.Live_route None) (Lane.Page_document {tab_id=1}) "browser_lane_off";
+  List.iter (fun route -> List.iter (fun verb ->
+    check bool "status and close still resolve server lanes" true
+      (Result.is_ok (Lane.resolve_target ~verb route))) [Lane.Session_status;Session_close])
+    [Lane.Automation_route;Stagehand_route];
+  current := Unobserved;
+  rejected (Lane.Live_route None) Lane.Tabs_list "browser_activity_unavailable")
+
+let test_off_preselected_stale () = with_lane (fun sw current ->
+  let client_id = match Lane.client_id_of_string "00000000-0000-4000-8000-000000000002" with
+    | Ok id -> id | Error detail -> fail detail in
+  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";engine_version="fixture"} in
+  ignore (Lane.take_command ~client_info ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
+  let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with
+    | Ok target -> target | Error _ -> fail "target" in
+  current := Disabled;
+  ignore (Lane.disconnect_client ~client_id);
+  let check = function
+    | Ok (Lane.Rejected_before_effect message) -> check string "off is the stale-target remedy"
+        "browser.live is off; enable it before issuing new browser work" message
+    | _ -> fail "off must precede the stale-client diagnostic" in
+  check (Lane.issue_for ~target ~verb:Tabs_list ~timeout_sec:1.);
+  check (Lane.issue_document_if_idle ~target ~tab_id:1 ~timeout_sec:1.))
+
 let test_accepted_finishes () = with_lane (fun sw current ->
   let started, start = Eio.Promise.create () in
   let finish, complete = Eio.Promise.create () in
@@ -104,7 +136,7 @@ let test_live_retains_accepted () = with_lane (fun sw current ->
   let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";engine_version="fixture"} in
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
-  let target = match Lane.resolve_target (Live_route (Some client_id)) with Ok target -> target | Error _ -> fail "target" in
+  let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with Ok target -> target | Error _ -> fail "target" in
   let work = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for ~target ~verb:Tabs_list ~timeout_sec:1.) in
   let issued = match Lane.take_command ~client_info ~window_sec:1. with Ok (Some command) -> command | _ -> fail "command" in
   current := Disabled;
@@ -120,7 +152,9 @@ let test_live_retains_accepted () = with_lane (fun sw current ->
 let () = run "Browser activity" [
   "configuration", test_case "paths retained and accepting locations" `Quick test_config
     :: List.map (fun (name,text) -> test_case name `Quick (fun () -> rejects text)) invalid;
-  "admission", [test_case "off and unavailable keep status/close" `Quick test_off_and_close;
+  "admission", [test_case "off precedes selection" `Quick test_off_preselection;
+    test_case "off precedes preselected stale client" `Quick test_off_preselected_stale;
+    test_case "off and unavailable keep status/close" `Quick test_off_and_close;
     test_case "accepted automation request finishes" `Quick test_accepted_finishes;
     test_case "accepted live request survives off" `Quick test_live_retains_accepted];
 ]

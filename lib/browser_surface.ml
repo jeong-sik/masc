@@ -34,7 +34,7 @@ let parse_request = function
   | _ -> Error "body must be a JSON object"
 type failure = Unselected of Browser_lane.selection_error | Unobserved of string
 let failure_message = function
-  | Unselected error -> Browser_lane.selection_error_code error
+  | Unselected error -> Browser_lane.selection_error_message error
   | Unobserved detail -> detail
 let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
 let decode_answer ~lane = function
@@ -79,7 +79,7 @@ let client_id_json target = match Browser_lane.target_client_id target with
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
-  let* target = Browser_lane.resolve_target request.route
+  let* target = Browser_lane.resolve_target ~verb:Browser_lane.Tabs_list request.route
     |> Result.map_error (fun error -> Unselected error) in
   let issue verb = exchange ~target ~verb in
   let* raw_tabs = issue Browser_lane.Tabs_list in
@@ -119,7 +119,7 @@ let capture request =
     | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
-  let* target = Browser_lane.resolve_target request.route
+  let* target = Browser_lane.resolve_target ~verb:(Browser_lane.Page_capture {tab_id}) request.route
     |> Result.map_error (fun error -> Unselected error) in
   let* data = exchange ~target ~verb:(Browser_lane.Page_capture {tab_id}) in
   unobserved @@

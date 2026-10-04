@@ -905,6 +905,11 @@ let publish_cleanup m ~id ~writer publication =
          retries only publication: successful resource release is not replayed. *)
       Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,message));
       Log.Misc.error "Lane recovered cleanup persistence: %s" message
+let fork_recovery ~sw m ~id ~on_failure work =
+  (* Cancellation can occur while scheduling, before the child starts. Keep
+     the same retry obligation as a cancellation inside its work. *)
+  try fork_isolated ~sw work with
+  | exn -> Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn
 let historical_detach ~sw m fields =
   let* id = text fields "instance_id" in
   let* previous = match List.assoc_opt "phase" fields with
@@ -914,7 +919,8 @@ let historical_detach ~sw m fields =
   | Some (Cleaning _ | Publishing_cleanup _) -> Ok (replace_phase fields Detaching)
   | Some (Cleanup_commit_failed (publication,_)) ->
       Hashtbl.replace m.recovering id (Publishing_cleanup publication);
-      fork_isolated ~sw (fun () -> publish_cleanup m ~id ~writer publication);
+      fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_commit_failed (publication,detail))
+        (fun () -> publish_cleanup m ~id ~writer publication);
       Ok (replace_phase fields Detaching)
   | None when previous = Detached -> Ok (`Assoc fields)
   | None | Some (Cleanup_request_failed _ | Cleanup_unconfirmed _) ->
@@ -947,7 +953,7 @@ let historical_detach ~sw m fields =
       | Ok () -> Ok ()
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store () in
-    fork_isolated ~sw (fun () ->
+    fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
       let result = try backend.recover_stop ~instance_id:id ~container_id ~max_reply_bytes with
         | Eio.Cancel.Cancelled _ as exn ->
             Hashtbl.replace m.recovering id (Cleanup_unconfirmed (fields,"cleanup cancelled before its result was confirmed"));

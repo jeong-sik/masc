@@ -1661,12 +1661,14 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
-  async function reloadRuntimeTomlSourceSnapshot(): Promise<{ sourceText: string; sourceRevision: string } | null> {
+  async function reloadRuntimeTomlSourceSnapshot(current: () => boolean = () => true): Promise<{ sourceText: string; sourceRevision: string } | null> {
     try {
       const config = await fetchRuntimeTomlConfig()
+      if (!current()) return null
       setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
       return { sourceText: config.source_text, sourceRevision: config.source_revision }
     } catch (err) {
+      if (!current()) return null
       setRuntimeTomlSource({ status: 'error', message: errorToString(err) })
       return null
     }
@@ -1677,36 +1679,42 @@ export function SettingsSurface() {
     void reloadRuntimeTomlSourceSnapshot()
   }, [sec])
 
-  async function reloadRuntimeDefaultsSnapshot(): Promise<void> {
+  async function reloadRuntimeDefaultsSnapshot(current: () => boolean = () => true): Promise<void> {
     try {
       const resp = await fetchRuntimeDefaults()
+      if (!current()) return
       setRuntimeDefaults(resp)
     } catch (err) {
+      if (!current()) return
       setRuntimeDefaults(null)
       throw err
     }
   }
 
-  async function reloadRuntimeResolvedSnapshot(): Promise<void> {
+  async function reloadRuntimeResolvedSnapshot(current: () => boolean = () => true): Promise<void> {
     setRuntimeResolvedStatus('loading')
     try {
       const resp = await fetchRuntimeResolved()
+      if (!current()) return
       setRuntimeResolved(resp)
       setRuntimeResolvedStatus('ready')
     } catch (err) {
+      if (!current()) return
       setRuntimeResolved(null)
       setRuntimeResolvedStatus('error')
       throw err
     }
   }
 
-  async function reloadRuntimeProvidersSnapshot(): Promise<void> {
+  async function reloadRuntimeProvidersSnapshot(current: () => boolean = () => true): Promise<void> {
     setRuntimeCatalogStatus('loading')
     try {
       const resp = await fetchRuntimeProviders()
+      if (!current()) return
       setRuntimeProviders(resp)
       setRuntimeCatalogStatus('ready')
     } catch (err) {
+      if (!current()) return
       setRuntimeProviders(null)
       setRuntimeCatalogStatus('error')
       throw err
@@ -1741,18 +1749,12 @@ export function SettingsSurface() {
     const current = () => active && executionWorkspaceAuthority.peek() === runtimeAuthority
       && runtimeTomlSourceGeneration.peek() === runtimeCommit.generation
     if (!current()) return
-    void Promise.all([fetchRuntimeDefaults(), fetchRuntimeResolved(), fetchRuntimeProviders(), fetchRuntimeTomlConfig()])
-      .then(([defaults, resolved, providers, config]) => {
-        if (!current()) return
-        setRuntimeDefaults(defaults)
-        setRuntimeResolved(resolved)
-        setRuntimeResolvedStatus('ready')
-        setRuntimeProviders(providers)
-        setRuntimeCatalogStatus('ready')
-        setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
-      }).catch(err => {
-        if (current()) console.warn('[Settings] runtime settings refresh failed after editor save:', err)
-      })
+    void Promise.allSettled([
+      reloadRuntimeDefaultsSnapshot(current),
+      reloadRuntimeResolvedSnapshot(current),
+      reloadRuntimeProvidersSnapshot(current),
+      reloadRuntimeTomlSourceSnapshot(current),
+    ])
     return () => { active = false }
   }, [runtimeAuthority, runtimeCommit])
 

@@ -872,8 +872,22 @@ let can_observe (instance : instance) = match instance.phase with
   | Row.Attached | Row.Observing | Row.Failed _ -> true
   | Row.Detaching | Row.Detached -> false
 
-let instance_controls (instance : instance) =
-  let removal = match instance.source_path with
+let removal_block_reason view (instance : instance) =
+  let stale = match view.snapshot, instance.installation_id, instance.source_path with
+    | Some {configuration=Some config;_}, Some id, Some path ->
+        List.exists (fun (d : declaration) ->
+          d.installation_id=Some id && d.source_path=path && d.instance_id=Some instance.id
+          && match d.desired,d.applied with
+             | Some desired,Some applied -> desired<>applied
+             | _ -> false) config.declarations
+    | _ -> false in
+  if stale then Some "Resolve changed TOML with E, then r refresh until its revision is applied before removal; nothing was removed."
+  else None
+
+let instance_controls view (instance : instance) =
+  let removal = match removal_block_reason view instance with
+    | Some reason -> "  " ^ reason
+    | None -> match instance.source_path with
     | Some _ -> "  d:remove TOML + worker"
     | None -> "  d:remove worker" in
   match instance.phase with
@@ -902,7 +916,7 @@ let overview_hints view =
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
       "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
-      (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
+      (match selected_instance view with None -> "" | Some instance -> instance_controls view instance ^ "  ") ^
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
 
@@ -1004,9 +1018,9 @@ let instance_heading _snapshot (item : instance) =
   | None -> item.title
   | Some name -> name ^ " · " ^ item.title
 
-let empty_result_lines (item : instance) =
+let empty_result_lines view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls item]
+  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls view item]
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
       if item.observation_seq=0 then ["No completed observation received yet."]
       else if item.rows_count=0 then
@@ -1107,7 +1121,7 @@ let overview_lines ~width view =
                   activity ^
                   (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
                   " · " ^ count_text in
-                let controls = "    Enter:open  " ^ instance_controls item in
+                let controls = "    Enter:open  " ^ instance_controls view item in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
@@ -1162,7 +1176,7 @@ let detail_lines ~width view =
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
           if rows=[] then Option.to_list item.display.description
-            @ (if record_rows=[] then empty_result_lines item
+            @ (if record_rows=[] then empty_result_lines view item
                else ["No declared result rows in this received view.";
                      "Supporting records remain available in 4 Records."])
             @ snapshot_coverage_lines snapshot.output.coverage
@@ -1216,7 +1230,7 @@ let detail_lines ~width view =
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
       | Rows ->
-          if record_rows=[] then empty_result_lines item
+          if record_rows=[] then empty_result_lines view item
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")

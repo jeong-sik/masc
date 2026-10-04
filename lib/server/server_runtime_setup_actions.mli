@@ -1,7 +1,7 @@
 (** Authenticated setup route implementation. Call only after CanAdmin and bind
     [base_path] to the authenticated workspace. Requests never accept credential
     file paths; references are resolved from selected native catalog entries. *)
-type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection
+type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
 (** [Network_unavailable]: the route was reached on a server whose Eio context

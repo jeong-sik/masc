@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-activity-recovery-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/settings-surface.test.ts -t 'successful manual setup retry|activity=true'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-activity-recovery-20261005/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  2 passed | 89 skipped (91)
+   Start at  01:14:17
+   Duration  2.44s (transform 39%, import 37%, environment 10%, setup 7%, tests 7%)
+

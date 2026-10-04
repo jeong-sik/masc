@@ -417,7 +417,7 @@ def run_dashboard_usage_regression(executable: str) -> None:
                     "days": 14,
                     "generated_at": now,
                     "sampling": "latest_provider_report_per_utc_day",
-                    "unreadable_reports": 0,
+                    "unreadable_reports": 0, "reported_no_windows": [],
                     "points": [
                         {
                             "scope_id": scope_id,
@@ -448,7 +448,7 @@ def run_dashboard_usage_regression(executable: str) -> None:
                     "days": 7,
                     "generated_at": now,
                     "sampling": "latest_provider_report_per_utc_day",
-                    "unreadable_reports": 0,
+                    "unreadable_reports": 0, "reported_no_windows": [],
                     "points": [],
                 },
             ),

@@ -40,6 +40,10 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+
 (* Where the exact-output registry reads its targets. The server builds them
    from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
    full replacement catalog, whose [[targets]] rows are then the whole set and
@@ -663,7 +667,7 @@ let exact_slot_body_deadline_gaps_of
   | Runtime_binding_targets ->
     List.concat_map
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         List.filter_map (gap_of lane) lane.slot_ids)
+         if lane.enabled then List.filter_map (gap_of lane) lane.slot_ids else [])
       decls
 ;;
 
@@ -1044,16 +1048,20 @@ let materialize_config
     validate_runtime_references ~dropped_bindings runtimes lanes
       (media_failover_references cfg.media_failover)
   in
-  let* () =
-    validate_runtime_references ~dropped_bindings runtimes lanes
-      (verifier_exact_slot_references cfg.exact_output_lane_decls)
+  let active_exact_output_lanes =
+    List.filter (fun (lane : Runtime_schema.exact_output_lane_decl) -> lane.enabled)
+      cfg.exact_output_lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
-      (exact_lane_cli_slot_references cfg.exact_output_lane_decls)
+      (verifier_exact_slot_references active_exact_output_lanes)
   in
   let* () =
-    validate_exact_lane_cli_slots ~runtimes cfg.exact_output_lane_decls
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (exact_lane_cli_slot_references active_exact_output_lanes)
+  in
+  let* () =
+    validate_exact_lane_cli_slots ~runtimes active_exact_output_lanes
   in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
@@ -1171,9 +1179,22 @@ let empty_loaded_state =
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
+let catalogue_revision_ref = Atomic.make 0
+let catalogue_changed = Eio.Condition.create ()
+let catalogue_revision () = Atomic.get catalogue_revision_ref
+
+let publish_loaded_state state =
+  Atomic.set loaded_state_ref state;
+  ignore (Atomic.fetch_and_add catalogue_revision_ref 1);
+  Eio.Condition.broadcast catalogue_changed
+
+let await_catalogue_change ~after =
+  Eio.Condition.loop_no_mutex catalogue_changed (fun () ->
+    let current = catalogue_revision () in
+    if current > after then Some current else None)
 
 let enter_setup_required ~reason () =
-  Atomic.set loaded_state_ref empty_loaded_state;
+  publish_loaded_state empty_loaded_state;
   Runtime_startup_state.set (Setup_required reason)
 ;;
 
@@ -1219,7 +1240,7 @@ let set_loaded
     | Some declared -> declared
     | None -> media_failover
   in
-  Atomic.set loaded_state_ref
+  publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some default_route
     ; runtimes
@@ -1779,7 +1800,7 @@ let verifier_exact_lane_resolution () =
                     selected_slots))))
 ;;
 
-let verifier_exact_lane_slot_ids () =
+let verifier_exact_lane_slots () =
   Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
     match
       lane.admitted_catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.slot_rejections
@@ -1792,14 +1813,16 @@ let verifier_exact_lane_slot_ids () =
         (Printf.sprintf
            "verifier_exact has no slot that can judge: %s"
            (String.concat "; " (List.map verifier_slot_rejection_to_string rejections)))
-    | (_ :: _ as slot_ids), _ -> Ok slot_ids)
+    | _ :: _, _ ->
+      Ok (List.map (fun id -> id, Types_core.Catalog_slot) lane.admitted_catalog_slot_ids
+          @ List.map (fun id -> id, Types_core.Cli_slot) lane.admitted_cli_slot_ids))
 ;;
 
 (* [Ok] carries the declared slots this lane cannot judge through, so a caller
    that reports readiness can also say why the lane is short of the
    declaration. An empty list means the whole declaration is usable.
 
-   Readiness and {!verifier_exact_lane_slot_ids} now answer from one
+   Readiness and {!verifier_exact_lane_slots} now answer from one
    admission. They used to disagree — readiness applied a second, stricter
    predicate to catalog slots — and that disagreement is what let the
    completion authority start on a lane that refused every review. *)
@@ -1849,21 +1872,13 @@ let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
 ;;
 
-let verifier_exact_slot_admission ~runtime_id =
-  let direct () = match get_runtime_by_id runtime_id with
-    | Some runtime -> verifier_runtime_admission runtime
-    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
-  match Runtime_exact_output_registry.current () with
-  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
-  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok registry ->
-    (* New reviews acquire the lane through [verifier_exact_lane_slot_ids].
-       This is a candidate check inside an already admitted review (or an
-       explicit single-runtime override). Activity changes must not erase a
-       retained CLI candidate's execution-kind constraint during failover. *)
-    (match Runtime_exact_output_registry.declared_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
-     | Some lane when List.mem runtime_id lane.cli_slot_ids -> verifier_cli_slot_admission ~runtime_id
-     | Some _ | None -> direct ())
+let verifier_exact_slot_admission ~candidate_kind ~runtime_id =
+  match candidate_kind with
+  | Types_core.Cli_slot -> verifier_cli_slot_admission ~runtime_id
+  | Types_core.Catalog_slot | Types_core.Explicit_runtime ->
+    (match get_runtime_by_id runtime_id with
+     | Some runtime -> verifier_runtime_admission runtime
+     | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime"))
 ;;
 
 let is_local_runtime_id (id : string) : bool option =
@@ -2245,10 +2260,15 @@ let attach_lock_warnings warnings receipt =
   { receipt with lock_warnings = receipt.lock_warnings @ warnings }
 ;;
 
-let with_config_lock ~runtime_config_path action =
+let with_config_lock_observed ~runtime_config_path action =
   let* locked = with_runtime_config_write_lock runtime_config_path action in
   List.iter (function Config_lock_release_unconfirmed detail ->
     Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
+  Ok locked
+;;
+
+let with_config_lock ~runtime_config_path action =
+  let* locked = with_config_lock_observed ~runtime_config_path action in
   locked.value
 ;;
 
@@ -2283,7 +2303,7 @@ let runtime_config_atomic_failure
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
       Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)
+    | _ -> Error (Config_commit_write_failed failure)
 ;;
 
 let runtime_config_write_outcome
@@ -2949,14 +2969,15 @@ let record_exact_output_commit ~path ~previous_view (receipt : config_commit_rec
   receipt
 ;;
 
-let commit_runtime_config_text
+let commit_config_text_locked
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
-    ~path
+    ~runtime_config_path:path
     content
   =
   let observation = config_observation ~path content in
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   let previous_view = exact_output_report_view () in
   let committed = record_exact_output_commit ~path ~previous_view in
@@ -2971,6 +2992,7 @@ let commit_runtime_config_text
   let runtimes, _, _, _, _, _, _, _, _ = loaded in
   let* plan =
     plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+    |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   match plan with
   | Commit_without_registry ->
@@ -3010,8 +3032,8 @@ let commit_runtime_config_text
      with
      | Error error ->
        Error
-         ("exact-output registry replacement reservation rejected: "
-          ^ Runtime_exact_output_registry.publication_error_to_string error)
+         (Config_commit_refused ("exact-output registry replacement reservation rejected: "
+          ^ Runtime_exact_output_registry.publication_error_to_string error))
      | Ok (Runtime_exact_output_registry.Not_committed failure) ->
        runtime_config_atomic_failure
          ~replacement_visible:false
@@ -3031,6 +3053,13 @@ let commit_runtime_config_text
          ~exact_output_registry
          failure
        |> Result.map committed)
+;;
+
+let commit_runtime_config_text ?replace_file ~path content =
+  commit_config_text_locked ?replace_file ~runtime_config_path:path content
+  |> Result.map_error (function
+      | Config_commit_refused detail -> detail
+      | Config_commit_write_failed failure -> Fs_compat.atomic_replace_failure_to_string failure)
 ;;
 
 let save_config_text_with_replace_file
@@ -3124,7 +3153,13 @@ module For_testing = struct
   (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
   let snapshot () = runtime_state ()
-  let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let restore snapshot = publish_loaded_state snapshot
+  let with_config_lock_observed_with_release_failure ~release_failure ~runtime_config_path action =
+    with_runtime_config_write_lock_using
+      (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure ~release_failure)
+      runtime_config_path action
+  ;;
+
   let with_config_lock_with_journal_sync_parent ~sync_parent ~runtime_config_path action =
     with_runtime_config_write_lock_using
       ~require_resolved:(Keeper_config_journal.For_testing.require_resolved_with_sync_parent ~sync_parent)

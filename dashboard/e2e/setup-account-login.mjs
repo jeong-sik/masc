@@ -73,7 +73,7 @@ try {
         }
         if (path === '/api/v1/setup/connections') {
           evidence.saves.push(body)
-          return json({ configured: true, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] })
+          return json({ configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] })
         }
         if (path === '/api/v1/runtime/setup/resume') return json({ runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } })
         return new Response(JSON.stringify({ error: 'Outside isolated login fixture scope' }), { status: 503, headers: { 'content-type': 'application/json' } })

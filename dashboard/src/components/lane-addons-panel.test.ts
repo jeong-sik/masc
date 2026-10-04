@@ -108,6 +108,25 @@ describe('optional Lane Add-on surface', () => {
     ])
     expect(group.textContent).not.toContain('0 records')
   })
+  it('refuses rounded JSON integer readings while preserving safe numbers and fractions', async () => {
+    const fields = JSON.parse('{"tooLarge":9007199254740993,"tooSmall":-9007199254740993,"maxSafe":9007199254740991,"minSafe":-9007199254740991,"fraction":1.25,"zero":0}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'number', unit: null,
+    }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      '9007199254740991', '-9007199254740991', '1.25', '0',
+    ])
+  })
   it('rejects malformed package display contracts instead of discarding them', () => {
     const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
     for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {

@@ -1,0 +1,20 @@
+{
+  "key": "metrics.store_max_bytes",
+  "env": "MASC_KEEPER_METRICS_STORE_MAX_BYTES",
+  "exposure": "toml_and_env",
+  "type": "integer",
+  "range": {
+    "kind": "integer",
+    "min_inclusive": 0,
+    "max_inclusive": null
+  },
+  "default": "0",
+  "reload_class": "process_restart",
+  "requires_restart": true,
+  "consumers": [
+    "Keeper_types_support.keeper_metrics_storage",
+    "Keeper_metrics_storage"
+  ],
+  "category": "metrics",
+  "description": "Date-sharded Keeper metric byte target (0 keeps all; oldest completed files pruned)"
+}
